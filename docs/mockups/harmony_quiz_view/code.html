@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;family=Public_Sans:ital,wght@0,100..900;1,100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary": "#54606a",
+              "surface-container-high": "#eae8df",
+              "on-tertiary-container": "#fffbff",
+              "surface-dim": "#dcdad2",
+              "on-surface-variant": "#42474c",
+              "on-error-container": "#93000a",
+              "primary-fixed-dim": "#aacae6",
+              "primary": "#3f5f77",
+              "background": "#fbf9f0",
+              "error": "#ba1a1a",
+              "inverse-surface": "#30312b",
+              "outline": "#72787d",
+              "tertiary-fixed": "#ffddb9",
+              "primary-fixed": "#c9e6ff",
+              "on-surface": "#1b1c17",
+              "inverse-on-surface": "#f3f1e8",
+              "on-tertiary-fixed-variant": "#5f401a",
+              "surface-container": "#f0eee5",
+              "on-primary-fixed": "#001e2f",
+              "error-container": "#ffdad6",
+              "surface-container-lowest": "#ffffff",
+              "tertiary-container": "#926e42",
+              "surface-tint": "#42627a",
+              "secondary-container": "#d5e1ed",
+              "on-error": "#ffffff",
+              "on-secondary-container": "#58646e",
+              "tertiary-fixed-dim": "#ecbe8d",
+              "secondary-fixed": "#d8e4f0",
+              "primary-container": "#587891",
+              "on-tertiary": "#ffffff",
+              "on-secondary-fixed-variant": "#3c4852",
+              "on-primary": "#ffffff",
+              "outline-variant": "#c2c7cd",
+              "surface": "#fbf9f0",
+              "surface-container-low": "#f6f4eb",
+              "on-secondary-fixed": "#111d26",
+              "surface-bright": "#fbf9f0",
+              "on-primary-container": "#fcfcff",
+              "on-primary-fixed-variant": "#294a61",
+              "tertiary": "#77552d",
+              "on-tertiary-fixed": "#2b1700",
+              "surface-variant": "#e4e3da",
+              "secondary-fixed-dim": "#bcc8d4",
+              "on-secondary": "#ffffff",
+              "on-background": "#1b1c17",
+              "surface-container-highest": "#e4e3da",
+              "inverse-primary": "#aacae6"
+            },
+            fontFamily: {
+              "headline": ["Newsreader"],
+              "body": ["Newsreader"],
+              "label": ["Public Sans"]
+            },
+            borderRadius: {"DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .ink-gradient {
+            background: linear-gradient(135deg, #3f5f77 0%, #587891 100%);
+        }
+        .frosted-vellum {
+            background-color: rgba(251, 249, 240, 0.8);
+            backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar -->
+<header class="bg-[#fbf9f0] dark:bg-[#1b1c17] flex justify-between items-center w-full px-8 py-4 fixed top-0 z-50">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-bold text-[#3f5f77] dark:text-[#63839C] uppercase font-['Newsreader'] tracking-tight">The Living Score</span>
+<nav class="hidden md:flex gap-8">
+<a class="text-[#72787d] dark:text-[#a1a7ab] font-['Newsreader'] tracking-tight hover:text-[#3f5f77] transition-colors duration-200" href="#">Library</a>
+<a class="text-[#72787d] dark:text-[#a1a7ab] font-['Newsreader'] tracking-tight hover:text-[#3f5f77] transition-colors duration-200" href="#">Scores</a>
+<a class="text-[#72787d] dark:text-[#a1a7ab] font-['Newsreader'] tracking-tight hover:text-[#3f5f77] transition-colors duration-200" href="#">Archives</a>
+<a class="text-[#3f5f77] dark:text-[#63839C] font-semibold border-b-2 border-[#3f5f77] font-['Newsreader'] tracking-tight" href="#">Quiz</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-[#3f5f77] text-2xl" data-icon="account_circle">account_circle</button>
+</div>
+</header>
+<main class="pt-32 pb-24 min-h-screen flex flex-col items-center px-4">
+<div class="max-w-4xl w-full">
+<!-- Header Section -->
+<div class="mb-12 text-center md:text-left">
+<span class="font-label text-xs uppercase tracking-[0.3em] text-outline mb-4 block">Analytical Exercise</span>
+<h1 class="text-5xl md:text-6xl font-headline font-light tracking-tight text-primary mb-2">Harmony Quiz</h1>
+</div>
+<!-- Quiz Layout: Asymmetric Pacing -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
+<!-- Main Quiz Card -->
+<div class="lg:col-span-8 space-y-8">
+<div class="bg-surface-container-low p-8 md:p-12 shadow-sm">
+<div class="flex justify-between items-baseline mb-8">
+<span class="font-label text-sm text-outline uppercase tracking-widest">Question 4 of 10</span>
+<div class="w-32 h-0.5 bg-surface-variant relative">
+<div class="absolute left-0 top-0 h-full bg-primary w-[40%]"></div>
+</div>
+</div>
+<h2 class="text-2xl font-headline italic mb-10 text-on-surface">Identify the cadence at the end of this phrase.</h2>
+<!-- Score Fragment Container -->
+<div class="relative group bg-white p-6 border border-outline-variant/15 mb-10 overflow-hidden">
+<img class="w-full h-auto grayscale contrast-125 opacity-90 transition-transform duration-700 group-hover:scale-105" data-alt="Close up of a classical urtext music score fragment on cream paper" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAultn34LGUkuQZNWXiCiudb7e22cqPFfM3Z5l42cJ_nJJ39b9B0JVOI6wa2niS0dFNCv4LPbYmeS3ng7O6tuHuaZE1e8ca0B4rKCjDPTpUvSiRbr4lR6XdmryKMzfb8c7WrUWvQbuwGfzyxHc18xvpp7oeb2xieTOcdv-xQlr8vFEVu7Z5JQbbfeDlKpUahCxWIQj_X2EfraUS6Cs6Ng6WqI03fkMOcOdYlS0mQraK5wNLbS4hwmPuRvBItC3QlC8zQxOF7a4PZwQ"/>
+<!-- Audio Control Overlay -->
+<div class="absolute inset-0 flex items-center justify-center bg-on-surface/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer">
+<div class="bg-primary p-4 shadow-xl">
+<span class="material-symbols-outlined text-white text-4xl" data-icon="play_arrow">play_arrow</span>
+</div>
+</div>
+<div class="mt-4 flex justify-between items-center">
+<span class="font-label text-[10px] text-outline uppercase tracking-[0.2em]">Fig. 4.2 — Mozart, Piano Sonata No. 16</span>
+<div class="flex gap-2">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="volume_up">volume_up</span>
+<span class="material-symbols-outlined text-outline text-sm" data-icon="settings">settings</span>
+</div>
+</div>
+</div>
+<!-- Options List -->
+<div class="space-y-4">
+<button class="w-full text-left p-6 bg-surface hover:bg-surface-container-high border-b border-transparent hover:border-primary transition-all duration-200 group flex justify-between items-center">
+<span class="font-headline text-lg">Perfect Authentic Cadence</span>
+<span class="font-label text-xs text-outline opacity-0 group-hover:opacity-100 transition-opacity">Option A</span>
+</button>
+<button class="w-full text-left p-6 bg-surface-container-highest/50 border-b-2 border-primary group flex justify-between items-center">
+<span class="font-headline text-lg font-semibold text-primary">Imperfect Authentic Cadence</span>
+<span class="material-symbols-outlined text-primary" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</button>
+<button class="w-full text-left p-6 bg-surface hover:bg-surface-container-high border-b border-transparent hover:border-primary transition-all duration-200 group flex justify-between items-center">
+<span class="font-headline text-lg">Half Cadence</span>
+<span class="font-label text-xs text-outline opacity-0 group-hover:opacity-100 transition-opacity">Option C</span>
+</button>
+</div>
+<!-- Footer Actions -->
+<div class="mt-12 flex justify-between items-center pt-8 border-t border-outline-variant/15">
+<button class="font-headline italic text-outline hover:text-primary transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="arrow_back">arrow_back</span>
+                                Previous Question
+                            </button>
+<button class="ink-gradient px-10 py-4 text-on-primary font-headline text-lg tracking-wide shadow-lg hover:brightness-110 transition-all active:scale-95 flex items-center gap-3">
+                                Next
+                                <span class="material-symbols-outlined" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Marginalia / Technical Sidebar -->
+<aside class="lg:col-span-4 space-y-12">
+<div class="border-l border-outline-variant/20 pl-8 py-4">
+<h3 class="font-label text-xs uppercase tracking-widest text-primary mb-6">Scholarly Context</h3>
+<p class="font-body text-on-surface-variant leading-relaxed mb-6">
+                            Cadences represent the "punctuation" of the musical language. An Imperfect Authentic Cadence (IAC) occurs when the final chord of a phrase is tonic (I) but either the soprano does not end on the tonic scale degree or the chords are in inversion.
+                        </p>
+<div class="p-6 bg-surface-container-high italic text-sm text-secondary font-body">
+                            "The Urtext edition ensures the voice leading remains as the composer intended, revealing the subtle distinctions between cadential strengths."
+                        </div>
+</div>
+<div class="space-y-6">
+<h3 class="font-label text-xs uppercase tracking-widest text-primary">Learning Resources</h3>
+<ul class="space-y-4">
+<li>
+<a class="group flex items-center justify-between text-on-surface hover:text-primary transition-colors" href="#">
+<span class="font-headline">The Bach Chorale Method</span>
+<span class="material-symbols-outlined text-sm opacity-50 group-hover:opacity-100" data-icon="open_in_new">open_in_new</span>
+</a>
+</li>
+<li>
+<a class="group flex items-center justify-between text-on-surface hover:text-primary transition-colors" href="#">
+<span class="font-headline">Functional Harmony Basics</span>
+<span class="material-symbols-outlined text-sm opacity-50 group-hover:opacity-100" data-icon="open_in_new">open_in_new</span>
+</a>
+</li>
+</ul>
+</div>
+</aside>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-[#f6f4eb] dark:bg-[#252620] border-t border-[#72787d]/15 py-12 px-12 w-full flex flex-col md:flex-row justify-between items-center mt-auto">
+<span class="text-lg font-bold text-[#3f5f77] dark:text-[#63839C] mb-4 md:mb-0 uppercase font-['Newsreader']">The Living Score</span>
+<div class="flex flex-col md:flex-row gap-8 items-center">
+<nav class="flex gap-6">
+<a class="font-['Public_Sans'] text-xs uppercase tracking-widest text-[#72787d] dark:text-[#a1a7ab] hover:text-[#3f5f77]" href="#">Terms of Service</a>
+<a class="font-['Public_Sans'] text-xs uppercase tracking-widest text-[#72787d] dark:text-[#a1a7ab] hover:text-[#3f5f77]" href="#">Privacy Policy</a>
+<a class="font-['Public_Sans'] text-xs uppercase tracking-widest text-[#72787d] dark:text-[#a1a7ab] hover:text-[#3f5f77]" href="#">Institutional Access</a>
+<a class="font-['Public_Sans'] text-xs uppercase tracking-widest text-[#72787d] dark:text-[#a1a7ab] hover:text-[#3f5f77]" href="#">Contact</a>
+</nav>
+<span class="font-['Public_Sans'] text-xs uppercase tracking-widest text-[#72787d] dark:text-[#a1a7ab]">© 2024 The Living Score. Urtext Edition Precision.</span>
+</div>
+</footer>
+</body></html>

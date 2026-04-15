@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>The Living Score - Chopin: 24 Préludes</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;family=Public+Sans:wght@300;400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary-fixed-dim": "#aacae6",
+              "secondary-fixed-dim": "#bcc8d4",
+              "surface-container": "#f0eee5",
+              "error-container": "#ffdad6",
+              "on-surface-variant": "#42474c",
+              "surface-container-low": "#f6f4eb",
+              "on-tertiary-fixed": "#2b1700",
+              "surface-container-high": "#eae8df",
+              "inverse-surface": "#30312b",
+              "on-error": "#ffffff",
+              "on-secondary-container": "#58646e",
+              "tertiary-container": "#926e42",
+              "inverse-on-surface": "#f3f1e8",
+              "secondary": "#54606a",
+              "surface-variant": "#e4e3da",
+              "error": "#ba1a1a",
+              "surface-container-lowest": "#ffffff",
+              "surface": "#fbf9f0",
+              "on-surface": "#1b1c17",
+              "primary": "#3f5f77",
+              "surface-bright": "#fbf9f0",
+              "on-error-container": "#93000a",
+              "on-background": "#1b1c17",
+              "outline-variant": "#c2c7cd",
+              "on-primary-fixed": "#001e2f",
+              "tertiary-fixed": "#ffddb9",
+              "on-tertiary-fixed-variant": "#5f401a",
+              "on-primary": "#ffffff",
+              "tertiary-fixed-dim": "#ecbe8d",
+              "surface-container-highest": "#e4e3da",
+              "on-secondary-fixed-variant": "#3c4852",
+              "tertiary": "#77552d",
+              "outline": "#72787d",
+              "primary-container": "#587891",
+              "on-secondary": "#ffffff",
+              "on-tertiary-container": "#fffbff",
+              "surface-tint": "#42627a",
+              "secondary-container": "#d5e1ed",
+              "secondary-fixed": "#d8e4f0",
+              "inverse-primary": "#aacae6",
+              "background": "#fbf9f0",
+              "on-primary-container": "#fcfcff",
+              "primary-fixed": "#c9e6ff",
+              "on-tertiary": "#ffffff",
+              "on-primary-fixed-variant": "#294a61",
+              "surface-dim": "#dcdad2",
+              "on-secondary-fixed": "#111d26"
+            },
+            fontFamily: {
+              "headline": ["Newsreader", "serif"],
+              "body": ["Newsreader", "serif"],
+              "label": ["Public Sans", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            background-color: #fbf9f0;
+            color: #1b1c17;
+            -webkit-font-smoothing: antialiased;
+        }
+        .urtext-shadow {
+            box-shadow: 0 40px 40px -20px rgba(27, 28, 23, 0.06);
+        }
+    </style>
+</head>
+<body class="font-body selection:bg-primary-container/30">
+<!-- Top Navigation Bar -->
+<header class="bg-[#fbf9f0] dark:bg-[#1b1c17] font-['Newsreader'] serif antialiased docked full-width top-0 z-50 flex justify-between items-center w-full px-8 py-4 max-w-none">
+<div class="flex items-center gap-8">
+<span class="text-2xl font-bold tracking-tight text-[#3f5f77] dark:text-[#63839C]">The Living Score</span>
+<nav class="hidden md:flex gap-6 items-center">
+<a class="text-[#3f5f77] dark:text-[#63839C] border-b-2 border-[#3f5f77] pb-1" href="#">Library</a>
+<a class="text-[#72787d] dark:text-[#aeb5ba] hover:text-[#3f5f77] transition-colors duration-300" href="#">Favorites</a>
+<a class="text-[#72787d] dark:text-[#aeb5ba] hover:text-[#3f5f77] transition-colors duration-300" href="#">Composers</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative hidden sm:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="bg-surface-container-low border-none border-b border-outline/20 pl-10 pr-4 py-2 text-sm focus:ring-0 focus:border-primary w-64 font-label" placeholder="Search urtext editions..." type="text"/>
+</div>
+<button class="p-2 hover:bg-[#f6f4eb] transition-colors duration-300 rounded-full">
+<span class="material-symbols-outlined text-[#3f5f77]" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</header>
+<main class="min-h-screen pt-20 pb-24 px-4 md:px-12 flex flex-col items-center">
+<!-- Score Header & Metadata -->
+<section class="w-full max-w-5xl mb-12 flex flex-col md:flex-row justify-between items-end gap-6">
+<div class="text-left">
+<p class="font-label uppercase tracking-widest text-xs text-primary mb-2">Frédéric Chopin</p>
+<h1 class="text-5xl md:text-7xl font-light text-on-surface leading-tight tracking-tight">24 Préludes</h1>
+<p class="text-xl italic text-outline mt-2">Op. 28, No. 15 in D-flat major "Raindrop"</p>
+</div>
+<!-- Contextual Toolbar -->
+<div class="flex gap-4 items-center bg-surface-container-low p-1 border-outline/10 border-opacity-15">
+<div class="flex items-center gap-1 px-3 py-2">
+<button class="flex items-center gap-2 px-3 py-1 bg-surface-container-high text-primary font-label text-[10px] uppercase tracking-wider">
+<span class="material-symbols-outlined text-sm">description</span>
+                        Single Page
+                    </button>
+<button class="flex items-center gap-2 px-3 py-1 text-outline font-label text-[10px] uppercase tracking-wider hover:bg-surface-container-high/50 transition-all">
+<span class="material-symbols-outlined text-sm">view_day</span>
+                        Continuous
+                    </button>
+</div>
+<div class="h-6 w-px bg-outline/20 mx-2"></div>
+<div class="flex items-center gap-4 px-3 py-2">
+<button class="material-symbols-outlined text-outline hover:text-primary transition-colors">remove</button>
+<span class="font-label text-xs font-bold text-primary w-8 text-center">100%</span>
+<button class="material-symbols-outlined text-outline hover:text-primary transition-colors">add</button>
+</div>
+</div>
+</section>
+<!-- The "Folio" Score Container -->
+<div class="relative w-full max-w-5xl aspect-[3/4] bg-white urtext-shadow mb-16 overflow-hidden flex flex-col items-center p-12 md:p-20 ring-1 ring-outline/5">
+<!-- Marginalia -->
+<aside class="absolute left-6 top-1/2 -translate-y-1/2 hidden xl:block w-32">
+<p class="font-body italic text-sm text-outline leading-relaxed border-l border-primary/20 pl-4">
+                    The autograph shows a distinct phrasing marking here, often simplified in later editions.
+                </p>
+</aside>
+<!-- Score Content Simulation (Representing Verovio output) -->
+<div class="w-full h-full flex flex-col gap-12 opacity-90 grayscale contrast-125">
+<img alt="Scholarly music score of Chopin Prelude No 15" class="w-full object-contain" data-alt="Detailed music engraving on cream paper with complex piano notation" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAcSZltkknC5ZDb4Ls0zQIg5TLwVFOSP4z85UcNy_AJSnE_EnDgCsKxzrncSHAbhynM84O7-kXDj8I3XSwEjefb9zsAAgbHXiFiAB6QA2iVBqLugDZEgDtXfWqwWZQzBd0NfI3PBTR2GC08yQerxvYxSlDA_UQ_bZwLNMB89i7ufL78seWDvf7WT-5-WCn6KDDaXM8PNUFUhjzK0ePQZQXb75eKSjFLH74rwGYdPKZn2EmTVOLLADtwRt65E3edWn8PM_MJfzlVKVY"/>
+<div class="mt-auto w-full border-t border-on-surface/5 pt-4 flex justify-between font-label text-[10px] uppercase tracking-widest text-outline">
+<span>Urtext Edition — 2024 Digital Folio</span>
+<span>Page 1 of 4</span>
+</div>
+</div>
+</div>
+<!-- Annotation / Scholarly Content -->
+<section class="w-full max-w-2xl mb-32">
+<h2 class="font-label uppercase tracking-[0.2em] text-xs text-primary mb-6">Editorial Notes</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+<div class="bg-surface-container-low p-8">
+<h3 class="font-body italic text-lg mb-3">Tempo &amp; Rubato</h3>
+<p class="font-body text-on-surface-variant leading-relaxed">
+                        The "Raindrop" prelude relies on a persistent A-flat (or G-sharp) pedal point. The Urtext suggests a stricter adherence to the <i>Sostenuto</i> marking than modern romantic interpretations.
+                    </p>
+</div>
+<div class="bg-surface-container-low p-8">
+<h3 class="font-body italic text-lg mb-3">Source Material</h3>
+<p class="font-body text-on-surface-variant leading-relaxed">
+                        Based on the autograph in the National Library of Poland and the first French edition (M. Schlesinger, Paris, 1839).
+                    </p>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Navigation Bar (Playback Controls) -->
+<footer class="fixed bottom-0 left-0 w-full z-50">
+<!-- Progress Bar -->
+<div class="w-full h-1 bg-surface-container-high relative overflow-hidden group cursor-pointer">
+<div class="absolute top-0 left-0 h-full bg-primary w-1/3 transition-all duration-300"></div>
+<div class="absolute top-0 left-1/3 w-2 h-full bg-primary-container hidden group-hover:block"></div>
+</div>
+<div class="bg-[#fbf9f0]/80 dark:bg-[#1b1c17]/80 backdrop-blur-md fixed bottom-0 left-0 w-full flex justify-between items-center h-20 px-12 pb-safe border-t border-[#72787d]/15">
+<!-- Metronome/Tempo -->
+<div class="flex items-center gap-6">
+<div class="flex flex-col items-center justify-center text-[#72787d] font-['Public_Sans'] uppercase tracking-widest text-[10px]">
+<span class="material-symbols-outlined text-primary mb-1" data-icon="metronome">timer</span>
+<span>72 BPM</span>
+</div>
+<div class="flex flex-col items-center justify-center text-[#72787d] font-['Public_Sans'] uppercase tracking-widest text-[10px]">
+<span class="material-symbols-outlined mb-1" data-icon="speed">speed</span>
+<span>Tempo</span>
+</div>
+</div>
+<!-- Transport Controls -->
+<div class="flex items-center gap-10">
+<button class="material-symbols-outlined text-outline hover:text-primary transition-all">skip_previous</button>
+<button class="w-12 h-12 bg-primary text-white flex items-center justify-center rounded-full shadow-lg hover:scale-110 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-3xl" data-icon="play_arrow">play_arrow</span>
+</button>
+<button class="material-symbols-outlined text-outline hover:text-primary transition-all">skip_next</button>
+</div>
+<!-- Instruments/Settings -->
+<div class="flex items-center gap-6">
+<div class="flex flex-col items-center justify-center text-[#72787d] font-['Public_Sans'] uppercase tracking-widest text-[10px] hover:text-[#3f5f77] transition-all cursor-pointer">
+<span class="material-symbols-outlined mb-1" data-icon="piano">piano</span>
+<span>Instruments</span>
+</div>
+<div class="flex flex-col items-center justify-center text-[#72787d] font-['Public_Sans'] uppercase tracking-widest text-[10px] hover:text-[#3f5f77] transition-all cursor-pointer">
+<span class="material-symbols-outlined mb-1" data-icon="tune">tune</span>
+<span>Settings</span>
+</div>
+</div>
+</div>
+</footer>
+<!-- Full Footer (Hidden when playing, visible as you scroll past the score) -->
+<section class="bg-[#f6f4eb] dark:bg-[#1b1c17] w-full py-12 px-8 flex flex-col md:flex-row justify-between items-center gap-4 w-full border-t border-outline/5 mt-20">
+<span class="font-['Newsreader'] italic text-sm text-[#72787d] dark:text-[#aeb5ba]">© 2024 The Living Score. Urtext Edition Standards.</span>
+<div class="flex gap-8">
+<a class="font-['Newsreader'] italic text-sm text-[#72787d] hover:text-[#3f5f77] transition-colors" href="#">Citation Guide</a>
+<a class="font-['Newsreader'] italic text-sm text-[#72787d] hover:text-[#3f5f77] transition-colors" href="#">Privacy</a>
+<a class="font-['Newsreader'] italic text-sm text-[#72787d] hover:text-[#3f5f77] transition-colors" href="#">Archive Terms</a>
+</div>
+</section>
+</body></html>

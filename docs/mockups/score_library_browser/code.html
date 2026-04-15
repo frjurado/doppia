@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;family=Public_Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary-fixed-dim": "#aacae6",
+              "secondary-fixed-dim": "#bcc8d4",
+              "surface-container": "#f0eee5",
+              "error-container": "#ffdad6",
+              "on-surface-variant": "#42474c",
+              "surface-container-low": "#f6f4eb",
+              "on-tertiary-fixed": "#2b1700",
+              "surface-container-high": "#eae8df",
+              "inverse-surface": "#30312b",
+              "on-error": "#ffffff",
+              "on-secondary-container": "#58646e",
+              "tertiary-container": "#926e42",
+              "inverse-on-surface": "#f3f1e8",
+              "secondary": "#54606a",
+              "surface-variant": "#e4e3da",
+              "error": "#ba1a1a",
+              "surface-container-lowest": "#ffffff",
+              "surface": "#fbf9f0",
+              "on-surface": "#1b1c17",
+              "primary": "#3f5f77",
+              "surface-bright": "#fbf9f0",
+              "on-error-container": "#93000a",
+              "on-background": "#1b1c17",
+              "outline-variant": "#c2c7cd",
+              "on-primary-fixed": "#001e2f",
+              "tertiary-fixed": "#ffddb9",
+              "on-tertiary-fixed-variant": "#5f401a",
+              "on-primary": "#ffffff",
+              "tertiary-fixed-dim": "#ecbe8d",
+              "surface-container-highest": "#e4e3da",
+              "on-secondary-fixed-variant": "#3c4852",
+              "tertiary": "#77552d",
+              "outline": "#72787d",
+              "primary-container": "#587891",
+              "on-secondary": "#ffffff",
+              "on-tertiary-container": "#fffbff",
+              "surface-tint": "#42627a",
+              "secondary-container": "#d5e1ed",
+              "secondary-fixed": "#d8e4f0",
+              "inverse-primary": "#aacae6",
+              "background": "#fbf9f0",
+              "on-primary-container": "#fcfcff",
+              "primary-fixed": "#c9e6ff",
+              "on-tertiary": "#ffffff",
+              "on-primary-fixed-variant": "#294a61",
+              "surface-dim": "#dcdad2",
+              "on-secondary-fixed": "#111d26"
+            },
+            fontFamily: {
+              "headline": ["Newsreader", "serif"],
+              "body": ["Newsreader", "serif"],
+              "label": ["Public Sans", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+            font-size: 20px;
+        }
+        body {
+            background-color: #fbf9f0;
+            color: #1b1c17;
+            -webkit-font-smoothing: antialiased;
+        }
+        .column-border {
+            background-color: rgba(114, 120, 125, 0.15);
+            width: 1px;
+            height: 100%;
+        }
+        /* Custom scrollbar for archival feel */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3f5f7733; border-radius: 0px; }
+    </style>
+</head>
+<body class="font-body selection:bg-primary-container/30">
+<!-- TopNavBar -->
+<nav class="bg-[#fbf9f0] dark:bg-[#1b1c17] flex justify-between items-center w-full px-8 py-4 max-w-none docked full-width top-0 z-50 font-['Newsreader'] serif antialiased">
+<div class="flex items-center gap-12">
+<span class="text-2xl font-bold tracking-tight text-[#3f5f77] dark:text-[#63839C]">The Living Score</span>
+<div class="hidden md:flex gap-8">
+<a class="text-[#3f5f77] dark:text-[#63839C] border-b-2 border-[#3f5f77] pb-1" href="#">Library</a>
+<a class="text-[#72787d] dark:text-[#aeb5ba] hover:text-[#3f5f77] transition-colors duration-300" href="#">Favorites</a>
+<a class="text-[#72787d] dark:text-[#aeb5ba] hover:text-[#3f5f77] transition-colors duration-300" href="#">Composers</a>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="bg-surface-container-low border-none focus:ring-1 focus:ring-primary pl-10 pr-4 py-2 text-sm font-label w-64" placeholder="Search archives..." type="text"/>
+</div>
+<button class="text-[#3f5f77] hover:bg-[#f6f4eb] p-2 transition-all duration-300">
+<span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</nav>
+<!-- Main Content: Column Browser -->
+<main class="flex h-[calc(100vh-144px)] w-full overflow-hidden bg-surface">
+<!-- Column 1: Composers -->
+<section class="w-64 flex-shrink-0 flex flex-col bg-surface">
+<div class="px-6 py-4">
+<span class="font-label uppercase tracking-widest text-[10px] text-primary font-bold">Composers</span>
+</div>
+<div class="flex-1 overflow-y-auto px-2">
+<div class="space-y-1">
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container-low transition-colors group flex justify-between items-center">
+<span class="text-lg">Bach, J.S.</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface bg-surface-container-high font-semibold flex justify-between items-center">
+<span class="text-lg">Beethoven, L. van</span>
+<span class="material-symbols-outlined text-primary scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container-low transition-colors group flex justify-between items-center">
+<span class="text-lg">Brahms, J.</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container-low transition-colors group flex justify-between items-center">
+<span class="text-lg">Chopin, F.</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container-low transition-colors group flex justify-between items-center">
+<span class="text-lg">Mozart, W.A.</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container-low transition-colors group flex justify-between items-center">
+<span class="text-lg">Schubert, F.</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+</div>
+</div>
+</section>
+<div class="column-border"></div>
+<!-- Column 2: Collections -->
+<section class="w-72 flex-shrink-0 flex flex-col bg-surface-container-low">
+<div class="px-6 py-4">
+<span class="font-label uppercase tracking-widest text-[10px] text-primary font-bold">Collections</span>
+</div>
+<div class="flex-1 overflow-y-auto px-2">
+<div class="space-y-1">
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container transition-colors group flex justify-between items-center">
+<span class="text-lg">Piano Sonatas</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface bg-surface-container font-semibold flex justify-between items-center">
+<span class="text-lg">Symphonies</span>
+<span class="material-symbols-outlined text-primary scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container transition-colors group flex justify-between items-center">
+<span class="text-lg">String Quartets</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+<button class="w-full text-left px-4 py-2 text-on-surface hover:bg-surface-container transition-colors group flex justify-between items-center">
+<span class="text-lg">Cello Sonatas</span>
+<span class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 scale-75">chevron_right</span>
+</button>
+</div>
+</div>
+</section>
+<div class="column-border"></div>
+<!-- Column 3: Individual Works -->
+<section class="w-80 flex-shrink-0 flex flex-col bg-surface">
+<div class="px-6 py-4">
+<span class="font-label uppercase tracking-widest text-[10px] text-primary font-bold">Works</span>
+</div>
+<div class="flex-1 overflow-y-auto px-2">
+<div class="space-y-1">
+<button class="w-full text-left px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors group">
+<p class="text-lg leading-tight">Symphony No. 1 in C major</p>
+<p class="font-label text-[10px] text-outline uppercase tracking-wider mt-1">Op. 21</p>
+</button>
+<button class="w-full text-left px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors group">
+<p class="text-lg leading-tight">Symphony No. 2 in D major</p>
+<p class="font-label text-[10px] text-outline uppercase tracking-wider mt-1">Op. 36</p>
+</button>
+<button class="w-full text-left px-4 py-3 text-on-surface bg-surface-container-high font-semibold">
+<p class="text-lg leading-tight">Symphony No. 3 in E flat major</p>
+<p class="font-label text-[10px] text-primary uppercase tracking-wider mt-1">Op. 55 "Eroica"</p>
+</button>
+<button class="w-full text-left px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors group">
+<p class="text-lg leading-tight">Symphony No. 4 in B flat major</p>
+<p class="font-label text-[10px] text-outline uppercase tracking-wider mt-1">Op. 60</p>
+</button>
+<button class="w-full text-left px-4 py-3 text-on-surface hover:bg-surface-container-low transition-colors group">
+<p class="text-lg leading-tight">Symphony No. 5 in C minor</p>
+<p class="font-label text-[10px] text-outline uppercase tracking-wider mt-1">Op. 67</p>
+</button>
+</div>
+</div>
+</section>
+<div class="column-border"></div>
+<!-- Column 4: Preview Pane -->
+<section class="flex-1 bg-surface-container-low overflow-y-auto p-12">
+<div class="max-w-xl mx-auto flex flex-col items-center">
+<!-- Cover Image Container -->
+<div class="w-72 aspect-[3/4] bg-primary relative shadow-2xl overflow-hidden mb-12">
+<img alt="Urtext edition music score cover" class="w-full h-full object-cover grayscale opacity-90 mix-blend-multiply" data-alt="Classic blue Henle Urtext music score cover design" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB-HI1ctjaruana-YrDTpURgTVTvgIcSeyIL5wvEcFxwNcgdeZGZFg3kv0vNSjuYgfvzUOfu7hgZ_rWxtQtZdqn1sIcsbMxpmoN4qQ-jXroBaV8O8c0wyl0Dj0lz8Omur7L5677rHGTMVNYEDWinIvaHR8zDzXKDs4R876RR1CR7RNRthml0k-QsIvF7wRMmI_J-WPJAvXawEiE4YTxsUlECwqzEmndpVs8Im2oKPcD1ngejUiUkXA23qij69Sh9yEhsa3mYSg6tWQ"/>
+<div class="absolute inset-0 border-[12px] border-primary-container/20 pointer-events-none"></div>
+<div class="absolute inset-x-8 top-16 text-center text-white">
+<p class="font-label uppercase tracking-[0.3em] text-[10px] opacity-80 mb-4">Urtext Edition</p>
+<h1 class="text-3xl font-bold tracking-tight mb-2">BEETHOVEN</h1>
+<div class="h-[1px] w-12 bg-white/40 mx-auto my-4"></div>
+<h2 class="text-xl italic font-serif opacity-90">Symphonie Nr. 3</h2>
+<p class="text-sm mt-2 opacity-70">Es-dur Op. 55</p>
+</div>
+</div>
+<!-- Metadata Content -->
+<div class="w-full text-left">
+<div class="mb-8">
+<h3 class="text-3xl font-bold text-primary mb-2">Symphony No. 3 in E flat major</h3>
+<p class="text-xl italic text-on-surface-variant">"Eroica"</p>
+</div>
+<div class="grid grid-cols-2 gap-y-6 gap-x-12">
+<div>
+<p class="font-label uppercase tracking-widest text-[10px] text-outline mb-1">Composer</p>
+<p class="text-lg">Ludwig van Beethoven</p>
+</div>
+<div>
+<p class="font-label uppercase tracking-widest text-[10px] text-outline mb-1">Catalogue</p>
+<p class="text-lg">Opus 55</p>
+</div>
+<div>
+<p class="font-label uppercase tracking-widest text-[10px] text-outline mb-1">Composed</p>
+<p class="text-lg">1803 – 1804</p>
+</div>
+<div>
+<p class="font-label uppercase tracking-widest text-[10px] text-outline mb-1">Instrumentation</p>
+<p class="text-lg">Orchestra</p>
+</div>
+</div>
+<div class="mt-12 pt-8 border-t border-outline/10 flex gap-4">
+<button class="bg-gradient-to-br from-primary to-primary-container text-white px-8 py-3 font-label uppercase tracking-widest text-xs font-bold hover:opacity-90 transition-opacity">
+                            Open Score
+                        </button>
+<button class="border border-primary text-primary px-8 py-3 font-label uppercase tracking-widest text-xs font-bold hover:bg-primary/5 transition-colors">
+                            Print Edition
+                        </button>
+</div>
+<!-- Marginalia -->
+<div class="mt-12 text-sm italic text-on-surface-variant/70 leading-relaxed font-serif max-w-md">
+                        Note: Dedicated to Prince Joseph Franz Maximilian Lobkowitz. First public performance in Vienna, April 7, 1805. The edition follows the original 1806 score by Simrock.
+                    </div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar (Visible on Mobile) -->
+<nav class="md:hidden bg-[#fbf9f0]/80 dark:bg-[#1b1c17]/80 backdrop-blur-md fixed bottom-0 left-0 w-full flex justify-around items-center h-20 px-6 pb-safe border-t border-[#72787d]/15 z-50">
+<a class="flex flex-col items-center justify-center text-[#3f5f77] font-bold" href="#">
+<span class="material-symbols-outlined" data-icon="play_arrow">play_arrow</span>
+<span class="font-['Public_Sans'] uppercase tracking-widest text-[10px] mt-1">Play</span>
+</a>
+<a class="flex flex-col items-center justify-center text-[#72787d]" href="#">
+<span class="material-symbols-outlined" data-icon="speed">speed</span>
+<span class="font-['Public_Sans'] uppercase tracking-widest text-[10px] mt-1">Tempo</span>
+</a>
+<a class="flex flex-col items-center justify-center text-[#72787d]" href="#">
+<span class="material-symbols-outlined" data-icon="piano">piano</span>
+<span class="font-['Public_Sans'] uppercase tracking-widest text-[10px] mt-1">Instruments</span>
+</a>
+<a class="flex flex-col items-center justify-center text-[#72787d]" href="#">
+<span class="material-symbols-outlined" data-icon="metronome">timer</span>
+<span class="font-['Public_Sans'] uppercase tracking-widest text-[10px] mt-1">Metronome</span>
+</a>
+<a class="flex flex-col items-center justify-center text-[#72787d]" href="#">
+<span class="material-symbols-outlined" data-icon="tune">tune</span>
+<span class="font-['Public_Sans'] uppercase tracking-widest text-[10px] mt-1">Settings</span>
+</a>
+</nav>
+<!-- Footer -->
+<footer class="bg-[#f6f4eb] dark:bg-[#1b1c17] w-full py-12 px-8 flex flex-col md:flex-row justify-between items-center gap-4 font-['Newsreader'] italic text-sm text-[#72787d] dark:text-[#aeb5ba]">
+<p>© 2024 The Living Score. Urtext Edition Standards.</p>
+<div class="flex gap-8">
+<a class="hover:text-[#3f5f77] transition-all" href="#">Citation Guide</a>
+<a class="hover:text-[#3f5f77] transition-all" href="#">Privacy</a>
+<a class="hover:text-[#3f5f77] transition-all" href="#">Archive Terms</a>
+</div>
+</footer>
+</body></html>
