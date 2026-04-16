@@ -5,12 +5,12 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/localpassword
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
       NEO4J_PLUGINS: '["apoc"]'
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "localpassword", "RETURN 1"]
+      test: ["CMD", "cypher-shell", "-u", "${NEO4J_USER}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -20,14 +20,14 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: doppia
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: localpassword
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d doppia"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -50,8 +50,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${R2_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${R2_SECRET_ACCESS_KEY}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -60,6 +60,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${R2_ACCESS_KEY_ID} ${R2_SECRET_ACCESS_KEY} &&
+      mc mb --ignore-existing local/${R2_BUCKET_NAME}
+      "
+    restart: on-failure
 
   api:
     build:
@@ -74,14 +86,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
       # Override localhost-pointing URLs to use Docker service names
       NEO4J_URI: bolt://neo4j:7687
-      DATABASE_URL: postgresql+asyncpg://postgres:localpassword@postgres/doppia
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
