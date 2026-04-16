@@ -18,7 +18,8 @@ docker compose up
 cd backend
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # local dev (includes all prod deps)
+# pip install -r requirements.txt     # production / Docker only
 ```
 
 ### Knowledge graph seeding and validation

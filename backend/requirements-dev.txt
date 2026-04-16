@@ -1,0 +1,16 @@
+# Inherits all production dependencies
+-r requirements.txt
+
+# Graph visualization (dev/debug)
+pyvis==0.3.2
+networkx==3.4.2
+
+# Linting & formatting
+black==24.10.0
+isort==5.13.2
+ruff==0.8.4
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
