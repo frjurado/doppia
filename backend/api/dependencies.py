@@ -3,17 +3,19 @@
 The sole permitted role enforcement mechanism is ``require_role()``.
 No inline role checks in route handlers or service functions.
 See CONTRIBUTING.md § Invariants and docs/architecture/security-model.md.
+
+Authentication is handled upstream by ``api.middleware.auth.AuthMiddleware``,
+which validates the JWT and attaches the user to ``request.state.user``.
+``get_current_user`` reads from that state; ``require_role`` enforces the
+minimum role level.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-
-_DEV_TOKEN = "dev-token"
 
 
 @dataclass(frozen=True)
@@ -31,32 +33,12 @@ class AuthenticatedUser:
     email: str
 
 
-async def _validate_supabase_jwt(request: Request) -> AuthenticatedUser:
-    """Validate a Supabase-issued JWT from the Authorization header.
-
-    Args:
-        request: The incoming FastAPI request.
-
-    Returns:
-        An AuthenticatedUser populated from the JWT claims.
-
-    Raises:
-        HTTPException: 401 if the token is absent or invalid.
-    """
-    # TODO: implement full JWT validation against SUPABASE_JWT_SECRET
-    # (Component 1 auth task).
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Supabase JWT validation not yet implemented.",
-    )
-
-
 async def get_current_user(request: Request) -> AuthenticatedUser:
     """FastAPI dependency that returns the authenticated user for the current request.
 
-    Dispatches to the development bypass (when AUTH_MODE=local) or full Supabase JWT
-    validation. The dev bypass is guarded by an ENVIRONMENT check to ensure it can
-    never activate in staging or production.
+    Reads the user attached to ``request.state.user`` by ``AuthMiddleware``.
+    Raises HTTP 401 if no user is present (i.e. the request carried no
+    ``Authorization`` header).
 
     Args:
         request: The incoming FastAPI request.
@@ -65,28 +47,16 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
         The authenticated user.
 
     Raises:
-        RuntimeError: If AUTH_MODE=local is set with a non-local ENVIRONMENT.
-        HTTPException: 401 if the token is missing or invalid.
+        HTTPException: 401 if no user is attached to the request state.
     """
-    environment = os.environ.get("ENVIRONMENT", "production")
-    auth_mode = os.environ.get("AUTH_MODE", "supabase")
-
-    if auth_mode == "local":
-        if environment != "local":
-            raise RuntimeError(
-                "AUTH_MODE=local is set but ENVIRONMENT is not 'local'. "
-                "This configuration is invalid and the application will not start. "
-                f"ENVIRONMENT={environment!r}"
-            )
-        token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        if token != _DEV_TOKEN:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid dev token.",
-            )
-        return AuthenticatedUser(id="dev-user", role="admin", email="dev@local")
-
-    return await _validate_supabase_jwt(request)
+    user: AuthenticatedUser | None = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
 
 
 def require_role(role: str) -> Annotated[AuthenticatedUser, Depends]:
