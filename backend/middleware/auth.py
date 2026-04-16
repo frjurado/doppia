@@ -9,11 +9,8 @@ See docs/architecture/security-model.md § The development auth bypass.
 
 from __future__ import annotations
 
-import os
-
-from fastapi import HTTPException, Request, status
-
 from api.dependencies import AuthenticatedUser
+from fastapi import HTTPException, Request, status
 
 
 async def validate_supabase_jwt(request: Request) -> AuthenticatedUser:

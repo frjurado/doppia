@@ -44,3 +44,9 @@ minio_data/
 
 # Alembic
 backend/migrations/versions/*.pyc
+
+# Claude
+.claude/
+
+# Internal Guide
+docs/.guide/

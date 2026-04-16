@@ -28,14 +28,16 @@ Traversed upward (zero-or-more hops) for schema inheritance queries."""
 # ── Schema structure ──────────────────────────────────────────────────────────
 
 HAS_PROPERTY_SCHEMA = "HAS_PROPERTY_SCHEMA"
-"""Concept → PropertySchema: declares that a concept (and its subtypes) carry this schema."""
+"""Concept → PropertySchema: declares that a concept (and its subtypes) carry this
+schema."""
 
 HAS_VALUE = "HAS_VALUE"
 """PropertySchema → PropertyValue: the set of allowed values for the schema."""
 
 VALUE_REFERENCES = "VALUE_REFERENCES"
 """PropertyValue → Concept: a value that is itself a reference to another concept node.
-Used when a property value selects a concept (e.g. SopranoPosition → ScaleDegree1 → Concept)."""
+Used when a property value selects a concept (e.g. SopranoPosition → ScaleDegree1
+→ Concept)."""
 
 # ── Compositional / structural ────────────────────────────────────────────────
 

@@ -9,13 +9,17 @@ pydantic[email]==2.10.3
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
-psycopg2-binary==2.9.10
+# psycopg2-binary: needed by Alembic for sync migrations; requires pg_config to build on Windows.
+# Installed automatically inside Docker. For local dev, asyncpg covers all async operations.
+# If you run Alembic locally, install PostgreSQL client tools first, then:
+#   pip install psycopg2-binary==2.9.10
+psycopg2-binary==2.9.10; sys_platform != "win32"
 
 # pgvector (scaffolded now; populated in Phase 3)
 pgvector==0.3.6
 
 # Neo4j
-neo4j==5.27.0
+neo4j==5.26.0
 neomodel==5.4.1
 
 # Task queue (Celery + Redis broker)

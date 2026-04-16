@@ -31,7 +31,7 @@ _ALLOWED_ORIGINS: dict[str, list[str]] = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application lifespan: open DB connections on startup, close on shutdown."""
+    """Manage application lifespan: open/close DB connections on startup/shutdown."""
     # TODO: initialise Neo4j driver and SQLAlchemy engine here (Component 1+)
     yield
     # TODO: close Neo4j driver and SQLAlchemy engine here
@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
     """
     app = FastAPI(
         title="Doppia API",
-        description="Open music analysis repository — notation infrastructure and editorial tools.",
+        description="Open music analysis repository — notation infrastructure and editorial tools.",  # noqa: E501
         version="0.1.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",

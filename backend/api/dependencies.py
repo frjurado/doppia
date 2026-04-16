@@ -43,7 +43,8 @@ async def _validate_supabase_jwt(request: Request) -> AuthenticatedUser:
     Raises:
         HTTPException: 401 if the token is absent or invalid.
     """
-    # TODO: implement full JWT validation against SUPABASE_JWT_SECRET (Component 1 auth task).
+    # TODO: implement full JWT validation against SUPABASE_JWT_SECRET
+    # (Component 1 auth task).
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Supabase JWT validation not yet implemented.",
@@ -112,7 +113,9 @@ def require_role(role: str) -> Annotated[AuthenticatedUser, Depends]:
     """
     _ROLE_HIERARCHY = {"editor": 1, "admin": 2}
 
-    async def _check(user: Annotated[AuthenticatedUser, Depends(get_current_user)]) -> AuthenticatedUser:
+    async def _check(
+        user: Annotated[AuthenticatedUser, Depends(get_current_user)]
+    ) -> AuthenticatedUser:
         required_level = _ROLE_HIERARCHY.get(role, 0)
         user_level = _ROLE_HIERARCHY.get(user.role, 0)
         if user_level < required_level:
