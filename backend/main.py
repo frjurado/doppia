@@ -15,6 +15,12 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from repo root when running locally (no-op if vars already set).
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError

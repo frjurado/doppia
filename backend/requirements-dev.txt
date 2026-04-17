@@ -1,6 +1,9 @@
 # Inherits all production dependencies
 -r requirements.txt
 
+# Local .env loading
+python-dotenv==1.1.0
+
 # Graph visualization (dev/debug)
 pyvis==0.3.2
 networkx==3.4.2

@@ -41,7 +41,7 @@ This starts:
 - **PostgreSQL 16** on `localhost:5432` (with pgvector enabled)
 - **MinIO** on `localhost:9000` (console at `localhost:9001`)
 - **Redis** on `localhost:6379`
-- **FastAPI backend** on `localhost:8000` (OpenAPI docs at `localhost:8000/docs`)
+- **FastAPI backend** on `localhost:8000` (OpenAPI docs at `localhost:8000/api/docs`)
 - **Frontend dev server** on `localhost:3000`
 
 On first run, the database init scripts create the PostgreSQL schema and enable pgvector. Neo4j starts empty; seed the knowledge graph separately (see step 4).
@@ -156,7 +156,7 @@ Snapshot tests pin a specific Verovio version. If Verovio is upgraded, regenerat
 
 | Service | Local URL | Purpose |
 |---|---|---|
-| FastAPI | `localhost:8000/docs` | OpenAPI documentation and interactive API explorer |
+| FastAPI | `localhost:8000/api/docs` | OpenAPI documentation and interactive API explorer |
 | Neo4j Browser | `localhost:7474` | Graph inspection and ad-hoc Cypher queries |
 | MinIO Console | `localhost:9001` | MEI file storage (S3-compatible) |
 | Frontend | `localhost:3000` | Score viewer and tagging tool |

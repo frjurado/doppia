@@ -16,7 +16,7 @@ docker compose up   # neo4j, postgres, redis, minio only
 Then in separate terminals:
 ```bash
 # API
-cd backend && source .venv/bin/activate && uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+cd backend && source .venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 # Frontend
 cd frontend && npm run dev
 ```
