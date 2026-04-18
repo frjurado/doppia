@@ -479,9 +479,9 @@ draft → submitted → approved
 - `approved`: a second editor (not the creator) has reviewed and confirmed the annotation. Visible in the public fragment database.
 - `rejected`: a reviewer has sent the record back with a comment. Visible to the original annotator, who can revise and resubmit.
 
-Add a `status` enum column and a `reviewed_by` / `review_comment` to the `fragment` table.
+Add a `status` enum column to the `fragment` table, and a separate `fragment_review` table to record per-reviewer decisions. The review table is the forward-compatible shape: when the approval threshold grows from one reviewer to two, no data migration is needed — only a configuration change to the approval-check service function. See `docs/architecture/fragment-schema.md` for the full `fragment_review` definition.
 
-**Who can approve/reject:** any `editor` who is not the fragment's creator. Admins can approve or reject any fragment. This rule is enforced in the service layer, not only in the UI. Implement the approval check as a parameterised service function so that the threshold (currently: one reviewer) can be raised to two distinct reviewers without modifying route handlers — if annotator volume makes a two-reviewer requirement feasible, it should be a configuration change.
+**Who can approve/reject:** any `editor` who is not the fragment's creator. Admins can approve or reject any fragment. This rule is enforced in the service layer, not only in the UI. The approval check is a parameterised service function that counts approving reviews in `fragment_review` excluding the fragment's creator; the threshold (currently one reviewer) is a configuration value.
 
 **Phase 1 note:** with a small team of annotators in Phase 1, the peer review workflow may feel heavyweight. It is still worth implementing correctly now, because the data model and state machine established here will inform Phase 2's full role model and the public fragment display logic (which shows only `approved` fragments).
 
@@ -508,10 +508,12 @@ When an MEI file passes ingestion (see Component 1, step 6 of the upload workflo
 
 Expert harmonic annotations are preferred over music21 auto-analysis wherever they exist. The pipeline follows the source priority documented in `docs/architecture/corpus-and-analysis-sources.md`:
 
-1. **DCML `harmonies.tsv`** — for any movement in a DCML corpus (Mozart piano sonatas, Beethoven, Corelli, etc.), import the DCML harmonic annotations directly. One row per harmony label, with measure number, beat, Roman numeral, inversion, and phrase boundary markers. Maps directly to the fragment `summary` JSONB `harmony` array without probabilistic inference. Set `harmony_source: "DCML"`.
-2. **When in Rome** — for repertoire not in DCML but covered by the When in Rome meta-corpus. Set `harmony_source: "WhenInRome"`.
-3. **music21 auto-analysis** — fallback only, used when no expert annotation exists. Flag auto-generated harmony fields with `"auto": true` and the music21 version used. Set `harmony_source: "music21_auto"`.
-4. **Manual** — values entered or corrected by the annotator via the tagging tool. Set `harmony_source: "manual"`.
+Provenance is tracked **per event** on `movement_analysis.events`, not per fragment. Each event row carries a `source` value (`"DCML"`, `"WhenInRome"`, `"music21_auto"`, or `"manual"`), along with `auto` and `reviewed` flags. Because events are per-beat, a single movement can mix provenances over its timeline. The ingestion priority is:
+
+1. **DCML `harmonies.tsv`** — for any movement in a DCML corpus (Mozart piano sonatas, Beethoven, Corelli, etc.), import the DCML harmonic annotations directly into `movement_analysis.events`. One row per harmony label, with bar, beat, Roman numeral, inversion, and related fields. Each ingested event gets `source: "DCML"`, `auto: false`, `reviewed: false`.
+2. **When in Rome** — for repertoire not in DCML but covered by the When in Rome meta-corpus. Each ingested event gets `source: "WhenInRome"`, `auto: false`, `reviewed: false`.
+3. **music21 auto-analysis** — fallback only, used when no expert annotation exists. Each emitted event gets `source: "music21_auto"`, `auto: true`, `reviewed: false`, along with the `music21_version` that produced it.
+4. **Manual** — values entered, inserted, or corrected by the annotator via the tagging tool. Edits write back into `movement_analysis.events` directly; the affected event's `source` becomes `"manual"`, `auto` becomes `false`, and `reviewed` becomes `true`.
 
 The pipeline must check for DCML/When in Rome annotations before running music21. music21 is not the default — it is the fallback.
 
@@ -531,34 +533,25 @@ Fields with "Medium" reliability should be flagged in the UI as "auto-generated,
 
 ### Summary JSONB Schema
 
-Pin the summary JSONB structure before any data is written. Changing it later requires a migration of all existing records.
+Pin the summary JSONB structure before any data is written. Changing it later requires a migration of all existing records. The authoritative field-by-field specification is in `docs/architecture/fragment-schema.md`; the shape at a glance:
 
 ```json
 {
   "version": 1,
   "key": "A major",
   "meter": "4/4",
-  "actual_key": { "value": "A major", "confidence": 0.92, "auto": true },
-  "harmony": [
-    {
-      "beat": 1.0,
-      "root": 2,
-      "quality": "minor",
-      "inversion": 1,
-      "numeral": "ii6",
-      "bass_pitch": "E4",
-      "soprano_pitch": "A5",
-      "auto": true,
-      "reviewed": false
-    }
-  ],
+  "actual_key": { "value": "A major", "confidence": 0.92, "auto": true, "reviewed": false },
+  "music21_version": "9.1.0",
   "concepts": ["PerfectAuthenticCadence"],
   "properties": {
     "SopranoPosition": "ScaleDegree1",
     "CadentialElaboration": ["Cadential64"]
-  }
+  },
+  "concept_extensions": {}
 }
 ```
+
+**Harmony is not stored in `summary`.** Chord-level harmonic analysis is stored once per movement in `movement_analysis` as a per-event timeline (with per-event `source`, `auto`, and `reviewed` flags) and sliced by the fragment's bar/beat range at read time. A fragment that needs to display or reason about harmony reads from `movement_analysis`, not from its own `summary`. See `fragment-schema.md` § "Harmonic analysis: movement-level single source of truth" for the rationale and the re-analysis smart-merge policy.
 
 The `version` field is essential. Any future schema change bumps the version and triggers a migration path for records at the old version.
 
@@ -570,28 +563,14 @@ The `version` field is essential. Any future schema change bumps the version and
 
 ### Schema (Full)
 
-In addition to the core schema in `tech-stack-and-database-reference.md`, add:
+The full fragment schema — `fragment`, `fragment_concept_tag`, `fragment_review`, and the `movement_analysis` timeline that fragments read from at render time — is specified in `docs/architecture/fragment-schema.md` and included in the initial Alembic migration produced by Step 4 of `phase-1-foundation-plan.md`. Component 7 does not add columns or tables; it wires up the CRUD endpoints, the review state transitions, and the on-score display against the schema already established by the foundation migration.
 
-```sql
-ALTER TABLE fragment ADD COLUMN prose_annotation TEXT;
-ALTER TABLE fragment ADD COLUMN beat_start FLOAT;       -- nullable, Phase 2
-ALTER TABLE fragment ADD COLUMN beat_end FLOAT;         -- nullable, Phase 2
-ALTER TABLE fragment ADD COLUMN repeat_context TEXT;    -- e.g. 'first_ending'
-ALTER TABLE fragment ADD COLUMN parent_fragment_id UUID REFERENCES fragment(id) ON DELETE CASCADE;
-ALTER TABLE fragment ADD COLUMN status TEXT NOT NULL DEFAULT 'draft';
-ALTER TABLE fragment ADD COLUMN created_by UUID REFERENCES app_user(id);
-ALTER TABLE fragment ADD COLUMN reviewed_by UUID REFERENCES app_user(id);
-ALTER TABLE fragment ADD COLUMN review_comment TEXT;
-ALTER TABLE fragment ADD COLUMN reviewed_at TIMESTAMPTZ;
+The relevant foundation schema summary for this component:
 
--- Join table between fragment records and Neo4j concept nodes.
--- concept_id is the stable Neo4j concept id (see Forward-Compatibility Notes).
-CREATE TABLE fragment_concept_tag (
-    fragment_id UUID REFERENCES fragment(id) ON DELETE CASCADE,
-    concept_id  TEXT NOT NULL,
-    PRIMARY KEY (fragment_id, concept_id)
-);
-```
+- `fragment` — one row per tagged excerpt; includes `movement_id`, bar/beat range, `repeat_context`, `parent_fragment_id`, `summary` JSONB, `prose_annotation`, `data_licence`, `status`, `created_by`, and audit timestamps.
+- `fragment_concept_tag` — join to Neo4j concept ids; `is_primary` distinguishes the driving concept from cross-reference tags.
+- `fragment_review` — per-reviewer decisions (`approved` | `rejected`) with comment and timestamp; `UNIQUE (fragment_id, reviewer_id)`. The approval threshold is a configurable service-layer parameter.
+- `movement_analysis` — per-event harmonic timeline, mutable, with per-event `source` / `auto` / `reviewed` flags. Fragments do **not** persist harmony in `summary`; they slice from `movement_analysis` at read time.
 
 ### On-Score Visual Indicators
 

@@ -10,7 +10,7 @@
 The project uses DCML corpora as a secondary score and annotation source for repertoire not covered by OpenScore (see `docs/architecture/corpus-and-analysis-sources.md`). DCML corpora provide two distinct assets:
 
 - **Scores** — uncompressed MuseScore 3 (`.mscx`) files, converted to MEI for storage.
-- **Harmonic annotations** — expert `harmonies.tsv` files consumed directly into the fragment `summary` JSONB as `harmony_source: "DCML"`.
+- **Harmonic annotations** — expert `harmonies.tsv` files consumed directly into `movement_analysis.events`; each event carries `source: "DCML"`.
 
 The licensing situation across DCML corpora is not uniform:
 
@@ -19,7 +19,7 @@ The licensing situation across DCML corpora is not uniform:
 | Most DCML corpora (Mozart, Beethoven piano sonatas, Chopin, Schubert, etc.) | CC BY-SA 4.0 | ShareAlike |
 | ABC corpus (Beethoven string quartets) | CC BY-NC-SA 4.0 | ShareAlike + NonCommercial |
 
-**CC BY-SA 4.0 — ShareAlike obligation.** Any database, API response, or other derivative work that incorporates CC BY-SA 4.0 material must be distributed under CC BY-SA 4.0 or a licence the Creative Commons organisation has designated as compatible. This obligation attaches to the licensed material itself, not to the project as a whole. Concretely: API responses that include DCML-derived annotation fields (`harmony`, `harmony_source`, and fields normalised directly from DCML TSVs) are derivative works and must be offered under CC BY-SA 4.0 terms.
+**CC BY-SA 4.0 — ShareAlike obligation.** Any database, API response, or other derivative work that incorporates CC BY-SA 4.0 material must be distributed under CC BY-SA 4.0 or a licence the Creative Commons organisation has designated as compatible. This obligation attaches to the licensed material itself, not to the project as a whole. Concretely: API responses that include DCML-derived annotation events from `movement_analysis` (events with `source: "DCML"`, and any fields normalised directly from DCML TSVs) are derivative works and must be offered under CC BY-SA 4.0 terms.
 
 **CC BY-NC-SA 4.0 — NonCommercial restriction.** The ABC corpus adds a NonCommercial clause on top of ShareAlike. Distributing ABC-derived material via a public API would restrict any downstream user from incorporating it in commercial products or services. This is a materially different legal exposure to the rest of the DCML collection and must be handled separately.
 
@@ -38,19 +38,19 @@ The licensing situation across DCML corpora is not uniform:
 
 **1. Apply CC BY-SA 4.0 to API responses that include DCML-derived annotation data.**
 
-The public read-only API must indicate CC BY-SA 4.0 as the applicable licence for any response that includes DCML-derived harmonic annotation fields. This is implemented by adding a `data_licence` field to fragment API responses:
+The public read-only API must indicate CC BY-SA 4.0 as the applicable licence for any response that includes DCML-derived harmonic annotation events. Licence derivation is per-fragment: the serialiser inspects the `source` values of all `movement_analysis` events that fall within the fragment's bar/beat range and resolves an effective `data_licence`. A fragment whose range includes any DCML-sourced event is classified CC BY-SA 4.0. This is surfaced in the API response as a `data_licence` field:
 
 ```json
 {
   "fragment_id": "...",
-  "harmony_source": "DCML",
   "data_licence": "CC BY-SA 4.0",
   "data_licence_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "harmony_sources": ["DCML", "manual"],
   ...
 }
 ```
 
-When `harmony_source` is `"music21_auto"`, `"manual"`, or `"WhenInRome"` (for analyses that do not originate from DCML), the `data_licence` field reflects the appropriate licence for that content. A mapping table from `harmony_source` values to applicable licences is maintained in the API response serialiser. For Phase 1, the only values are `"DCML"` (CC BY-SA 4.0) and `"music21_auto"` (no third-party restriction).
+`harmony_sources` is the set of per-event `source` values present in the fragment's range (for transparency and filtering), distinct from the derived effective `data_licence`. When all events in range are `"music21_auto"`, `"manual"`, or `"WhenInRome"` (and none are DCML-sourced), the `data_licence` reflects the appropriate licence for that mix. A mapping table from event `source` values to applicable licences is maintained in the API response serialiser. For Phase 1, the relevant source values are `"DCML"` (CC BY-SA 4.0), `"manual"` and `"music21_auto"` (no third-party restriction), with `"WhenInRome"` following the underlying annotation's licence.
 
 **2. Exclude the ABC corpus (Beethoven string quartets) from the public API.**
 
@@ -88,7 +88,7 @@ This satisfies the BY (attribution) and SA (ShareAlike notice) requirements of t
 
 - This decision does not affect the internal tagging tool. Authenticated annotators may work with any ingested corpus regardless of licence, since internal tool use does not constitute public distribution under CC BY-SA 4.0's terms.
 - Score files (MEI) sourced from DCML `.mscx` conversions carry the same CC BY-SA 4.0 licence as the annotations. If MEI files are exposed directly via the API or downloadable links, the same `data_licence` treatment applies to those assets.
-- The `harmony_source` field already exists in the fragment schema and is populated at ingestion time. No schema migration is required to support the per-fragment licence derivation logic.
+- The per-event `source` field on `movement_analysis.events` is populated at ingestion time and on every manual correction. No schema migration is required to support the per-fragment licence derivation logic; the serialiser reads the events and derives the effective `data_licence` at query time.
 
 ---
 
@@ -98,4 +98,4 @@ This satisfies the BY (attribution) and SA (ShareAlike notice) requirements of t
 
 **Include the ABC corpus under a NonCommercial flag and expose it in a separate, clearly marked API endpoint.** Considered but deferred. A separate endpoint or a `commercial_use_permitted: false` flag would give downstream users the information they need to comply. However, this approach complicates the API surface and increases the risk that the NonCommercial restriction is misunderstood or overlooked. The simpler and safer path is exclusion until there is a concrete use case that justifies the added complexity.
 
-**Treat the entire API response as CC BY-SA 4.0 regardless of the annotation source.** Rejected. Applying ShareAlike to CC0 (OpenScore) or project-authored fields is unnecessary and would impose licensing restrictions on content that carries no such obligation from its upstream source. The per-field `harmony_source` → `data_licence` mapping is more precise and less restrictive.
+**Treat the entire API response as CC BY-SA 4.0 regardless of the annotation source.** Rejected. Applying ShareAlike to CC0 (OpenScore) or project-authored fields is unnecessary and would impose licensing restrictions on content that carries no such obligation from its upstream source. The per-event `source` → `data_licence` mapping is more precise and less restrictive.

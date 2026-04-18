@@ -33,7 +33,7 @@ When an MEI file passes validation and is stored in R2, a Celery task is enqueue
 2. Parses it with music21 and runs full harmonic analysis.
 3. Stores the result as a movement-level analysis record in the `movement_analysis` table (keyed by `movement_id`).
 
-When an annotator creates a fragment record in the tagging tool, the preprocessing service reads the relevant beat range from the cached `movement_analysis` record and populates the `summary` JSONB field synchronously at fragment creation time. The annotator sees pre-populated data immediately — no waiting state, no return visit required.
+When an annotator creates a fragment record in the tagging tool, the preprocessing service reads the relevant beat range from the `movement_analysis` record at render time and presents it for review within the tagging UI. `movement_analysis` is the **single source of truth** for harmonic analysis: the fragment's `summary` does not persist a `harmony` array, and corrections made during tagging write back into the `movement_analysis` event directly (setting the event's `source = "manual"`, `auto = false`, `reviewed = true`). See `docs/architecture/fragment-schema.md` § "Harmonic analysis: movement-level single source of truth" for the full model.
 
 The movement-level cache means music21 runs once per movement, not once per fragment. A movement that yields 20 tagged fragments incurs one music21 run, not 20.
 
@@ -45,7 +45,7 @@ The movement-level cache means music21 runs once per movement, not once per frag
 
 - The annotator's workflow is uninterrupted. Pre-populated data is available immediately when a fragment is created; there is no "pending analysis" state in the tagging tool.
 - music21 runs once per movement regardless of how many fragments are tagged from it. This is the most efficient trigger point.
-- The peer review workflow is not complicated. Auto-generated fields are present and reviewable from the moment a draft fragment exists; the `reviewed` flag per harmony entry and the approval gate work as designed.
+- The peer review workflow is not complicated. Auto-generated harmony events are present and reviewable from the moment a draft fragment exists; the per-event `reviewed` flag on `movement_analysis` and the approval gate work as designed. Because review state lives at the movement level, a reviewer's work on fragment A satisfies the review gate for any later fragment B that covers overlapping events.
 - The movement-level cache is a general asset. Any future feature that needs beat-level harmonic data for a movement (e.g. whole-movement playback annotation, score-level search) can read from `movement_analysis` without re-running music21.
 
 **Negative**
@@ -53,7 +53,13 @@ The movement-level cache means music21 runs once per movement, not once per frag
 - Movements are processed whether or not they ever yield any tagged fragments. If a corpus of 50 movements is ingested and only 10 are ultimately tagged, the preprocessing work for 40 movements was unnecessary.
   At Phase 1 corpus scale (tens of movements), this overhead is negligible. If the corpus grows to hundreds of movements and tagging density remains low, the trigger strategy can be revisited — the `movement_analysis` table makes it straightforward to identify which movements have been analysed and which fragments have consumed their analysis.
 - The Celery task queue and a Redis broker are required from day one. Redis is already in the Docker Compose stack (wired in for Phase 2 caching); Celery adds a worker process. Both are present in the local development environment; neither adds a new managed service in production.
-- If an MEI file is corrected after upload (measure number renumbering, score error fixes), the corresponding `movement_analysis` record is stale. The correction workflow must enqueue a re-analysis task as part of the correction process, and any fragment records derived from the stale analysis must be flagged for re-review. This is handled by the correction tool documented in the phase-1 roadmap; the `music21_version` and a `movement_analysis_id` reference on affected fragments make stale records identifiable.
+- If an MEI file is corrected after upload (measure number renumbering, score error fixes), the corresponding `movement_analysis` record is stale. The correction workflow must enqueue a re-analysis task as part of the correction process, and any fragment whose bar range overlaps a changed event must be flagged for re-review. The re-analysis task **must not clobber manually-reviewed events**; it applies the following smart-merge policy:
+  - Events with `source = "manual"` or `reviewed = true` are preserved unchanged.
+  - Events with `source in ("music21_auto", "DCML", "WhenInRome")` and `reviewed = false` are replaced by the new analysis.
+  - New events from the re-analysis that did not exist at their `(bar, beat)` position are inserted.
+  - Events that existed before but are not produced by the re-analysis are dropped unless `reviewed = true`, in which case they are preserved and flagged for human reconciliation.
+
+  This policy is documented in full in `docs/architecture/fragment-schema.md` under the `movement_analysis` section; the correction tool and any re-analysis Celery task must implement it faithfully.
 
 **Neutral**
 

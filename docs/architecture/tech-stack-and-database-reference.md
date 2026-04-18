@@ -82,19 +82,98 @@ RETURN $id AS direct_id, collect(distinct related.id) AS via_property_ids
 
 **Why PostgreSQL for both:** The fragment database has enough structured fields alongside its variable JSON content that a relational store is the right fit. PostgreSQL's JSONB column type handles the analytical summary natively — it is binary-stored, indexable with GIN indexes, and queryable with path operators — without requiring a separate document database. Consolidating user infrastructure into the same instance avoids a third database technology for what is fundamentally a well-structured relational problem.
 
-**Why not MongoDB:** Adding MongoDB would introduce a third database technology to operate and reason about, while providing no capability that PostgreSQL with JSONB does not already cover for this use case. Fragment records have well-defined structural fields (MEI pointer, key, meter, formal role, concept tag references) alongside the variable JSON summary; JSONB handles the variable part cleanly.
+**Why not MongoDB:** Adding MongoDB would introduce a third database technology to operate and reason about, while providing no capability that PostgreSQL with JSONB does not already cover for this use case. Fragment records have well-defined structural fields (`movement_id`, bar/beat range, concept tag references) alongside the variable JSON summary; JSONB handles the variable part cleanly.
+
+#### Music works infrastructure
+
+The corpus is organised as a four-level hierarchy: composer → corpus → work → movement. The MEI object key lives on `movement` as `mei_object_key` and follows the convention `{composer.slug}/{corpus.slug}/{work.slug}/{movement.slug}.mei`. These tables own the licensing and provenance metadata that travels with ingested MEI; fragments reach the source via `movement_id` rather than carrying their own MEI pointer.
+
+```sql
+CREATE TABLE composer (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug          TEXT UNIQUE NOT NULL,     -- e.g. "mozart", "beethoven"
+    name          TEXT NOT NULL,            -- "Wolfgang Amadeus Mozart"
+    sort_name     TEXT NOT NULL,            -- "Mozart, Wolfgang Amadeus"
+    birth_year    INTEGER,
+    death_year    INTEGER,
+    nationality   TEXT,                     -- free text; ISO codes premature
+    wikidata_id   TEXT,                     -- e.g. "Q254"; nullable
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX composer_sort_name_idx ON composer (sort_name);
+
+CREATE TABLE corpus (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    composer_id       UUID NOT NULL REFERENCES composer(id) ON DELETE RESTRICT,
+    slug              TEXT NOT NULL,        -- e.g. "piano-sonatas"
+    title             TEXT NOT NULL,        -- "Piano Sonatas"
+    source_repository TEXT,                 -- e.g. "DCML/mozart-piano-sonatas"
+    source_url        TEXT,                 -- canonical URL to the upstream source
+    source_commit     TEXT,                 -- git SHA of the ingested snapshot
+    analysis_source   TEXT CHECK (analysis_source IN
+                          ('DCML', 'WhenInRome', 'music21_auto', 'none')),
+    licence           TEXT NOT NULL,        -- SPDX: "CC-BY-SA-4.0", "CC0-1.0", …
+    licence_notice    TEXT,                 -- attribution text if required
+    notes             TEXT,
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    updated_at        TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (composer_id, slug)
+);
+CREATE INDEX corpus_analysis_source_idx ON corpus (analysis_source);
+
+CREATE TABLE work (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    corpus_id        UUID NOT NULL REFERENCES corpus(id) ON DELETE RESTRICT,
+    slug             TEXT NOT NULL,         -- e.g. "k331", "op2-no1"
+    title            TEXT NOT NULL,         -- "Piano Sonata No. 11 in A major"
+    catalogue_number TEXT,                  -- "K. 331", "Op. 2 No. 1", "BWV 846"
+    year_composed    INTEGER,               -- nullable; ranges go in year_notes
+    year_notes       TEXT,                  -- "c. 1783", "1782–1784"
+    key_signature    TEXT,                  -- overall key; optional
+    instrumentation  TEXT,                  -- free text for Phase 1
+    notes            TEXT,
+    created_at       TIMESTAMPTZ DEFAULT now(),
+    updated_at       TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (corpus_id, slug)
+);
+
+CREATE TABLE movement (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    work_id                 UUID NOT NULL REFERENCES work(id) ON DELETE RESTRICT,
+    slug                    TEXT NOT NULL,    -- e.g. "movement-1", "allegro"
+    movement_number         INTEGER NOT NULL, -- 1-indexed; unique within work
+    title                   TEXT,             -- "Andante grazioso"
+    tempo_marking           TEXT,             -- "Allegro", "Andante con moto"
+    key_signature           TEXT,             -- canonical: "A major"
+    meter                   TEXT,             -- starting meter: "6/8"
+    mei_object_key          TEXT NOT NULL,    -- S3 key of the normalized MEI
+    mei_original_object_key TEXT,             -- pre-normalization; nullable
+    duration_bars           INTEGER,          -- cached last bar @n; populated by the normalizer
+    normalization_warnings  JSONB,            -- structured warnings; null = clean
+    ingested_at             TIMESTAMPTZ DEFAULT now(),
+    created_at              TIMESTAMPTZ DEFAULT now(),
+    updated_at              TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (work_id, movement_number),
+    UNIQUE (work_id, slug)
+);
+CREATE INDEX movement_mei_key_idx ON movement (mei_object_key);
+```
+
+**Slug scoping.** Slugs are unique per parent (corpus per composer, work per corpus, movement per work). This is what makes the composed path `{composer.slug}/{corpus.slug}/{work.slug}/{movement.slug}.mei` globally unique without a central registry.
+
+**`duration_bars`** caches the last `@n` value found in the normalized MEI. It is populated by the normalizer and is the natural upper bound for fragment `bar_end` validation; the service layer uses it to reject fragments that overshoot the movement without re-parsing the MEI on every write.
+
+**`ingested_at` vs. `created_at`.** `created_at` is when the row was first inserted. `ingested_at` is when the MEI passed the pipeline and was normalized. A re-ingest after an MEI correction updates `ingested_at` without re-creating the row.
 
 #### Fragment table (core schema sketch)
 
 ```sql
 CREATE TABLE fragment (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    mei_file      TEXT NOT NULL,          -- path/reference to the MEI source file
+    movement_id   UUID NOT NULL REFERENCES movement(id) ON DELETE RESTRICT,
     bar_start     INTEGER NOT NULL,
     bar_end       INTEGER NOT NULL,
-    key           TEXT,                   -- e.g. "C major"
-    meter         TEXT,                   -- e.g. "4/4"
-    formal_role   TEXT,                   -- e.g. "consequent phrase"
     summary       JSONB NOT NULL,         -- full structured analytical summary
     created_at    TIMESTAMPTZ DEFAULT now(),
     updated_at    TIMESTAMPTZ DEFAULT now()
@@ -106,68 +185,64 @@ CREATE INDEX fragment_summary_gin ON fragment USING GIN (summary);
 CREATE TABLE fragment_concept_tag (
     fragment_id     UUID REFERENCES fragment(id) ON DELETE CASCADE,
     concept_id      TEXT NOT NULL,          -- references Concept.id in Neo4j
-    structural_role TEXT,                   -- e.g. "cadence", "opening gesture"
-    formal_context  TEXT,                   -- e.g. "within antecedent phrase"
-    is_primary      BOOLEAN NOT NULL DEFAULT true,  -- false for secondary/contextual tags
+    is_primary      BOOLEAN NOT NULL DEFAULT true,  -- true for the concept that drove the tag; see fragment-schema.md
     PRIMARY KEY (fragment_id, concept_id)
 );
 ```
 
 The `fragment_concept_tag` table is the join surface between PostgreSQL and Neo4j. `concept_id` values are the same `id` strings used as primary keys in the graph. No foreign key enforcement across databases — referential integrity is maintained by the application layer and Pydantic validation.
 
-**The structured JSON summary** (`summary` JSONB) carries the music21-derivable content and the property instance record. The authoritative field-by-field specification — including the `harmony_source` provenance field, versioning policy, and review workflow — is in:
+The sketch above is intentionally minimal; the full fragment schema (sub-measure precision, parent-fragment nesting, peer review state machine, per-fragment licence, `fragment_review` table, and the `summary` JSONB specification) is in:
 
 **[`fragment-schema.md`](fragment-schema.md)**
 
+`key`, `meter`, and harmonic analysis are **not** columns on `fragment`. Key and meter live inside the `summary` JSONB; chord-level harmonic analysis lives in `movement_analysis` (per-event, mutable, reviewable) and is sliced at read time by the fragment's bar/beat range. See `fragment-schema.md` for the rationale.
+
 #### User infrastructure tables
 
+Phase 1 creates only `app_user`. The other user-facing tables (`collection`, `collection_fragment`, `exercise_result`, `reading_history`) are deferred to Phase 2, when their consumers exist and their schemas can be designed against real use cases. Drafting them now risks locking in shapes that will need to change once the feature work begins.
+
 ```sql
+-- Named app_user, not user, because USER is a SQL keyword (alias for CURRENT_USER).
+-- Avoiding it means no double-quoting in queries and no surprising semantics.
 CREATE TABLE app_user (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email         TEXT UNIQUE NOT NULL,
     display_name  TEXT,
-    experience_level TEXT,
     role          TEXT NOT NULL DEFAULT 'user',  -- user | editor | admin
     created_at    TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE collection (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id      UUID REFERENCES app_user(id),
-    title         TEXT NOT NULL,
-    intent        TEXT,           -- class_prep | practice | research | other
-    description   TEXT,
-    is_public     BOOLEAN DEFAULT false,
-    created_at    TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE collection_fragment (
-    collection_id UUID REFERENCES collection(id) ON DELETE CASCADE,
-    fragment_id   UUID REFERENCES fragment(id),
-    position      INTEGER NOT NULL,
-    annotation    TEXT,
-    PRIMARY KEY (collection_id, fragment_id)
-);
-
-CREATE TABLE exercise_result (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id       UUID REFERENCES app_user(id),
-    exercise_type TEXT NOT NULL,
-    fragment_id   UUID REFERENCES fragment(id),
-    concept_id    TEXT NOT NULL,    -- the target concept
-    correct       BOOLEAN NOT NULL,
-    response      TEXT,             -- what the user answered
-    answered_at   TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE reading_history (
-    user_id       UUID REFERENCES app_user(id),
-    content_id    TEXT NOT NULL,    -- fragment id or blog post slug
-    content_type  TEXT NOT NULL,    -- 'fragment' | 'blog_post'
-    visited_at    TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (user_id, content_id)
-);
+-- TODO (Phase 2): add self_declared_role with a CHECK-constrained vocabulary.
+-- Shape under consideration:
+--   self_declared_role TEXT CHECK (self_declared_role IN
+--     ('student', 'educator', 'researcher', 'hobbyist', 'professional_musician', 'other'))
+-- Not added in Phase 1 because the only app_user rows are trusted annotators and admins;
+-- the field has no consumer until the reader-facing UI exists in Phase 2.
 ```
+
+**Deferred (Phase 2) — documented here so the intent is captured but not yet schema'd:**
+
+`collection` and `collection_fragment` — user-curated ordered sets of fragments with intent (class_prep, practice, research), visibility, and per-item annotations. Deferred until the reader UI exists; the column list needs real use cases to pull on it.
+
+`exercise_result` — records of a user's attempts at a fragment/concept exercise (correct/incorrect, response, timestamp). Deferred until exercise types are themselves defined. The shape of this table is coupled to the exercise system, which is still open.
+
+`reading_history` — per-user visit log across fragments and blog posts. **When added, the primary key must include time or be a surrogate**: the naive `(user_id, content_id)` composite PK cannot record repeat visits, which defeats the analytical purpose of the table. Drafted shape for later:
+
+```sql
+-- NOT CREATED IN PHASE 1 — drafted for Phase 2 reference.
+CREATE TABLE reading_history (
+    id            BIGSERIAL PRIMARY KEY,
+    user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    content_type  TEXT NOT NULL CHECK (content_type IN ('fragment', 'blog_post')),
+    content_ref   TEXT NOT NULL,           -- UUID-as-text for fragments; slug for blog posts
+    visited_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX reading_history_user_time_idx ON reading_history (user_id, visited_at DESC);
+CREATE INDEX reading_history_content_idx   ON reading_history (content_type, content_ref);
+```
+
+If storage growth becomes a concern, dedupe per day via a unique `(user_id, content_type, content_ref, date_trunc('day', visited_at))` constraint plus a `visit_count INTEGER`. That is a Phase 2+ decision.
 
 **Python integration:** SQLAlchemy (ORM + Core) with async support via `asyncpg`. Alembic for schema migrations.
 

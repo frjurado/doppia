@@ -245,8 +245,7 @@ async def list_fragments_by_concept(
 
 class FragmentTagCreate(BaseModel):
     concept_id: str
-    structural_role: str | None = None
-    formal_context: str | None = None
+    is_primary: bool = True
 
     @model_validator(mode="after")
     async def validate_concept_exists(self) -> "FragmentTagCreate":

@@ -192,12 +192,14 @@ SQLAlchemy will raise an error if a `text()` construct references a parameter na
 
 ### 3.3 Object key path traversal (R2 / MinIO)
 
-The `mei_file` column in the `fragment` table stores an S3 object key (`{corpus_slug}/{work_id}/{movement_id}.mei`). If this value were accepted directly from user input and used to construct a key for an R2 operation without validation, a malicious actor could craft a value like `../../admin-only/credentials.txt` and attempt to read or write outside the intended path space.
+The `mei_object_key` column in the `movement` table stores an S3 object key (`{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei`). Fragments resolve the key via `movement.mei_object_key` (there is no `mei_file` column on `fragment`). If this value were accepted directly from user input and used to construct a key for an R2 operation without validation, a malicious actor could craft a value like `../../admin-only/credentials.txt` and attempt to read or write outside the intended path space.
 
 **Rule:** Object keys are never accepted directly from API request bodies as arbitrary strings. They are always constructed by the application from validated, typed components:
 
 ```python
-def build_object_key(corpus_slug: str, work_id: str, movement_id: str) -> str:
+def build_object_key(
+    composer_slug: str, corpus_slug: str, work_slug: str, movement_slug: str
+) -> str:
     """Construct a canonical object key from validated components.
 
     Each component is validated against a strict pattern before being
@@ -206,20 +208,21 @@ def build_object_key(corpus_slug: str, work_id: str, movement_id: str) -> str:
     a user-supplied path string.
     """
     slug_pattern = re.compile(r'^[a-z0-9][a-z0-9\-]{0,63}$')
-    id_pattern   = re.compile(r'^[a-z0-9][a-z0-9\-]{0,63}$')
-    assert slug_pattern.match(corpus_slug), f"Invalid corpus_slug: {corpus_slug}"
-    assert id_pattern.match(work_id),       f"Invalid work_id: {work_id}"
-    assert id_pattern.match(movement_id),   f"Invalid movement_id: {movement_id}"
-    return f"{corpus_slug}/{work_id}/{movement_id}.mei"
+    assert slug_pattern.match(composer_slug), f"Invalid composer_slug: {composer_slug}"
+    assert slug_pattern.match(corpus_slug),   f"Invalid corpus_slug: {corpus_slug}"
+    assert slug_pattern.match(work_slug),     f"Invalid work_slug: {work_slug}"
+    assert slug_pattern.match(movement_slug), f"Invalid movement_slug: {movement_slug}"
+    return f"{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei"
 ```
 
 When an existing key is read from the database (rather than constructed from request input), it must still be validated against the expected pattern before use, as an additional defence against corrupted database values:
 
 ```python
 _VALID_KEY = re.compile(
-    r'^[a-z0-9][a-z0-9\-]{0,63}'    # corpus_slug
-    r'/[a-z0-9][a-z0-9\-]{0,63}'   # work_id
-    r'/[a-z0-9][a-z0-9\-]{0,63}'   # movement_id
+    r'^[a-z0-9][a-z0-9\-]{0,63}'    # composer_slug
+    r'/[a-z0-9][a-z0-9\-]{0,63}'   # corpus_slug
+    r'/[a-z0-9][a-z0-9\-]{0,63}'   # work_slug
+    r'/[a-z0-9][a-z0-9\-]{0,63}'   # movement_slug
     r'\.(mei|svg)$'
 )
 
@@ -293,7 +296,7 @@ This validation runs during corpus ingestion, before the file is written to R2.
 
 ### What is stored vs. what is served
 
-The `mei_file` column in the `fragment` table and the `mei_object_key` column in the `movement` table store S3 **object keys** — stable, permanent identifiers of the form `{corpus_slug}/{work_id}/{movement_id}.mei`. Object keys are stored; URLs are never stored. (See ADR-002.)
+The `mei_object_key` column in the `movement` table stores an S3 **object key** — a stable, permanent identifier of the form `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei`. Fragments inherit their MEI source by way of `movement_id`; no key is stored on the fragment itself. Object keys are stored; URLs are never stored. (See ADR-002.)
 
 Signed URLs are generated on demand at request time, used, and discarded. Nothing that expires is persisted.
 

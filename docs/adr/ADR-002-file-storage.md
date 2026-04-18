@@ -9,7 +9,7 @@
 
 The system stores MEI files as the authoritative, archival representation of each score. These files are uploaded at corpus ingestion time and subsequently fetched by the backend for preprocessing (music21 analysis, Verovio server-side rendering) and by the frontend for client-side rendering. The fragment database stores a pointer to each MEI file, not the file content itself.
 
-The `mei_file` column in the `fragment` table and the `mei_object_key` column in the `movement` table must reference MEI files by a stable, environment-agnostic identifier. Absolute filesystem paths are not environment-agnostic and break between local development and any deployed environment.
+The `mei_object_key` column in the `movement` table must reference MEI files by a stable, environment-agnostic identifier. Fragments inherit the MEI source through their `movement_id` foreign key — there is no `mei_file` column on the fragment table. Absolute filesystem paths are not environment-agnostic and break between local development and any deployed environment.
 
 MEI files are text (XML), typically 50KB–2MB per movement. Storage volume at Phase 1 scale is modest (hundreds of files); it grows with the corpus but does not approach the scale where per-GB cost is a primary concern.
 
@@ -33,10 +33,10 @@ Use **Cloudflare R2** for production and staging file storage, and **MinIO** as 
 
 Both expose the same S3-compatible API. The application interacts with file storage exclusively through the `boto3`/`aioboto3` S3 client, configured via environment variables (`R2_ENDPOINT_URL`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`). Switching between MinIO and R2 requires only changing environment variable values; no application code changes.
 
-The `mei_file` column stores an **S3 object key** — not a URL, not a path. The format is:
+The `mei_object_key` column stores an **S3 object key** — not a URL, not a path. The format is:
 
 ```
-{composer_slug}/{corpus_slug}/{work_id}/{movement_id}.mei
+{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei
 ```
 
 Example: `mozart/piano-sonatas/k331/movement-1.mei`
@@ -65,7 +65,7 @@ The application layer resolves object keys to signed URLs at request time when t
 **Neutral**
 
 - The S3-compatible API is stable and well-supported across tooling. `aioboto3` (async) is the Python client used throughout; no R2-specific SDK is required.
-- Static preview images (Verovio-rendered SVG incipits and fragment previews) are stored in the same bucket as MEI files, under a parallel key structure: `{corpus_slug}/{work_id}/{movement_id}/preview.svg`. The same client and key-resolution logic applies.
+- Static preview images (Verovio-rendered SVG incipits and fragment previews) are stored in the same bucket as MEI files, under a parallel key structure: `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/preview.svg`. The same client and key-resolution logic applies.
 
 ---
 
