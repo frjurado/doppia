@@ -1,18 +1,172 @@
 """Pytest configuration and shared fixtures.
 
-Unit test fixtures go here. Integration test fixtures that require live databases
-should be added in tests/integration/conftest.py (to be created when those tests
-are written).
+Fixtures are split into two tiers:
 
-All fixtures follow the pattern: set up test data, yield, tear down. Do not assume
-a clean database between tests; do not leave test data behind.
+- **Unit fixtures** (``test_client``): rebuild the FastAPI app with a no-op
+  lifespan so they run without any external services.  These are used by
+  ``tests/unit/`` and must pass even when Docker is not running.
+
+- **Integration fixtures** (``db_session``, ``neo4j_session``,
+  ``minio_bucket``): connect to the live Docker services.  They are used by
+  ``tests/integration/`` and require ``docker compose up`` to be running
+  beforehand.
+
+All fixtures follow the pattern: set up → yield → tear down.
+Do not assume a clean database between tests; do not leave test data behind.
 """
 
 from __future__ import annotations
 
-# TODO: add fixtures as components are built.
-# Planned fixtures:
-#   - neo4j_session: async Neo4j session against a test database
-#   - db_session: async SQLAlchemy session against a test PostgreSQL database
-#   - test_client: FastAPI TestClient with dev auth bypass active
-#   - sample_mei_file: bytes of a minimal valid MEI file for upload tests
+import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+import aioboto3
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from httpx import ASGITransport, AsyncClient
+from neo4j import AsyncDriver, AsyncGraphDatabase
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from starlette.exceptions import HTTPException
+
+# ---------------------------------------------------------------------------
+# Unit fixtures — no Docker required
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """No-op lifespan that skips all DB connection setup.
+
+    Used in the ``test_client`` fixture so unit tests can run without a
+    running PostgreSQL or Neo4j instance.
+    """
+    yield
+
+
+@pytest_asyncio.fixture
+async def test_client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
+    """Async HTTP client wired to a unit-test FastAPI app.
+
+    The app is rebuilt with a no-op lifespan and the dev auth bypass
+    (``ENVIRONMENT=local``, ``AUTH_MODE=local``) so that:
+
+    - No real database connections are opened.
+    - Auth middleware accepts requests with the ``dev-token`` bearer token
+      or passes unauthenticated requests through.
+
+    Yields:
+        An ``httpx.AsyncClient`` pointed at ``http://test``.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setenv("AUTH_MODE", "local")
+
+    from api.middleware.auth import AuthMiddleware
+    from api.middleware.errors import (
+        http_exception_handler,
+        unhandled_exception_handler,
+        validation_exception_handler,
+    )
+    from api.router import router as api_router
+
+    app = FastAPI(lifespan=_noop_lifespan)
+    app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_middleware(AuthMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+    app.include_router(api_router)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+# ---------------------------------------------------------------------------
+# Integration fixtures — require ``docker compose up``
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Async SQLAlchemy session connected to the local test PostgreSQL instance.
+
+    Reads ``DATABASE_URL`` from the environment (defaults to the local Docker
+    URL from ``.env.example``).  Each test gets a fresh session; uncommitted
+    changes are rolled back on teardown to keep tests isolated.
+
+    Yields:
+        An ``AsyncSession`` bound to the test database engine.
+    """
+    database_url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:localpassword@localhost/doppia",
+    )
+    engine = create_async_engine(database_url, echo=False, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with factory() as session:
+        yield session
+
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def neo4j_session() -> AsyncGenerator[AsyncDriver, None]:
+    """Async Neo4j driver connected to the local Docker Neo4j instance.
+
+    Reads ``NEO4J_URI``, ``NEO4J_USER``, and ``NEO4J_PASSWORD`` from the
+    environment (defaults match ``.env.example``).
+
+    Yields:
+        A verified ``AsyncDriver`` instance.  The caller is responsible for
+        opening sessions via ``driver.session()``.
+    """
+    uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+    user = os.environ.get("NEO4J_USER", "neo4j")
+    password = os.environ.get("NEO4J_PASSWORD", "localpassword")
+
+    driver: AsyncDriver = AsyncGraphDatabase.driver(uri, auth=(user, password))
+    await driver.verify_connectivity()
+
+    yield driver
+
+    await driver.close()
+
+
+@pytest_asyncio.fixture
+async def minio_bucket() -> AsyncGenerator[object, None]:
+    """aioboto3 S3 resource pointed at the local MinIO instance.
+
+    Reads ``R2_ENDPOINT_URL``, ``R2_ACCESS_KEY_ID``, ``R2_SECRET_ACCESS_KEY``,
+    and ``R2_BUCKET_NAME`` from the environment (defaults match ``.env.example``).
+
+    Yields:
+        An aioboto3 ``S3.Bucket`` resource for the configured bucket name.
+    """
+    endpoint_url = os.environ.get("R2_ENDPOINT_URL", "http://localhost:9000")
+    access_key = os.environ.get("R2_ACCESS_KEY_ID", "minioadmin")
+    secret_key = os.environ.get("R2_SECRET_ACCESS_KEY", "minioadmin")
+    bucket_name = os.environ.get("R2_BUCKET_NAME", "doppia-local")
+
+    session = aioboto3.Session()
+    async with session.resource(
+        "s3",
+        endpoint_url=endpoint_url,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name="us-east-1",
+    ) as s3:
+        bucket = await s3.Bucket(bucket_name)
+        yield bucket
