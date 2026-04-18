@@ -13,6 +13,13 @@ from __future__ import annotations
 import os
 import re
 from logging.config import fileConfig
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from repo root when running alembic from the backend/ directory.
+# No-op if the variables are already set in the environment.
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
