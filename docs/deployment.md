@@ -34,7 +34,7 @@ AUTH_MODE=supabase          # local | supabase  (local only valid when ENVIRONME
 
 # Neo4j AuraDB
 NEO4J_URI=neo4j+s://<instance-id>.databases.neo4j.io
-NEO4J_USERNAME=neo4j
+NEO4J_USER=neo4j
 NEO4J_PASSWORD=<auradb-password>
 
 # Supabase (PostgreSQL + Auth)
@@ -70,7 +70,7 @@ Secrets are stored in Fly.io's secret store (`fly secrets set KEY=value`) and ar
 2. Create a new AuraDB Free instance. Choose the nearest region.
 3. Download the generated credentials file immediately — the password is shown only once.
 4. Note the connection URI (format: `neo4j+s://<instance-id>.databases.neo4j.io`).
-5. Set `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD` in Fly.io secrets.
+5. Set `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD` in Fly.io secrets.
 
 **Seed the graph after first deploy:**
 
@@ -140,7 +140,7 @@ fly apps create doppia-staging
 fly secrets set \
   ENVIRONMENT=staging \
   NEO4J_URI=<uri> \
-  NEO4J_USERNAME=neo4j \
+  NEO4J_USER=neo4j \
   NEO4J_PASSWORD=<password> \
   DATABASE_URL=<supabase-url> \
   SUPABASE_URL=<url> \
