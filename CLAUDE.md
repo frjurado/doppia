@@ -8,9 +8,22 @@ Doppia is an open music analysis repository: a curated corpus of musical scores 
 
 ## Commands
 
-### Start the full stack
+### Start infrastructure (hybrid dev — recommended)
 ```bash
-docker compose up
+docker compose up   # neo4j, postgres, redis, minio only
+```
+
+Then in separate terminals:
+```bash
+# API
+cd backend && source .venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Frontend
+cd frontend && npm run dev
+```
+
+### Start full stack in Docker (CI / staging preview)
+```bash
+docker compose --profile app up
 ```
 
 ### Backend setup
@@ -18,7 +31,8 @@ docker compose up
 cd backend
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # local dev (includes all prod deps)
+# pip install -r requirements.txt     # production / Docker only
 ```
 
 ### Knowledge graph seeding and validation
