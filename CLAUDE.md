@@ -136,7 +136,7 @@ Conventional Commits with a project-specific `seed:` type for knowledge graph YA
 - `seed:` commits must include the domain in scope: `seed(cadences):`, `seed(sequences):`, etc.
 
 ### Branching
-- `master` is always deployable to staging and must pass CI (tests + linting + graph validation).
+- `main` is always deployable to staging and must pass CI (tests + linting + graph validation).
 - Feature branches: `feature/{short-description}`; fix branches: `fix/{short-description}`.
 
 ## Important Documentation
