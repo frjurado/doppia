@@ -470,7 +470,7 @@ Full variable list and descriptions are in `docs/deployment.md`. The categories 
 
 - **Application:** `ENVIRONMENT`, `AUTH_MODE`
 - **Neo4j AuraDB:** `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`
-- **Supabase:** `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- **Supabase:** `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
 - **Cloudflare R2:** `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`
 - **Upstash Redis:** `REDIS_URL`, `REDIS_TOKEN`
 - **OpenAI:** `OPENAI_API_KEY` (Phase 3; wire in now)

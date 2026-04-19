@@ -373,15 +373,15 @@ These are not style preferences. Violating them silently breaks data integrity a
 
 ## 7. Branching policy
 
-**`main` is always deployable to staging.** Do not merge anything into `main` that is not passing CI (all tests, linting, graph validation).
+**`master` is always deployable to staging.** Do not merge anything into `master` that is not passing CI (all tests, linting, graph validation).
 
 **Feature branches** are named `feature/{short-description}`, e.g. `feature/cadence-domain-seed`, `feature/fragment-tagging-tool`. Keep branches short-lived. If a feature takes more than a week, it is probably too large — break it down.
 
 **Fix branches** are named `fix/{short-description}`, e.g. `fix/beat-start-nullable-migration`.
 
-**Open a pull request** for every merge into `main`, even if you are the only contributor. The PR is the place where the change is described, the ADR is linked if applicable, and CI results are visible. Self-merge is permitted in Phase 1 with a small team; the discipline of writing the PR description is the point.
+**Open a pull request** for every merge into `master`, even if you are the only contributor. The PR is the place where the change is described, the ADR is linked if applicable, and CI results are visible. Self-merge is permitted in Phase 1 with a small team; the discipline of writing the PR description is the point.
 
-**Tag milestones** on `main` after significant completions:
+**Tag milestones** on `master` after significant completions:
 
 - `phase1/corpus-ingestion-complete`
 - `phase1/cadence-domain-seeded`
