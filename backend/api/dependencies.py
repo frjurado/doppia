@@ -70,7 +70,7 @@ def require_role(role: str) -> Annotated[AuthenticatedUser, Depends]:
         @router.post("/fragments/{id}/approve")
         async def approve_fragment(
             id: UUID,
-            _: Annotated[AppUser, Depends(require_role("editor"))],
+            _: AppUser = require_role("editor"),
         ) -> Fragment:
             ...
 
