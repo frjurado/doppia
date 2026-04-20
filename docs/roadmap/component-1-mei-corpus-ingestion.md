@@ -160,7 +160,7 @@ Normalizer enforces (in document order, per the spec):
 4. Repeat-barline pairing: flag unpaired `rptstart` and any `rptend` after the first that lacks a matching `rptstart`; treat `rptboth` as a combined `rptend`+`rptstart` event (consuming one open section and opening a new one). The first `rptend` or `rptboth`-as-close is always allowed to be unpaired.
 5. `@n` uniqueness outside `<ending>` elements: flag duplicates; flag gaps exceeding 10; flag non-integer values.
 6. `@n` values inside `<ending>` elements: strip alphabetic suffixes from suffix-style values (e.g. `"12a"` → `"12"`) as an auto-correction; flag unparseable non-integer values; flag duplicates within a single ending (duplicates across different endings are expected and not flagged).
-7. Incomplete measures at repeat boundaries: detect metrically incomplete measures adjacent to `rptend`/`rptboth` barlines; set `@metcon="false"` on the complement if missing; flag cases where no complement can be identified.
+7. Incomplete measures at repeat boundaries: when a measure adjacent to an `rptend`/`rptboth` barline already carries `@metcon="false"`, search for its complement after the matching `rptstart`/`rptboth`-as-open; set `@metcon="false"` on the complement if missing; flag cases where no complement can be identified. Beat-counting is not attempted — detection relies solely on `@metcon="false"` already present in the source (see `docs/architecture/mei-ingest-normalization.md` §7 for rationale).
 
 The normalizer never touches musical content, `xml:id` values, or encoding style.
 

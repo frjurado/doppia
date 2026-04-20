@@ -92,11 +92,13 @@ Note: measures that lie within a repeat section but outside any `<ending>` eleme
 This means each half is an independently addressable bar in the tagging coordinate system: `bar_start` or `bar_end` may point to either half, and `beat_start`/`beat_end` within each half are computed against the beats actually present. Ghost construction is unaffected — the "only struck beats get ghosts" rule already handles measures with fewer content beats than the prevailing meter.
 
 **Normalizer behavior:**
-- When a measure has `@right="rptend"` or `@right="rptboth"` and is metrically incomplete (`@metcon="false"`, or contains fewer beats than the prevailing meter), the normalizer searches for its complement: the first metrically incomplete measure found after the matching `rptstart` or `rptboth`-as-open in the same structural scope.
+- When a measure has `@right="rptend"` or `@right="rptboth"` and already carries `@metcon="false"`, the normalizer searches for its complement: the first measure carrying `@metcon="false"` found after the matching `rptstart` or `rptboth`-as-open in the same structural scope.
 - If the complement is identified but lacks `@metcon="false"`, the normalizer sets it and records the change in `changes_applied`.
-- If no complement can be identified, the file is flagged with a warning. Ingest proceeds; ghost construction will produce fewer ghosts than `beatCount` for that measure, which is correct behavior for an incomplete bar.
+- If no complement can be identified, the file is flagged with a warning. Ingest proceeds normally.
 - The `@join` attribute is treated as informational and is not required. If present but referencing a non-existent `xml:id`, it is flagged.
 - Both halves are subject to §5's integer uniqueness rules: each must carry a unique integer `@n`.
+
+**Why beat-counting is not attempted.** Determining a measure's actual duration from raw MEI requires handling chords (take the max duration per simultaneous group, not the sum), multiple layers (parallel voices — take the max across layers), tuplets (scale by `@numbase / @num`), and tied continuations. This is outside the normalizer's `lxml`-only scope, and attempting it would be both fragile and redundant. The tagging tool's ghost construction already resolves this correctly at render time: it queries Verovio for actual note onsets via `getTimesForElement()` and builds ghosts only for struck beats — so a metrically incomplete measure automatically produces the right number of ghosts regardless of whether `@metcon` is set. No ingestion-time beat count is needed to ensure correct tagging behaviour. Cases where a genuine split-measure half lacks `@metcon="false"` will be visible to annotators as a measure with fewer ghosts than the prevailing meter suggests, which is self-evident and does not corrupt any data.
 
 ---
 
