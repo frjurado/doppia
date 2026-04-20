@@ -156,13 +156,15 @@ Normalizer enforces (in document order, per the spec):
 
 1. Pickup bar: `@n="0"` + `@metcon="false"`, renumbering subsequent measures if the source used `@n="1"` for the pickup.
 2. Meter change propagation: insert `<meterSig>` children into measures whose meter changes are expressed only as `<staffDef>` updates.
-3. `<ending>` auto-correction: assign `@n` sequentially only when `<ending>` elements have no `@n`; all other ending issues (zero measures, non-sequential numbers, missing second ending) are flagged, not corrected.
-4. Repeat-barline pairing: flag unpaired `|:` and any `:|` after the first that lacks a matching `|:`. The first `:|` is always allowed to be unpaired.
-5. `@n` uniqueness outside `<ending>`: flag duplicates; flag gaps exceeding 10; flag non-integer values.
+3. `<ending>` auto-correction: assign `@n` sequentially only when `<ending>` elements have no `@n`; all other ending structure issues (zero measures, non-sequential numbers, missing second ending) are flagged, not corrected.
+4. Repeat-barline pairing: flag unpaired `rptstart` and any `rptend` after the first that lacks a matching `rptstart`; treat `rptboth` as a combined `rptend`+`rptstart` event (consuming one open section and opening a new one). The first `rptend` or `rptboth`-as-close is always allowed to be unpaired.
+5. `@n` uniqueness outside `<ending>` elements: flag duplicates; flag gaps exceeding 10; flag non-integer values.
+6. `@n` values inside `<ending>` elements: strip alphabetic suffixes from suffix-style values (e.g. `"12a"` → `"12"`) as an auto-correction; flag unparseable non-integer values; flag duplicates within a single ending (duplicates across different endings are expected and not flagged).
+7. Incomplete measures at repeat boundaries: detect metrically incomplete measures adjacent to `rptend`/`rptboth` barlines; set `@metcon="false"` on the complement if missing; flag cases where no complement can be identified.
 
 The normalizer never touches musical content, `xml:id` values, or encoding style.
 
-**Duration metadata.** After normalization, the function emits the last `@n` value found outside `<ending>` elements. This is what gets stored as `movement.duration_bars` and is what the service layer will later use to reject fragments that overshoot the movement without re-parsing the MEI on every write (per `tech-stack-and-database-reference.md`).
+**Duration metadata.** After normalization, the function emits the **maximum integer `@n` value found across all measures in the document** (inside and outside `<ending>` elements) as `NormalizationReport.duration_bars`. This is stored as `movement.duration_bars` and is what the service layer uses to reject fragments that overshoot the movement without re-parsing the MEI on every write (per `tech-stack-and-database-reference.md`). Using the maximum rather than the last `@n` outside endings is necessary because pieces frequently end inside a final or second ending. See `docs/architecture/mei-ingest-normalization.md` §Implementation for full rationale.
 
 **Verification.** Test suite at `backend/tests/unit/test_mei_normalizer.py` — one fixture per normalization rule, each asserting both the correction applied and idempotence on a second pass. Plus: the real Mozart K. 331 first movement exercised end-to-end as an integration test.
 
@@ -390,7 +392,7 @@ Then:  - 201 with an ingestion report listing both movements under movements_acc
        - both normalized MEI files are readable from MinIO under the expected keys
        - both original MEI files exist under originals/
        - movement_analysis.events is populated with source="DCML" entries for each movement
-       - movement.duration_bars matches the last @n in the normalized MEI
+       - movement.duration_bars equals the maximum integer @n found anywhere in the normalized MEI (inside or outside endings)
        - Re-running the same POST is idempotent (no duplicate rows; ingested_at advances)
 ```
 

@@ -364,7 +364,7 @@ CREATE INDEX movement_analysis_events_gin        ON movement_analysis USING GIN 
 
 | Field | Type | Description |
 |---|---|---|
-| `bar` | integer | 1-indexed measure `@n` value (0 for the pickup). |
+| `bar` | integer | Measure `@n` value. 0 for the pickup bar; 1-indexed for all others. For measures inside `<ending>` elements, this value is shared between counterpart measures in different endings (e.g. both the first-ending bar and the second-ending bar at the same slot carry `bar=12`); the `repeat_context` field on the `fragment` row disambiguates which ending pass a harmony event belongs to when consumed in a fragment context. Both halves of a split measure at a repeat boundary carry distinct sequential integers. |
 | `beat` | float | Beat position within the bar, 1-indexed. Beat 1.0 is the downbeat. |
 | `root` | integer | Scale degree of the chord root in the local key (1–7). |
 | `quality` | string | `"major"`, `"minor"`, `"diminished"`, `"augmented"`, `"half-diminished"`, `"dominant-seventh"`. |
