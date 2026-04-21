@@ -1,0 +1,8 @@
+mc	mn	quarterbeats	duration_qb	keysig	timesig	act_dur	mc_onset	mn_onset	event	timesig_num	volta	chord_tones	added_tones	root_roman	bass_note	globalkey	localkey	pedal	chord	numeral	form	figbass	changes	relativeroot	pedalend	phraseend	chord_tones_num	added_tones_num
+1	1	0	3	3	6/8	3/8	0	0	{	6	NaN	(0, 4, 7)	()	I	0	A	I	NaN	I	I	M		NaN	NaN	NaN	NaN	3	0
+1	1	0	3	3	6/8	3/8	0	0	I	6	NaN	(0, 4, 7)	()	I	0	A	I	NaN	I	I	M		NaN	NaN	NaN	NaN	3	0
+2	2	0	3	3	6/8	3/8	0	0	V7	6	NaN	(7, 11, 2, 5)	()	V	7	A	I	NaN	V7	V	M	7	NaN	NaN	NaN	}	4	0
+3	3	0	3	3	6/8	3/8	0	0	I	6	NaN	(0, 4, 7)	()	I	0	A	I	NaN	I	I	M		NaN	NaN	NaN	NaN	3	0
+4	4	0	3	3	6/8	3/8	0	0	V/V	6	NaN	(7, 11, 2)	()	V	7	A	I	NaN	V	V	M		NaN	/V	NaN	NaN	3	0
+5	5	0	3	3	6/8	3/8	0	0	V	6	NaN	(7, 11, 2)	()	V	7	A	I	NaN	V	V	M		NaN	NaN	NaN	NaN	3	0
+6	6	0	3	3	6/8	3/8	0	0	I	6	NaN	(0, 4, 7)	()	I	0	A	I	NaN	I	I	M		NaN	NaN	NaN	NaN	3	0

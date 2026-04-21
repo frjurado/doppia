@@ -1,0 +1,623 @@
+# DCML Mozart Piano Sonatas — corpus-preparation config
+#
+# Used with: python scripts/prepare_dcml_corpus.py
+#   --repo-path ~/src/mozart_piano_sonatas
+#   --config scripts/dcml_corpora/mozart-piano-sonatas.toml
+#   --output /tmp/mozart-piano-sonatas.zip
+#
+# Source: https://github.com/DCMLab/mozart_piano_sonatas
+# Licence: CC BY-SA 4.0 (ADR-009)
+#
+# mscx_filename values use the DCML Mozart repo naming convention:
+#   K{number}-{movement}.mscx
+
+[composer]
+slug = "mozart"
+name = "Wolfgang Amadeus Mozart"
+sort_name = "Mozart, Wolfgang Amadeus"
+birth_year = 1756
+death_year = 1791
+nationality = "Austrian"
+wikidata_id = "Q254"
+
+[corpus]
+slug = "piano-sonatas"
+title = "Piano Sonatas"
+source_repository = "DCMLab/mozart_piano_sonatas"
+analysis_source = "DCML"
+licence = "CC-BY-SA-4.0"
+licence_notice = "© DCML contributors. Licensed under CC BY-SA 4.0. https://creativecommons.org/licenses/by-sa/4.0/"
+
+# ---------------------------------------------------------------------------
+# K. 279 — Piano Sonata No. 1 in C major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k279"
+title = "Piano Sonata No. 1 in C major, K. 279"
+catalogue_number = "K. 279"
+year_composed = 1775
+key_signature = "C major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K279-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante"
+meter = "3/4"
+mscx_filename = "K279-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegro"
+meter = "3/8"
+mscx_filename = "K279-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 280 — Piano Sonata No. 2 in F major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k280"
+title = "Piano Sonata No. 2 in F major, K. 280"
+catalogue_number = "K. 280"
+year_composed = 1775
+key_signature = "F major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro assai"
+meter = "3/4"
+mscx_filename = "K280-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "6/8"
+mscx_filename = "K280-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Presto"
+meter = "3/8"
+mscx_filename = "K280-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 281 — Piano Sonata No. 3 in B♭ major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k281"
+title = "Piano Sonata No. 3 in B-flat major, K. 281"
+catalogue_number = "K. 281"
+year_composed = 1775
+key_signature = "B-flat major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K281-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante amoroso"
+meter = "6/8"
+mscx_filename = "K281-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Rondeau. Allegro"
+meter = "2/4"
+mscx_filename = "K281-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 282 — Piano Sonata No. 4 in E♭ major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k282"
+title = "Piano Sonata No. 4 in E-flat major, K. 282"
+catalogue_number = "K. 282"
+year_composed = 1775
+key_signature = "E-flat major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Adagio"
+meter = "4/4"
+mscx_filename = "K282-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Menuetto I & II"
+meter = "3/4"
+mscx_filename = "K282-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegro"
+meter = "2/4"
+mscx_filename = "K282-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 283 — Piano Sonata No. 5 in G major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k283"
+title = "Piano Sonata No. 5 in G major, K. 283"
+catalogue_number = "K. 283"
+year_composed = 1775
+key_signature = "G major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "3/4"
+mscx_filename = "K283-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante"
+meter = "4/4"
+mscx_filename = "K283-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Presto"
+meter = "3/8"
+mscx_filename = "K283-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 284 — Piano Sonata No. 6 in D major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k284"
+title = "Piano Sonata No. 6 in D major, K. 284"
+catalogue_number = "K. 284"
+year_composed = 1775
+key_signature = "D major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K284-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Rondeau en Polonaise. Andante"
+meter = "3/4"
+mscx_filename = "K284-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Thema con variazioni. Andante"
+meter = "2/4"
+mscx_filename = "K284-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 309 — Piano Sonata No. 7 in C major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k309"
+title = "Piano Sonata No. 7 in C major, K. 309"
+catalogue_number = "K. 309"
+year_composed = 1777
+key_signature = "C major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro con spirito"
+meter = "4/4"
+mscx_filename = "K309-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante un poco adagio"
+meter = "3/4"
+mscx_filename = "K309-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Rondeau. Allegretto grazioso"
+meter = "2/4"
+mscx_filename = "K309-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 310 — Piano Sonata No. 8 in A minor
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k310"
+title = "Piano Sonata No. 8 in A minor, K. 310"
+catalogue_number = "K. 310"
+year_composed = 1778
+key_signature = "A minor"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro maestoso"
+meter = "4/4"
+mscx_filename = "K310-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante cantabile con espressione"
+meter = "3/4"
+mscx_filename = "K310-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Presto"
+meter = "2/4"
+mscx_filename = "K310-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 311 — Piano Sonata No. 9 in D major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k311"
+title = "Piano Sonata No. 9 in D major, K. 311"
+catalogue_number = "K. 311"
+year_composed = 1777
+key_signature = "D major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro con spirito"
+meter = "3/4"
+mscx_filename = "K311-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante con espressione"
+meter = "3/4"
+mscx_filename = "K311-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Rondeau. Allegro"
+meter = "6/8"
+mscx_filename = "K311-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 330 — Piano Sonata No. 10 in C major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k330"
+title = "Piano Sonata No. 10 in C major, K. 330"
+catalogue_number = "K. 330"
+year_composed = 1783
+key_signature = "C major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro moderato"
+meter = "4/4"
+mscx_filename = "K330-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante cantabile"
+meter = "3/4"
+mscx_filename = "K330-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegretto"
+meter = "2/4"
+mscx_filename = "K330-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 331 — Piano Sonata No. 11 in A major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k331"
+title = "Piano Sonata No. 11 in A major, K. 331"
+catalogue_number = "K. 331"
+year_composed = 1783
+key_signature = "A major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Andante grazioso"
+meter = "6/8"
+mscx_filename = "K331-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Menuetto"
+meter = "3/4"
+mscx_filename = "K331-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Alla Turca. Allegretto"
+meter = "2/4"
+mscx_filename = "K331-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 332 — Piano Sonata No. 12 in F major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k332"
+title = "Piano Sonata No. 12 in F major, K. 332"
+catalogue_number = "K. 332"
+year_composed = 1783
+key_signature = "F major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "3/4"
+mscx_filename = "K332-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "3/4"
+mscx_filename = "K332-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegro assai"
+meter = "2/4"
+mscx_filename = "K332-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 333 — Piano Sonata No. 13 in B♭ major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k333"
+title = "Piano Sonata No. 13 in B-flat major, K. 333"
+catalogue_number = "K. 333"
+year_composed = 1783
+key_signature = "B-flat major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K333-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante cantabile"
+meter = "6/8"
+mscx_filename = "K333-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegretto grazioso"
+meter = "3/4"
+mscx_filename = "K333-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 457 — Piano Sonata No. 14 in C minor
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k457"
+title = "Piano Sonata No. 14 in C minor, K. 457"
+catalogue_number = "K. 457"
+year_composed = 1784
+key_signature = "C minor"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Molto allegro"
+meter = "4/4"
+mscx_filename = "K457-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "6/8"
+mscx_filename = "K457-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegro assai"
+meter = "4/4"
+mscx_filename = "K457-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 494 / K. 533 — Piano Sonata No. 15 in F major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k533"
+title = "Piano Sonata No. 15 in F major, K. 533/494"
+catalogue_number = "K. 533/494"
+year_composed = 1788
+key_signature = "F major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K533-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante"
+meter = "3/4"
+mscx_filename = "K533-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Rondo. Allegretto"
+meter = "6/8"
+mscx_filename = "K533-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 545 — Piano Sonata No. 16 in C major ("Sonata facile")
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k545"
+title = "Piano Sonata No. 16 in C major, K. 545"
+catalogue_number = "K. 545"
+year_composed = 1788
+key_signature = "C major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K545-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante"
+meter = "3/4"
+mscx_filename = "K545-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Rondo. Allegretto"
+meter = "2/4"
+mscx_filename = "K545-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 570 — Piano Sonata No. 17 in B♭ major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k570"
+title = "Piano Sonata No. 17 in B-flat major, K. 570"
+catalogue_number = "K. 570"
+year_composed = 1789
+key_signature = "B-flat major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K570-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "3/4"
+mscx_filename = "K570-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegretto"
+meter = "2/4"
+mscx_filename = "K570-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 576 — Piano Sonata No. 18 in D major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k576"
+title = "Piano Sonata No. 18 in D major, K. 576"
+catalogue_number = "K. 576"
+year_composed = 1789
+key_signature = "D major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K576-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "3/4"
+mscx_filename = "K576-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegretto"
+meter = "6/8"
+mscx_filename = "K576-3.mscx"

@@ -1,0 +1,45 @@
+# DCML corpus-preparation smoke-test config.
+#
+# Points at backend/tests/fixtures/dcml-subset/ instead of a real cloned
+# DCML repository.  Used by backend/tests/unit/test_prepare_dcml_corpus.py.
+#
+# Contains K331 movements 1–2 only (the minimal fixture subset).
+
+[composer]
+slug = "mozart"
+name = "Wolfgang Amadeus Mozart"
+sort_name = "Mozart, Wolfgang Amadeus"
+birth_year = 1756
+death_year = 1791
+nationality = "Austrian"
+wikidata_id = "Q254"
+
+[corpus]
+slug = "piano-sonatas"
+title = "Piano Sonatas"
+source_repository = "DCMLab/mozart_piano_sonatas"
+analysis_source = "DCML"
+licence = "CC-BY-SA-4.0"
+licence_notice = "© DCML contributors. Licensed under CC BY-SA 4.0."
+
+[[works]]
+slug = "k331"
+title = "Piano Sonata No. 11 in A major, K. 331"
+catalogue_number = "K. 331"
+year_composed = 1783
+key_signature = "A major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Andante grazioso"
+meter = "6/8"
+mscx_filename = "K331-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Menuetto"
+meter = "3/4"
+mscx_filename = "K331-2.mscx"
