@@ -28,14 +28,14 @@ In scope:
 - The MEI normalizer (`backend/services/mei_normalizer.py`), exactly as specified in `docs/architecture/mei-ingest-normalization.md`.
 - The bulk upload endpoint `POST /api/v1/composers/{composer_slug}/corpora/{corpus_slug}/upload`, restricted to `admin`.
 - The post-ingest analysis-ingestion task that populates `movement_analysis.events`. For the Mozart first case this means parsing `harmonies.tsv`; for corpora without expert analysis it will later hand off to Component 6 (music21 fallback).
-- A pre-tagging measure-number correction utility (`scripts/fix_measure_numbers.py` with a `--dry-run` mode), together with its verification test.
 
 Explicitly deferred:
 
 - **Component 6 — music21 auto-analysis fallback.** The only corpus ingested in Phase 1's initial pass is Mozart piano sonatas (DCML), which ships with expert harmonic annotations. music21's auto-analysis is the fallback described in `docs/architecture/corpus-and-analysis-sources.md` and is only invoked when no expert annotation exists. Since the first corpus does have expert annotation, music21 preprocessing is not on the critical path for Component 1. See the *Analysis ingestion* section below for how the dispatch point is built now so Component 6 plugs in later without reshaping the pipeline.
 - **Incipit generation.** Component 2 owns the server-side Verovio incipit render (`previews/incipit.svg`). The ingestion pipeline emits a Celery event on successful movement ingest that Component 2 subscribes to; Component 1 does not generate incipits itself.
 - **Repeat-context disambiguation UI.** `repeat_context` is a column on `fragment` already; its Phase 1 handling is purely "store the flag, flag ambiguous ranges at tag time." Component 1 is not concerned with it.
-- **MEI re-ingest after score correction.** The re-ingest path (including the `movement_analysis` smart-merge described in ADR-004) is scaffolded by reusing the same pipeline with `update=true`, but the end-to-end test for it is not required before Component 2 begins; the measure-number correction utility tests the only re-ingest trigger that matters in Phase 1.
+- **MEI re-ingest after score correction.** The re-ingest path (including the `movement_analysis` smart-merge described in ADR-004) is scaffolded by reusing the same pipeline with `update=true`, but the end-to-end test for it is not required before Component 2 begins.
+- **Measure-number correction utility.** A `scripts/fix_measure_numbers.py` tool was originally specified for catching convention mismatches (e.g. a pickup numbered `1` instead of `0`) between an uploaded MEI and a scholarly edition reference. Deferred: piano repertoire (the first corpus) carries no printed measure numbers in editions, so there is no external reference to mismatch against; the normalizer already handles the structural pickup-bar case. The problem to solve — and the right shape of tool — will be clearer once a corpus with printed, edition-specific numbering is actually ingested. Revisit at that point.
 
 ---
 
@@ -170,29 +170,9 @@ The normalizer never touches musical content, `xml:id` values, or encoding style
 
 ---
 
-## Step 5 — Measure-number correction utility
+## Step 5 — Measure-number correction utility (deferred)
 
-Create `scripts/fix_measure_numbers.py`. Per the phase-1.md specification this is a **pre-tagging corpus-setup utility**, not a production tagging-time tool. Its purpose is to catch and fix convention mismatches (e.g. a pickup bar numbered `1` instead of `0`, or measures following a different edition's numbering system) during initial ingestion, before annotators touch the corpus.
-
-CLI:
-
-```bash
-python scripts/fix_measure_numbers.py \
-    --movement-slug k331/movement-1 \
-    --from-start-at 1 --to-start-at 0 \
-    --dry-run
-```
-
-Behavior:
-
-- Fetches the MEI file from R2 using `object_storage.get_mei(mei_object_key)`.
-- Applies the renumbering transform in memory.
-- If `--dry-run`, prints the diff and exits without writing.
-- Otherwise: writes the corrected MEI back to the same object key (overwriting), and atomically updates any existing `fragment.bar_start`/`bar_end` pointers in the same transaction. The atomic update is the key correctness property of this utility.
-- Records the correction in `movement.normalization_warnings` with a `measure_number_correction` entry so it is visible to annotators.
-- Enqueues the analysis-ingestion task for the affected movement (Step 8), with the smart-merge policy applied.
-
-**Verification gate.** The `phase-1.md` specification calls this out explicitly: before this utility touches any production fragment, write an integration test that (a) ingests an MEI file with non-standard measure numbers, (b) creates a fragment pointing to bars 3–5, (c) runs the correction, (d) verifies the fragment pointer is updated correctly. This test lives at `backend/tests/integration/test_measure_number_correction.py` and runs in CI. Without this passing, the script must be feature-flagged off in any deployed environment.
+Not implemented in Component 1. See the *Explicitly deferred* section above for rationale.
 
 ---
 
@@ -370,7 +350,7 @@ Notation-normalisation mappings (from `corpus-and-analysis-sources.md`) are appl
 
 `bass_pitch` and `soprano_pitch` are nullable. The DCML TSV does not always carry them; when Component 6 is built and music21 is available, a top-up job can fill them in for DCML-sourced events without flipping `source` to `music21_auto`.
 
-**Smart-merge on re-analysis.** The upsert applies the ADR-004 policy faithfully: events where `source = "manual"` or `reviewed = true` are preserved unchanged; other events are replaced; new events are inserted; disappeared-but-reviewed events are preserved and flagged. The policy is implemented in a single place (`_merge_events`) and tested explicitly, because the correction pipeline (Step 5) depends on it.
+**Smart-merge on re-analysis.** The upsert applies the ADR-004 policy faithfully: events where `source = "manual"` or `reviewed = true` are preserved unchanged; other events are replaced; new events are inserted; disappeared-but-reviewed events are preserved and flagged. The policy is implemented in a single place (`_merge_events`) and tested explicitly.
 
 **Verification.**
 
@@ -396,7 +376,6 @@ Then:  - 201 with an ingestion report listing both movements under movements_acc
        - Re-running the same POST is idempotent (no duplicate rows; ingested_at advances)
 ```
 
-Plus the negative-case test already specified in Step 5 for the measure-number correction utility.
 
 ---
 
@@ -409,8 +388,7 @@ Day 3: MEI normalizer (Step 4), including the idempotence round-trip test
 Day 4: DCML corpus-preparation script (Step 6) + fixture subset
 Day 5: Upload endpoint + ingestion service (Step 7)
 Day 6: Analysis ingestion task — DCML branch + smart-merge (Step 8)
-Day 7: Measure-number correction utility + its gate test (Step 5)
-Day 8: End-to-end integration test (Step 9); run the full Mozart piano sonatas ingest in staging
+Day 7: End-to-end integration test (Step 9); run the full Mozart piano sonatas ingest in staging
 ```
 
 Steps 1 and 2 are the only ones that can safely run in parallel. Steps 3–5 depend on Step 1 (the metadata layer) and on each other's contracts. Step 6 needs Step 3 available as a preflight check. Steps 7 and 8 depend on everything above.
@@ -436,7 +414,6 @@ The practical implication for the roadmap is that Component 6 can slip later int
 ## Hard gates before Component 2 begins
 
 1. The Mozart piano sonatas ingest end-to-end against staging (Supabase + Cloudflare R2), producing the expected composer/corpus/work/movement rows and populated `movement_analysis.events` for every movement.
-2. `scripts/fix_measure_numbers.py` passes its integration test (Step 5) in CI. Until this passes, the utility is feature-flagged off in staging.
-3. The normalization report for every movement is captured in `movement.normalization_warnings` so that Component 5's tagging UI can surface the status to annotators per `mei-ingest-normalization.md` §Implementation.
+2. The normalization report for every movement is captured in `movement.normalization_warnings` so that Component 5's tagging UI can surface the status to annotators per `mei-ingest-normalization.md` §Implementation.
 
 Once these gates pass, Component 2 can start rendering what the corpus browser needs on top of the persisted composer/corpus/work/movement hierarchy.
