@@ -418,3 +418,54 @@ class IngestMetadata(BaseModel):
             for work in self.corpus.works
             for movement in work.movements
         ]
+
+
+# ---------------------------------------------------------------------------
+# Ingestion response models
+# ---------------------------------------------------------------------------
+
+
+class MovementAccepted(BaseModel):
+    """A movement that passed validation and was persisted.
+
+    ``movement_slug`` uses the compound form ``"{work_slug}/{movement_slug}"``
+    to make the report unambiguous without requiring the caller to cross-reference
+    the work list.
+    """
+
+    movement_slug: str
+    warnings: list[str] = []
+
+
+class MovementRejected(BaseModel):
+    """A movement that failed MEI validation and was not persisted."""
+
+    movement_slug: str
+    errors: list[dict[str, Any]]
+
+
+class IngestionReport(BaseModel):
+    """Structured response body for a successful corpus upload.
+
+    A 201 is returned even when some movements are rejected (partial accept).
+    A 422 is returned only when the entire ZIP is rejected (metadata failure,
+    coherence failure, or all movements invalid).
+
+    Example::
+
+        {
+            "corpus": {"composer_slug": "mozart", "corpus_slug": "piano-sonatas"},
+            "movements_accepted": [
+                {"movement_slug": "k331/movement-1", "warnings": []}
+            ],
+            "movements_rejected": [],
+            "coherence_warnings": [],
+            "source_commit": "a1b2c3d"
+        }
+    """
+
+    corpus: dict[str, str]
+    movements_accepted: list[MovementAccepted] = []
+    movements_rejected: list[MovementRejected] = []
+    coherence_warnings: list[str] = []
+    source_commit: str | None = None

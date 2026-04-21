@@ -59,6 +59,11 @@ class ErrorCode(StrEnum):
     UNREVIEWED_HARMONY = "UNREVIEWED_HARMONY"
     SELF_REVIEW_FORBIDDEN = "SELF_REVIEW_FORBIDDEN"
 
+    # Corpus ingestion
+    INVALID_ZIP = "INVALID_ZIP"
+    METADATA_PARSE_ERROR = "METADATA_PARSE_ERROR"
+    CORPUS_COHERENCE_ERROR = "CORPUS_COHERENCE_ERROR"
+
 
 class ErrorDetail(BaseModel):
     """Optional structured detail accompanying an error."""
