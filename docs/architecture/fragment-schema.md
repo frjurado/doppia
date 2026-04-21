@@ -292,7 +292,7 @@ The tagging UI exposes these primitives directly. Moving a boundary and editing 
 Before a fragment can move from `submitted` to `approved`, the service layer enforces:
 
 1. Every `actual_key` object with `auto: true` must have `reviewed: true`. (If `actual_key` is absent, this check is vacuous.)
-2. Every harmony event in `movement_analysis` whose `(bar, beat)` falls within the fragment's `[bar_start, beat_start] .. [bar_end, beat_end)` range must have `reviewed: true` — but only if the fragment's concepts include at least one that requires harmony review. For fragments whose concepts do not capture harmony (e.g. a Hemiola), this check is skipped; the harmonic context is still displayed when rendering the fragment, but unreviewed events do not block approval.
+2. Every harmony event in `movement_analysis` whose position falls within the fragment's `[bar_start, beat_start] .. [bar_end, beat_end)` range must have `reviewed: true` — but only if the fragment's concepts include at least one that requires harmony review. For fragments whose concepts do not capture harmony (e.g. a Hemiola), this check is skipped; the harmonic context is still displayed when rendering the fragment, but unreviewed events do not block approval. The range query matches on `mn` against the fragment's `bar_start`/`bar_end`; when the fragment carries a non-null `repeat_context`, the query additionally filters events by `volta` (e.g. `repeat_context = "first_ending"` restricts to events with `volta = 1`), so that only the events belonging to the correct ending pass are checked.
 
 Which concepts require harmony review is determined by their `capture_extensions` spec (see `docs/architecture/capture_extensions.md`): a concept that declares a `harmony` extension is asserting that harmony matters for its analysis, and approval of fragments tagged with that concept therefore depends on the harmony events in their range being reviewed.
 
@@ -332,6 +332,7 @@ The authoritative record of beat-level harmonic analysis for each movement. Crea
 CREATE TABLE movement_analysis (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     movement_id        UUID UNIQUE NOT NULL REFERENCES movement(id) ON DELETE CASCADE,
+    global_key         TEXT,                 -- e.g. "A major"; constant for the movement; from DCML globalkey column or music21 key analysis; nullable for movements not yet analysed
     events             JSONB NOT NULL,       -- per-event harmonic timeline; see structure below
     music21_version    TEXT NOT NULL,        -- version used for the initial auto-analysis
     created_at         TIMESTAMPTZ DEFAULT now(),
@@ -344,18 +345,26 @@ CREATE INDEX movement_analysis_events_gin        ON movement_analysis USING GIN 
 
 **`movement_id`** is a foreign key to the `movement` row. `UNIQUE` enforces one analysis record per movement. The previous free-text key (`{composer}/{corpus}/{work}/{movement}`) is a path convention, not a database identity; it has no place as a primary key.
 
+**`global_key`** stores the overall tonic key of the movement (e.g. `"A major"`, `"D minor"`) as a movement-level fact, not repeated on each event. For DCML sources this is the `globalkey` column value; for music21-analysed movements it is the output of music21's probabilistic key analysis. Null when the movement has no analysis record yet. Consumers that need per-event local key read `local_key` from each event; `global_key` is for movement-level filtering and display only.
+
 **`events`** stores the complete per-event harmonic timeline for the movement as a JSONB array. Each event has the shape:
 
 ```json
 {
-  "bar": 17,
+  "mc": 18,
+  "mn": 17,
+  "volta": null,
   "beat": 3.0,
+  "local_key": "D minor",
   "root": 2,
   "quality": "minor",
   "inversion": 1,
   "numeral": "ii6",
-  "bass_pitch": "E4",
-  "soprano_pitch": "A5",
+  "root_accidental": null,
+  "applied_to": null,
+  "extensions": [],
+  "bass_pitch": null,
+  "soprano_pitch": null,
   "source": "DCML",
   "auto": false,
   "reviewed": true
@@ -364,29 +373,35 @@ CREATE INDEX movement_analysis_events_gin        ON movement_analysis USING GIN 
 
 | Field | Type | Description |
 |---|---|---|
-| `bar` | integer | Measure `@n` value. 0 for the pickup bar; 1-indexed for all others. For measures inside `<ending>` elements, this value is shared between counterpart measures in different endings (e.g. both the first-ending bar and the second-ending bar at the same slot carry `bar=12`); the `repeat_context` field on the `fragment` row disambiguates which ending pass a harmony event belongs to when consumed in a fragment context. Both halves of a split measure at a repeat boundary carry distinct sequential integers. |
+| `mc` | integer | DCML measure count — a monotonically increasing linear index across the entire movement, unambiguous across repeat endings and split bars. Null for manually-inserted events and music21-auto events where no DCML source exists. The natural stable key for DCML smart-merge operations. |
+| `mn` | integer | Notated measure number, corresponding to MEI `<measure @n>`. 0 for the pickup bar; 1-indexed for all others. Repeats across different endings when the same notated number appears in more than one `<ending>` element (e.g. both the first- and second-ending bars at the same notated slot carry `mn=12`). Both halves of a split bar at a repeat boundary share the same `mn`. |
+| `volta` | integer or null | The ending number (1, 2, …) when the event falls inside a `<ending>` element; `null` for measures outside any repeat ending. Together with `mn`, uniquely addresses the measure in the MEI source. |
 | `beat` | float | Beat position within the bar, 1-indexed. Beat 1.0 is the downbeat. |
-| `root` | integer | Scale degree of the chord root in the local key (1–7). |
+| `local_key` | string | The prevailing local key at this event, in canonical form: `"A major"`, `"D minor"`. Corresponds to DCML's `localkey` column or to music21's running key estimate. Required for interpreting `root` and `numeral`. |
+| `root` | integer | Scale degree of the chord root in `local_key` (1–7). |
 | `quality` | string | `"major"`, `"minor"`, `"diminished"`, `"augmented"`, `"half-diminished"`, `"dominant-seventh"`. |
 | `inversion` | integer | Root position = 0; first = 1; second = 2; third = 3. |
-| `numeral` | string | Roman numeral with figured bass, e.g. `"ii6"`, `"V7"`, `"bVI"`. |
-| `bass_pitch` | string | Scientific pitch notation of the lowest sounding note. |
-| `soprano_pitch` | string | Scientific pitch notation of the highest sounding note. |
+| `numeral` | string | Roman numeral with figured bass, e.g. `"ii6"`, `"V7"`. Does not include a flat/sharp prefix; if the root is altered, see `root_accidental`. |
+| `root_accidental` | string or null | `"flat"` when the numeral carries a `b` prefix in the source notation, `"sharp"` for a `#` prefix, `null` otherwise. This is a notational fact, not an analytical interpretation: it records that the root lies a half-step below (or above) the diatonic degree, without asserting why. Whether this constitutes modal borrowing is a knowledge-graph-level label, not an event field. |
+| `applied_to` | string or null | For secondary functions: the Roman numeral of the tonicised degree, e.g. `"V"` for `V/V`. `null` for non-applied chords. |
+| `extensions` | array of strings | Chord extensions beyond the seventh, e.g. `["9"]` for `V7(9)`. Empty array when none. |
+| `bass_pitch` | string or null | Scientific pitch notation of the lowest sounding note, e.g. `"E4"`. Not present in DCML TSV files; always `null` for DCML-sourced events. May be populated by a later music21 top-up pass without changing `source`. |
+| `soprano_pitch` | string or null | Scientific pitch notation of the highest sounding note, e.g. `"A5"`. Same provenance constraint as `bass_pitch`. |
 | `source` | string | Provenance: `"DCML"`, `"WhenInRome"`, `"music21_auto"`, or `"manual"`. Per-event: a movement can legitimately have DCML entries for most bars and `music21_auto` for the rest. |
 | `auto` | boolean | `true` while the entry has not been edited by a human; `false` after a human edit (which also sets `source` to `"manual"`). |
 | `reviewed` | boolean | `false` until an annotator has explicitly confirmed or corrected this entry. |
 
 Event durations are implicit: each event extends in time until the next event, or to the end of the movement if it is the last. See "Harmonic rhythm and event durations" above.
 
-**Reliability classes:** High-reliability fields (`root`, `quality`, `inversion`, `bass_pitch`, `soprano_pitch`) are derivable mechanically and are expected to be correct without review in most cases. Medium-reliability fields (`numeral`) are probabilistic and must always be reviewed before a fragment whose range covers them can be approved.
+**Reliability classes:** High-reliability fields (`root`, `quality`, `inversion`) are derivable mechanically and are expected to be correct without review in most cases. Medium-reliability fields (`numeral`, `local_key`) are probabilistic and must always be reviewed before a fragment whose range covers them can be approved. `bass_pitch` and `soprano_pitch` are not populated for DCML-sourced events and are always `null` until a music21 top-up pass fills them in.
 
-**Mutability.** `events` is mutable. When an annotator corrects a chord in the tagging UI, the service layer finds the matching event (by `bar`, `beat`) and updates it in place: sets the new chord fields, flips `source` to `"manual"`, sets `auto: false` and `reviewed: true`. The fragment that triggered the edit is not where the value lives — the fragment just provided the context in which the correction happened.
+**Mutability.** `events` is mutable. When an annotator corrects a chord in the tagging UI, the service layer finds the matching event by `(mn, volta, beat)` and updates it in place: sets the new chord fields, flips `source` to `"manual"`, sets `auto: false` and `reviewed: true`. For DCML-sourced events `mc` provides an additional stable cross-check, but `(mn, volta, beat)` is the universal event identity across all source types. The fragment that triggered the edit is not where the value lives — the fragment just provided the context in which the correction happened.
 
 **Re-analysis smart merge.** If the MEI source is corrected and music21 is re-run for a movement, the re-analysis task must not clobber manually-reviewed events. The merge policy:
 
 - Events with `source = "manual"` or `reviewed = true` are preserved unchanged.
 - Events with `source in ("music21_auto", "DCML", "WhenInRome")` and `reviewed = false` are replaced by the new analysis.
-- New events from the re-analysis that did not exist at their `(bar, beat)` position are inserted.
+- New events from the re-analysis that did not exist at their `(mn, volta, beat)` position are inserted.
 - Events that existed before but are not present in the re-analysis (because a bar was deleted or a harmony change removed) are dropped unless `reviewed = true`, in which case they are preserved and flagged for human reconciliation.
 
 Any fragment whose range overlaps a changed event is flagged for re-review. The flagging mechanism is implemented by the correction workflow documented in the Phase 1 roadmap.

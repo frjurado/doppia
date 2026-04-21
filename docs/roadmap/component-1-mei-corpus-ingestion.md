@@ -164,6 +164,8 @@ Normalizer enforces (in document order, per the spec):
 
 The normalizer never touches musical content, `xml:id` values, or encoding style.
 
+**`<harm>` element handling (deferred).** MuseScore-sourced MEI files from DCML corpora contain `<harm>` elements that originate from the Roman-numeral annotations embedded in the `.mscx` source. Verovio renders these by default, producing visual clutter that conflicts with the tagging UI's own annotation layer. The target resolution is to strip `<harm>` elements in the normalizer for corpora where `analysis_source` is `"DCML"` or `"WhenInRome"` — corpora where the authoritative harmony record is `movement_analysis.events`, not score-embedded text. However, this must not extend to corpora where `<harm>` carries original source material (e.g. figured bass in baroque scores), and the situation is more complex still for a score that carries *both* original figured bass and superimposed DCML annotations — the two are indistinguishable at the MEI level. This problem is deferred until the first baroque corpus is ingested. When that work begins, revisit this section and implement conditional stripping keyed on `analysis_source`, with a documented exemption policy for original figured bass.
+
 **Duration metadata.** After normalization, the function emits the **maximum integer `@n` value found across all measures in the document** (inside and outside `<ending>` elements) as `NormalizationReport.duration_bars`. This is stored as `movement.duration_bars` and is what the service layer uses to reject fragments that overshoot the movement without re-parsing the MEI on every write (per `tech-stack-and-database-reference.md`). Using the maximum rather than the last `@n` outside endings is necessary because pieces frequently end inside a final or second ending. See `docs/architecture/mei-ingest-normalization.md` §Implementation for full rationale.
 
 **Verification.** Test suite at `backend/tests/unit/test_mei_normalizer.py` — one fixture per normalization rule, each asserting both the correction applied and idempotence on a second pass. Plus: the real Mozart K. 331 first movement exercised end-to-end as an integration test.
@@ -333,22 +335,36 @@ The dispatch shape is the small investment that makes the Component 6 deferral c
 
 ```json
 {
-  "bar": 17, "beat": 3.0,
+  "mc": 18, "mn": 17, "volta": null,
+  "beat": 3.0,
+  "local_key": "D minor",
   "root": 2, "quality": "minor", "inversion": 1,
   "numeral": "ii6",
+  "root_accidental": null, "applied_to": null, "extensions": [],
   "bass_pitch": null, "soprano_pitch": null,
   "source": "DCML", "auto": false, "reviewed": false
 }
 ```
 
+The DCML TSV columns map to event fields as follows:
+
+- `mc` → `mc` (linear measure count; the stable unique key for smart-merge on DCML events)
+- `mn` → `mn` (notated measure number; maps to MEI `<measure @n>`)
+- `volta` → `volta` (ending number if the event falls inside a `<ending>` element; `null` otherwise — derived from the DCML `volta` column)
+- `beat` → `beat`
+- `localkey` → `local_key`
+- `globalkey` → stored once on `movement_analysis.global_key`, not per event
+
 Notation-normalisation mappings (from `corpus-and-analysis-sources.md`) are applied here:
 
-- `V7(9)` → `numeral: "V7"`, stash the `(9)` extension in a secondary field or the numeral itself per the fragment-schema canonical form.
+- `V7(9)` → `numeral: "V7"`, `extensions: ["9"]`.
 - `V/V` → `numeral: "V"`, `applied_to: "V"`.
-- Borrowed chords (`bVII`, `bII`) → canonical numeral + `borrowed: true`.
+- Flat/sharp numeral prefix (`bVII`, `#IV`) → `root_accidental: "flat"` / `"sharp"` with the prefix stripped from `numeral`. Do not set any "borrowed" flag; that interpretation requires tonal context and belongs in the knowledge graph.
 - Phrase markers `{` / `}` are *not* written into `movement_analysis.events` — those are boundaries, not events. They are retained in the ingestion report so that, later, a phrase-boundary hint endpoint can surface them to the tagging UI as candidate fragment boundaries (per `corpus-and-analysis-sources.md`).
 
-`bass_pitch` and `soprano_pitch` are nullable. The DCML TSV does not always carry them; when Component 6 is built and music21 is available, a top-up job can fill them in for DCML-sourced events without flipping `source` to `music21_auto`.
+`bass_pitch` and `soprano_pitch` are not present in DCML TSV files; always set them to `null` for DCML-sourced events. When Component 6 is built and music21 is available, a top-up job can fill them in without changing `source`.
+
+**Alignment verification.** `_parse_dcml_harmonies` receives both the TSV content and the normalised MEI bytes. After parsing, a verification pass builds a map of `(mn, volta) → xml:id` by walking the MEI, then checks that every TSV row's `(mn, volta)` pair resolves to a known measure. Mismatches — which indicate a normalisation renumbering mismatch between the DCML TSV and the MEI — are collected and written to a `harmony_alignment_warnings` field in the ingestion report rather than failing hard. The field is empty for a clean ingest; non-empty means the ingest succeeded but alignment should be inspected before tagging begins on the affected movement.
 
 **Smart-merge on re-analysis.** The upsert applies the ADR-004 policy faithfully: events where `source = "manual"` or `reviewed = true` are preserved unchanged; other events are replaced; new events are inserted; disappeared-but-reviewed events are preserved and flagged. The policy is implemented in a single place (`_merge_events`) and tested explicitly.
 
@@ -365,15 +381,20 @@ Notation-normalisation mappings (from `corpus-and-analysis-sources.md`) are appl
 One integration test in `backend/tests/integration/test_corpus_ingestion.py`:
 
 ```
-Given: a fixture ZIP (K. 331, movements 1 and 2) built by scripts/prepare_dcml_corpus.py
+Given: a fixture ZIP (K. 331 movements 1–2, plus K. 283 movement 2) built by scripts/prepare_dcml_corpus.py
 When:  POST /api/v1/composers/mozart/corpora/piano-sonatas/upload (as admin)
-Then:  - 201 with an ingestion report listing both movements under movements_accepted
+Then:  - 201 with an ingestion report listing all movements under movements_accepted
        - composer/corpus/work/movement rows exist with the expected slugs
        - both normalized MEI files are readable from MinIO under the expected keys
        - both original MEI files exist under originals/
        - movement_analysis.events is populated with source="DCML" entries for each movement
        - movement.duration_bars equals the maximum integer @n found anywhere in the normalized MEI (inside or outside endings)
        - Re-running the same POST is idempotent (no duplicate rows; ingested_at advances)
+       - harmony_alignment_warnings is empty for all movements in the report
+       - For K. 283 movement 2 (which has first and second endings): events covering measures that
+         appear in both endings carry distinct mc values and correct volta values (volta=1 for first-
+         ending events, volta=2 for second-ending events); the mn values repeat across the two ending
+         groups as expected. Spot-check at least one (mn, volta) pair against the known TSV content.
 ```
 
 

@@ -76,12 +76,20 @@ Every row in `movement_analysis.events` carries a `source` value (`"DCML"`, `"Wh
 
 ```json
 {
-  "bar": 3,
+  "mc": 4,
+  "mn": 3,
+  "volta": null,
   "beat": 1.0,
+  "local_key": "A major",
   "root": 2,
   "quality": "minor",
   "inversion": 1,
   "numeral": "ii6",
+  "root_accidental": null,
+  "applied_to": null,
+  "extensions": [],
+  "bass_pitch": null,
+  "soprano_pitch": null,
   "source": "DCML",
   "auto": false,
   "reviewed": false
@@ -92,12 +100,13 @@ Every row in `movement_analysis.events` carries a `source` value (`"DCML"`, `"Wh
 
 ## DCML Notation Normalisation
 
-Both DCML TSV and When in Rome analyses use notation conventions that differ in detail from each other and from the fragment JSON schema. A normalisation script is required before either source can populate the `harmony` array. Key mappings to define:
+Both DCML TSV and When in Rome analyses use notation conventions that differ in detail from each other and from the fragment JSON schema. A normalisation script is required before either source can populate the `harmony` array. Key mappings:
 
 - DCML extended chord syntax: `V7(9)` → `{ numeral: "V7", extensions: ["9"] }`
 - Secondary functions: `V/V` → `{ numeral: "V", applied_to: "V" }`
 - Phrase markers: `{` / `}` in the DCML harmonies layer → candidate `bar_start` / `bar_end` for fragment records (passed to annotator as pre-suggestions, not committed automatically)
-- Borrowed chords: `bVII`, `bII` → `{ numeral: "VII", borrowed: true }`, etc.
+- Flat/sharp prefix on numerals: `bVII`, `#IV` → `{ numeral: "VII", root_accidental: "flat" }`, `{ numeral: "IV", root_accidental: "sharp" }`. The prefix is an observed notational fact — whether the chord is analytically "borrowed from the parallel mode" is a downstream interpretation that requires tonal context and is not encoded at ingestion time. Chords like minor iv in a major context are borrowed without carrying any prefix, and that label belongs in the knowledge graph, not the event store.
+- `bass_pitch` and `soprano_pitch` are not present in DCML TSV files. These fields are always `null` for DCML-sourced events. They may be populated by a later music21 top-up pass without changing `source`.
 
 The normalisation script must be validated against at least one complete movement before corpus-wide ingestion. The Mozart piano sonatas are the natural first test case.
 
