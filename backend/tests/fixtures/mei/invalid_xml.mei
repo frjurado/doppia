@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Test fixture — invalid XML (unclosed tag)</title></titleStmt>

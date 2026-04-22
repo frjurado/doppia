@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal MEI fixture for volta-handling integration tests.
+     Structure:
+       measure n=1   (volta=None)
+       ending n=1 → measure n=2  (volta=1)
+       ending n=2 → measure n=2  (volta=2)
+       measure n=3   (volta=None)
+     _build_measure_map produces {(1,None), (2,1), (2,2), (3,None)}.
+     A synthetic 4-event TSV (mn=1/None, mn=2/volta=1, mn=2/volta=2, mn=3/None)
+     produces zero alignment warnings. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Volta movement — integration test fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="4" oct="4" pname="c"/>
+                  <note dur="4" oct="4" pname="e"/>
+                  <note dur="4" oct="4" pname="g"/>
+                  <note dur="4" oct="4" pname="c"/>
+                </layer>
+              </staff>
+            </measure>
+            <ending n="1">
+              <measure n="2">
+                <staff n="1">
+                  <layer n="1">
+                    <note dur="4" oct="4" pname="g"/>
+                    <note dur="4" oct="4" pname="b"/>
+                    <note dur="4" oct="4" pname="d"/>
+                    <note dur="4" oct="4" pname="g"/>
+                  </layer>
+                </staff>
+              </measure>
+            </ending>
+            <ending n="2">
+              <measure n="2">
+                <staff n="1">
+                  <layer n="1">
+                    <note dur="4" oct="4" pname="f"/>
+                    <note dur="4" oct="4" pname="a"/>
+                    <note dur="4" oct="4" pname="c"/>
+                    <note dur="4" oct="4" pname="f"/>
+                  </layer>
+                </staff>
+              </measure>
+            </ending>
+            <measure n="3">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="4" oct="4" pname="c"/>
+                  <note dur="4" oct="4" pname="e"/>
+                  <note dur="4" oct="4" pname="g"/>
+                  <note dur="4" oct="4" pname="c"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>
