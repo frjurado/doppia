@@ -353,7 +353,7 @@ The DCML TSV columns map to event fields as follows:
 - `volta` → `volta` (ending number if the event falls inside a `<ending>` element; `null` otherwise — derived from the DCML `volta` column)
 - `beat` → `beat`
 - `localkey` → `local_key`
-- `globalkey` → stored once on `movement_analysis.global_key`, not per event
+- `globalkey` → cross-checked against `movement.key_signature` (same canonical format, e.g. `"A major"`). If `movement.key_signature` is null, populate it from `globalkey`; if it is already set and disagrees, write a `harmony_alignment_warnings` entry — a mismatch here indicates a data-quality problem in the corpus package rather than a normalisation issue. Not stored on `movement_analysis`; the movement row is the right home for a movement-level key fact.
 
 Notation-normalisation mappings (from `corpus-and-analysis-sources.md`) are applied here:
 

@@ -332,7 +332,6 @@ The authoritative record of beat-level harmonic analysis for each movement. Crea
 CREATE TABLE movement_analysis (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     movement_id        UUID UNIQUE NOT NULL REFERENCES movement(id) ON DELETE CASCADE,
-    global_key         TEXT,                 -- e.g. "A major"; constant for the movement; from DCML globalkey column or music21 key analysis; nullable for movements not yet analysed
     events             JSONB NOT NULL,       -- per-event harmonic timeline; see structure below
     music21_version    TEXT NOT NULL,        -- version used for the initial auto-analysis
     created_at         TIMESTAMPTZ DEFAULT now(),
@@ -344,8 +343,6 @@ CREATE INDEX movement_analysis_events_gin        ON movement_analysis USING GIN 
 ```
 
 **`movement_id`** is a foreign key to the `movement` row. `UNIQUE` enforces one analysis record per movement. The previous free-text key (`{composer}/{corpus}/{work}/{movement}`) is a path convention, not a database identity; it has no place as a primary key.
-
-**`global_key`** stores the overall tonic key of the movement (e.g. `"A major"`, `"D minor"`) as a movement-level fact, not repeated on each event. For DCML sources this is the `globalkey` column value; for music21-analysed movements it is the output of music21's probabilistic key analysis. Null when the movement has no analysis record yet. Consumers that need per-event local key read `local_key` from each event; `global_key` is for movement-level filtering and display only.
 
 **`events`** stores the complete per-event harmonic timeline for the movement as a JSONB array. Each event has the shape:
 
