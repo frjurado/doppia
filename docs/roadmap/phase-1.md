@@ -244,7 +244,7 @@ Rather than loading an entire MEI file to show a preview, generate a static inci
 
 ### Mobile Layout
 
-The tagging tool is a desktop-only workflow — no mobile adaptation needed for Phase 1's editorial functions. The corpus browser, however, may be accessed on mobile by collaborators reviewing the corpus. Minimum viable mobile: the three-column selector should collapse to a stacked accordion on narrow viewports. The score viewer (Component 4) is explicitly not mobile-optimized in Phase 1.
+The tagging tool is a desktop-only workflow — no mobile adaptation needed for Phase 1's editorial functions. The corpus browser, however, may be accessed on mobile by collaborators reviewing the corpus. Minimum viable mobile: the four-column selector should collapse to a stacked accordion on narrow viewports. The score viewer (Component 4) is explicitly not mobile-optimized in Phase 1.
 
 ---
 
