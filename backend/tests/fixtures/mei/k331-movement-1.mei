@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal 6-measure MEI fixture for K331 movement-1 integration tests.
+     meter: 6/8  measures: n=1 through n=6
+     All (mn, volta=None) pairs used in K331-1.tsv resolve here. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>K331 movement 1 — integration test fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="6" meter.unit="8">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" oct="4" pname="a"/>
+                  <note dur="8" oct="4" pname="b"/>
+                  <note dur="8" oct="5" pname="c"/>
+                  <note dur="8" oct="5" pname="d"/>
+                  <note dur="8" oct="5" pname="e"/>
+                  <note dur="8" oct="4" pname="a"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" oct="4" pname="e"/>
+                  <note dur="8" oct="4" pname="g"/>
+                  <note dur="8" oct="4" pname="b"/>
+                  <note dur="8" oct="4" pname="e"/>
+                  <note dur="8" oct="4" pname="g"/>
+                  <note dur="8" oct="4" pname="b"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="3">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" oct="4" pname="a"/>
+                  <note dur="8" oct="4" pname="c"/>
+                  <note dur="8" oct="4" pname="e"/>
+                  <note dur="8" oct="4" pname="a"/>
+                  <note dur="8" oct="4" pname="c"/>
+                  <note dur="8" oct="4" pname="e"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="4">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" oct="4" pname="d"/>
+                  <note dur="8" oct="4" pname="f"/>
+                  <note dur="8" oct="4" pname="a"/>
+                  <note dur="8" oct="4" pname="d"/>
+                  <note dur="8" oct="4" pname="f"/>
+                  <note dur="8" oct="4" pname="a"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="5">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" oct="4" pname="e"/>
+                  <note dur="8" oct="4" pname="g"/>
+                  <note dur="8" oct="4" pname="b"/>
+                  <note dur="8" oct="4" pname="e"/>
+                  <note dur="8" oct="4" pname="g"/>
+                  <note dur="8" oct="4" pname="b"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="6">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" oct="4" pname="a"/>
+                  <note dur="8" oct="4" pname="c"/>
+                  <note dur="8" oct="4" pname="e"/>
+                  <note dur="8" oct="4" pname="a"/>
+                  <note dur="8" oct="4" pname="c"/>
+                  <note dur="8" oct="4" pname="e"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>
