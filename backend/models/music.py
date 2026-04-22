@@ -170,6 +170,10 @@ class Movement(Base):
     mei_original_object_key: Mapped[str | None] = mapped_column(String, nullable=True)
     duration_bars: Mapped[int | None] = mapped_column(Integer, nullable=True)
     normalization_warnings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    incipit_object_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    incipit_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
