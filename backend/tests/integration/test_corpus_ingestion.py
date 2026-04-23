@@ -281,8 +281,10 @@ class TestCorpusIngestion:
         def _capture_delay(**kwargs: Any) -> None:
             dispatch_calls.append(kwargs)
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_task:
+        with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
+             patch("services.ingestion.generate_incipit") as mock_incipit:
             mock_task.delay = MagicMock(side_effect=_capture_delay)
+            mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
                 "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
@@ -302,8 +304,9 @@ class TestCorpusIngestion:
         assert report["movements_rejected"] == []
         assert report["source_commit"] == "abc1234"
 
-        # Celery was called once per movement
+        # Celery was called once per movement for both tasks
         assert mock_task.delay.call_count == 2
+        assert mock_incipit.delay.call_count == 2
 
         # ── Assert DB hierarchy ────────────────────────────────────────
         composer_row = (
@@ -523,8 +526,10 @@ class TestCorpusIngestion:
             def _capture(**kwargs: Any) -> None:
                 dispatch_calls.append(kwargs)
 
-            with patch("services.ingestion.ingest_movement_analysis") as mock_task:
+            with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
+                 patch("services.ingestion.generate_incipit") as mock_incipit:
                 mock_task.delay = MagicMock(side_effect=_capture)
+                mock_incipit.delay = MagicMock()
                 resp = await integration_test_client.post(
                     "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                     files={"archive": ("corpus.zip", archive, "application/zip")},
@@ -662,8 +667,10 @@ class TestCorpusIngestion:
         def _capture(**kwargs: Any) -> None:
             dispatch_calls.append(kwargs)
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_task:
+        with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
+             patch("services.ingestion.generate_incipit") as mock_incipit:
             mock_task.delay = MagicMock(side_effect=_capture)
+            mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
                 "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
@@ -673,6 +680,7 @@ class TestCorpusIngestion:
         assert response.status_code == 201, response.text
         assert response.json()["movements_rejected"] == []
         assert mock_task.delay.call_count == 1
+        assert mock_incipit.delay.call_count == 1
 
         call = dispatch_calls[0]
         movement_id = call["movement_id"]

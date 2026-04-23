@@ -51,6 +51,7 @@ from models.normalization import NormalizationReport
 from services.mei_normalizer import normalize_mei
 from services.mei_validator import validate_mei
 from services.object_storage import StorageClient
+from services.tasks.generate_incipit import generate_incipit
 from services.tasks.ingest_analysis import ingest_movement_analysis
 
 
@@ -319,6 +320,7 @@ async def ingest_corpus(
                 entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
             ),
         )
+        generate_incipit.delay(movement_id=str(entry.movement_id))
 
     # ------------------------------------------------------------------
     # 9. Return report
