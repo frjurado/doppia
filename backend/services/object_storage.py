@@ -1,6 +1,6 @@
-"""Async S3-compatible object storage client for MEI files.
+"""Async S3-compatible object storage client for MEI files and SVG incipits.
 
-Thin wrapper around ``aioboto3`` that exposes the four operations used by
+Thin wrapper around ``aioboto3`` that exposes the operations used by
 the MEI corpus ingestion pipeline and the Verovio rendering service.
 
 The client is environment-agnostic: the same code runs against MinIO locally
@@ -11,16 +11,20 @@ Key convention (ADR-002):
 
 - Normalized MEI:  ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei``
 - Original MEI:    ``originals/{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei``
+- Incipit SVG:     ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg``
+  (written by the ``generate_incipit`` Celery task — Component 2)
 - Preview SVG:     ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/preview.svg``
-  (written by Component 2 / Component 7; not by this module)
+  (written by Component 7; not by this module)
 
 Example usage::
 
-    from services.object_storage import make_storage_client
+    from services.object_storage import make_storage_client, incipit_key
 
     client = make_storage_client()
     await client.put_mei("mozart/piano-sonatas/k331/movement-1.mei", mei_bytes)
-    url = await client.signed_url("mozart/piano-sonatas/k331/movement-1.mei")
+    key = incipit_key("mozart", "piano-sonatas", "k331", "movement-1")
+    await client.put_svg(key, svg_string)
+    url = await client.signed_url(key)
 """
 
 from __future__ import annotations
@@ -133,6 +137,21 @@ class StorageClient:
             response = await s3.get_object(Bucket=self._bucket_name, Key=key)
             return await response["Body"].read()
 
+    async def put_svg(self, key: str, content: str) -> None:
+        """Store an SVG string in object storage.
+
+        Args:
+            key: S3 object key (use :func:`incipit_key` to construct it).
+            content: SVG document as a UTF-8 string.
+        """
+        async with self._session.client("s3", **self._client_kwargs()) as s3:
+            await s3.put_object(
+                Bucket=self._bucket_name,
+                Key=key,
+                Body=content.encode("utf-8"),
+                ContentType="image/svg+xml",
+            )
+
     async def signed_url(self, key: str, expires_in: int = 300) -> str:
         """Generate a pre-signed GET URL for a stored file.
 
@@ -153,6 +172,28 @@ class StorageClient:
                 Params={"Bucket": self._bucket_name, "Key": key},
                 ExpiresIn=expires_in,
             )
+
+
+def incipit_key(
+    composer_slug: str,
+    corpus_slug: str,
+    work_slug: str,
+    movement_slug: str,
+) -> str:
+    """Return the object key for a movement's incipit SVG.
+
+    Key format: ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg``
+
+    Args:
+        composer_slug: URL-safe composer identifier (e.g. ``"mozart"``).
+        corpus_slug: URL-safe corpus identifier (e.g. ``"piano-sonatas"``).
+        work_slug: URL-safe work identifier (e.g. ``"k331"``).
+        movement_slug: URL-safe movement identifier (e.g. ``"movement-1"``).
+
+    Returns:
+        S3 object key string.
+    """
+    return f"{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg"
 
 
 def make_storage_client() -> StorageClient:

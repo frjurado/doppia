@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 from botocore.exceptions import ClientError
 
-from services.object_storage import StorageClient
+from services.object_storage import StorageClient, incipit_key
 
 # ---------------------------------------------------------------------------
 # MinIO connection defaults (match .env.example)
@@ -83,6 +83,9 @@ async def storage_client() -> AsyncGenerator[StorageClient, None]:
 _MEI_KEY = "mozart/piano-sonatas/k331/movement-1.mei"
 _MEI_CONTENT = b"<mei><music/></mei>"
 
+_SVG_KEY = incipit_key("mozart", "piano-sonatas", "k331", "movement-1")
+_SVG_CONTENT = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="120"><rect width="800" height="120"/></svg>'
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -124,6 +127,22 @@ async def test_signed_url_returns_string(storage_client: StorageClient) -> None:
     url = await storage_client.signed_url(_MEI_KEY)
     assert isinstance(url, str)
     assert url.startswith(_ENDPOINT_URL)
+
+
+async def test_put_svg_and_signed_url_round_trip(storage_client: StorageClient) -> None:
+    """put_svg stores the SVG; signed_url returns a readable URL for it."""
+    await storage_client.put_svg(_SVG_KEY, _SVG_CONTENT)
+    url = await storage_client.signed_url(_SVG_KEY)
+    assert isinstance(url, str)
+    assert url.startswith(_ENDPOINT_URL)
+    # Key path must appear in the presigned URL.
+    assert "incipit.svg" in url
+
+
+def test_put_svg_key_follows_incipit_key_convention() -> None:
+    """incipit_key produces the expected path structure."""
+    key = incipit_key("bach", "wtc", "bwv846", "prelude")
+    assert key == "bach/wtc/bwv846/prelude/incipit.svg"
 
 
 async def test_signed_url_custom_expiry(storage_client: StorageClient) -> None:
