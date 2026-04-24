@@ -1,0 +1,57 @@
+import React from 'react';
+
+export type SurfaceLayer =
+  | 'base'
+  | 'container-lowest'
+  | 'container-low'
+  | 'container'
+  | 'container-high'
+  | 'container-highest'
+  | 'floating';
+
+interface SurfaceProps {
+  layer?: SurfaceLayer;
+  floating?: boolean;
+  className?: string;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}
+
+const layerTokens: Record<SurfaceLayer, string> = {
+  'base':               'var(--color-surface)',
+  'container-lowest':   'var(--color-surface-container-lowest)',
+  'container-low':      'var(--color-surface-container-low)',
+  'container':          'var(--color-surface-container)',
+  'container-high':     'var(--color-surface-container-high)',
+  'container-highest':  'var(--color-surface-container-highest)',
+  'floating':           'var(--color-surface-container-highest)',
+};
+
+/**
+ * A surface container that maps a semantic layer name to the corresponding
+ * tonal background token. Depth is achieved through colour shifts, not borders
+ * or shadows — except floating elements which receive an ambient shadow.
+ */
+export default function Surface({
+  layer = 'base',
+  floating = false,
+  className,
+  children,
+  style,
+}: SurfaceProps) {
+  const background = layerTokens[layer];
+
+  const computedStyle: React.CSSProperties = {
+    backgroundColor: background,
+    ...(floating
+      ? { boxShadow: '0 0 40px 0 rgba(27, 28, 23, 0.06)' }
+      : undefined),
+    ...style,
+  };
+
+  return (
+    <div className={className} style={computedStyle}>
+      {children}
+    </div>
+  );
+}
