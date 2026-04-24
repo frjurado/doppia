@@ -1,0 +1,21 @@
+.column {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.emptyState {
+  padding: var(--spacing-6) var(--spacing-4);
+}
+
+.skeletonLine {
+  height: 1rem;
+  width: 75%;
+  background-color: var(--color-surface-container-high);
+  margin-bottom: var(--spacing-2);
+}
+
+.skeletonLineSm {
+  height: 0.75rem;
+  width: 50%;
+  background-color: var(--color-surface-container-high);
+}
