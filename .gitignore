@@ -50,3 +50,6 @@ backend/migrations/versions/*.pyc
 
 # Internal Guide
 docs/.guide/
+
+# Spike output (generated SVGs from scripts/spike_verovio_incipit.py)
+scripts/spike_output/

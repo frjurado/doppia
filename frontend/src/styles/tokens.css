@@ -1,0 +1,40 @@
+:root {
+  /* Brand colours */
+  --color-primary:                   #3f5f77;
+  --color-primary-container:         #587891;
+
+  /* Surface hierarchy (tonal layers, no borders) */
+  --color-surface:                   #fbf9f0; /* Urtext Cream — base canvas */
+  --color-surface-container-lowest:  #ffffff;
+  --color-surface-container-low:     #f6f4eb;
+  --color-surface-container:         #eeecde;
+  --color-surface-container-high:    #eae8df;
+  --color-surface-container-highest: #e4e3da;
+
+  /* Text */
+  --color-on-background:             #1b1c17; /* never pure black */
+  --color-on-surface-variant:        #44483d;
+  --color-on-primary:                #ffffff;
+
+  /* Borders and outlines (ghost-only; never 100% opaque) */
+  --color-outline:                   #72787d;
+  --color-outline-variant:           rgba(114, 120, 125, 0.15);
+
+  /* Typography */
+  --font-serif:   'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-sans:    'Public Sans', system-ui, -apple-system, sans-serif;
+
+  /* Spacing scale (multiples of 0.25rem) */
+  --spacing-1:  0.25rem;
+  --spacing-2:  0.5rem;
+  --spacing-3:  0.75rem;
+  --spacing-4:  1rem;
+  --spacing-5:  1.25rem;
+  --spacing-6:  1.5rem;
+  --spacing-8:  2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+
+  /* Shape — 0px everywhere, non-negotiable */
+  --border-radius: 0px;
+}

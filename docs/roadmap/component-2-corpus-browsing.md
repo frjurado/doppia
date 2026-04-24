@@ -18,7 +18,7 @@ The roadmap specifies that incipits are "generated at upload time," but Componen
 
 - Component 1's `ingest_corpus` service already runs the validation, normalization, and database writes. At the end of a successful movement ingest it currently enqueues the `ingest_analysis` task (Step 8 of the Component 1 plan). Component 2 adds a second `.delay()` call at the same point: `generate_incipit.delay(movement_id=movement.id)`. No restructuring of Component 1 is required — it is a single-line addition to `backend/services/ingestion.py`.
 
-- **Server-side Verovio (Python bindings) is not client-side Verovio (WASM).** The Python `verovio` package is already pinned in `backend/requirements.txt` — it was required for the corpus-preparation script (`scripts/prepare_dcml_corpus.py`, Step 6 of Component 1). Component 2's Celery task uses those same bindings to render SVGs server-side. The browser receives a signed URL and renders a static `<img>`. No Verovio WASM is loaded in the browser for the corpus browser.
+- **Server-side Verovio (Python bindings) is not client-side Verovio (WASM).** The Python `verovio` package is pinned in `backend/requirements.txt` — it was required for the corpus-preparation script (`scripts/prepare_dcml_corpus.py`, Step 6 of Component 1). Component 2's Celery task uses those same bindings to render SVGs server-side. The browser receives a signed URL and renders a static `<img>`. No Verovio WASM is loaded in the browser for the corpus browser. **The pin must be `verovio==6.1.0`** (or the current release per ADR-013); the originally committed `4.3.1` pin must not be used — see the spike results in `docs/architecture/mei-ingest-normalization.md` for why.
 
 - Client-side Verovio WASM is Component 3's responsibility. The incipit pipeline and the interactive score viewer are technically independent and have no shared code path.
 
@@ -136,20 +136,20 @@ Implementation outline:
 
 1. Query `movement` by `movement_id` to obtain `mei_object_key`, `composer_slug`, `corpus_slug`, `work_slug`, `movement_slug`. Raise `Ignore` (Celery's "discard silently") if the movement does not exist — this should not happen, but guards against race conditions in test teardown.
 2. Fetch the normalised MEI bytes from object storage via `get_mei(movement.mei_object_key)`.
-3. Instantiate the Verovio toolkit and apply options determined by the Step 1 spike. The defaults to start with:
+3. Instantiate the Verovio toolkit and apply the options established by the Step 1 spike (Finding 5 in `docs/architecture/mei-ingest-normalization.md`). Use the smart-break, narrow-page approach — it is simpler than `select`-based clipping for incipits, produces correct results including pickup bars, and does not depend on `measureRange` addressing:
    ```python
    tk = verovio.toolkit()
    tk.setOptions({
-       "pageWidth": 2200,
+       "pageWidth": 800,
        "pageHeight": 800,
-       "scale": 35,
        "adjustPageHeight": True,
-       "breaks": "none",
-       "select": [{"measureRange": "0-4"}],  # adjust per spike findings
+       "breaks": "smart",
+       "scale": 35,
    })
    tk.loadData(mei_bytes.decode("utf-8"))
-   svg = tk.renderToSVG(1)
+   svg = tk.renderToSVG(1)   # page 1 = first system = incipit
    ```
+   Note: `select` with `measureRange` is now functional in Verovio 6.1.0 (see ADR-013) and is the recommended approach for **Component 3** fragment rendering. For incipits, the smart-break page-1 strategy remains preferable because it includes pickup bars naturally and requires no `@n` addressing logic.
 4. Compute the incipit key and store via `put_svg`.
 5. Update `movement.incipit_object_key` and `movement.incipit_generated_at` in a database write.
 6. On `verovio` rendering failure: log the error and re-raise so Celery retries (up to `max_retries`). On final failure, leave `incipit_object_key` null — the browse API handles this gracefully.
@@ -181,7 +181,45 @@ python scripts/backfill_incipits.py
 
 Create this script alongside the existing seed scripts. It queries all movements where `incipit_object_key IS NULL` and enqueues `generate_incipit` for each. This is a one-time operation and not part of the normal pipeline.
 
-**Staging data top-up.** Once the incipit task is verified working, use the corpus-preparation script to ingest 5–6 complete works (roughly 12–15 movements) from the Mozart piano sonatas into staging. This serves two purposes: it confirms the incipit pipeline holds up across a range of key signatures, meters, and movement lengths, and it gives the corpus browser enough data to evaluate meaningfully — a single work in the works column is indistinguishable from a broken state. The full corpus population is Component 9's responsibility; this subset is the minimum needed to make the browser feel real during development. The existing fixture movements (K. 331/1–2, K. 283/2) count toward the total.
+**Staging data top-up.** Once the incipit task is verified working, ingest 5 complete sonatas (15 movements) from the Mozart piano sonatas using the staging subset config. This gives the corpus browser enough data to evaluate meaningfully. The full corpus population is Component 9's responsibility; this subset is the minimum needed to make the browser feel real during development. The existing fixture movements (K. 331/1–2, K. 283/2) count toward the total.
+
+Run the following from the repo root with the backend venv active and Docker stack running:
+
+**1. Build the staging ZIP** (uses Python `verovio` bindings — no CLI dependency):
+
+```bash
+python scripts/prepare_dcml_corpus.py \
+  --repo-path "F:/CLAUDE/Doppia/mozart_piano_sonatas" \
+  --config scripts/dcml_corpora/mozart-browser-staging.toml \
+  --output /tmp/mozart-browser-staging.zip
+```
+
+This produces a ZIP covering K. 279, 280, 283, 331, 332 (15 movements total). The config is at `scripts/dcml_corpora/mozart-browser-staging.toml`.
+
+**2. Upload to the local API:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/composers/mozart/corpora/piano-sonatas/upload \
+  -H "Authorization: Bearer dev-token" \
+  -F "archive=@/tmp/mozart-browser-staging.zip"
+```
+
+`dev-token` is accepted because `.env` sets `ENVIRONMENT=local` and `AUTH_MODE=local`. The endpoint requires `admin` role, which the dev token carries. Inspect the JSON response — `movements_accepted` should list 15 movements, `movements_rejected` should be empty.
+
+**3. Start the Celery worker** (in a separate terminal, venv active, from `backend/`):
+
+```bash
+celery -A services.celery_app worker --loglevel=info
+```
+
+**4. Backfill incipits** for all movements that were ingested before the worker was wired:
+
+```bash
+DATABASE_URL="postgresql+asyncpg://postgres:localpassword@localhost/doppia" \
+  python scripts/backfill_incipits.py
+```
+
+Watch the Celery worker terminal — each `generate_incipit` task should complete with a log line confirming the SVG was stored. Verify with `--dry-run` first if desired.
 
 ---
 

@@ -169,6 +169,24 @@ def _mock_normalize_side_effect(src: str, dst: str) -> NormalizationReport:
 
 
 # ---------------------------------------------------------------------------
+# Module-level autouse fixture: suppress generate_incipit Celery dispatch
+# ---------------------------------------------------------------------------
+# All tests in this file call ingest_corpus() with mocked infrastructure.
+# The new generate_incipit.delay() call added in Step 3 would try to connect
+# to Redis (not available in unit tests) unless silenced here.
+# TestTaskDispatch still verifies ingest_movement_analysis dispatch; a separate
+# integration test covers generate_incipit dispatch.
+
+
+@pytest.fixture(autouse=True)
+def _mock_generate_incipit_delay():
+    """Patch generate_incipit.delay for every unit test in this module."""
+    with patch("services.ingestion.generate_incipit") as mock:
+        mock.delay = MagicMock()
+        yield mock
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 

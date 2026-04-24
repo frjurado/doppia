@@ -27,9 +27,10 @@ Usage::
 
 Requirements:
 
-- ``mscore`` (MuseScore 3.6.2) must be on ``PATH``.
-- ``verovio`` CLI must be on ``PATH``.
-- Python packages: ``pyyaml``, ``lxml``, ``pydantic`` (installed via backend deps).
+- ``mscore`` (MuseScore 3.6.2) must be on ``PATH``, or pass ``--mscore-path``
+  with the full executable path (e.g. on Windows: ``--mscore-path
+  "C:/Program Files/MuseScore 3/bin/MuseScore3.exe"``).
+- Python packages: ``pyyaml``, ``lxml``, ``pydantic``, ``verovio`` (installed via backend deps).
 
 This is a developer-workstation script, not a container dependency.
 See ``docs/roadmap/component-1-mei-corpus-ingestion.md`` §Step 6.
@@ -38,6 +39,7 @@ See ``docs/roadmap/component-1-mei-corpus-ingestion.md`` §Step 6.
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -157,6 +159,17 @@ def parse_args() -> argparse.Namespace:
         required=True,
         type=Path,
         help="Destination path for the output ZIP file.",
+    )
+    parser.add_argument(
+        "--mscore-path",
+        type=str,
+        default=None,
+        help=(
+            "Full path to the mscore/MuseScore executable. "
+            "Defaults to resolving 'mscore' from PATH. "
+            "On Windows use e.g. "
+            "'C:/Program Files/MuseScore 3/bin/MuseScore3.exe'."
+        ),
     )
     return parser.parse_args()
 
@@ -293,14 +306,18 @@ def discover_movements(
 # ---------------------------------------------------------------------------
 
 
-def convert_mscx_to_mxl(mscx_path: Path, tmpdir: Path) -> Path:
+def convert_mscx_to_mxl(mscx_path: Path, tmpdir: Path, mscore_exe: str) -> Path:
     """Convert a MuseScore ``.mscx`` file to compressed MusicXML (``.mxl``).
 
-    Calls the ``mscore`` CLI (MuseScore 3.6.2) which must be on ``PATH``.
+    Calls the MuseScore CLI (3.6.2).  Pass the resolved executable path via
+    ``mscore_exe`` — do not rely on bare ``"mscore"`` on Windows where the
+    system PATH may differ from the shell PATH.
 
     Args:
         mscx_path: Source ``.mscx`` file.
         tmpdir: Temporary directory for the output file.
+        mscore_exe: Full path (or bare name if on system PATH) of the mscore
+            executable.
 
     Returns:
         Path to the generated ``.mxl`` file.
@@ -310,33 +327,46 @@ def convert_mscx_to_mxl(mscx_path: Path, tmpdir: Path) -> Path:
     """
     out_mxl = tmpdir / (mscx_path.stem + ".mxl")
     subprocess.run(
-        ["mscore", "--export-to", str(out_mxl), str(mscx_path)],
+        [mscore_exe, "--export-to", str(out_mxl), str(mscx_path)],
         check=True,
         capture_output=True,
+        shell=mscore_exe.lower().endswith(".bat"),
     )
     return out_mxl
 
 
 def convert_mxl_to_mei(mxl_path: Path, tmpdir: Path) -> bytes:
-    """Convert a MusicXML ``.mxl`` file to MEI using the ``verovio`` CLI.
+    """Convert a MusicXML ``.mxl`` file to MEI using the ``verovio`` Python bindings.
 
     Args:
         mxl_path: Source ``.mxl`` file.
-        tmpdir: Temporary directory for the output file.
+        tmpdir: Unused; kept for signature compatibility.
 
     Returns:
-        Raw MEI bytes.
+        Raw MEI bytes, schema-clean for the MEI CMN RelaxNG profile.
 
     Raises:
-        subprocess.CalledProcessError: If ``verovio`` exits with a non-zero code.
+        RuntimeError: If verovio fails to load the file.
     """
-    out_mei = tmpdir / (mxl_path.stem + ".mei")
-    subprocess.run(
-        ["verovio", "--to", "mei", str(mxl_path), "-o", str(out_mei)],
-        check=True,
-        capture_output=True,
-    )
-    return out_mei.read_bytes()
+    import lxml.etree
+    import verovio
+
+    tk = verovio.toolkit()
+    if not tk.loadFile(str(mxl_path)):
+        raise RuntimeError(f"verovio failed to load {mxl_path}")
+    mei_bytes = tk.getMEI().encode("utf-8")
+
+    # Verovio adds encoding-metadata attributes that the CMN RelaxNG schema
+    # does not permit.  Strip them before validation:
+    #   - @meiversion on the root <mei> element
+    #   - @version on <application> inside <appInfo>
+    # Both are purely informational and have no effect on musical content.
+    _MEI_NS = "http://www.music-encoding.org/ns/mei"
+    root = lxml.etree.fromstring(mei_bytes)
+    root.attrib.pop("meiversion", None)
+    for app in root.iter(f"{{{_MEI_NS}}}application"):
+        app.attrib.pop("version", None)
+    return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +387,7 @@ def find_harmonies_tsv(repo_path: Path, mscx_path: Path) -> Path | None:
     Returns:
         Path to the TSV file, or ``None`` if it does not exist.
     """
-    tsv_path = repo_path / "harmonies" / (mscx_path.stem + ".tsv")
+    tsv_path = repo_path / "harmonies" / (mscx_path.stem + ".harmonies.tsv")
     return tsv_path if tsv_path.exists() else None
 
 
@@ -507,6 +537,19 @@ def main() -> None:
     check_abc_deny_list(config)
     git_sha = get_git_sha(args.repo_path)
 
+    # Resolve the mscore executable once up front so a missing binary fails
+    # immediately rather than mid-conversion.
+    mscore_exe: str = args.mscore_path or shutil.which("mscore") or ""
+    if not mscore_exe or not (
+        Path(mscore_exe).exists() or shutil.which(mscore_exe)
+    ):
+        _err(
+            f"Cannot find mscore executable: {mscore_exe!r}. "
+            "Pass --mscore-path with the full path, e.g. "
+            "'C:/Program Files/MuseScore 3/bin/mscore.bat'."
+        )
+        sys.exit(1)
+
     entries = discover_movements(args.repo_path, config)
     accepted: list[AcceptedMovement] = []
 
@@ -517,21 +560,21 @@ def main() -> None:
             _log(f"Converting {label} ...")
 
             try:
-                mxl_path = convert_mscx_to_mxl(entry.mscx_path, tmpdir)
+                mxl_path = convert_mscx_to_mxl(entry.mscx_path, tmpdir, mscore_exe)
             except subprocess.CalledProcessError as exc:
                 _err(f"mscore failed for {label}: {exc}")
                 sys.exit(1)
 
             try:
                 mei_bytes = convert_mxl_to_mei(mxl_path, tmpdir)
-            except subprocess.CalledProcessError as exc:
+            except RuntimeError as exc:
                 _err(f"verovio failed for {label}: {exc}")
                 sys.exit(1)
 
             report = validate_mei(mei_bytes)
             if not report.is_valid:
-                codes = ", ".join(e.code for e in report.errors)
-                _err(f"MEI validation failed for {label}: {codes}")
+                for e in report.errors:
+                    _err(f"MEI validation failed for {label}: [{e.code}] {e.message}")
                 sys.exit(1)
 
             harmonies_path = find_harmonies_tsv(args.repo_path, entry.mscx_path)

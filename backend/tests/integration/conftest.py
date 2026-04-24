@@ -25,21 +25,14 @@ from starlette.exceptions import HTTPException
 
 
 @asynccontextmanager
-async def _integration_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Lifespan that initialises the async SQLAlchemy engine.
+async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """No-op lifespan for the integration test app.
 
-    Unlike the unit-test no-op lifespan, this calls ``init_db()`` so that
-    ``get_db()`` works inside route handlers during integration tests.
+    ``init_db()`` is called directly in ``integration_test_client`` before
+    the AsyncClient is created, because ``ASGITransport`` does not trigger
+    ASGI lifespan events.
     """
-    from models.base import close_db, init_db
-
-    database_url = os.environ.get(
-        "DATABASE_URL",
-        "postgresql+asyncpg://postgres:localpassword@localhost/doppia",
-    )
-    init_db(database_url)
     yield
-    await close_db()
 
 
 @pytest_asyncio.fixture
@@ -81,6 +74,20 @@ async def integration_test_client(
         if not os.environ.get(key):
             monkeypatch.setenv(key, default)
 
+    # ASGITransport does not trigger ASGI lifespan events, so we initialise
+    # the database directly here rather than relying on lifespan startup.
+    # We do NOT call close_db() between tests because disposing the asyncpg
+    # engine after a test's event loop scope ends causes ProactorEventLoop
+    # errors on Windows — instead, init_db() on the next test overwrites the
+    # module-level singleton with a fresh engine.
+    from models.base import init_db
+
+    database_url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:localpassword@localhost/doppia",
+    )
+    init_db(database_url)
+
     from api.middleware.auth import AuthMiddleware
     from api.middleware.errors import (
         http_exception_handler,
@@ -89,7 +96,7 @@ async def integration_test_client(
     )
     from api.router import router as api_router
 
-    app = FastAPI(lifespan=_integration_lifespan)
+    app = FastAPI(lifespan=_noop_lifespan)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

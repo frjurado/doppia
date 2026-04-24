@@ -227,16 +227,28 @@ async def _delete_test_composer(session: AsyncSession, slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 class TestCorpusIngestion:
     """End-to-end tests for the corpus upload + DCML analysis ingestion pipeline."""
 
     @pytest_asyncio.fixture(autouse=True)
     async def _cleanup(self, db_session: AsyncSession) -> None:  # type: ignore[override]
         """Delete test composer and all descendant rows after each test."""
+        import services.tasks.ingest_analysis as _ia_module
+
         yield
-        async with db_session.begin():
-            await _delete_test_composer(db_session, "test-mozart")
+
+        # Reset the ingest_analysis session-factory cache so the next test
+        # gets a fresh engine/session bound to the current event loop.
+        _ia_module._session_factory = None
+        _ia_module._engine = None
+
+        # Use rollback to discard any uncommitted state from the test body
+        # (autobegin may already have started a transaction), then run the
+        # deletes in a clean autobegin transaction and commit.
+        await db_session.rollback()
+        await _delete_test_composer(db_session, "test-mozart")
+        await db_session.commit()
 
     # ------------------------------------------------------------------
     # Test 1 — full pipeline
@@ -281,8 +293,10 @@ class TestCorpusIngestion:
         def _capture_delay(**kwargs: Any) -> None:
             dispatch_calls.append(kwargs)
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_task:
+        with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
+             patch("services.ingestion.generate_incipit") as mock_incipit:
             mock_task.delay = MagicMock(side_effect=_capture_delay)
+            mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
                 "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
@@ -302,8 +316,9 @@ class TestCorpusIngestion:
         assert report["movements_rejected"] == []
         assert report["source_commit"] == "abc1234"
 
-        # Celery was called once per movement
+        # Celery was called once per movement for both tasks
         assert mock_task.delay.call_count == 2
+        assert mock_incipit.delay.call_count == 2
 
         # ── Assert DB hierarchy ────────────────────────────────────────
         composer_row = (
@@ -523,8 +538,10 @@ class TestCorpusIngestion:
             def _capture(**kwargs: Any) -> None:
                 dispatch_calls.append(kwargs)
 
-            with patch("services.ingestion.ingest_movement_analysis") as mock_task:
+            with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
+                 patch("services.ingestion.generate_incipit") as mock_incipit:
                 mock_task.delay = MagicMock(side_effect=_capture)
+                mock_incipit.delay = MagicMock()
                 resp = await integration_test_client.post(
                     "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                     files={"archive": ("corpus.zip", archive, "application/zip")},
@@ -662,8 +679,10 @@ class TestCorpusIngestion:
         def _capture(**kwargs: Any) -> None:
             dispatch_calls.append(kwargs)
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_task:
+        with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
+             patch("services.ingestion.generate_incipit") as mock_incipit:
             mock_task.delay = MagicMock(side_effect=_capture)
+            mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
                 "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
@@ -673,6 +692,7 @@ class TestCorpusIngestion:
         assert response.status_code == 201, response.text
         assert response.json()["movements_rejected"] == []
         assert mock_task.delay.call_count == 1
+        assert mock_incipit.delay.call_count == 1
 
         call = dispatch_calls[0]
         movement_id = call["movement_id"]
