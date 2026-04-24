@@ -29,7 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
 from neo4j import AsyncDriver, AsyncGraphDatabase
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException
 
 # ---------------------------------------------------------------------------
@@ -98,28 +98,42 @@ async def test_client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncCl
 # ---------------------------------------------------------------------------
 
 
-@pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Async SQLAlchemy session connected to the local test PostgreSQL instance.
+@pytest_asyncio.fixture(scope="session")
+async def _db_engine() -> AsyncGenerator[AsyncEngine, None]:
+    """Session-scoped async SQLAlchemy engine.
 
-    Reads ``DATABASE_URL`` from the environment (defaults to the local Docker
-    URL from ``.env.example``).  Each test gets a fresh session; uncommitted
-    changes are rolled back on teardown to keep tests isolated.
+    A single engine (and its connection pool) is shared across all tests that
+    use ``db_session``. This avoids asyncpg connection-cleanup races that arise
+    when a per-test engine is disposed while the event loop is still running
+    other tests in the same session.
 
     Yields:
-        An ``AsyncSession`` bound to the test database engine.
+        The ``AsyncEngine`` instance.
     """
     database_url = os.environ.get(
         "DATABASE_URL",
         "postgresql+asyncpg://postgres:localpassword@localhost/doppia",
     )
     engine = create_async_engine(database_url, echo=False, pool_pre_ping=True)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(_db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+    """Async SQLAlchemy session connected to the local test PostgreSQL instance.
+
+    Reads ``DATABASE_URL`` from the environment (defaults to the local Docker
+    URL from ``.env.example``).  Each test gets a fresh session backed by the
+    session-scoped engine so the connection pool is not recreated between tests.
+
+    Yields:
+        An ``AsyncSession`` bound to the test database engine.
+    """
+    factory = async_sessionmaker(_db_engine, class_=AsyncSession, expire_on_commit=False)
 
     async with factory() as session:
         yield session
-
-    await engine.dispose()
 
 
 @pytest_asyncio.fixture

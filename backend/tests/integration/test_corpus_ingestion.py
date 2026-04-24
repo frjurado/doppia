@@ -227,16 +227,28 @@ async def _delete_test_composer(session: AsyncSession, slug: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 class TestCorpusIngestion:
     """End-to-end tests for the corpus upload + DCML analysis ingestion pipeline."""
 
     @pytest_asyncio.fixture(autouse=True)
     async def _cleanup(self, db_session: AsyncSession) -> None:  # type: ignore[override]
         """Delete test composer and all descendant rows after each test."""
+        import services.tasks.ingest_analysis as _ia_module
+
         yield
-        async with db_session.begin():
-            await _delete_test_composer(db_session, "test-mozart")
+
+        # Reset the ingest_analysis session-factory cache so the next test
+        # gets a fresh engine/session bound to the current event loop.
+        _ia_module._session_factory = None
+        _ia_module._engine = None
+
+        # Use rollback to discard any uncommitted state from the test body
+        # (autobegin may already have started a transaction), then run the
+        # deletes in a clean autobegin transaction and commit.
+        await db_session.rollback()
+        await _delete_test_composer(db_session, "test-mozart")
+        await db_session.commit()
 
     # ------------------------------------------------------------------
     # Test 1 — full pipeline

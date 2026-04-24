@@ -184,7 +184,7 @@ async def _delete_test_composer(session: AsyncSession) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 class TestBrowseApi:
     """Integration tests for GET /api/v1/composers, /corpora, /works, /movements."""
 
@@ -197,8 +197,8 @@ class TestBrowseApi:
         """Upload the browse-test Mozart corpus before each test; clean up after."""
         # Suppress Celery task dispatch — no broker running in CI.
         with (
-            patch("services.ingestion.generate_incipit.delay"),
-            patch("services.ingestion.ingest_analysis.delay"),
+            patch("services.ingestion.generate_incipit"),
+            patch("services.ingestion.ingest_movement_analysis"),
         ):
             resp = await integration_test_client.post(
                 f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",

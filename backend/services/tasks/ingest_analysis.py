@@ -715,7 +715,7 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
                          created_at, updated_at)
                     VALUES
                         (gen_random_uuid(), :movement_id,
-                         :events::jsonb, :music21_version,
+                         CAST(:events AS jsonb), :music21_version,
                          now(), now())
                     ON CONFLICT (movement_id) DO UPDATE
                         SET events          = EXCLUDED.events,
@@ -739,7 +739,7 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
                         SET normalization_warnings = jsonb_set(
                             COALESCE(normalization_warnings, '{}'),
                             '{harmony_alignment_warnings}',
-                            :warnings::jsonb
+                            CAST(:warnings AS jsonb)
                         )
                         WHERE id = :id
                         """

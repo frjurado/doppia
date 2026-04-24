@@ -186,6 +186,7 @@ async def _get_movement_id(
     session: AsyncSession,
     movement_slug: str = "movement-1",
     work_slug: str = "k331",
+    composer_slug: str = "test-mozart",
 ) -> str:
     """Return the UUID string for the given movement slug.
 
@@ -193,6 +194,7 @@ async def _get_movement_id(
         session: Open async session.
         movement_slug: Movement slug to look up.
         work_slug: Work slug to disambiguate.
+        composer_slug: Composer slug to disambiguate from staging data.
 
     Returns:
         UUID string for the movement row.
@@ -204,10 +206,12 @@ async def _get_movement_id(
                 SELECT mv.id
                 FROM   movement mv
                 JOIN   work w ON mv.work_id = w.id
-                WHERE  mv.slug = :ms AND w.slug = :ws
+                JOIN   corpus c ON w.corpus_id = c.id
+                JOIN   composer co ON c.composer_id = co.id
+                WHERE  mv.slug = :ms AND w.slug = :ws AND co.slug = :cs
                 """
             ),
-            {"ms": movement_slug, "ws": work_slug},
+            {"ms": movement_slug, "ws": work_slug, "cs": composer_slug},
         )
     ).one()
     return str(row.id)
@@ -218,7 +222,7 @@ async def _get_movement_id(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 class TestGenerateIncipit:
     """Integration tests for the generate_incipit task."""
 
@@ -258,8 +262,9 @@ class TestGenerateIncipit:
 
         yield
 
-        async with db_session.begin():
-            await _delete_test_composer(db_session, "test-mozart")
+        await db_session.rollback()
+        await _delete_test_composer(db_session, "test-mozart")
+        await db_session.commit()
 
     # ------------------------------------------------------------------
     # Test 1 — DB columns are written

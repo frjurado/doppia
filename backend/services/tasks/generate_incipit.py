@@ -129,7 +129,13 @@ async def _generate_incipit_async(movement_id: str) -> None:
                 "scale": 35,
             }
         )
-        ok = tk.loadData(mei_bytes.decode("utf-8"))
+        # Strip XML comments before loading: Verovio's XML parser does not
+        # handle comments that appear between the XML declaration and the root
+        # element, which causes it to miss <music>.  Using re.sub here avoids
+        # pulling in lxml as a dependency.
+        import re as _re
+        mei_text = _re.sub(r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=_re.DOTALL)
+        ok = tk.loadData(mei_text)
         if not ok:
             raise RuntimeError(
                 f"Verovio failed to load MEI for movement {movement_id}. "
