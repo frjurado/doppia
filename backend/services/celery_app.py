@@ -15,13 +15,23 @@ Override with:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from celery import Celery
+from dotenv import load_dotenv
+
+# Load .env from repo root so worker processes have DATABASE_URL, R2_*, etc.
+# No-op if variables are already set in the environment (e.g. in production).
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 celery_app = Celery(
     "doppia",
     broker=os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
     backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+    include=[
+        "services.tasks.generate_incipit",
+        "services.tasks.ingest_analysis",
+    ],
 )
 
 celery_app.conf.task_serializer = "json"

@@ -181,7 +181,45 @@ python scripts/backfill_incipits.py
 
 Create this script alongside the existing seed scripts. It queries all movements where `incipit_object_key IS NULL` and enqueues `generate_incipit` for each. This is a one-time operation and not part of the normal pipeline.
 
-**Staging data top-up.** Once the incipit task is verified working, use the corpus-preparation script to ingest 5–6 complete works (roughly 12–15 movements) from the Mozart piano sonatas into staging. This serves two purposes: it confirms the incipit pipeline holds up across a range of key signatures, meters, and movement lengths, and it gives the corpus browser enough data to evaluate meaningfully — a single work in the works column is indistinguishable from a broken state. The full corpus population is Component 9's responsibility; this subset is the minimum needed to make the browser feel real during development. The existing fixture movements (K. 331/1–2, K. 283/2) count toward the total.
+**Staging data top-up.** Once the incipit task is verified working, ingest 5 complete sonatas (15 movements) from the Mozart piano sonatas using the staging subset config. This gives the corpus browser enough data to evaluate meaningfully. The full corpus population is Component 9's responsibility; this subset is the minimum needed to make the browser feel real during development. The existing fixture movements (K. 331/1–2, K. 283/2) count toward the total.
+
+Run the following from the repo root with the backend venv active and Docker stack running:
+
+**1. Build the staging ZIP** (uses Python `verovio` bindings — no CLI dependency):
+
+```bash
+python scripts/prepare_dcml_corpus.py \
+  --repo-path "F:/CLAUDE/Doppia/mozart_piano_sonatas" \
+  --config scripts/dcml_corpora/mozart-browser-staging.toml \
+  --output /tmp/mozart-browser-staging.zip
+```
+
+This produces a ZIP covering K. 279, 280, 283, 331, 332 (15 movements total). The config is at `scripts/dcml_corpora/mozart-browser-staging.toml`.
+
+**2. Upload to the local API:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/composers/mozart/corpora/piano-sonatas/upload \
+  -H "Authorization: Bearer dev-token" \
+  -F "archive=@/tmp/mozart-browser-staging.zip"
+```
+
+`dev-token` is accepted because `.env` sets `ENVIRONMENT=local` and `AUTH_MODE=local`. The endpoint requires `admin` role, which the dev token carries. Inspect the JSON response — `movements_accepted` should list 15 movements, `movements_rejected` should be empty.
+
+**3. Start the Celery worker** (in a separate terminal, venv active, from `backend/`):
+
+```bash
+celery -A services.celery_app worker --loglevel=info
+```
+
+**4. Backfill incipits** for all movements that were ingested before the worker was wired:
+
+```bash
+DATABASE_URL="postgresql+asyncpg://postgres:localpassword@localhost/doppia" \
+  python scripts/backfill_incipits.py
+```
+
+Watch the Celery worker terminal — each `generate_incipit` task should complete with a log line confirming the SVG was stored. Verify with `--dry-run` first if desired.
 
 ---
 

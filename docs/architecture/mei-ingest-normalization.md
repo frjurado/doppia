@@ -355,5 +355,55 @@ The spike script bug (missing `redoLayout()`) has been corrected. `tk.select()` 
 2. **Time map audit** — ✅ **N/A.** `grep -r getTimesForElement backend/` returns no matches. No callers exist; nothing to audit.
 3. **MIDI repetition default** — ✅ **N/A.** No MIDI playback Celery task has been implemented yet (ADR-012 references future Phase 1/2 work). No code relies on the previous non-expansion behaviour.
 4. **Regenerate snapshot baselines** — ✅ **N/A.** `backend/tests/snapshots/` contains only an empty `__init__.py`; no baselines exist to regenerate. The 5.3 SVG structure change is noted but has no current impact.
-5. **Backfill incipits** — ✅ **N/A.** The `generate_incipit` task (Component 2 Step 3) has not yet been implemented; no incipits have been generated under 4.3.1. Nothing to backfill.
+5. **Backfill incipits** — ✅ **Done.** The `generate_incipit` task (Component 2 Step 3) has been implemented and backfilled for all 15 staging movements. See §"Known incipit rendering quality issues" below for observations.
 6. **Client/server version parity** — ✅ **N/A.** No frontend Verovio WASM is integrated yet (Component 3). The parity requirement applies when Component 3 introduces the WASM viewer.
+
+---
+
+## § Known DCML encoding quirks: Mozart staging ingest (2026-04-24)
+
+*Source: ingestion report from `scripts/dcml_corpora/mozart-browser-staging.toml` (K.279, 280, 283, 331, 332 — 15 movements). All movements were accepted; these are warnings, not rejections.*
+
+The following patterns appear across the Mozart corpus and are artefacts of how MuseScore 3.6 encodes repeats and how verovio converts them to MEI. They do not affect musical content or incipit rendering and are flagged by the normalizer as warnings only.
+
+### `@n='X1'`, `'X2'`, … on measures outside `<ending>`
+
+Affects: K.279/2–3, K.280/3, K.283/1, K.331/1,3, K.332/3 (and others).
+
+MuseScore encodes certain repeated sections by writing out repeat-end measures with non-integer `@n` values (`X1`, `X2`, …) rather than using `<ending>` wrappers. These values are not valid as measure numbers outside `<ending>` elements. The normalizer flags them but cannot auto-correct them without knowing the intended bar numbering.
+
+**Future fix:** A dedicated normalizer pass that detects `X`-prefixed `@n` values, infers whether they belong inside an `<ending>` wrapper, and either rewrites the structure or strips the `X` prefix and renumbers accordingly. K.331/movement-1 is the representative case.
+
+### Duplicate `@n` on all measures outside `<ending>` (K.331/movement-2)
+
+K.331/movement-2 (Menuetto) has every measure `@n` duplicated (1–48 twice). This is the worst case in the staging set: the movement appears to have been written out twice by MuseScore rather than using repeat barlines, producing a full duplicate of the bar sequence. The normalizer warns on all 48 duplicates.
+
+**Future fix:** Investigate whether the MuseScore source (`K331-2.mscx`) contains a structural duplication and whether it can be collapsed into a repeat structure before MEI conversion.
+
+### Non-sequential `<ending> @n` values (K.283/2, K.331/1)
+
+Endings are numbered `[1, 1, 2, 2]` (K.283/2) and `[1, 1, 1, 2, 2, 2]` (K.331/1) rather than sequentially. These are paired endings across multiple repetitions; the MEI encoding repeats the same ending number for each volta occurrence rather than using unique identifiers.
+
+### Unpaired `rptend` (K.331/movement-2)
+
+Two `rptend` barlines without matching `rptstart` in K.331/movement-2, consistent with the duplicate-bar issue above.
+
+---
+
+## § Known incipit rendering quality issues (2026-04-24)
+
+*Observed after running `generate_incipit` across all 15 staging movements using `pageWidth=800`, `breaks="smart"`, `scale=35`.*
+
+The page-1 / smart-break strategy (Finding 5) works correctly for the majority of movements, but two quality issues affect a subset:
+
+### Single-bar incipits
+
+Some movements render only one bar on page 1. This happens when the first measure is unusually wide — typically due to many notes, ornaments, or a very short time-signature denominator (e.g. 3/8 with many 32nd notes). Verovio's smart-break algorithm places the line break after bar 1 because bar 1 alone already fills the 800px width at scale 35.
+
+**Potential fix:** Increase `pageWidth` (e.g. to 1200px) to allow more bars per system, at the cost of a wider SVG. Alternatively, use `measureRange "1-4"` (the select-based approach from Finding 2) to guarantee a fixed bar count regardless of width — but this requires a fallback for movements without a pickup bar. This is worth revisiting when the corpus browser UI is under active development (Component 2 Step 8).
+
+### Illegible incipits due to crowded spacing
+
+A few movements produce incipits where notes are packed so tightly they overlap or are visually unreadable. This is the converse of the above: many bars fit in 800px but at scale 35 the notation is too compressed.
+
+**Potential fix:** A higher `scale` value (e.g. 40–45) increases note spacing and glyph size. This trades off against fitting fewer bars on the first system. Testing with `scale=40` and `pageWidth=1000` on the affected movements (primarily K.331/movement-1 and K.279/movement-2) is recommended before finalising the incipit parameters.

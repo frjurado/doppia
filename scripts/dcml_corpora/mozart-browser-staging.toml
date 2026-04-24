@@ -1,0 +1,204 @@
+# DCML Mozart Piano Sonatas — browser staging subset
+#
+# Five sonatas (15 movements) covering a range of keys and meters, sufficient
+# to make the corpus browser columns look real during Component 2 development.
+#
+# Used with: python scripts/prepare_dcml_corpus.py
+#   --repo-path ~/src/mozart_piano_sonatas
+#   --config scripts/dcml_corpora/mozart-browser-staging.toml
+#   --output /tmp/mozart-browser-staging.zip
+#
+# Source: https://github.com/DCMLab/mozart_piano_sonatas
+# Licence: CC BY-SA 4.0 (ADR-009)
+#
+# Sonatas included:
+#   K.279 — C major   (4/4, 3/4, 3/8)
+#   K.280 — F major   (3/4, 6/8, 3/8)
+#   K.283 — G major   (3/4, 4/4, 3/8)
+#   K.331 — A major   (6/8, 3/4, 2/4) — movements 1-2 exist as test fixtures
+#   K.332 — F major   (3/4, 3/4, 2/4)
+#
+# The full corpus (18 sonatas) is in mozart-piano-sonatas.toml.
+# Component 9 is responsible for ingesting the full corpus.
+
+[composer]
+slug = "mozart"
+name = "Wolfgang Amadeus Mozart"
+sort_name = "Mozart, Wolfgang Amadeus"
+birth_year = 1756
+death_year = 1791
+nationality = "Austrian"
+wikidata_id = "Q254"
+
+[corpus]
+slug = "piano-sonatas"
+title = "Piano Sonatas"
+source_repository = "DCMLab/mozart_piano_sonatas"
+analysis_source = "DCML"
+licence = "CC-BY-SA-4.0"
+licence_notice = "© DCML contributors. Licensed under CC BY-SA 4.0. https://creativecommons.org/licenses/by-sa/4.0/"
+
+# ---------------------------------------------------------------------------
+# K. 279 — Piano Sonata No. 1 in C major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k279"
+title = "Piano Sonata No. 1 in C major, K. 279"
+catalogue_number = "K. 279"
+year_composed = 1775
+key_signature = "C major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "4/4"
+mscx_filename = "K279-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante"
+meter = "3/4"
+mscx_filename = "K279-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegro"
+meter = "3/8"
+mscx_filename = "K279-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 280 — Piano Sonata No. 2 in F major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k280"
+title = "Piano Sonata No. 2 in F major, K. 280"
+catalogue_number = "K. 280"
+year_composed = 1775
+key_signature = "F major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro assai"
+meter = "3/4"
+mscx_filename = "K280-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "6/8"
+mscx_filename = "K280-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Presto"
+meter = "3/8"
+mscx_filename = "K280-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 283 — Piano Sonata No. 5 in G major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k283"
+title = "Piano Sonata No. 5 in G major, K. 283"
+catalogue_number = "K. 283"
+year_composed = 1775
+key_signature = "G major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "3/4"
+mscx_filename = "K283-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Andante"
+meter = "4/4"
+mscx_filename = "K283-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Presto"
+meter = "3/8"
+mscx_filename = "K283-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 331 — Piano Sonata No. 11 in A major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k331"
+title = "Piano Sonata No. 11 in A major, K. 331"
+catalogue_number = "K. 331"
+year_composed = 1783
+key_signature = "A major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Andante grazioso"
+meter = "6/8"
+mscx_filename = "K331-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Menuetto"
+meter = "3/4"
+mscx_filename = "K331-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Alla Turca. Allegretto"
+meter = "2/4"
+mscx_filename = "K331-3.mscx"
+
+# ---------------------------------------------------------------------------
+# K. 332 — Piano Sonata No. 12 in F major
+# ---------------------------------------------------------------------------
+
+[[works]]
+slug = "k332"
+title = "Piano Sonata No. 12 in F major, K. 332"
+catalogue_number = "K. 332"
+year_composed = 1783
+key_signature = "F major"
+instrumentation = "piano"
+
+[[works.movements]]
+slug = "movement-1"
+movement_number = 1
+title = "Allegro"
+meter = "3/4"
+mscx_filename = "K332-1.mscx"
+
+[[works.movements]]
+slug = "movement-2"
+movement_number = 2
+title = "Adagio"
+meter = "3/4"
+mscx_filename = "K332-2.mscx"
+
+[[works.movements]]
+slug = "movement-3"
+movement_number = 3
+title = "Allegro assai"
+meter = "2/4"
+mscx_filename = "K332-3.mscx"
