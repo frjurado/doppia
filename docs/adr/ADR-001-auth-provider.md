@@ -48,7 +48,7 @@ The Phase 1 role model (`editor`, `admin`) maps directly onto Supabase Auth's us
 **Negative**
 
 - Supabase Auth is less feature-rich than Auth0 for complex enterprise identity scenarios (SAML, advanced MFA policies, organisation-level tenancy). None of these are needed now, but migrating away from Supabase Auth later would require re-issuing tokens to all users.
-- The local development stack must replicate Supabase Auth behaviour. The solution is the `AUTH_MODE=local` bypass documented in the README: when `ENVIRONMENT=development`, the backend accepts a fixed development token. This is a small but real divergence from production behaviour that must be kept inert outside development.
+- The local development stack must replicate Supabase Auth behaviour. The solution is the `AUTH_MODE=local` bypass documented in the README: when `ENVIRONMENT=local`, the backend accepts a fixed development token. This is a small but real divergence from production behaviour that must be kept inert outside development.
 
 **Neutral**
 

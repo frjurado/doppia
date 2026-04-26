@@ -36,6 +36,8 @@ Without this test, the bug can re-emerge silently.
 
 ## Issue 2: README says `ENVIRONMENT=development` for dev-auth bypass; code requires `ENVIRONMENT=local`
 
+**[SOLVED]**
+
 **Issue.** `README.md` line 84 instructs developers:
 
 > Set `AUTH_MODE=local` in `.env` and the backend will accept a fixed development token (`Bearer dev-token`) on all authenticated endpoints. This is enforced only when `ENVIRONMENT=development`.
