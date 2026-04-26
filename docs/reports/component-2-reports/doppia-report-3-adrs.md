@@ -92,6 +92,8 @@ So the document is internally inconsistent on the same decision: line 421 has th
 
 ## Issue 4: `python-dotenv` is in dev requirements only, but imported by production code paths
 
+**[SOLVED]**
+
 **Issue.** `backend/requirements.txt` does not include `python-dotenv`. `backend/requirements-dev.txt` line 7 does. But `backend/main.py` line 20 has:
 
 ```python
