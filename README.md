@@ -81,7 +81,7 @@ npm run dev
 
 ## Development without external auth
 
-During local development, Supabase Auth can be bypassed. Set `AUTH_MODE=local` in `.env` and the backend will accept a fixed development token (`Bearer dev-token`) on all authenticated endpoints. This is enforced only when `ENVIRONMENT=development`; it is inert in staging and production.
+During local development, Supabase Auth can be bypassed. Set `AUTH_MODE=local` in `.env` and the backend will accept a fixed development token (`Bearer dev-token`) on all authenticated endpoints. This is enforced only when `ENVIRONMENT=local`; it is inert in staging and production.
 
 Do not use development auth mode in any environment that handles real data.
 

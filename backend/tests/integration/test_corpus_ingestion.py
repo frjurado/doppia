@@ -234,14 +234,7 @@ class TestCorpusIngestion:
     @pytest_asyncio.fixture(autouse=True)
     async def _cleanup(self, db_session: AsyncSession) -> None:  # type: ignore[override]
         """Delete test composer and all descendant rows after each test."""
-        import services.tasks.ingest_analysis as _ia_module
-
         yield
-
-        # Reset the ingest_analysis session-factory cache so the next test
-        # gets a fresh engine/session bound to the current event loop.
-        _ia_module._session_factory = None
-        _ia_module._engine = None
 
         # Use rollback to discard any uncommitted state from the test body
         # (autobegin may already have started a transaction), then run the
@@ -738,3 +731,42 @@ class TestCorpusIngestion:
         assert harmony_warn == [], (
             f"Expected no harmony_alignment_warnings, got: {harmony_warn}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Standalone regression test: per-invocation engine (Issue 1)
+# ---------------------------------------------------------------------------
+
+
+def test_dcml_branch_runs_twice_in_same_process() -> None:
+    """asyncio.run(_dcml_branch) called twice in the same process must not crash.
+
+    Regression test for the engine-caching bug described in Report 2 Issue 1.
+    The old ``_get_session_factory()`` cached the SQLAlchemy engine at module
+    level.  The second ``asyncio.run()`` call creates a new event loop, but the
+    cached asyncpg connections are bound to the *previous* (now-closed) loop,
+    causing ``RuntimeError: Event loop is closed``.
+
+    With the per-invocation engine pattern (mirroring ``generate_incipit``),
+    each call creates and disposes its own engine, so both calls succeed —
+    they raise ``ValueError`` (movement not found for the fake UUID) rather
+    than a ``RuntimeError``.
+
+    Requires a live PostgreSQL instance (same as other integration tests).
+    """
+    import asyncio
+
+    import pytest
+    from services.tasks.ingest_analysis import _dcml_branch
+
+    fake_id = "00000000-0000-0000-0000-000000000099"
+
+    # First call: loop A opens and closes.
+    with pytest.raises(ValueError, match="no movement found"):
+        asyncio.run(_dcml_branch(fake_id, ""))
+
+    # Second call: loop B.  With a cached engine bound to loop A this raises
+    # RuntimeError('Event loop is closed').  With per-invocation engines it
+    # raises the same ValueError as the first call.
+    with pytest.raises(ValueError, match="no movement found"):
+        asyncio.run(_dcml_branch(fake_id, ""))
