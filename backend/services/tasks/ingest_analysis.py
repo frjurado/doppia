@@ -30,39 +30,10 @@ from typing import Any, Literal
 
 import lxml.etree
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from services.celery_app import celery_app
 from services.object_storage import make_storage_client
-
-# ---------------------------------------------------------------------------
-# Module-level lazy async engine — initialised once per Celery worker process.
-# ---------------------------------------------------------------------------
-
-_engine: AsyncEngine | None = None
-_session_factory: async_sessionmaker[AsyncSession] | None = None
-
-
-def _get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Return (lazily initialised) async session factory for Celery worker DB access."""
-    global _engine, _session_factory
-    if _session_factory is None:
-        _engine = create_async_engine(
-            os.environ["DATABASE_URL"],
-            pool_pre_ping=True,
-            pool_size=2,
-            max_overflow=2,
-        )
-        _session_factory = async_sessionmaker(
-            _engine, class_=AsyncSession, expire_on_commit=False
-        )
-    return _session_factory
-
 
 # ---------------------------------------------------------------------------
 # MEI namespace constants
@@ -626,129 +597,150 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
     Fetches the normalized MEI from object storage, parses the DCML TSV,
     applies the smart-merge policy, and upserts ``movement_analysis``.
 
+    A fresh SQLAlchemy engine is created and disposed within this coroutine.
+    This is intentional: Celery tasks run inside ``asyncio.run()``, which
+    creates and closes a new event loop per invocation.  A module-level cached
+    engine holds asyncpg connections bound to the *previous* (closed) loop and
+    raises ``RuntimeError: Event loop is closed`` on reuse.  Creating a
+    per-invocation engine avoids this entirely with negligible overhead for an
+    internal tool.
+
     Args:
         movement_id: UUID of the ``movement`` row (as a string).
         harmonies_tsv_content: Raw TSV text from the ``harmonies/*.tsv`` file.
     """
     import music21 as _music21
 
-    factory = _get_session_factory()
-    async with factory() as session:
-        async with session.begin():
-            # 1. Fetch movement metadata needed for storage access and key check.
-            row = (
-                await session.execute(
-                    text(
-                        "SELECT mei_object_key, key_signature "
-                        "FROM movement WHERE id = :id"
-                    ),
-                    {"id": movement_id},
+    engine = create_async_engine(
+        os.environ["DATABASE_URL"],
+        pool_size=1,
+        max_overflow=0,
+        pool_pre_ping=False,
+    )
+    try:
+        async with AsyncSession(engine) as session:
+            async with session.begin():
+                # 1. Fetch movement metadata needed for storage access and key check.
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT mei_object_key, key_signature "
+                            "FROM movement WHERE id = :id"
+                        ),
+                        {"id": movement_id},
+                    )
+                ).one_or_none()
+                if row is None:
+                    raise ValueError(
+                        "ingest_movement_analysis: no movement found for"
+                        f" id={movement_id!r}."
+                    )
+                mei_object_key: str = row.mei_object_key
+                existing_key_sig: str | None = row.key_signature
+
+                # 2. Fetch normalized MEI from object storage.
+                storage = make_storage_client()
+                mei_bytes = await storage.get_mei(mei_object_key)
+
+                # 3. Parse TSV + alignment verification.
+                events, _phrase_boundaries, alignment_warnings = _parse_dcml_harmonies(
+                    harmonies_tsv_content, mei_bytes
                 )
-            ).one_or_none()
-            if row is None:
-                raise ValueError(
-                    f"ingest_movement_analysis: no movement found for id={movement_id!r}."
-                )
-            mei_object_key: str = row.mei_object_key
-            existing_key_sig: str | None = row.key_signature
 
-            # 2. Fetch normalized MEI from object storage.
-            storage = make_storage_client()
-            mei_bytes = await storage.get_mei(mei_object_key)
-
-            # 3. Parse TSV + alignment verification.
-            events, _phrase_boundaries, alignment_warnings = _parse_dcml_harmonies(
-                harmonies_tsv_content, mei_bytes
-            )
-
-            # 4. Global key cross-check: back-fill movement.key_signature if absent;
-            #    flag disagreement as an alignment warning.
-            if events:
-                first_globalkey = _extract_first_globalkey(harmonies_tsv_content)
-                if first_globalkey:
-                    try:
-                        canonical_gk = _resolve_key(first_globalkey, first_globalkey)
-                    except ValueError:
-                        canonical_gk = None
-
-                    if canonical_gk:
-                        if existing_key_sig is None:
-                            await session.execute(
-                                text(
-                                    "UPDATE movement "
-                                    "SET key_signature = :ks "
-                                    "WHERE id = :id"
-                                ),
-                                {"ks": canonical_gk, "id": movement_id},
+                # 4. Global key cross-check: back-fill movement.key_signature if absent;
+                #    flag disagreement as an alignment warning.
+                if events:
+                    first_globalkey = _extract_first_globalkey(harmonies_tsv_content)
+                    if first_globalkey:
+                        try:
+                            canonical_gk = _resolve_key(
+                                first_globalkey, first_globalkey
                             )
-                        elif existing_key_sig != canonical_gk:
-                            alignment_warnings.append(
-                                f"globalkey mismatch: TSV says {canonical_gk!r}, "
-                                f"movement.key_signature is {existing_key_sig!r}."
-                            )
+                        except ValueError:
+                            canonical_gk = None
 
-            # 5. Load existing events for smart-merge on re-analysis.
-            existing_row = (
-                await session.execute(
-                    text(
-                        "SELECT events FROM movement_analysis "
-                        "WHERE movement_id = :mid"
-                    ),
-                    {"mid": movement_id},
+                        if canonical_gk:
+                            if existing_key_sig is None:
+                                await session.execute(
+                                    text(
+                                        "UPDATE movement "
+                                        "SET key_signature = :ks "
+                                        "WHERE id = :id"
+                                    ),
+                                    {"ks": canonical_gk, "id": movement_id},
+                                )
+                            elif existing_key_sig != canonical_gk:
+                                alignment_warnings.append(
+                                    f"globalkey mismatch: TSV says {canonical_gk!r}, "
+                                    f"movement.key_signature is {existing_key_sig!r}."
+                                )
+
+                # 5. Load existing events for smart-merge on re-analysis.
+                existing_row = (
+                    await session.execute(
+                        text(
+                            "SELECT events FROM movement_analysis "
+                            "WHERE movement_id = :mid"
+                        ),
+                        {"mid": movement_id},
+                    )
+                ).one_or_none()
+                existing_events: list[dict[str, Any]] = (
+                    existing_row.events if existing_row else []
                 )
-            ).one_or_none()
-            existing_events: list[dict[str, Any]] = (
-                existing_row.events if existing_row else []
-            )
 
-            # 6. Apply smart-merge.
-            final_events = (
-                _merge_events(existing_events, events) if existing_events else events
-            )
+                # 6. Apply smart-merge.
+                final_events = (
+                    _merge_events(existing_events, events)
+                    if existing_events
+                    else events
+                )
 
-            # 7. Upsert movement_analysis.
-            await session.execute(
-                text(
-                    """
-                    INSERT INTO movement_analysis
-                        (id, movement_id, events, music21_version,
-                         created_at, updated_at)
-                    VALUES
-                        (gen_random_uuid(), :movement_id,
-                         CAST(:events AS jsonb), :music21_version,
-                         now(), now())
-                    ON CONFLICT (movement_id) DO UPDATE
-                        SET events          = EXCLUDED.events,
-                            music21_version = EXCLUDED.music21_version,
-                            updated_at      = now()
-                    """
-                ),
-                {
-                    "movement_id": movement_id,
-                    "events": json.dumps(final_events),
-                    "music21_version": _music21.__version__,
-                },
-            )
-
-            # 8. Store alignment warnings in movement.normalization_warnings.
-            if alignment_warnings:
+                # 7. Upsert movement_analysis.
                 await session.execute(
                     text(
                         """
-                        UPDATE movement
-                        SET normalization_warnings = jsonb_set(
-                            COALESCE(normalization_warnings, '{}'),
-                            '{harmony_alignment_warnings}',
-                            CAST(:warnings AS jsonb)
-                        )
-                        WHERE id = :id
+                        INSERT INTO movement_analysis
+                            (id, movement_id, events, music21_version,
+                             created_at, updated_at)
+                        VALUES
+                            (gen_random_uuid(), :movement_id,
+                             CAST(:events AS jsonb), :music21_version,
+                             now(), now())
+                        ON CONFLICT (movement_id) DO UPDATE
+                            SET events          = EXCLUDED.events,
+                                music21_version = EXCLUDED.music21_version,
+                                updated_at      = now()
                         """
                     ),
                     {
-                        "warnings": json.dumps(alignment_warnings),
-                        "id": movement_id,
+                        "movement_id": movement_id,
+                        "events": json.dumps(final_events),
+                        "music21_version": _music21.__version__,
                     },
                 )
+
+                # 8. Store alignment warnings in movement.normalization_warnings.
+                if alignment_warnings:
+                    await session.execute(
+                        text(
+                            """
+                            UPDATE movement
+                            SET normalization_warnings = jsonb_set(
+                                COALESCE(normalization_warnings, '{}'),
+                                '{harmony_alignment_warnings}',
+                                CAST(:warnings AS jsonb)
+                            )
+                            WHERE id = :id
+                            """
+                        ),
+                        {
+                            "warnings": json.dumps(alignment_warnings),
+                            "id": movement_id,
+                        },
+                    )
+    finally:
+        await engine.dispose()
 
 
 def _extract_first_globalkey(tsv_content: str) -> str | None:

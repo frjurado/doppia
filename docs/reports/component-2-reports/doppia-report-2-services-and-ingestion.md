@@ -12,6 +12,8 @@ The problems cluster around two themes. First, a **direct contradiction between 
 
 ## Issue 1: Conflicting engine-caching strategies between the two Celery tasks
 
+**[SOLVED]**
+
 **Issue.** `backend/services/tasks/generate_incipit.py` lines 67–73 documents an explicit decision to **avoid** module-level engine caching:
 
 > A fresh SQLAlchemy engine is created and disposed within this coroutine. This is intentional: Celery tasks run inside `asyncio.run()`, which creates and closes a new event loop per invocation. A module-level cached engine holds asyncpg connections bound to the *previous* (closed) loop and raises `RuntimeError: Event loop is closed` on reuse.
