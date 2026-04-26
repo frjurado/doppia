@@ -22,9 +22,11 @@ from dotenv import load_dotenv
 # Load .env from repo root when running locally (no-op if vars already set).
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+import httpx
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from starlette.exceptions import HTTPException
 
@@ -91,6 +93,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await neo4j_driver.verify_connectivity()
     app.state.neo4j_driver = neo4j_driver
 
+    # Fetch Supabase JWKS for ES256 token verification (new Supabase projects).
+    # Stored on app.state so the auth middleware can access it without an env var.
+    # Falls back gracefully to None; middleware then tries SUPABASE_JWT_SECRET (HS256).
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    app.state.jwks: dict | None = None
+    if supabase_url:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{supabase_url}/auth/v1/.well-known/jwks.json", timeout=5.0
+                )
+                resp.raise_for_status()
+                app.state.jwks = resp.json()
+                logger.info("Startup: Supabase JWKS fetched successfully.")
+        except Exception as exc:
+            logger.warning("Startup: could not fetch Supabase JWKS: %s", exc)
+
     logger.info("Startup complete: all connections established.")
 
     yield
@@ -143,6 +162,15 @@ def create_app() -> FastAPI:
 
     # Versioned API router — all endpoints live under /api/v1/.
     application.include_router(router)
+
+    # Serve the built React SPA in staging/production.
+    # The static/ directory is present in the Docker image (copied from the
+    # frontend build stage) but absent in local development, where Vite runs
+    # separately. StaticFiles with html=True returns index.html for any path
+    # that doesn't match a file, which is what React Router requires.
+    _static_dir = Path(__file__).parent / "static"
+    if _static_dir.is_dir():
+        application.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="frontend")
 
     return application
 

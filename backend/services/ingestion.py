@@ -20,6 +20,7 @@ The public surface is a single async function:
 from __future__ import annotations
 
 import io
+import logging
 import tempfile
 import uuid
 import zipfile
@@ -29,6 +30,8 @@ from typing import Any
 
 import yaml
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 from pydantic import ValidationError
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -313,14 +316,25 @@ async def ingest_corpus(
     # 8. Dispatch Celery tasks (outside transaction, after commit)
     # ------------------------------------------------------------------
     for entry in dispatch_entries:
-        ingest_movement_analysis.delay(
-            movement_id=str(entry.movement_id),
-            analysis_source=entry.analysis_source,
-            harmonies_tsv_content=(
-                entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
-            ),
-        )
-        generate_incipit.delay(movement_id=str(entry.movement_id))
+        try:
+            ingest_movement_analysis.delay(
+                movement_id=str(entry.movement_id),
+                analysis_source=entry.analysis_source,
+                harmonies_tsv_content=(
+                    entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
+                ),
+            )
+            generate_incipit.delay(movement_id=str(entry.movement_id))
+        except Exception as exc:
+            # Broker unavailable (e.g. misconfigured Redis in staging). The
+            # upload itself has already succeeded — DB records committed and
+            # MEI files stored. Log and continue; tasks can be re-enqueued
+            # manually once the broker is reachable.
+            logger.warning(
+                "Could not enqueue background tasks for movement %s: %s",
+                entry.movement_id,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # 9. Return report

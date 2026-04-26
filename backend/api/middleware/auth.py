@@ -1,7 +1,7 @@
 """JWT validation middleware for the Doppia API.
 
 Reads the ``Authorization: Bearer <token>`` header on every request,
-validates it against the Supabase JWT secret, and attaches the resulting
+validates it against the Supabase public key, and attaches the resulting
 ``AuthenticatedUser`` to ``request.state.user``.
 
 If no ``Authorization`` header is present, ``request.state.user`` is set to
@@ -11,6 +11,14 @@ authentication requirements via the ``require_role()`` dependency.
 A development bypass is available when both ``ENVIRONMENT=local`` and
 ``AUTH_MODE=local`` are set: the literal token ``dev-token`` is accepted
 without JWT validation.
+
+Supabase uses ES256 (asymmetric) JWT signing on new projects. Set
+``SUPABASE_JWKS`` to the raw JSON string from the JWKS endpoint:
+    https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
+python-jose matches the token's ``kid`` header to the correct key automatically.
+
+Legacy projects using HS256 symmetric signing: set ``SUPABASE_JWT_SECRET``
+instead. Only one variable is needed; ``SUPABASE_JWKS`` takes precedence.
 """
 
 from __future__ import annotations
@@ -26,7 +34,6 @@ from starlette.types import ASGIApp
 
 from api.dependencies import AuthenticatedUser
 
-_ALGORITHM = "HS256"
 _DEV_TOKEN = "dev-token"
 _DEV_USER = AuthenticatedUser(id="dev-user", role="admin", email="dev@local")
 
@@ -92,15 +99,25 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Production / staging: full Supabase JWT validation.
-        jwt_secret = os.environ.get("SUPABASE_JWT_SECRET", "")
-        if not jwt_secret:
-            return _make_401("Server JWT secret is not configured.")
+        # ES256 (asymmetric, new Supabase projects): JWKS is fetched at startup
+        #   from the Supabase endpoint and stored on app.state.jwks.
+        # HS256 (symmetric, legacy projects): set SUPABASE_JWT_SECRET instead.
+        jwks: dict | None = getattr(request.app.state, "jwks", None)
+        secret = os.environ.get("SUPABASE_JWT_SECRET", "")
+        if jwks:
+            verify_key: object = jwks
+            algorithm = "ES256"
+        elif secret:
+            verify_key = secret
+            algorithm = "HS256"
+        else:
+            return _make_401("Server JWT key is not configured.")
 
         try:
             payload: dict = jwt.decode(
                 token,
-                jwt_secret,
-                algorithms=[_ALGORITHM],
+                verify_key,
+                algorithms=[algorithm],
                 # Supabase tokens carry audience "authenticated"; we skip
                 # audience verification here and rely on iss + exp instead.
                 options={"verify_aud": False},

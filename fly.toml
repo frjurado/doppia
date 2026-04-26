@@ -3,11 +3,14 @@ primary_region = "lhr"
 
 [build]
   dockerfile = "backend/Dockerfile"
+  context = "."
 
 [env]
   ENVIRONMENT = "staging"
   AUTH_MODE = "supabase"
   PORT = "8000"
+  R2_BUCKET_NAME = "doppia-staging"
+  R2_ENDPOINT_URL = "https://b0c58a6078065a6edcd5cf3ecced703d.r2.cloudflarestorage.com"
 
 [http_service]
   internal_port = 8000
