@@ -14,6 +14,8 @@ The other findings are smaller: stale ADR-001 referencing the wrong env-var name
 
 ## Issue 1: ADR-006 (Internationalisation) is unimplemented despite "Phase 1 (immediately)" status
 
+**[SOLVED]** (_solution 2_)
+
 **Issue.** ADR-006 is marked Accepted (2026-04-12) and contains an explicit "What Gets Built When" section. Under "Phase 1 (immediately)" it lists:
 
 - `language` column added to `fragment`, `blog_post`, and any future prose-bearing tables; default `'en'`
@@ -40,6 +42,8 @@ Recommendation: **option 2**. Schema-only scaffolding takes 30 minutes, defends 
 ---
 
 ## Issue 2: `fragment.beat_start` / `beat_end` migration comment contradicts ADR-005
+
+**[SOLVED]**
 
 **Issue.** `backend/migrations/versions/0001_initial_schema.py` line 245:
 

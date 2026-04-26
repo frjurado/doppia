@@ -242,7 +242,10 @@ def upgrade() -> None:
         ),
         sa.Column("bar_start", sa.Integer, nullable=False),
         sa.Column("bar_end", sa.Integer, nullable=False),
-        # Phase 1 leaves beat_start/beat_end null (ADR-005).
+        # beat_start/beat_end are nullable: null means "the full extent of the
+        # measure range" (ADR-005 §"Nullable convention"). Sub-beat selection is
+        # implemented in Phase 1; null is reserved for concepts whose granularity
+        # does not warrant sub-measure precision (e.g. formal sections).
         sa.Column("beat_start", sa.Float, nullable=True),
         sa.Column("beat_end", sa.Float, nullable=True),
         sa.Column("repeat_context", sa.Text, nullable=True),
