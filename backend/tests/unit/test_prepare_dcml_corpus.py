@@ -146,56 +146,43 @@ class TestConvertMscxToMxl:
 
 
 class TestConvertMxlToMei:
-    """convert_mxl_to_mei calls verovio and returns the emitted MEI bytes."""
+    """convert_mxl_to_mei uses the verovio Python API to return MEI bytes."""
 
-    def _make_mei_side_effect(
-        self,
-        mxl_path: Path,
-        tmpdir: Path,
-        mei_content: bytes,
-    ):
-        """Return a side_effect that writes mei_content to the expected output path."""
-
-        def _side_effect(cmd: list, **kwargs):
-            out_mei = tmpdir / (mxl_path.stem + ".mei")
-            out_mei.write_bytes(mei_content)
-
-        return _side_effect
+    def _verovio_mock(self, mei_content: bytes | None = None) -> tuple[MagicMock, MagicMock]:
+        """Return (mock_verovio_module, mock_toolkit_instance) for sys.modules patching."""
+        mock_tk = MagicMock()
+        mock_tk.loadFile.return_value = mei_content is not None
+        if mei_content is not None:
+            mock_tk.getMEI.return_value = mei_content.decode("utf-8")
+        mock_verovio = MagicMock()
+        mock_verovio.toolkit.return_value = mock_tk
+        return mock_verovio, mock_tk
 
     def test_calls_verovio_with_correct_args(
         self, tmp_path: Path, valid_mei_bytes: bytes
     ) -> None:
         mxl = tmp_path / "K331-1.mxl"
         mxl.touch()
-        side_effect = self._make_mei_side_effect(mxl, tmp_path, valid_mei_bytes)
-        with patch(
-            "prepare_dcml_corpus.subprocess.run", side_effect=side_effect
-        ) as mock_run:
+        mock_verovio, mock_tk = self._verovio_mock(valid_mei_bytes)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
             pdc.convert_mxl_to_mei(mxl, tmp_path)
-        call_args = mock_run.call_args[0][0]
-        assert call_args[0] == "verovio"
-        assert call_args[1] == "--to"
-        assert call_args[2] == "mei"
-        assert call_args[3] == str(mxl)
-        assert call_args[4] == "-o"
-        assert call_args[5].endswith("K331-1.mei")
+        mock_tk.loadFile.assert_called_once_with(str(mxl))
 
     def test_returns_mei_bytes(self, tmp_path: Path, valid_mei_bytes: bytes) -> None:
         mxl = tmp_path / "K331-1.mxl"
         mxl.touch()
-        side_effect = self._make_mei_side_effect(mxl, tmp_path, valid_mei_bytes)
-        with patch("prepare_dcml_corpus.subprocess.run", side_effect=side_effect):
+        mock_verovio, _ = self._verovio_mock(valid_mei_bytes)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
             result = pdc.convert_mxl_to_mei(mxl, tmp_path)
-        assert result == valid_mei_bytes
+        assert isinstance(result, bytes)
+        assert b"<mei" in result
 
-    def test_propagates_called_process_error(self, tmp_path: Path) -> None:
+    def test_raises_runtime_error_on_load_failure(self, tmp_path: Path) -> None:
         mxl = tmp_path / "K331-1.mxl"
         mxl.touch()
-        with patch(
-            "prepare_dcml_corpus.subprocess.run",
-            side_effect=CalledProcessError(1, "verovio"),
-        ):
-            with pytest.raises(CalledProcessError):
+        mock_verovio, _ = self._verovio_mock(mei_content=None)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
+            with pytest.raises(RuntimeError, match="verovio failed to load"):
                 pdc.convert_mxl_to_mei(mxl, tmp_path)
 
 
