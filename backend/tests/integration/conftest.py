@@ -11,6 +11,7 @@ MinIO, Redis) to be running before the test session starts.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -22,6 +23,24 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
 from starlette.exceptions import HTTPException
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def pin_event_loop() -> AsyncGenerator[None, None]:
+    """Pin the running loop as the thread's current event loop for the session.
+
+    On Python 3.12, ``asyncio.get_event_loop()`` raises ``RuntimeError`` when
+    called from a non-coroutine context if the running loop has not been
+    explicitly registered via ``asyncio.set_event_loop()``.  pytest-asyncio
+    may omit this call in some configurations.  Libraries such as
+    ``aioboto3``/``botocore`` that call ``asyncio.get_event_loop()`` inside
+    synchronous callpaths triggered from async code therefore fail.
+
+    This fixture runs once per session and ensures the running loop is always
+    reachable via the standard ``asyncio.get_event_loop()`` API.
+    """
+    asyncio.set_event_loop(asyncio.get_running_loop())
+    yield
 
 
 @asynccontextmanager
