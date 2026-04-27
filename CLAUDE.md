@@ -60,14 +60,15 @@ ruff check backend/
 
 ### Tests
 ```bash
-pytest                                          # all tests (requires Docker stack running)
-pytest tests/unit/                              # fast; no Docker required
-pytest tests/integration/                       # requires live Neo4j + PostgreSQL
-pytest tests/graph/                             # graph structure validation
-pytest tests/snapshots/                         # Verovio rendering snapshots
-pytest tests/snapshots/ --update-snapshots      # regenerate baselines after Verovio upgrade
-pytest --cov=backend --cov-report=term-missing  # with coverage
+pytest                                          # unit tests only (no Docker required)
+pytest tests/unit/                              # same as above, explicit path
+DOPPIA_RUN_INTEGRATION=1 pytest tests/integration/  # requires docker compose up
+pytest --cov=backend --cov-report=term-missing  # with coverage (unit tests only)
 ```
+
+Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set.
+Snapshot tests (`tests/snapshots/`) are deferred to Phase 2 (Verovio regression guards).
+Graph structure tests use `python scripts/validate_graph.py` directly (see below).
 
 ## Architecture
 

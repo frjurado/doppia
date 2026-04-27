@@ -21,6 +21,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import pytest_asyncio
 import yaml
+
+pytestmark = pytest.mark.integration
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

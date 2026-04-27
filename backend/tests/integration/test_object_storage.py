@@ -20,6 +20,8 @@ from botocore.exceptions import ClientError
 
 from services.object_storage import StorageClient, incipit_key
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # MinIO connection defaults (match .env.example)
 # ---------------------------------------------------------------------------

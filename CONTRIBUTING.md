@@ -231,42 +231,38 @@ Pure functions, Pydantic validators, service-layer logic that can be tested with
 pytest tests/unit/
 ```
 
+Running `pytest` without arguments collects only unit tests. Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set.
+
 ### Integration tests
 
-FastAPI endpoints tested against a real Neo4j instance and a real PostgreSQL instance. The Docker Compose stack provides both. Integration tests are the primary confidence signal for API correctness.
+FastAPI endpoints tested against real PostgreSQL and MinIO instances. The Docker Compose stack provides both. Integration tests are the primary confidence signal for API correctness.
+
+Every integration test file is marked with `pytestmark = pytest.mark.integration`. To run them:
 
 ```bash
-pytest tests/integration/
+docker compose up -d   # start postgres, minio, redis
+DOPPIA_RUN_INTEGRATION=1 pytest tests/integration/
 ```
 
 Use test fixtures that set up and tear down their own data. Do not assume a clean database; do not leave test data behind. Every integration test should be runnable in any order and in parallel.
 
-### Graph structure tests
+### Graph structure validation
 
-Validate the structure of the seeded knowledge graph: no orphaned nodes, all cross-references resolve, `CONTAINS` edges have unique `order` values per concept, every `PropertySchema` has at least one value. These run against a live Neo4j instance seeded with the YAML files.
-
-```bash
-pytest tests/graph/
-```
-
-Or equivalently (for quick ad-hoc runs):
+Validate the structure of the seeded knowledge graph: no orphaned nodes, all cross-references resolve, `CONTAINS` edges have unique `order` values per concept, every `PropertySchema` has at least one value.
 
 ```bash
 python scripts/validate_graph.py
 ```
 
-The `pytest` suite and the standalone script run the same checks; the script is for local iteration and CI, the pytest suite is for structured reporting.
+Run this after every change to YAML seed files in `backend/seed/`. CI runs it automatically on commits that touch the seed directory.
 
 ### Verovio snapshot tests
 
-Pin the rendering output of a known MEI file against a baseline SVG. These catch Verovio version regressions. Baselines are committed to the repository alongside the test inputs.
+Snapshot tests (`tests/snapshots/`) are scaffolded but not yet populated — they are planned for Phase 2 once the Verovio rendering pipeline is stable. Do not add tests to this directory without first reading the snapshot test strategy in the Phase 2 roadmap.
 
-```bash
-pytest tests/snapshots/                       # assert against committed baselines
-pytest tests/snapshots/ --update-snapshots    # regenerate baselines (after a deliberate Verovio upgrade)
-```
+### Frontend tests
 
-Snapshot baselines are committed only when Verovio is deliberately upgraded. An unexpected snapshot diff is a test failure, not an excuse to regenerate.
+No frontend test framework is configured yet. This is a deliberate Phase 1 choice — the frontend is a thin browser layer on top of four read-only endpoints. See `frontend/TESTING.md` for the rationale and the planned Phase 2 approach (Vitest + React Testing Library).
 
 ### What is not tested in Phase 1
 

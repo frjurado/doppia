@@ -20,10 +20,17 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import aioboto3
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
+
+# Load .env from the project root so that DATABASE_URL and other required
+# variables are always available when pytest is invoked.  If no .env file
+# exists (e.g. in CI, where env vars are injected directly) this is a no-op.
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +38,33 @@ from httpx import ASGITransport, AsyncClient
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException
+
+# ---------------------------------------------------------------------------
+# Integration-marker skip hook
+# ---------------------------------------------------------------------------
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """Skip integration tests unless DOPPIA_RUN_INTEGRATION is set.
+
+    Integration tests are marked with ``@pytest.mark.integration`` (or via
+    ``pytestmark = pytest.mark.integration`` at module level).  On a fresh
+    checkout without Docker running, a contributor can do ``pytest`` and get
+    only the fast unit tests.  Set ``DOPPIA_RUN_INTEGRATION=1`` (or any
+    non-empty value) to include integration tests.
+    """
+    if os.environ.get("DOPPIA_RUN_INTEGRATION"):
+        return
+    skip = pytest.mark.skip(
+        reason="Docker not running — set DOPPIA_RUN_INTEGRATION=1 to run integration tests"
+    )
+    for item in items:
+        if item.get_closest_marker("integration"):
+            item.add_marker(skip)
+
 
 # ---------------------------------------------------------------------------
 # Unit fixtures — no Docker required

@@ -19,3 +19,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 testpaths = ["backend/tests"]
 pythonpath = ["backend", "scripts"]
+addopts = "--ignore=backend/tests/snapshots"
+markers = [
+    "integration: tests requiring docker compose up (postgres, minio, redis)",
+]
