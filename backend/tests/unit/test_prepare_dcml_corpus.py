@@ -148,7 +148,9 @@ class TestConvertMscxToMxl:
 class TestConvertMxlToMei:
     """convert_mxl_to_mei uses the verovio Python API to return MEI bytes."""
 
-    def _verovio_mock(self, mei_content: bytes | None = None) -> tuple[MagicMock, MagicMock]:
+    def _verovio_mock(
+        self, mei_content: bytes | None = None
+    ) -> tuple[MagicMock, MagicMock]:
         """Return (mock_verovio_module, mock_toolkit_instance) for sys.modules patching."""
         mock_tk = MagicMock()
         mock_tk.loadFile.return_value = mei_content is not None
