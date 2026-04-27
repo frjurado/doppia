@@ -6,11 +6,10 @@ All feature routers are registered here. ``main.py`` imports only this
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-
 from api.routes.browse import router as browse_router
 from api.routes.corpora import router as corpora_router
 from api.routes.health import router as health_router
+from fastapi import APIRouter
 
 # Single public router imported by main.py.
 router = APIRouter(prefix="/api/v1")

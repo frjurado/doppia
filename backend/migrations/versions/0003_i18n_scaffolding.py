@@ -192,16 +192,12 @@ def upgrade() -> None:
     op.create_index(
         "concept_translation_language_idx", "concept_translation", ["language"]
     )
-    op.create_index(
-        "fat_language_idx", "fragment_annotation_translation", ["language"]
-    )
+    op.create_index("fat_language_idx", "fragment_annotation_translation", ["language"])
 
 
 def downgrade() -> None:
     op.drop_index("fat_language_idx", table_name="fragment_annotation_translation")
-    op.drop_index(
-        "concept_translation_language_idx", table_name="concept_translation"
-    )
+    op.drop_index("concept_translation_language_idx", table_name="concept_translation")
     op.drop_index("fragment_language_idx", table_name="fragment")
 
     op.drop_table("fragment_annotation_translation")

@@ -19,16 +19,13 @@ import copy
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
 from models.ingestion import (
     ComposerMetadata,
-    CorpusMetadata,
     IngestMetadata,
     MovementMetadata,
     WorkMetadata,
 )
-
+from pydantic import ValidationError
 
 # ---------------------------------------------------------------------------
 # Base fixture factory
@@ -289,9 +286,7 @@ def test_work_slug_leading_hyphen_rejected() -> None:
             slug="-op18",
             title="Test",
             movements=[
-                MovementMetadata(
-                    slug="i", movement_number=1, mei_filename="x.mei"
-                )
+                MovementMetadata(slug="i", movement_number=1, mei_filename="x.mei")
             ],
         )
     locs = _errors_by_loc(exc_info.value)
@@ -319,9 +314,7 @@ def test_composer_slug_empty_rejected() -> None:
 def test_movement_slug_with_underscore_rejected() -> None:
     """Underscores are not permitted in slugs."""
     with pytest.raises(ValidationError) as exc_info:
-        MovementMetadata(
-            slug="movement_1", movement_number=1, mei_filename="x.mei"
-        )
+        MovementMetadata(slug="movement_1", movement_number=1, mei_filename="x.mei")
     locs = _errors_by_loc(exc_info.value)
     assert "slug" in locs
 
@@ -503,9 +496,9 @@ def test_abc_beethoven_slug_rejected() -> None:
 def test_abc_beethoven_full_url_rejected() -> None:
     """Full GitHub URL containing the ABC slug also triggers the deny-list."""
     d = _valid_ingest_dict()
-    d["corpus"]["source_repository"] = (
-        "https://github.com/DCMLab/abc/beethoven-quartets"
-    )
+    d["corpus"][
+        "source_repository"
+    ] = "https://github.com/DCMLab/abc/beethoven-quartets"
     d["corpus"]["analysis_source"] = "DCML"
     with pytest.raises(ValidationError):
         IngestMetadata.model_validate(d)

@@ -356,6 +356,7 @@ class TestMapForm:
 
     def test_unknown_raises(self) -> None:
         import pytest
+
         with pytest.raises(ValueError):
             _map_form("Z")
 
@@ -403,11 +404,20 @@ class TestParseDcmlHarmonies:
 
     def test_happy_path_chord_i(self) -> None:
         """mc=1, mn=1, 6/8, localkey=I, globalkey=A → A major I."""
-        tsv = _make_tsv(_row(
-            mc=1, mn=1, timesig="6/8", mn_onset="0",
-            event="I", globalkey="A", localkey="I",
-            numeral="I", form="M", figbass="",
-        ))
+        tsv = _make_tsv(
+            _row(
+                mc=1,
+                mn=1,
+                timesig="6/8",
+                mn_onset="0",
+                event="I",
+                globalkey="A",
+                localkey="I",
+                numeral="I",
+                form="M",
+                figbass="",
+            )
+        )
         events, _, _ = _parse_dcml_harmonies(tsv, _MEI_SIMPLE)
         assert len(events) == 1
         ev = events[0]
@@ -431,11 +441,20 @@ class TestParseDcmlHarmonies:
 
     def test_v7_chord(self) -> None:
         """V with figbass=7 → numeral V7, inversion 0."""
-        tsv = _make_tsv(_row(
-            mc=2, mn=2, timesig="6/8", mn_onset="0",
-            event="V7", globalkey="A", localkey="I",
-            numeral="V", form="M", figbass="7",
-        ))
+        tsv = _make_tsv(
+            _row(
+                mc=2,
+                mn=2,
+                timesig="6/8",
+                mn_onset="0",
+                event="V7",
+                globalkey="A",
+                localkey="I",
+                numeral="V",
+                form="M",
+                figbass="7",
+            )
+        )
         events, _, _ = _parse_dcml_harmonies(tsv, _MEI_SIMPLE)
         ev = events[0]
         assert ev["numeral"] == "V7"
@@ -458,8 +477,15 @@ class TestParseDcmlHarmonies:
     def test_phraseend_column_captured(self) -> None:
         """Phrase close in phraseend column is captured as a boundary."""
         tsv = _make_tsv(
-            _row(mc=2, mn=2, event="V7", numeral="V", form="M", figbass="7",
-                 phraseend="}"),
+            _row(
+                mc=2,
+                mn=2,
+                event="V7",
+                numeral="V",
+                form="M",
+                figbass="7",
+                phraseend="}",
+            ),
         )
         events, phrases, _ = _parse_dcml_harmonies(tsv, b"")
         assert len(events) == 1
@@ -467,23 +493,36 @@ class TestParseDcmlHarmonies:
 
     def test_secondary_dominant(self) -> None:
         """numeral=V, relativeroot=/V → applied_to='V'."""
-        tsv = _make_tsv(_row(
-            mc=4, mn=4, event="V/V",
-            globalkey="A", localkey="I",
-            numeral="V", form="M", figbass="",
-            relativeroot="/V",
-        ))
+        tsv = _make_tsv(
+            _row(
+                mc=4,
+                mn=4,
+                event="V/V",
+                globalkey="A",
+                localkey="I",
+                numeral="V",
+                form="M",
+                figbass="",
+                relativeroot="/V",
+            )
+        )
         events, _, _ = _parse_dcml_harmonies(tsv, b"")
         assert events[0]["applied_to"] == "V"
         assert events[0]["numeral"] == "V"
 
     def test_flat_numeral(self) -> None:
         """bVII → numeral='VII', root_accidental='flat'."""
-        tsv = _make_tsv(_row(
-            mc=5, mn=5, event="bVII",
-            globalkey="A", localkey="I",
-            numeral="bVII", form="M",
-        ))
+        tsv = _make_tsv(
+            _row(
+                mc=5,
+                mn=5,
+                event="bVII",
+                globalkey="A",
+                localkey="I",
+                numeral="bVII",
+                form="M",
+            )
+        )
         events, _, _ = _parse_dcml_harmonies(tsv, b"")
         ev = events[0]
         assert ev["numeral"] == "VII"
@@ -491,11 +530,19 @@ class TestParseDcmlHarmonies:
 
     def test_extension_parsed(self) -> None:
         """figbass=7, changes=(9) → numeral='V7', extensions=['9']."""
-        tsv = _make_tsv(_row(
-            mc=6, mn=6, event="V7(9)",
-            globalkey="A", localkey="I",
-            numeral="V", form="M", figbass="7", changes="(9)",
-        ))
+        tsv = _make_tsv(
+            _row(
+                mc=6,
+                mn=6,
+                event="V7(9)",
+                globalkey="A",
+                localkey="I",
+                numeral="V",
+                form="M",
+                figbass="7",
+                changes="(9)",
+            )
+        )
         events, _, _ = _parse_dcml_harmonies(tsv, b"")
         ev = events[0]
         assert ev["numeral"] == "V7"
@@ -536,9 +583,13 @@ class TestParseDcmlHarmonies:
     def test_k331_fixture_rows(self) -> None:
         """Smoke test against real rows from K331-1.tsv fixture."""
         from pathlib import Path
-        fixture = Path(__file__).parent.parent / "fixtures/dcml-subset/harmonies/K331-1.tsv"
+
+        fixture = (
+            Path(__file__).parent.parent / "fixtures/dcml-subset/harmonies/K331-1.tsv"
+        )
         if not fixture.exists():
             import pytest
+
             pytest.skip("K331-1.tsv fixture not available")
         tsv_content = fixture.read_text(encoding="utf-8")
         events, phrases, _ = _parse_dcml_harmonies(tsv_content, b"")
@@ -566,9 +617,14 @@ class TestParseDcmlHarmonies:
 class TestMergeEvents:
     def _ev(self, mc: int, numeral: str = "I", **kwargs: object) -> dict:
         return {
-            "mc": mc, "mn": mc, "volta": None, "beat": 1.0,
-            "numeral": numeral, "source": "DCML",
-            "auto": False, "reviewed": False,
+            "mc": mc,
+            "mn": mc,
+            "volta": None,
+            "beat": 1.0,
+            "numeral": numeral,
+            "source": "DCML",
+            "auto": False,
+            "reviewed": False,
             **kwargs,
         }
 
@@ -594,7 +650,7 @@ class TestMergeEvents:
 
     def test_unreviewed_event_replaced(self) -> None:
         existing = [self._ev(1, numeral="IV")]  # wrong chord, unreviewed
-        incoming = [self._ev(1, numeral="I")]   # correct chord
+        incoming = [self._ev(1, numeral="I")]  # correct chord
         result = _merge_events(existing, incoming)
         assert result[0]["numeral"] == "I"
 
@@ -618,21 +674,21 @@ class TestMergeEvents:
     def test_mixed_scenario(self) -> None:
         """Manual preserved, unreviewed replaced, new inserted, orphan flagged."""
         existing = [
-            self._ev(1, source="manual", numeral="IV"),   # preserved
-            self._ev(2, numeral="bVII"),                   # replaced
-            self._ev(10, reviewed=True, numeral="V"),      # orphaned (not in incoming)
+            self._ev(1, source="manual", numeral="IV"),  # preserved
+            self._ev(2, numeral="bVII"),  # replaced
+            self._ev(10, reviewed=True, numeral="V"),  # orphaned (not in incoming)
         ]
         incoming = [
-            self._ev(1, numeral="I"),    # manual at mc=1 wins
-            self._ev(2, numeral="ii"),   # replaces bVII
-            self._ev(3, numeral="V"),    # new
+            self._ev(1, numeral="I"),  # manual at mc=1 wins
+            self._ev(2, numeral="ii"),  # replaces bVII
+            self._ev(3, numeral="V"),  # new
         ]
         result = _merge_events(existing, incoming)
         by_mc = {e["mc"]: e for e in result}
-        assert by_mc[1]["numeral"] == "IV"     # manual preserved
-        assert by_mc[2]["numeral"] == "ii"     # replaced
-        assert by_mc[3]["numeral"] == "V"      # new
-        assert by_mc[10]["numeral"] == "V"     # orphaned
+        assert by_mc[1]["numeral"] == "IV"  # manual preserved
+        assert by_mc[2]["numeral"] == "ii"  # replaced
+        assert by_mc[3]["numeral"] == "V"  # new
+        assert by_mc[10]["numeral"] == "V"  # orphaned
         assert by_mc[10].get("orphaned") is True
 
     def test_result_sorted_by_mc(self) -> None:
@@ -642,8 +698,15 @@ class TestMergeEvents:
 
     def test_no_mc_event_kept(self) -> None:
         """Existing events without mc (manually inserted) are always kept."""
-        manual_no_mc = {"mc": None, "mn": 5, "volta": None, "beat": 2.0,
-                        "source": "manual", "numeral": "V", "reviewed": False}
+        manual_no_mc = {
+            "mc": None,
+            "mn": 5,
+            "volta": None,
+            "beat": 2.0,
+            "source": "manual",
+            "numeral": "V",
+            "reviewed": False,
+        }
         existing = [manual_no_mc]
         incoming = [self._ev(1)]
         result = _merge_events(existing, incoming)

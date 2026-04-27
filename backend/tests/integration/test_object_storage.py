@@ -17,7 +17,6 @@ import aioboto3
 import pytest
 import pytest_asyncio
 from botocore.exceptions import ClientError
-
 from services.object_storage import StorageClient, incipit_key
 
 pytestmark = pytest.mark.integration
@@ -72,9 +71,7 @@ async def storage_client() -> AsyncGenerator[StorageClient, None]:
         async for page in paginator.paginate(Bucket=bucket_name):
             objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
             if objects:
-                await s3.delete_objects(
-                    Bucket=bucket_name, Delete={"Objects": objects}
-                )
+                await s3.delete_objects(Bucket=bucket_name, Delete={"Objects": objects})
         await s3.delete_bucket(Bucket=bucket_name)
 
 
@@ -162,5 +159,7 @@ async def test_signed_url_custom_expiry(storage_client: StorageClient) -> None:
     assert isinstance(url, str) and url.startswith(_ENDPOINT_URL)
     # SigV4: X-Amz-Expires=60  |  SigV2: Expires=<unix timestamp ≈ now+60>
     has_sigv4_expiry = "X-Amz-Expires=60" in url
-    has_sigv2_expiry = "Expires=" in url and int(url.split("Expires=")[1].split("&")[0]) > int(time.time())
+    has_sigv2_expiry = "Expires=" in url and int(
+        url.split("Expires=")[1].split("&")[0]
+    ) > int(time.time())
     assert has_sigv4_expiry or has_sigv2_expiry

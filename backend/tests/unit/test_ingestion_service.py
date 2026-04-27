@@ -27,7 +27,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
-
 from models.ingestion import IngestionReport
 from models.normalization import NormalizationReport
 from models.validation import ValidationIssue, ValidationReport
@@ -45,6 +44,7 @@ _HARMONIES_TSV = _FIXTURES / "dcml-subset" / "harmonies" / "K331-1.tsv"
 # ---------------------------------------------------------------------------
 # Helpers: build in-memory ZIPs and metadata YAML dicts
 # ---------------------------------------------------------------------------
+
 
 def _minimal_metadata(
     *,
@@ -196,7 +196,9 @@ class TestZipParsing:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
-            await ingest_corpus("mozart", "piano-sonatas", b"not a zip", mock_db, mock_storage)
+            await ingest_corpus(
+                "mozart", "piano-sonatas", b"not a zip", mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "INVALID_ZIP"
 
@@ -209,7 +211,9 @@ class TestZipParsing:
         archive = buf.getvalue()
 
         with pytest.raises(HTTPException) as exc_info:
-            await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+            await ingest_corpus(
+                "mozart", "piano-sonatas", archive, mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
 
@@ -222,11 +226,15 @@ class TestZipParsing:
         archive = buf.getvalue()
 
         with pytest.raises(HTTPException) as exc_info:
-            await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+            await ingest_corpus(
+                "mozart", "piano-sonatas", archive, mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
 
-    async def test_invalid_metadata_schema_raises_422(self, valid_mei_bytes, mock_db, mock_storage, harmonies_bytes):
+    async def test_invalid_metadata_schema_raises_422(
+        self, valid_mei_bytes, mock_db, mock_storage, harmonies_bytes
+    ):
         """metadata.yaml that parses as YAML but fails Pydantic."""
         from fastapi import HTTPException
 
@@ -235,7 +243,9 @@ class TestZipParsing:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with pytest.raises(HTTPException) as exc_info:
-            await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+            await ingest_corpus(
+                "mozart", "piano-sonatas", archive, mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
 
@@ -251,7 +261,9 @@ class TestSlugCoherence:
 
         with pytest.raises(HTTPException) as exc_info:
             # URL slug is "beethoven" but metadata says "mozart"
-            await ingest_corpus("beethoven", "piano-sonatas", archive, mock_db, mock_storage)
+            await ingest_corpus(
+                "beethoven", "piano-sonatas", archive, mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
 
@@ -264,7 +276,9 @@ class TestSlugCoherence:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with pytest.raises(HTTPException) as exc_info:
-            await ingest_corpus("mozart", "violin-sonatas", archive, mock_db, mock_storage)
+            await ingest_corpus(
+                "mozart", "violin-sonatas", archive, mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
 
@@ -286,7 +300,9 @@ class TestSlugCoherence:
         archive = buf.getvalue()
 
         with pytest.raises(HTTPException) as exc_info:
-            await ingest_corpus("beethoven", "piano-sonatas", archive, mock_db, mock_storage)
+            await ingest_corpus(
+                "beethoven", "piano-sonatas", archive, mock_db, mock_storage
+            )
         assert exc_info.value.status_code == 422
         # The ABC deny-list fires in Pydantic → caught as METADATA_PARSE_ERROR
         assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
@@ -329,7 +345,9 @@ class TestPerMovementValidation:
         archive = buf.getvalue()
 
         bad_report = ValidationReport(
-            errors=[ValidationIssue(code="INVALID_XML", message="bad", severity="error")]
+            errors=[
+                ValidationIssue(code="INVALID_XML", message="bad", severity="error")
+            ]
         )
         call_count = 0
 
@@ -341,7 +359,10 @@ class TestPerMovementValidation:
             return bad_report  # movement-2 fails
 
         with patch("services.ingestion.validate_mei", side_effect=_validate):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
                     report = await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
@@ -361,11 +382,15 @@ class TestPerMovementValidation:
         archive = _build_zip(meta, b"not valid xml", harmonies_bytes)
 
         bad_report = ValidationReport(
-            errors=[ValidationIssue(code="INVALID_XML", message="bad", severity="error")]
+            errors=[
+                ValidationIssue(code="INVALID_XML", message="bad", severity="error")
+            ]
         )
         with patch("services.ingestion.validate_mei", return_value=bad_report):
             with pytest.raises(HTTPException) as exc_info:
-                await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                await ingest_corpus(
+                    "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "INVALID_MEI"
 
@@ -385,7 +410,9 @@ class TestPerMovementValidation:
             with patch("services.ingestion.ingest_movement_analysis"):
                 with pytest.raises(Exception):
                     # All movements rejected → 422
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
 
 
 class TestCorpusCoherence:
@@ -434,9 +461,14 @@ class TestCorpusCoherence:
         archive = buf.getvalue()
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with pytest.raises(HTTPException) as exc_info:
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
         assert exc_info.value.status_code == 422
         assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
         assert "SHARED" in exc_info.value.detail["error"]["message"]
@@ -450,9 +482,14 @@ class TestObjectKeys:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
 
         mock_storage.put_mei.assert_called_once()
         key_arg = mock_storage.put_mei.call_args[0][0]
@@ -465,9 +502,14 @@ class TestObjectKeys:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
 
         mock_storage.put_mei_original.assert_called_once()
         # put_mei_original receives the same key as put_mei (it adds originals/ internally)
@@ -485,9 +527,14 @@ class TestStorageRollback:
         mock_storage.put_mei.side_effect = RuntimeError("S3 timeout")
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with pytest.raises(RuntimeError, match="S3 timeout"):
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
 
 
 class TestTaskDispatch:
@@ -498,10 +545,15 @@ class TestTaskDispatch:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis") as mock_task:
                     mock_task.delay = MagicMock()
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
 
         mock_task.delay.assert_called_once()
 
@@ -512,10 +564,15 @@ class TestTaskDispatch:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis") as mock_task:
                     mock_task.delay = MagicMock()
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
 
         call_kwargs = mock_task.delay.call_args[1]
         assert call_kwargs["analysis_source"] == "DCML"
@@ -529,14 +586,18 @@ class TestTaskDispatch:
         meta = _minimal_metadata()
         archive = _build_zip(meta, b"invalid xml", harmonies_bytes)
         bad_report = ValidationReport(
-            errors=[ValidationIssue(code="INVALID_XML", message="bad", severity="error")]
+            errors=[
+                ValidationIssue(code="INVALID_XML", message="bad", severity="error")
+            ]
         )
 
         with patch("services.ingestion.validate_mei", return_value=bad_report):
             with patch("services.ingestion.ingest_movement_analysis") as mock_task:
                 mock_task.delay = MagicMock()
                 with pytest.raises(Exception):
-                    await ingest_corpus("mozart", "piano-sonatas", archive, mock_db, mock_storage)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
         mock_task.delay.assert_not_called()
 
 
@@ -548,14 +609,20 @@ class TestReport:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
                     report = await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
                     )
 
         assert isinstance(report, IngestionReport)
-        assert report.corpus == {"composer_slug": "mozart", "corpus_slug": "piano-sonatas"}
+        assert report.corpus == {
+            "composer_slug": "mozart",
+            "corpus_slug": "piano-sonatas",
+        }
         assert len(report.movements_accepted) == 1
         assert report.movements_accepted[0].movement_slug == "k331/movement-1"
         assert report.movements_rejected == []
@@ -567,7 +634,10 @@ class TestReport:
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
                     report = await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
@@ -589,13 +659,17 @@ class TestReport:
             )
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
-            with patch("services.ingestion.normalize_mei", side_effect=_normalize_with_warnings):
+            with patch(
+                "services.ingestion.normalize_mei", side_effect=_normalize_with_warnings
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
                     report = await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
                     )
 
-        assert report.movements_accepted[0].warnings == ["Unpaired rptstart at measure 5"]
+        assert report.movements_accepted[0].warnings == [
+            "Unpaired rptstart at measure 5"
+        ]
 
     async def test_partial_accept_shows_rejected_entry(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
@@ -640,11 +714,16 @@ class TestReport:
             if call_count == 1:
                 return ValidationReport()
             return ValidationReport(
-                errors=[ValidationIssue(code="INVALID_XML", message="bad", severity="error")]
+                errors=[
+                    ValidationIssue(code="INVALID_XML", message="bad", severity="error")
+                ]
             )
 
         with patch("services.ingestion.validate_mei", side_effect=_validate):
-            with patch("services.ingestion.normalize_mei", side_effect=_mock_normalize_side_effect):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
                 with patch("services.ingestion.ingest_movement_analysis"):
                     report = await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage

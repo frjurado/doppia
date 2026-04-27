@@ -26,13 +26,12 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 
+from api.dependencies import AuthenticatedUser
 from fastapi import Request, Response
 from jose import ExpiredSignatureError, JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
-
-from api.dependencies import AuthenticatedUser
 
 _DEV_TOKEN = "dev-token"
 _DEV_USER = AuthenticatedUser(id="dev-user", role="admin", email="dev@local")

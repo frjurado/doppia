@@ -29,11 +29,10 @@ from fractions import Fraction
 from typing import Any, Literal
 
 import lxml.etree
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-
 from services.celery_app import celery_app
 from services.object_storage import make_storage_client
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 # ---------------------------------------------------------------------------
 # MEI namespace constants
@@ -47,14 +46,31 @@ _XML_NS = "http://www.w3.org/XML/1998/namespace"
 # ---------------------------------------------------------------------------
 
 _NOTE_TO_PC: dict[str, int] = {
-    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
-    "E": 4, "Fb": 4, "F": 5, "E#": 5, "F#": 6, "Gb": 6,
-    "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10,
-    "B": 11, "Cb": 11, "B#": 0,
+    "C": 0,
+    "C#": 1,
+    "Db": 1,
+    "D": 2,
+    "D#": 3,
+    "Eb": 3,
+    "E": 4,
+    "Fb": 4,
+    "F": 5,
+    "E#": 5,
+    "F#": 6,
+    "Gb": 6,
+    "G": 7,
+    "G#": 8,
+    "Ab": 8,
+    "A": 9,
+    "A#": 10,
+    "Bb": 10,
+    "B": 11,
+    "Cb": 11,
+    "B#": 0,
 }
 
 _PC_TO_NOTE_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-_PC_TO_NOTE_FLAT  = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
+_PC_TO_NOTE_FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 # Global keys whose derived pitch names should prefer flat spellings.
 _FLAT_KEY_TONICS = {"F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"}
@@ -63,7 +79,13 @@ _FLAT_KEY_TONICS = {"F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"}
 _MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11]
 
 _ROMAN_TO_DEG: dict[str, int] = {
-    "I": 0, "II": 1, "III": 2, "IV": 3, "V": 4, "VI": 5, "VII": 6,
+    "I": 0,
+    "II": 1,
+    "III": 2,
+    "IV": 3,
+    "V": 4,
+    "VI": 5,
+    "VII": 6,
 }
 
 # ---------------------------------------------------------------------------
@@ -85,14 +107,14 @@ _FORM_TO_QUALITY: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 _FIGBASS_MAP: dict[str, tuple[str, int]] = {
-    "":   ("", 0),
-    "6":  ("6", 1),
+    "": ("", 0),
+    "6": ("6", 1),
     "64": ("64", 2),
-    "7":  ("7", 0),
+    "7": ("7", 0),
     "65": ("65", 1),
     "43": ("43", 2),
-    "2":  ("2", 3),
-    "9":  ("9", 0),
+    "2": ("2", 3),
+    "9": ("9", 0),
 }
 
 # ---------------------------------------------------------------------------
@@ -196,7 +218,7 @@ def _resolve_key(localkey: str, globalkey: str) -> str:
     # Case 2: Roman numeral relative to globalkey.
     m_rom = _ROMAN_RE.match(lk)
     if m_rom:
-        acc_str = m_rom.group(1)   # "" | "b" | "#"
+        acc_str = m_rom.group(1)  # "" | "b" | "#"
         roman = m_rom.group(2).upper()
         # Quality: first character of the Roman part (after stripping accidental).
         first_char = lk[len(acc_str)]
@@ -478,25 +500,27 @@ def _parse_dcml_harmonies(
             direction = "open" if phraseend_raw == "{" else "close"
             phrase_boundaries.append(f"mn={mn} volta={volta} {direction}")
 
-        events.append({
-            "mc": mc,
-            "mn": mn,
-            "volta": volta,
-            "beat": beat,
-            "local_key": local_key_str,
-            "root": root_int,
-            "quality": quality,
-            "inversion": inversion,
-            "numeral": built_numeral,
-            "root_accidental": root_accidental,
-            "applied_to": applied_to,
-            "extensions": extensions,
-            "bass_pitch": None,
-            "soprano_pitch": None,
-            "source": "DCML",
-            "auto": False,
-            "reviewed": False,
-        })
+        events.append(
+            {
+                "mc": mc,
+                "mn": mn,
+                "volta": volta,
+                "beat": beat,
+                "local_key": local_key_str,
+                "root": root_int,
+                "quality": quality,
+                "inversion": inversion,
+                "numeral": built_numeral,
+                "root_accidental": root_accidental,
+                "applied_to": applied_to,
+                "extensions": extensions,
+                "bass_pitch": None,
+                "soprano_pitch": None,
+                "source": "DCML",
+                "auto": False,
+                "reviewed": False,
+            }
+        )
 
     # ── Alignment verification ────────────────────────────────────────────
     alignment_warnings: list[str] = []
@@ -806,9 +830,7 @@ def ingest_movement_analysis(
             "When in Rome ingestion is deferred until the first non-DCML corpus."
         )
     elif analysis_source == "music21_auto":
-        raise NotImplementedError(
-            "music21 auto-analysis is deferred to Component 6."
-        )
+        raise NotImplementedError("music21 auto-analysis is deferred to Component 6.")
     elif analysis_source == "none":
         return
     else:

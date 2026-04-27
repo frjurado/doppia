@@ -14,18 +14,10 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from models.browse import (
-    ComposerResponse,
-    CorpusResponse,
-    MovementResponse,
-    WorkResponse,
-)
 from services.browse import list_composers, list_corpora, list_movements, list_works
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -34,7 +26,17 @@ from services.browse import list_composers, list_corpora, list_movements, list_w
 
 def _make_composer(**kwargs: Any) -> MagicMock:
     """Return a mock Composer with sensible defaults."""
-    c = MagicMock(spec_set=["id", "slug", "name", "sort_name", "birth_year", "death_year", "composer_id"])
+    c = MagicMock(
+        spec_set=[
+            "id",
+            "slug",
+            "name",
+            "sort_name",
+            "birth_year",
+            "death_year",
+            "composer_id",
+        ]
+    )
     c.id = kwargs.get("id", uuid.uuid4())
     c.slug = kwargs.get("slug", "mozart")
     c.name = kwargs.get("name", "Wolfgang Amadeus Mozart")
@@ -45,7 +47,9 @@ def _make_composer(**kwargs: Any) -> MagicMock:
 
 
 def _make_corpus(**kwargs: Any) -> MagicMock:
-    c = MagicMock(spec_set=["id", "slug", "title", "source_repository", "licence", "composer_id"])
+    c = MagicMock(
+        spec_set=["id", "slug", "title", "source_repository", "licence", "composer_id"]
+    )
     c.id = kwargs.get("id", uuid.uuid4())
     c.slug = kwargs.get("slug", "piano-sonatas")
     c.title = kwargs.get("title", "Piano Sonatas")
@@ -56,7 +60,16 @@ def _make_corpus(**kwargs: Any) -> MagicMock:
 
 
 def _make_work(**kwargs: Any) -> MagicMock:
-    w = MagicMock(spec_set=["id", "slug", "title", "catalogue_number", "year_composed", "corpus_id"])
+    w = MagicMock(
+        spec_set=[
+            "id",
+            "slug",
+            "title",
+            "catalogue_number",
+            "year_composed",
+            "corpus_id",
+        ]
+    )
     w.id = kwargs.get("id", uuid.uuid4())
     w.slug = kwargs.get("slug", "k331")
     w.title = kwargs.get("title", "Piano Sonata No. 11 in A major")
@@ -67,10 +80,20 @@ def _make_work(**kwargs: Any) -> MagicMock:
 
 
 def _make_movement(**kwargs: Any) -> MagicMock:
-    m = MagicMock(spec_set=[
-        "id", "slug", "movement_number", "title", "tempo_marking",
-        "key_signature", "meter", "duration_bars", "incipit_object_key", "work_id",
-    ])
+    m = MagicMock(
+        spec_set=[
+            "id",
+            "slug",
+            "movement_number",
+            "title",
+            "tempo_marking",
+            "key_signature",
+            "meter",
+            "duration_bars",
+            "incipit_object_key",
+            "work_id",
+        ]
+    )
     m.id = kwargs.get("id", uuid.uuid4())
     m.slug = kwargs.get("slug", "movement-1")
     m.movement_number = kwargs.get("movement_number", 1)
@@ -284,7 +307,13 @@ class TestListMovements:
 
         execute_results = [
             MagicMock(**{"scalar_one_or_none.return_value": work}),
-            MagicMock(**{"scalars.return_value": MagicMock(**{"all.return_value": [movement]})}),
+            MagicMock(
+                **{
+                    "scalars.return_value": MagicMock(
+                        **{"all.return_value": [movement]}
+                    )
+                }
+            ),
         ]
         db = AsyncMock()
         db.execute.side_effect = execute_results
@@ -306,7 +335,13 @@ class TestListMovements:
 
         execute_results = [
             MagicMock(**{"scalar_one_or_none.return_value": work}),
-            MagicMock(**{"scalars.return_value": MagicMock(**{"all.return_value": [movement]})}),
+            MagicMock(
+                **{
+                    "scalars.return_value": MagicMock(
+                        **{"all.return_value": [movement]}
+                    )
+                }
+            ),
         ]
         db = AsyncMock()
         db.execute.side_effect = execute_results
@@ -328,7 +363,13 @@ class TestListMovements:
 
         execute_results = [
             MagicMock(**{"scalar_one_or_none.return_value": work}),
-            MagicMock(**{"scalars.return_value": MagicMock(**{"all.return_value": [movement]})}),
+            MagicMock(
+                **{
+                    "scalars.return_value": MagicMock(
+                        **{"all.return_value": [movement]}
+                    )
+                }
+            ),
         ]
         db = AsyncMock()
         db.execute.side_effect = execute_results

@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from models.base import Base
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -31,8 +32,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
-
-from models.base import Base
 
 
 class Composer(Base):

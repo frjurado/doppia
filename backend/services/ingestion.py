@@ -32,18 +32,12 @@ import yaml
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
-from pydantic import ValidationError
-from sqlalchemy import func
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from models.analysis import MovementAnalysis
 from models.errors import ErrorCode, ErrorResponse
 from models.ingestion import (
     ComposerMetadata,
     CorpusMetadata,
-    IngestMetadata,
     IngestionReport,
+    IngestMetadata,
     MovementAccepted,
     MovementMetadata,
     MovementRejected,
@@ -51,12 +45,15 @@ from models.ingestion import (
 )
 from models.music import Composer, Corpus, Movement, Work
 from models.normalization import NormalizationReport
+from pydantic import ValidationError
 from services.mei_normalizer import normalize_mei
 from services.mei_validator import validate_mei
 from services.object_storage import StorageClient
 from services.tasks.generate_incipit import generate_incipit
 from services.tasks.ingest_analysis import ingest_movement_analysis
-
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Internal dataclasses (not part of the public API)
@@ -359,9 +356,7 @@ async def ingest_corpus(
 # ---------------------------------------------------------------------------
 
 
-async def _upsert_composer(
-    db: AsyncSession, meta: ComposerMetadata
-) -> uuid.UUID:
+async def _upsert_composer(db: AsyncSession, meta: ComposerMetadata) -> uuid.UUID:
     """Upsert the ``composer`` row, returning its UUID.
 
     Args:
@@ -559,5 +554,7 @@ def _raise_422(
     """
     raise HTTPException(
         status_code=422,
-        detail=ErrorResponse.make(code=code, message=message, detail=detail).model_dump(),
+        detail=ErrorResponse.make(
+            code=code, message=message, detail=detail
+        ).model_dump(),
     )

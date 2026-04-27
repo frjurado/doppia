@@ -16,7 +16,7 @@ import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -241,9 +241,7 @@ class TestBrowseApi:
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 200
-        item = next(
-            i for i in resp.json() if i["slug"] == _COMPOSER_SLUG
-        )
+        item = next(i for i in resp.json() if i["slug"] == _COMPOSER_SLUG)
         assert item["name"] == "Wolfgang Amadeus Mozart"
         assert item["sort_name"] == "Mozart, Wolfgang Amadeus"
         assert item["birth_year"] == 1756

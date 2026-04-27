@@ -78,9 +78,7 @@ def _validate_slug(value: str) -> str:
         ValueError: When *value* does not match ``_SLUG_PATTERN``.
     """
     if not _SLUG_PATTERN.match(value):
-        raise ValueError(
-            f"Invalid slug {value!r}: must match ^[a-z0-9][a-z0-9-]*$"
-        )
+        raise ValueError(f"Invalid slug {value!r}: must match ^[a-z0-9][a-z0-9-]*$")
     return value
 
 
@@ -333,8 +331,7 @@ class CorpusMetadata(BaseModel):
         if duplicates:
             raise ValueError(
                 "Duplicate work slug(s) within corpus "
-                f"{self.slug!r}: "
-                + ", ".join(repr(s) for s in duplicates)
+                f"{self.slug!r}: " + ", ".join(repr(s) for s in duplicates)
             )
 
         return self

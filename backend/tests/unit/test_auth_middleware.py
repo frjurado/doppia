@@ -11,7 +11,6 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated
 
 import pytest
 import pytest_asyncio
@@ -21,7 +20,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
 from starlette.exceptions import HTTPException
-from starlette.responses import JSONResponse
 
 _TEST_SECRET = "test-jwt-secret-for-unit-tests"
 _ALGORITHM = "HS256"
@@ -219,7 +217,9 @@ async def test_malformed_token_rejected(supabase_client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_require_role_editor_with_editor_token(supabase_client: AsyncClient) -> None:
+async def test_require_role_editor_with_editor_token(
+    supabase_client: AsyncClient,
+) -> None:
     """An editor-role token satisfies require_role("editor")."""
     token = _make_token(sub="editor-uuid", role="editor")
     response = await supabase_client.get(
@@ -232,7 +232,9 @@ async def test_require_role_editor_with_editor_token(supabase_client: AsyncClien
     assert body["role"] == "editor"
 
 
-async def test_require_role_editor_with_admin_token(supabase_client: AsyncClient) -> None:
+async def test_require_role_editor_with_admin_token(
+    supabase_client: AsyncClient,
+) -> None:
     """An admin-role token also satisfies require_role("editor") (higher rank)."""
     token = _make_token(role="admin")
     response = await supabase_client.get(
@@ -260,7 +262,9 @@ async def test_require_role_editor_with_no_token(supabase_client: AsyncClient) -
     assert response.status_code == 401
 
 
-async def test_dev_token_rejected_in_supabase_mode(supabase_client: AsyncClient) -> None:
+async def test_dev_token_rejected_in_supabase_mode(
+    supabase_client: AsyncClient,
+) -> None:
     """The 'dev-token' bypass must not work when AUTH_MODE=supabase."""
     response = await supabase_client.get(
         "/api/v1/health",

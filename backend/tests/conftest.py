@@ -36,7 +36,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
 from neo4j import AsyncDriver, AsyncGraphDatabase
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from starlette.exceptions import HTTPException
 
 # ---------------------------------------------------------------------------
@@ -82,7 +87,9 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 @pytest_asyncio.fixture
-async def test_client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncClient, None]:
+async def test_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP client wired to a unit-test FastAPI app.
 
     The app is rebuilt with a no-op lifespan and the dev auth bypass
@@ -164,7 +171,9 @@ async def db_session(_db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, No
     Yields:
         An ``AsyncSession`` bound to the test database engine.
     """
-    factory = async_sessionmaker(_db_engine, class_=AsyncSession, expire_on_commit=False)
+    factory = async_sessionmaker(
+        _db_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async with factory() as session:
         yield session

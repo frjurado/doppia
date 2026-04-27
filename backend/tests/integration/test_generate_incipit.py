@@ -29,11 +29,10 @@ from celery.exceptions import Ignore
 
 pytestmark = pytest.mark.integration
 from httpx import AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from services.object_storage import make_storage_client
 from services.tasks.generate_incipit import _generate_incipit_async
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Fixtures directory
@@ -251,8 +250,10 @@ class TestGenerateIncipit:
             },
         )
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_analysis, \
-             patch("services.ingestion.generate_incipit") as mock_incipit:
+        with (
+            patch("services.ingestion.ingest_movement_analysis") as mock_analysis,
+            patch("services.ingestion.generate_incipit") as mock_incipit,
+        ):
             mock_analysis.delay = MagicMock()
             mock_incipit.delay = MagicMock()
             resp = await integration_test_client.post(
@@ -320,9 +321,9 @@ class TestGenerateIncipit:
         svg_bytes = await storage.get_mei(key_row.incipit_object_key)
         svg_text = svg_bytes.decode("utf-8")
 
-        assert svg_text.lstrip().startswith("<svg"), (
-            f"Expected SVG output to start with '<svg', got: {svg_text[:120]!r}"
-        )
+        assert svg_text.lstrip().startswith(
+            "<svg"
+        ), f"Expected SVG output to start with '<svg', got: {svg_text[:120]!r}"
 
     # ------------------------------------------------------------------
     # Test 3 — idempotent re-run
@@ -351,9 +352,9 @@ class TestGenerateIncipit:
             )
         ).scalar_one()
 
-        assert generated_at_2 >= generated_at_1, (
-            "incipit_generated_at should not regress on re-run"
-        )
+        assert (
+            generated_at_2 >= generated_at_1
+        ), "incipit_generated_at should not regress on re-run"
 
     # ------------------------------------------------------------------
     # Test 4 — nonexistent movement raises Ignore

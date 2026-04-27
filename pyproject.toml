@@ -11,8 +11,11 @@ line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = []
+select = ["E", "F", "W"]  # I (isort) omitted — isort runs separately and owns import order
+ignore = [
+    "E402",  # module-level import not at top — intentional for load_dotenv/sys.path bootstrapping
+    "E501",  # line too long — black is the authoritative line-length enforcer
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

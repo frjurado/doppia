@@ -23,14 +23,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 import httpx
-from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-from neo4j import AsyncDriver, AsyncGraphDatabase
-from starlette.exceptions import HTTPException
-
 from api.middleware.auth import AuthMiddleware
 from api.middleware.errors import (
     http_exception_handler,
@@ -38,7 +30,14 @@ from api.middleware.errors import (
     validation_exception_handler,
 )
 from api.router import router
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from models.base import close_db, init_db
+from neo4j import AsyncDriver, AsyncGraphDatabase
+from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +141,9 @@ def create_app() -> FastAPI:
 
     # Exception handlers — registered before middleware so they apply globally.
     application.add_exception_handler(HTTPException, http_exception_handler)
-    application.add_exception_handler(RequestValidationError, validation_exception_handler)
+    application.add_exception_handler(
+        RequestValidationError, validation_exception_handler
+    )
     application.add_exception_handler(Exception, unhandled_exception_handler)
 
     # Middleware — Starlette inserts each at the front of the stack, so

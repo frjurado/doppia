@@ -14,11 +14,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from models.base import Base
 from sqlalchemy import DateTime, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
-
-from models.base import Base
 
 
 class AppUser(Base):
