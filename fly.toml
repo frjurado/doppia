@@ -5,6 +5,10 @@ primary_region = "lhr"
   dockerfile = "backend/Dockerfile"
   context = "."
 
+  [build.args]
+    VITE_SUPABASE_URL = "https://vywprfptbicpvuygksad.supabase.co"
+    VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5d3ByZnB0YmljcHZ1eWdrc2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzQ1ODEsImV4cCI6MjA5MjExMDU4MX0.yakwqnLrfFk-mljsVaMrXjAF1YLdrln61MWSoWZvD4o"
+
 [processes]
   app    = "uvicorn main:app --host 0.0.0.0 --port 8000"
   worker = "celery -A services.celery_app worker --loglevel=info --concurrency=1"

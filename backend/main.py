@@ -26,6 +26,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from starlette.exceptions import HTTPException
@@ -166,11 +167,26 @@ def create_app() -> FastAPI:
     # Serve the built React SPA in staging/production.
     # The static/ directory is present in the Docker image (copied from the
     # frontend build stage) but absent in local development, where Vite runs
-    # separately. StaticFiles with html=True returns index.html for any path
-    # that doesn't match a file, which is what React Router requires.
+    # separately.
+    #
+    # StaticFiles(html=True) only serves index.html for directory requests, not
+    # for unknown paths like /login. A catch-all route is required so React
+    # Router can handle client-side navigation: serve the requested file if it
+    # exists (JS/CSS assets), otherwise fall back to index.html.
     _static_dir = Path(__file__).parent / "static"
     if _static_dir.is_dir():
-        application.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="frontend")
+        application.mount(
+            "/assets",
+            StaticFiles(directory=str(_static_dir / "assets")),
+            name="assets",
+        )
+
+        @application.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str) -> FileResponse:
+            file_path = _static_dir / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(_static_dir / "index.html")
 
     return application
 
