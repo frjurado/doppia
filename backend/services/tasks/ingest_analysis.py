@@ -616,6 +616,10 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
         pool_size=1,
         max_overflow=0,
         pool_pre_ping=False,
+        # Supabase uses PgBouncer in transaction pooling mode, which does not
+        # support asyncpg prepared statements.  Setting statement_cache_size=0
+        # disables the cache and prevents DuplicatePreparedStatementError.
+        connect_args={"statement_cache_size": 0},
     )
     try:
         async with AsyncSession(engine) as session:
