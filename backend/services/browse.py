@@ -21,12 +21,9 @@ from models.browse import (
     WorkResponse,
 )
 from models.music import Composer, Corpus, Movement, Work
-from services.object_storage import StorageClient
+from services.object_storage import CLIENT_FACING_URL_TTL, StorageClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-# Signed URL lifetime matching MEI URL policy (ADR-002): 15 minutes.
-_INCIPIT_URL_TTL_SECONDS = 900
 
 
 async def list_composers(db: AsyncSession) -> list[ComposerResponse]:
@@ -193,7 +190,7 @@ async def list_movements(
         incipit_url: str | None = None
         if m.incipit_object_key is not None:
             incipit_url = await storage.signed_url(
-                m.incipit_object_key, expires_in=_INCIPIT_URL_TTL_SECONDS
+                m.incipit_object_key, expires_in=CLIENT_FACING_URL_TTL
             )
         responses.append(
             MovementResponse(

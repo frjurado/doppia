@@ -546,14 +546,23 @@ RETURN nodes(path), relationships(path)
 
 All fragments containing a specific concept (direct or via property):
 
+`APPEARS_IN` is **not** a Neo4j edge — it is resolved at the application layer via the PostgreSQL `fragment_concept_tag` table (see `tech-stack-and-database-reference.md`). Fragment nodes do not exist in Neo4j. The correct two-step pattern is:
+
 ```cypher
+-- Step 1 (Neo4j): expand concept to all related concept IDs.
 MATCH (c:Concept {id: $id})
-OPTIONAL MATCH (c)<-[:APPEARS_IN]-(f:Fragment)
 OPTIONAL MATCH (c)<-[:VALUE_REFERENCES]-(:PropertyValue)
               <-[:HAS_VALUE]-(:PropertySchema)
-              <-[:HAS_PROPERTY_SCHEMA]-(:Concept)
-              <-[:APPEARS_IN]-(f2:Fragment)
-RETURN collect(distinct f) + collect(distinct f2)
+              <-[:HAS_PROPERTY_SCHEMA]-(related:Concept)
+RETURN $id AS direct_id, collect(distinct related.id) AS via_property_ids
+```
+
+Then in PostgreSQL:
+
+```sql
+-- Step 2 (PostgreSQL): query fragments tagged with any of those concepts.
+SELECT fragment_id FROM fragment_concept_tag
+WHERE concept_id = ANY(:direct_id || :via_property_ids)
 ```
 
 Creating nodes and the property schema layer:

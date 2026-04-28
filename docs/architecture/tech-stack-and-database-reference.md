@@ -192,7 +192,7 @@ CREATE TABLE fragment_concept_tag (
 
 The `fragment_concept_tag` table is the join surface between PostgreSQL and Neo4j. `concept_id` values are the same `id` strings used as primary keys in the graph. No foreign key enforcement across databases — referential integrity is maintained by the application layer and Pydantic validation.
 
-The sketch above is intentionally minimal; the full fragment schema (sub-measure precision, parent-fragment nesting, peer review state machine, per-fragment licence, `fragment_review` table, and the `summary` JSONB specification) is in:
+This sketch shows the MEI-pointer columns (`movement_id`) and the JSONB summary field — the parts that distinguish fragment-table design at the database level. It deliberately omits columns that belong to the peer-review state machine and editorial metadata (`beat_start`, `beat_end`, `repeat_context`, `parent_fragment_id`, `prose_annotation`, `data_licence`, `status`, `created_by`). The full schema, including the peer-review state machine and per-fragment licence, is in:
 
 **[`fragment-schema.md`](fragment-schema.md)**
 

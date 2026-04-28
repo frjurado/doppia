@@ -32,7 +32,7 @@ FastAPI does not add CORS headers by default. Without explicit middleware config
 CORS is configured via FastAPI's `CORSMiddleware` in the application factory. The allowed-origins list is driven by the `ENVIRONMENT` environment variable:
 
 ```python
-# backend/api/app.py
+# backend/main.py
 
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -265,30 +265,22 @@ MEI files are XML and are parsed server-side by music21 and Verovio. The primary
 
 **Verovio** (Python bindings and WASM) parses MEI internally in C++. Verovio does not expose a general-purpose XML parser interface and processes MEI structure, not arbitrary XML. XXE via Verovio is not a documented attack surface.
 
-**For belt-and-suspenders confidence:** MEI files should be validated against the MEI schema (using `lxml` with schema validation) before being stored or processed. A validating parse with `lxml` in secure mode (`resolve_entities=False`) catches malformed or injected entity declarations before the file reaches music21 or Verovio:
+MEI files are validated in two passes during corpus ingestion, before the file is written to R2.
+
+**Pass 1 — XXE-safe XML parse.** A validating parse with `lxml` in secure mode (`resolve_entities=False`) catches malformed or injected entity declarations before the file reaches music21 or Verovio:
 
 ```python
 from lxml import etree
 
-def validate_mei_file(content: bytes) -> None:
-    """Parse and basic-validate MEI XML before storing.
-
-    Raises ValueError if the content is not well-formed XML or contains
-    entity declarations. Does not enforce the full MEI schema (that would
-    require an XSD or RNG; deferred to Phase 2 if needed).
-    """
-    parser = etree.XMLParser(
-        resolve_entities=False,
-        no_network=True,
-        load_dtd=False,
-    )
-    try:
-        etree.fromstring(content, parser)
-    except etree.XMLSyntaxError as exc:
-        raise ValueError(f"MEI file failed XML validation: {exc}") from exc
+parser = etree.XMLParser(
+    resolve_entities=False,
+    no_network=True,
+    load_dtd=False,
+)
+etree.fromstring(content, parser)
 ```
 
-This validation runs during corpus ingestion, before the file is written to R2.
+**Pass 2 — RelaxNG schema validation.** Full MEI schema validation is already implemented in `backend/services/mei_validator.py` (Check 2), validating against the MEI 5.0.0 CMN profile (`backend/resources/mei-CMN.rng`). This catches structurally malformed MEI that would cause silent rendering errors in Verovio and is active on the upload path via `services/ingestion.py`.
 
 ---
 
@@ -313,50 +305,39 @@ The 1-hour TTL for client-facing URLs means a URL embedded in an API response re
 
 ### Signed URL generation
 
+The production implementation in `services/object_storage.py` uses a short-lived `aioboto3` client per call, opened as an `async with` context manager. This is the correct pattern for Phase 1 request volumes and avoids the event-loop scoping issue that a module-global cached client would introduce (see the explicit comment in `services/tasks/generate_incipit.py` on this trade-off).
+
 ```python
+# services/object_storage.py (simplified)
+
 import aioboto3
 import os
-from datetime import timedelta
 
-_S3_CLIENT = None
+class StorageClient:
+    def __init__(self, ...):
+        self._session = aioboto3.Session()
 
-async def get_s3_client():
-    global _S3_CLIENT
-    if _S3_CLIENT is None:
-        session = aioboto3.Session()
-        _S3_CLIENT = await session.client(
-            "s3",
-            endpoint_url=os.environ["R2_ENDPOINT_URL"],
-            aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-            aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
-        ).__aenter__()
-    return _S3_CLIENT
+    async def signed_url(self, key: str, expires_in: int = 3600) -> str:
+        """Generate a pre-signed GET URL for a stored file.
 
-async def generate_signed_url(
-    object_key: str,
-    ttl_seconds: int = 3600,
-) -> str:
-    """Generate a pre-signed GET URL for an R2 object.
+        Args:
+            key: S3 object key of the file to expose.
+            expires_in: URL lifetime in seconds. Default: 1 hour
+                (CLIENT_FACING_URL_TTL). Use BACKEND_PROCESSING_TTL
+                (15 minutes) for backend-to-backend access.
 
-    Args:
-        object_key: Validated S3 object key (see section 3.3).
-        ttl_seconds: URL lifetime in seconds. Default: 1 hour.
-
-    Returns:
-        A pre-signed URL valid for ttl_seconds.
-    """
-    validate_object_key(object_key)   # always validate before use
-    client = await get_s3_client()
-    url = await client.generate_presigned_url(
-        "get_object",
-        Params={
-            "Bucket": os.environ["R2_BUCKET_NAME"],
-            "Key": object_key,
-        },
-        ExpiresIn=ttl_seconds,
-    )
-    return url
+        Returns:
+            A pre-signed URL string.
+        """
+        async with self._session.client("s3", **self._client_kwargs()) as s3:
+            return await s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket_name, "Key": key},
+                ExpiresIn=expires_in,
+            )
 ```
+
+A persistent connection pool can be added later if latency measurements warrant it; for now, short-lived clients are both simpler and safe.
 
 ### Share links in Phase 2
 
@@ -387,7 +368,7 @@ The guarantee rests on two independent checks, both of which must be true for th
 **Check 1 — `ENVIRONMENT` must equal `"local"`:**
 
 ```python
-# backend/middleware/auth.py
+# backend/api/middleware/auth.py
 
 import os
 from fastapi import Request, HTTPException
@@ -461,8 +442,12 @@ The `worker-src blob:` entry is required for Verovio's WASM module. Adjust `conn
 
 **`X-Content-Type-Options`.** Set `X-Content-Type-Options: nosniff` on all responses. This prevents browsers from MIME-sniffing response content (relevant if MEI or SVG files are ever served with an ambiguous content type).
 
-**MEI schema validation.** Upgrade the XML parse check in [section 3.5](#35-mei-file-content-xml-parsing) to full MEI schema validation using an RNG or XSD file. The lxml parse with `resolve_entities=False` is sufficient for Phase 1; full schema validation catches malformed MEI that would cause silent rendering errors.
+---
 
-**CORS: pull request preview environments.** If Fly.io preview deployments are introduced for pull requests (each PR gets its own preview URL), the CORS allowlist must accommodate dynamic origins. The recommended approach is a backend startup check that reads a comma-separated `ALLOWED_ORIGINS` environment variable, falling back to the static allowlist. This avoids hardcoding preview URLs in code.
+### Could be done in Phase 1
 
-**Dependency scanning.** Add `pip-audit` (Python) and `npm audit` (JavaScript) to the CI pipeline. Both are low-noise and catch known CVEs in third-party packages before they reach production.
+The following items are technically deferred but require no Phase 2 infrastructure — they are cheap to land now and save a future ADR.
+
+**CORS: pull request preview environments.** If Fly.io preview deployments are introduced for pull requests (each PR gets its own preview URL), the CORS allowlist must accommodate dynamic origins. The recommended approach is a backend startup check that reads a comma-separated `ALLOWED_ORIGINS` environment variable, falling back to the static allowlist. This avoids hardcoding preview URLs in code. This is a 5-line change to `main.py` with no new dependencies.
+
+**Dependency scanning.** Add `pip-audit` (Python) and `npm audit` (JavaScript) to the CI pipeline. Both are low-noise, catch known CVEs in third-party packages before they reach production, and can be wired up against `requirements.txt` and `package.json` which already exist.

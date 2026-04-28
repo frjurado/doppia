@@ -6,7 +6,7 @@ This document is the authoritative specification for the fragment data model. It
 
 **The `summary` JSONB schema defined here is treated as a published API from the moment the first fragment record is written.** The Phase 3 AI reasoning layer will consume this structure directly via tool calls. Changing field names, removing fields, or restructuring the hierarchy after production fragments exist requires a versioned migration of every affected record. Additions of new optional fields at the top level are safe without a version bump, provided existing consumers ignore unknown fields. Everything else is a breaking change.
 
-When any breaking change is made: increment `version`, write a migration script in `scripts/migrations/`, update this document, and run the migration in staging before production.
+When any breaking change is made: increment `version`, write a migration script in `backend/data_migrations/`, update this document, and run the migration in staging before production. (Note: `backend/data_migrations/` contains JSONB data migrations for `fragment.summary`; Alembic schema migrations live separately in `backend/migrations/`.)
 
 ---
 
@@ -391,6 +391,8 @@ CREATE INDEX movement_analysis_events_gin        ON movement_analysis USING GIN 
 Event durations are implicit: each event extends in time until the next event, or to the end of the movement if it is the last. See "Harmonic rhythm and event durations" above.
 
 **Reliability classes:** High-reliability fields (`root`, `quality`, `inversion`) are derivable mechanically and are expected to be correct without review in most cases. Medium-reliability fields (`numeral`, `local_key`) are probabilistic and must always be reviewed before a fragment whose range covers them can be approved. `bass_pitch` and `soprano_pitch` are not populated for DCML-sourced events and are always `null` until a music21 top-up pass fills them in.
+
+**Phase 1 note on `bass_pitch` / `soprano_pitch`.** As of Phase 1, no music21 top-up pass exists — the `music21_auto` branch in `ingest_analysis.py` raises `NotImplementedError`. For DCML-sourced events these fields remain `null` indefinitely. Component 6 introduces the top-up pass; until then, any query that filters on `bass_pitch IS NOT NULL` or `soprano_pitch IS NOT NULL` will return no results for DCML corpora.
 
 **Mutability.** `events` is mutable. When an annotator corrects a chord in the tagging UI, the service layer finds the matching event by `(mn, volta, beat)` and updates it in place: sets the new chord fields, flips `source` to `"manual"`, sets `auto: false` and `reviewed: true`. For DCML-sourced events `mc` provides an additional stable cross-check, but `(mn, volta, beat)` is the universal event identity across all source types. The fragment that triggered the edit is not where the value lives — the fragment just provided the context in which the correction happened.
 
