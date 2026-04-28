@@ -346,10 +346,10 @@ All responses follow the envelope defined in `CONTRIBUTING.md § 5`:
 }
 ```
 
-The exception handler registration lives in `backend/api/exception_handlers.py` and is called once from the application factory:
+The exception handler registration lives in `backend/api/middleware/errors.py` and is called once from the application factory:
 
 ```python
-# backend/api/exception_handlers.py
+# backend/api/middleware/errors.py
 
 from fastapi import Request
 from fastapi.responses import JSONResponse

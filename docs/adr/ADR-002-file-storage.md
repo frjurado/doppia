@@ -65,7 +65,13 @@ The application layer resolves object keys to signed URLs at request time when t
 **Neutral**
 
 - The S3-compatible API is stable and well-supported across tooling. `aioboto3` (async) is the Python client used throughout; no R2-specific SDK is required.
-- Static preview images (Verovio-rendered SVG incipits and fragment previews) are stored in the same bucket as MEI files, under a parallel key structure: `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/preview.svg`. The same client and key-resolution logic applies.
+- Static SVG assets (Verovio-rendered incipits and fragment previews) are stored in the same bucket as MEI files. The full key inventory is:
+  - **Normalized MEI** — `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei`
+  - **Original MEI** — `originals/{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei` (preserved pre-normalisation copy; see ADR-014)
+  - **Incipit SVG** — `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg` (per-movement first-page render for the browse view; written by the `generate_incipit` Celery task)
+  - **Fragment preview SVG** — `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/fragments/{fragment_id}.svg` (per-fragment thumbnail; written at submission time per ADR-008; Component 4+)
+
+  The same `aioboto3` client and key-resolution logic applies to all four asset types. `services/object_storage.py` documents the full set.
 
 ---
 
