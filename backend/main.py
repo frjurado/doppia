@@ -25,10 +25,12 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 import httpx
 from api.middleware.auth import AuthMiddleware
 from api.middleware.errors import (
+    doppia_error_handler,
     http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from errors import DoppiaError
 from api.router import router
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -140,6 +142,9 @@ def create_app() -> FastAPI:
     )
 
     # Exception handlers — registered before middleware so they apply globally.
+    # DoppiaError is registered first: typed domain exceptions take priority
+    # over the bare HTTPException fallback.
+    application.add_exception_handler(DoppiaError, doppia_error_handler)
     application.add_exception_handler(HTTPException, http_exception_handler)
     application.add_exception_handler(
         RequestValidationError, validation_exception_handler

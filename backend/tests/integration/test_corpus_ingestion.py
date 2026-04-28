@@ -738,6 +738,81 @@ class TestCorpusIngestion:
 
 
 # ---------------------------------------------------------------------------
+# Error envelope tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestIngestionErrorEnvelopes:
+    """Verify that ingestion validation failures return the correct error envelope.
+
+    These tests exercise the IngestionError → doppia_error_handler path and
+    confirm that the double-wrapping bug (Report 2 Issue 2) is resolved.
+    """
+
+    async def test_invalid_zip_returns_proper_envelope(
+        self,
+        integration_test_client: AsyncClient,
+    ) -> None:
+        """Uploading a non-ZIP body returns 422 with INVALID_ZIP code."""
+        resp = await integration_test_client.post(
+            "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+            headers={"Authorization": "Bearer dev-token"},
+            files={"archive": ("bad.zip", b"not a zip file", "application/zip")},
+        )
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["error"]["code"] == "INVALID_ZIP"
+        assert "ZIP" in body["error"]["message"]
+        # Must not be double-wrapped (old bug: code was INTERNAL_SERVER_ERROR
+        # and message was a stringified dict)
+        assert body["error"]["code"] != "INTERNAL_SERVER_ERROR"
+        assert not body["error"]["message"].startswith("{")
+
+    async def test_missing_metadata_returns_metadata_parse_error(
+        self,
+        integration_test_client: AsyncClient,
+    ) -> None:
+        """A valid ZIP with no metadata.yaml returns 422 with METADATA_PARSE_ERROR."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("some_other_file.txt", "hello")
+        archive_bytes = buf.getvalue()
+
+        resp = await integration_test_client.post(
+            "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+            headers={"Authorization": "Bearer dev-token"},
+            files={"archive": ("no_metadata.zip", archive_bytes, "application/zip")},
+        )
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["error"]["code"] == "METADATA_PARSE_ERROR"
+
+    async def test_slug_mismatch_returns_coherence_error(
+        self,
+        integration_test_client: AsyncClient,
+    ) -> None:
+        """A ZIP whose metadata.composer.slug doesn't match the URL returns 422."""
+        wrong_slug_metadata = {
+            **_MAIN_METADATA,
+            "composer": {**_MAIN_METADATA["composer"], "slug": "wrong-slug"},
+        }
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("metadata.yaml", yaml.safe_dump(wrong_slug_metadata))
+        archive_bytes = buf.getvalue()
+
+        resp = await integration_test_client.post(
+            "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+            headers={"Authorization": "Bearer dev-token"},
+            files={"archive": ("mismatch.zip", archive_bytes, "application/zip")},
+        )
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["error"]["code"] == "CORPUS_COHERENCE_ERROR"
+
+
+# ---------------------------------------------------------------------------
 # Standalone regression test: per-invocation engine (Issue 1)
 # ---------------------------------------------------------------------------
 

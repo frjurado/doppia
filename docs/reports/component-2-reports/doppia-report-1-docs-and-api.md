@@ -12,6 +12,8 @@ The problems are of two kinds. First, several **real bugs** in the code: a 404â†
 
 ## Issue 1: 404 maps to `INTERNAL_SERVER_ERROR` in the error envelope
 
+**[SOLVED]**
+
 **Issue.** `backend/api/middleware/errors.py` line 38 maps HTTP status 404 to `ErrorCode.INTERNAL_SERVER_ERROR`. Every 404 response from the API (including all four `HTTPException(404, ...)` raises in `routes/browse.py`) returns an envelope with `code: "INTERNAL_SERVER_ERROR"`. The `ErrorCode` enum has specific not-found codes (`FRAGMENT_NOT_FOUND`, `MOVEMENT_NOT_FOUND`, `WORK_NOT_FOUND`, `CORPUS_NOT_FOUND`, `COMPOSER_NOT_FOUND`) but no generic `NOT_FOUND` to use as a fallback for the status-code-based mapping.
 
 **Solution.** Pick one of:
@@ -145,6 +147,8 @@ Both scripts are stubs. A new contributor following the setup steps in order wil
 ---
 
 ## Issue 9: 404 path bypasses the typed `ErrorCode` enum entirely
+
+**[SOLVED]**
 
 **Issue.** Route handlers in `backend/api/routes/browse.py` raise:
 

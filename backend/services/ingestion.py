@@ -29,10 +29,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import HTTPException
+from errors import IngestionError
 
 logger = logging.getLogger(__name__)
-from models.errors import ErrorCode, ErrorResponse
+from models.errors import ErrorCode
 from models.ingestion import (
     ComposerMetadata,
     CorpusMetadata,
@@ -108,8 +108,9 @@ async def ingest_corpus(
         were accepted and which were rejected.
 
     Raises:
-        HTTPException(422): On ZIP parse failure, metadata validation failure,
+        IngestionError: On ZIP parse failure, metadata validation failure,
             slug mismatch, all-movements-rejected, or corpus coherence failure.
+            Maps to 422 Unprocessable Entity via the DoppiaError exception handler.
     """
     # ------------------------------------------------------------------
     # 1. Unpack ZIP
@@ -117,7 +118,9 @@ async def ingest_corpus(
     try:
         zf = zipfile.ZipFile(io.BytesIO(archive_bytes))
     except zipfile.BadZipFile as exc:
-        _raise_422(ErrorCode.INVALID_ZIP, f"Archive is not a valid ZIP file: {exc}")
+        raise IngestionError(
+            ErrorCode.INVALID_ZIP, f"Archive is not a valid ZIP file: {exc}"
+        ) from exc
 
     with tempfile.TemporaryDirectory() as _tmpdir:
         tmp = Path(_tmpdir)
@@ -128,7 +131,7 @@ async def ingest_corpus(
         try:
             raw_yaml = zf.read("metadata.yaml")
         except KeyError:
-            _raise_422(
+            raise IngestionError(
                 ErrorCode.METADATA_PARSE_ERROR,
                 "metadata.yaml not found in archive.",
             )
@@ -137,22 +140,22 @@ async def ingest_corpus(
             raw_dict = yaml.safe_load(raw_yaml)
             metadata = IngestMetadata.model_validate(raw_dict)
         except (yaml.YAMLError, ValidationError) as exc:
-            _raise_422(
+            raise IngestionError(
                 ErrorCode.METADATA_PARSE_ERROR,
                 f"metadata.yaml failed validation: {exc}",
-            )
+            ) from exc
 
         # ------------------------------------------------------------------
         # 3. Slug coherence
         # ------------------------------------------------------------------
         if metadata.composer.slug != composer_slug:
-            _raise_422(
+            raise IngestionError(
                 ErrorCode.CORPUS_COHERENCE_ERROR,
                 f"metadata.composer.slug {metadata.composer.slug!r} does not match "
                 f"URL slug {composer_slug!r}.",
             )
         if metadata.corpus.slug != corpus_slug:
-            _raise_422(
+            raise IngestionError(
                 ErrorCode.CORPUS_COHERENCE_ERROR,
                 f"metadata.corpus.slug {metadata.corpus.slug!r} does not match "
                 f"URL slug {corpus_slug!r}.",
@@ -232,7 +235,7 @@ async def ingest_corpus(
             cat = work_meta.catalogue_number
             if cat is not None:
                 if cat in catalogue_seen:
-                    _raise_422(
+                    raise IngestionError(
                         ErrorCode.CORPUS_COHERENCE_ERROR,
                         f"Duplicate catalogue_number {cat!r}: "
                         f"works {catalogue_seen[cat]!r} and {work_meta.slug!r}.",
@@ -259,7 +262,7 @@ async def ingest_corpus(
         # 6. Abort if every movement was rejected
         # ------------------------------------------------------------------
         if not accepted and rejected:
-            _raise_422(
+            raise IngestionError(
                 ErrorCode.INVALID_MEI,
                 f"All {len(rejected)} movement(s) failed MEI validation.",
                 detail={"rejected": [r.model_dump() for r in rejected]},
@@ -534,27 +537,3 @@ async def _upsert_movement(
     return result.scalar_one()
 
 
-# ---------------------------------------------------------------------------
-# Utility
-# ---------------------------------------------------------------------------
-
-
-def _raise_422(
-    code: ErrorCode, message: str, detail: dict[str, Any] | None = None
-) -> None:
-    """Raise a FastAPI 422 with the project's standard error envelope.
-
-    Args:
-        code: Error code enum value.
-        message: Human-readable description.
-        detail: Optional structured context dict.
-
-    Raises:
-        HTTPException: Always; return type is ``None`` for type-checker clarity.
-    """
-    raise HTTPException(
-        status_code=422,
-        detail=ErrorResponse.make(
-            code=code, message=message, detail=detail
-        ).model_dump(),
-    )

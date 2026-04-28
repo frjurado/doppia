@@ -18,7 +18,8 @@ from __future__ import annotations
 import uuid
 
 from api.dependencies import require_role
-from fastapi import APIRouter, Depends, HTTPException, status
+from errors import ComposerNotFoundError, CorpusNotFoundError, WorkNotFoundError
+from fastapi import APIRouter, Depends
 from models.base import get_db
 from models.browse import (
     ComposerResponse,
@@ -75,13 +76,13 @@ async def get_corpora(
         List of :class:`~models.browse.CorpusResponse` items.
 
     Raises:
-        HTTPException: 404 if the composer slug is not found.
+        ComposerNotFoundError: 404 if the composer slug is not found.
     """
     result = await list_corpora(composer_slug=composer_slug, db=db)
     if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Composer '{composer_slug}' not found.",
+        raise ComposerNotFoundError(
+            f"Composer '{composer_slug}' not found.",
+            detail={"slug": composer_slug},
         )
     return result
 
@@ -109,7 +110,7 @@ async def get_works(
         List of :class:`~models.browse.WorkResponse` items.
 
     Raises:
-        HTTPException: 404 if the composer or corpus slug is not found.
+        CorpusNotFoundError: 404 if the composer or corpus slug is not found.
     """
     result = await list_works(
         composer_slug=composer_slug,
@@ -117,9 +118,9 @@ async def get_works(
         db=db,
     )
     if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(f"Composer '{composer_slug}' or corpus '{corpus_slug}' not found."),
+        raise CorpusNotFoundError(
+            f"Composer '{composer_slug}' or corpus '{corpus_slug}' not found.",
+            detail={"composer_slug": composer_slug, "corpus_slug": corpus_slug},
         )
     return result
 
@@ -151,13 +152,13 @@ async def get_movements(
         List of :class:`~models.browse.MovementResponse` items.
 
     Raises:
-        HTTPException: 404 if the work ID is not found.
+        WorkNotFoundError: 404 if the work ID is not found.
     """
     storage = make_storage_client()
     result = await list_movements(work_id=work_id, db=db, storage=storage)
     if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Work '{work_id}' not found.",
+        raise WorkNotFoundError(
+            f"Work '{work_id}' not found.",
+            detail={"work_id": str(work_id)},
         )
     return result

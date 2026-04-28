@@ -47,6 +47,8 @@ Without this test the bug only surfaces on the second corpus ingestion, by which
 
 ## Issue 2: Service-layer `_raise_422` produces a double-wrapped error envelope
 
+**[SOLVED]**
+
 **Issue.** `backend/services/ingestion.py` lines 533–549:
 
 ```python

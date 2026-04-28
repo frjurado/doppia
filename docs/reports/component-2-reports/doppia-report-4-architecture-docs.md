@@ -14,6 +14,8 @@ The good news: the modelling docs (graph design, fragment schema, corpus-and-ana
 
 ## Issue 1: `error-handling.md` describes an exception architecture that doesn't exist
 
+**[SOLVED]**
+
 **Issue.** `docs/architecture/error-handling.md` (442 lines) is the most heavily cross-referenced architecture document — CONTRIBUTING.md links to it for "the full error propagation strategy", CLAUDE.md lists it under "Important Documentation", and `models/errors.py` itself references it as the canonical source. The document describes:
 
 - A base `DoppiaError` exception class with a hierarchy of subclasses (`InfrastructureError`, `Neo4jUnavailableError`, `PostgresUnavailableError`, `RedisUnavailableError`, `NotFoundError`, `FragmentNotFoundError`, `ConceptNotFoundError`, `CollectionNotFoundError`, `UserNotFoundError`, `ConflictError`, `FragmentAlreadyApprovedError`, `HarmonyNotReviewedError`, `AuthorizationError`, `GraphIntegrityError`).

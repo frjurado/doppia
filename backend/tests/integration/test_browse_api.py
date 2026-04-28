@@ -282,12 +282,15 @@ class TestBrowseApi:
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown composer slug returns 404."""
+        """Unknown composer slug returns 404 with COMPOSER_NOT_FOUND code."""
         resp = await integration_test_client.get(
             "/api/v1/composers/nonexistent-composer/corpora",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "COMPOSER_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     # ------------------------------------------------------------------
     # GET /api/v1/composers/{slug}/corpora/{slug}/works
@@ -314,23 +317,29 @@ class TestBrowseApi:
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown corpus slug returns 404."""
+        """Unknown corpus slug returns 404 with CORPUS_NOT_FOUND code."""
         resp = await integration_test_client.get(
             f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/nonexistent/works",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "CORPUS_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     async def test_list_works_404_unknown_composer(
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown composer slug returns 404."""
+        """Unknown composer slug returns 404 with CORPUS_NOT_FOUND code."""
         resp = await integration_test_client.get(
             "/api/v1/composers/nonexistent/corpora/piano-sonatas/works",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "CORPUS_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     # ------------------------------------------------------------------
     # GET /api/v1/works/{work_id}/movements
@@ -416,12 +425,15 @@ class TestBrowseApi:
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown work UUID returns 404."""
+        """Unknown work UUID returns 404 with WORK_NOT_FOUND code."""
         resp = await integration_test_client.get(
             f"/api/v1/works/{uuid.uuid4()}/movements",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "WORK_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     async def test_list_movements_required_fields(
         self,

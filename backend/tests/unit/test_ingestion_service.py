@@ -193,100 +193,101 @@ def _mock_generate_incipit_delay():
 
 class TestZipParsing:
     async def test_non_zip_bytes_raises_422(self, mock_db, mock_storage):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", b"not a zip", mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "INVALID_ZIP"
+        assert exc_info.value.code == ErrorCode.INVALID_ZIP
 
     async def test_missing_metadata_yaml_raises_422(self, mock_db, mock_storage):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("readme.txt", "no metadata here")
         archive = buf.getvalue()
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
     async def test_malformed_metadata_yaml_raises_422(self, mock_db, mock_storage):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("metadata.yaml", "slug: !!INVALID YAML [[[")
         archive = buf.getvalue()
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
     async def test_invalid_metadata_schema_raises_422(
         self, valid_mei_bytes, mock_db, mock_storage, harmonies_bytes
     ):
         """metadata.yaml that parses as YAML but fails Pydantic."""
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata()
         meta["corpus"]["licence"] = "NOT-A-REAL-SPDX"
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
 
 class TestSlugCoherence:
     async def test_composer_slug_mismatch_raises_422(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(composer_slug="mozart")
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             # URL slug is "beethoven" but metadata says "mozart"
             await ingest_corpus(
                 "beethoven", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
+        assert exc_info.value.code == ErrorCode.CORPUS_COHERENCE_ERROR
 
     async def test_corpus_slug_mismatch_raises_422(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(corpus_slug="piano-sonatas")
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "violin-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
+        assert exc_info.value.code == ErrorCode.CORPUS_COHERENCE_ERROR
 
     async def test_abc_repository_raises_422(
         self, valid_mei_bytes, mock_db, mock_storage
     ):
         """ABC/Beethoven deny-list is enforced at Pydantic level → METADATA_PARSE_ERROR."""
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(
             composer_slug="beethoven",
@@ -299,13 +300,12 @@ class TestSlugCoherence:
             zf.writestr("metadata.yaml", yaml.dump(meta))
         archive = buf.getvalue()
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "beethoven", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
         # The ABC deny-list fires in Pydantic → caught as METADATA_PARSE_ERROR
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
 
 class TestPerMovementValidation:
@@ -376,7 +376,8 @@ class TestPerMovementValidation:
     async def test_all_movements_rejected_raises_422(
         self, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata()
         archive = _build_zip(meta, b"not valid xml", harmonies_bytes)
@@ -387,12 +388,11 @@ class TestPerMovementValidation:
             ]
         )
         with patch("services.ingestion.validate_mei", return_value=bad_report):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(IngestionError) as exc_info:
                 await ingest_corpus(
                     "mozart", "piano-sonatas", archive, mock_db, mock_storage
                 )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "INVALID_MEI"
+        assert exc_info.value.code == ErrorCode.INVALID_MEI
 
     async def test_missing_mei_file_in_zip_rejects_movement(
         self, harmonies_bytes, mock_db, mock_storage
@@ -419,7 +419,8 @@ class TestCorpusCoherence:
     async def test_duplicate_catalogue_number_raises_422(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(
             works=[
@@ -465,13 +466,12 @@ class TestCorpusCoherence:
                 "services.ingestion.normalize_mei",
                 side_effect=_mock_normalize_side_effect,
             ):
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(IngestionError) as exc_info:
                     await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
                     )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
-        assert "SHARED" in exc_info.value.detail["error"]["message"]
+        assert exc_info.value.code == ErrorCode.CORPUS_COHERENCE_ERROR
+        assert "SHARED" in exc_info.value.message
 
 
 class TestObjectKeys:

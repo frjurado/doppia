@@ -116,13 +116,16 @@ async def integration_test_client(
 
     from api.middleware.auth import AuthMiddleware
     from api.middleware.errors import (
+        doppia_error_handler,
         http_exception_handler,
         unhandled_exception_handler,
         validation_exception_handler,
     )
     from api.router import router as api_router
+    from errors import DoppiaError
 
     app = FastAPI(lifespan=_noop_lifespan)
+    app.add_exception_handler(DoppiaError, doppia_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
