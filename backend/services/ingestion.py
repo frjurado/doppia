@@ -20,6 +20,7 @@ The public surface is a single async function:
 from __future__ import annotations
 
 import io
+import logging
 import tempfile
 import uuid
 import zipfile
@@ -29,18 +30,14 @@ from typing import Any
 
 import yaml
 from fastapi import HTTPException
-from pydantic import ValidationError
-from sqlalchemy import func
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.analysis import MovementAnalysis
+logger = logging.getLogger(__name__)
 from models.errors import ErrorCode, ErrorResponse
 from models.ingestion import (
     ComposerMetadata,
     CorpusMetadata,
-    IngestMetadata,
     IngestionReport,
+    IngestMetadata,
     MovementAccepted,
     MovementMetadata,
     MovementRejected,
@@ -48,12 +45,15 @@ from models.ingestion import (
 )
 from models.music import Composer, Corpus, Movement, Work
 from models.normalization import NormalizationReport
+from pydantic import ValidationError
 from services.mei_normalizer import normalize_mei
 from services.mei_validator import validate_mei
 from services.object_storage import StorageClient
 from services.tasks.generate_incipit import generate_incipit
 from services.tasks.ingest_analysis import ingest_movement_analysis
-
+from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Internal dataclasses (not part of the public API)
@@ -313,14 +313,25 @@ async def ingest_corpus(
     # 8. Dispatch Celery tasks (outside transaction, after commit)
     # ------------------------------------------------------------------
     for entry in dispatch_entries:
-        ingest_movement_analysis.delay(
-            movement_id=str(entry.movement_id),
-            analysis_source=entry.analysis_source,
-            harmonies_tsv_content=(
-                entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
-            ),
-        )
-        generate_incipit.delay(movement_id=str(entry.movement_id))
+        try:
+            ingest_movement_analysis.delay(
+                movement_id=str(entry.movement_id),
+                analysis_source=entry.analysis_source,
+                harmonies_tsv_content=(
+                    entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
+                ),
+            )
+            generate_incipit.delay(movement_id=str(entry.movement_id))
+        except Exception as exc:
+            # Broker unavailable (e.g. misconfigured Redis in staging). The
+            # upload itself has already succeeded — DB records committed and
+            # MEI files stored. Log and continue; tasks can be re-enqueued
+            # manually once the broker is reachable.
+            logger.warning(
+                "Could not enqueue background tasks for movement %s: %s",
+                entry.movement_id,
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # 9. Return report
@@ -345,9 +356,7 @@ async def ingest_corpus(
 # ---------------------------------------------------------------------------
 
 
-async def _upsert_composer(
-    db: AsyncSession, meta: ComposerMetadata
-) -> uuid.UUID:
+async def _upsert_composer(db: AsyncSession, meta: ComposerMetadata) -> uuid.UUID:
     """Upsert the ``composer`` row, returning its UUID.
 
     Args:
@@ -545,5 +554,7 @@ def _raise_422(
     """
     raise HTTPException(
         status_code=422,
-        detail=ErrorResponse.make(code=code, message=message, detail=detail).model_dump(),
+        detail=ErrorResponse.make(
+            code=code, message=message, detail=detail
+        ).model_dump(),
     )

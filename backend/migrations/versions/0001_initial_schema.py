@@ -408,9 +408,7 @@ def upgrade() -> None:
     # when Alembic imports this migration module on systems where pgvector is not
     # installed (e.g. CI environments that only run offline SQL generation).
     # Null until Phase 3; dimension fixed at 1536 (text-embedding-3-small).
-    op.execute(
-        "ALTER TABLE prose_chunk ADD COLUMN embedding vector(1536)"
-    )
+    op.execute("ALTER TABLE prose_chunk ADD COLUMN embedding vector(1536)")
 
     # ------------------------------------------------------------------
     # Indexes
@@ -436,9 +434,7 @@ def upgrade() -> None:
     op.create_index("fragment_status_idx", "fragment", ["status"])
     op.create_index("fragment_movement_idx", "fragment", ["movement_id"])
     op.create_index("fct_concept_idx", "fragment_concept_tag", ["concept_id"])
-    op.create_index(
-        "fragment_review_fragment_idx", "fragment_review", ["fragment_id"]
-    )
+    op.create_index("fragment_review_fragment_idx", "fragment_review", ["fragment_id"])
     op.create_index(
         "movement_analysis_music21_version_idx",
         "movement_analysis",

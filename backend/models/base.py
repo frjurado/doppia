@@ -51,6 +51,10 @@ def init_db(database_url: str) -> AsyncEngine:
         pool_pre_ping=True,
         pool_size=5,
         max_overflow=10,
+        # PgBouncer in transaction pool mode (used by Fly.io Postgres) does not
+        # support asyncpg's prepared statements. Disabling the statement cache
+        # tells asyncpg to send queries as simple protocol messages instead.
+        connect_args={"statement_cache_size": 0},
     )
     _async_session_factory = async_sessionmaker(
         _engine,

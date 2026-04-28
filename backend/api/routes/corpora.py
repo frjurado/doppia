@@ -13,14 +13,13 @@ See docs/roadmap/component-1-mei-corpus-ingestion.md §Step 7.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from api.dependencies import require_role
+from fastapi import APIRouter, Depends, File, UploadFile
 from models.base import get_db
 from models.ingestion import IngestionReport
 from services.ingestion import ingest_corpus
 from services.object_storage import make_storage_client
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/composers", tags=["Corpora"])
 
@@ -36,7 +35,9 @@ router = APIRouter(prefix="/composers", tags=["Corpora"])
 async def upload_corpus(
     composer_slug: str,
     corpus_slug: str,
-    archive: UploadFile = File(..., description="ZIP produced by prepare_dcml_corpus.py"),
+    archive: UploadFile = File(
+        ..., description="ZIP produced by prepare_dcml_corpus.py"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> IngestionReport:
     """Ingest a corpus upload ZIP.

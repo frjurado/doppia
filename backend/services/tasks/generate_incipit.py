@@ -26,11 +26,10 @@ import os
 
 import verovio
 from celery.exceptions import Ignore
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-
 from services.celery_app import celery_app
 from services.object_storage import incipit_key, make_storage_client
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +45,7 @@ def _verovio_resource_path() -> str | None:
         Absolute path to the ``data/`` directory inside the verovio package,
         or ``None`` if it cannot be located.
     """
-    candidate = os.path.join(
-        os.path.dirname(os.path.abspath(verovio.__file__)), "data"
-    )
+    candidate = os.path.join(os.path.dirname(os.path.abspath(verovio.__file__)), "data")
     return candidate if os.path.isdir(candidate) else None
 
 
@@ -84,6 +81,10 @@ async def _generate_incipit_async(movement_id: str) -> None:
         pool_size=1,
         max_overflow=0,
         pool_pre_ping=False,
+        # Supabase uses PgBouncer in transaction pooling mode, which does not
+        # support asyncpg prepared statements.  Setting statement_cache_size=0
+        # disables the cache and prevents DuplicatePreparedStatementError.
+        connect_args={"statement_cache_size": 0},
     )
     try:
         async with AsyncSession(engine) as session:
@@ -134,7 +135,10 @@ async def _generate_incipit_async(movement_id: str) -> None:
         # element, which causes it to miss <music>.  Using re.sub here avoids
         # pulling in lxml as a dependency.
         import re as _re
-        mei_text = _re.sub(r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=_re.DOTALL)
+
+        mei_text = _re.sub(
+            r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=_re.DOTALL
+        )
         ok = tk.loadData(mei_text)
         if not ok:
             raise RuntimeError(

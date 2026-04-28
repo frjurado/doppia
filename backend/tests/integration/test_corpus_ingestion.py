@@ -28,6 +28,8 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+pytestmark = pytest.mark.integration
+
 # ---------------------------------------------------------------------------
 # Fixtures directory
 # ---------------------------------------------------------------------------
@@ -286,8 +288,10 @@ class TestCorpusIngestion:
         def _capture_delay(**kwargs: Any) -> None:
             dispatch_calls.append(kwargs)
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
-             patch("services.ingestion.generate_incipit") as mock_incipit:
+        with (
+            patch("services.ingestion.ingest_movement_analysis") as mock_task,
+            patch("services.ingestion.generate_incipit") as mock_incipit,
+        ):
             mock_task.delay = MagicMock(side_effect=_capture_delay)
             mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
@@ -334,10 +338,7 @@ class TestCorpusIngestion:
 
         work_row = (
             await db_session.execute(
-                text(
-                    "SELECT id FROM work "
-                    "WHERE corpus_id = :wid AND slug = 'k331'"
-                ),
+                text("SELECT id FROM work " "WHERE corpus_id = :wid AND slug = 'k331'"),
                 {"wid": corpus_id},
             )
         ).one()
@@ -365,12 +366,12 @@ class TestCorpusIngestion:
         ).one()
 
         # duration_bars = max @n in the fixture MEI files
-        assert mov1_row.duration_bars == 6, (
-            f"Expected duration_bars=6 for movement-1, got {mov1_row.duration_bars}"
-        )
-        assert mov2_row.duration_bars == 5, (
-            f"Expected duration_bars=5 for movement-2, got {mov2_row.duration_bars}"
-        )
+        assert (
+            mov1_row.duration_bars == 6
+        ), f"Expected duration_bars=6 for movement-1, got {mov1_row.duration_bars}"
+        assert (
+            mov2_row.duration_bars == 5
+        ), f"Expected duration_bars=5 for movement-2, got {mov2_row.duration_bars}"
 
         # MEI object key convention
         assert mov1_row.mei_object_key == (
@@ -416,16 +417,20 @@ class TestCorpusIngestion:
             )
         ).one()
         events1: list[dict[str, Any]] = ma1_row.events
-        assert len(events1) == 6, (
-            f"Expected 6 events for K331 movement-1, got {len(events1)}"
-        )
+        assert (
+            len(events1) == 6
+        ), f"Expected 6 events for K331 movement-1, got {len(events1)}"
         assert ma1_row.music21_version, "music21_version must be non-empty"
 
         # Spot-check: mc=2 → V7 from DCML
         mc2_events = [e for e in events1 if e.get("mc") == 2]
-        assert len(mc2_events) == 1, f"Expected exactly 1 event at mc=2, got {mc2_events}"
+        assert (
+            len(mc2_events) == 1
+        ), f"Expected exactly 1 event at mc=2, got {mc2_events}"
         mc2 = mc2_events[0]
-        assert mc2["numeral"] == "V7", f"Expected numeral='V7' at mc=2, got {mc2['numeral']}"
+        assert (
+            mc2["numeral"] == "V7"
+        ), f"Expected numeral='V7' at mc=2, got {mc2['numeral']}"
         assert mc2["source"] == "DCML"
         assert mc2["auto"] is False
         assert mc2["reviewed"] is False
@@ -433,16 +438,14 @@ class TestCorpusIngestion:
         # K331-2.tsv: 1 phrase-open row excluded → 5 chord events
         ma2_row = (
             await db_session.execute(
-                text(
-                    "SELECT events FROM movement_analysis WHERE movement_id = :mid"
-                ),
+                text("SELECT events FROM movement_analysis WHERE movement_id = :mid"),
                 {"mid": movement_id_2},
             )
         ).one()
         events2: list[dict[str, Any]] = ma2_row.events
-        assert len(events2) == 5, (
-            f"Expected 5 events for K331 movement-2, got {len(events2)}"
-        )
+        assert (
+            len(events2) == 5
+        ), f"Expected 5 events for K331 movement-2, got {len(events2)}"
 
         # Spot-check bVII in movement-2 (mc=4 in K331-2.tsv)
         mc4_events = [e for e in events2 if e.get("mc") == 4]
@@ -460,16 +463,16 @@ class TestCorpusIngestion:
                 {"mid": movement_id_1},
             )
         ).one()
-        assert updated_mov1.key_signature == "A major", (
-            f"Expected key_signature='A major', got {updated_mov1.key_signature!r}"
-        )
+        assert (
+            updated_mov1.key_signature == "A major"
+        ), f"Expected key_signature='A major', got {updated_mov1.key_signature!r}"
 
         # ── harmony_alignment_warnings must be absent / empty ─────────
         norm_warn = updated_mov1.normalization_warnings or {}
         harmony_warn = norm_warn.get("harmony_alignment_warnings", [])
-        assert harmony_warn == [], (
-            f"Expected empty harmony_alignment_warnings, got: {harmony_warn}"
-        )
+        assert (
+            harmony_warn == []
+        ), f"Expected empty harmony_alignment_warnings, got: {harmony_warn}"
 
     # ------------------------------------------------------------------
     # Test 2 — idempotent re-upload
@@ -531,8 +534,10 @@ class TestCorpusIngestion:
             def _capture(**kwargs: Any) -> None:
                 dispatch_calls.append(kwargs)
 
-            with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
-                 patch("services.ingestion.generate_incipit") as mock_incipit:
+            with (
+                patch("services.ingestion.ingest_movement_analysis") as mock_task,
+                patch("services.ingestion.generate_incipit") as mock_incipit,
+            ):
                 mock_task.delay = MagicMock(side_effect=_capture)
                 mock_incipit.delay = MagicMock()
                 resp = await integration_test_client.post(
@@ -624,17 +629,17 @@ class TestCorpusIngestion:
         assert corpus_count == 1, f"Expected 1 corpus row, got {corpus_count}"
 
         # Timestamps advanced
-        assert ingested_at_2 >= ingested_at_1, (
-            "movement.ingested_at should advance on re-upload"
-        )
-        assert ma_updated_at_2 >= ma_updated_at_1, (
-            "movement_analysis.updated_at should advance on re-analysis"
-        )
+        assert (
+            ingested_at_2 >= ingested_at_1
+        ), "movement.ingested_at should advance on re-upload"
+        assert (
+            ma_updated_at_2 >= ma_updated_at_1
+        ), "movement_analysis.updated_at should advance on re-analysis"
 
         # Event count unchanged
-        assert events_count_2 == events_count_1, (
-            f"Event count changed after re-upload: {events_count_1} → {events_count_2}"
-        )
+        assert (
+            events_count_2 == events_count_1
+        ), f"Event count changed after re-upload: {events_count_1} → {events_count_2}"
 
     # ------------------------------------------------------------------
     # Test 3 — volta handling
@@ -672,8 +677,10 @@ class TestCorpusIngestion:
         def _capture(**kwargs: Any) -> None:
             dispatch_calls.append(kwargs)
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_task, \
-             patch("services.ingestion.generate_incipit") as mock_incipit:
+        with (
+            patch("services.ingestion.ingest_movement_analysis") as mock_task,
+            patch("services.ingestion.generate_incipit") as mock_incipit,
+        ):
             mock_task.delay = MagicMock(side_effect=_capture)
             mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
@@ -694,9 +701,7 @@ class TestCorpusIngestion:
         # ── Assert events ─────────────────────────────────────────────
         ma_row = (
             await db_session.execute(
-                text(
-                    "SELECT events FROM movement_analysis WHERE movement_id = :mid"
-                ),
+                text("SELECT events FROM movement_analysis WHERE movement_id = :mid"),
                 {"mid": movement_id},
             )
         ).one()
@@ -708,9 +713,10 @@ class TestCorpusIngestion:
         mn2_events = [e for e in events if e["mn"] == 2]
         assert len(mn2_events) == 2, f"Expected 2 events at mn=2, got {mn2_events}"
         volta_values = {e["volta"] for e in mn2_events}
-        assert volta_values == {1, 2}, (
-            f"Expected volta values {{1, 2}} at mn=2, got {volta_values}"
-        )
+        assert volta_values == {
+            1,
+            2,
+        }, f"Expected volta values {{1, 2}} at mn=2, got {volta_values}"
 
         # Verify the specific numerals
         by_volta = {e["volta"]: e for e in mn2_events}
@@ -720,17 +726,15 @@ class TestCorpusIngestion:
         # ── No alignment warnings ──────────────────────────────────────
         norm_warn_row = (
             await db_session.execute(
-                text(
-                    "SELECT normalization_warnings FROM movement WHERE id = :mid"
-                ),
+                text("SELECT normalization_warnings FROM movement WHERE id = :mid"),
                 {"mid": movement_id},
             )
         ).one()
         norm_warn = norm_warn_row.normalization_warnings or {}
         harmony_warn = norm_warn.get("harmony_alignment_warnings", [])
-        assert harmony_warn == [], (
-            f"Expected no harmony_alignment_warnings, got: {harmony_warn}"
-        )
+        assert (
+            harmony_warn == []
+        ), f"Expected no harmony_alignment_warnings, got: {harmony_warn}"
 
 
 # ---------------------------------------------------------------------------

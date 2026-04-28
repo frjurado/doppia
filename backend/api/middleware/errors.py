@@ -23,9 +23,8 @@ import logging
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException
-
 from models.errors import ErrorCode, ErrorResponse
+from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,9 @@ async def http_exception_handler(
     Returns:
         A ``JSONResponse`` with the error envelope and the original status code.
     """
-    code = _HTTP_STATUS_TO_ERROR_CODE.get(exc.status_code, ErrorCode.INTERNAL_SERVER_ERROR)
+    code = _HTTP_STATUS_TO_ERROR_CODE.get(
+        exc.status_code, ErrorCode.INTERNAL_SERVER_ERROR
+    )
     message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     body = ErrorResponse.make(code=code, message=message)
     headers: dict[str, str] = getattr(exc, "headers", None) or {}

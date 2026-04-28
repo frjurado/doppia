@@ -19,16 +19,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, func, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
-
 from models.base import Base
 
 # pgvector Vector type — installed via the pgvector package.
 # The dimension (1536) matches OpenAI text-embedding-3-small and is fixed at
 # table creation; changing it requires re-embedding the entire corpus.
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 
 class MovementAnalysis(Base):
@@ -100,9 +99,7 @@ class ProseChunk(Base):
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     # Null until Phase 3; dimension fixed at 1536 (text-embedding-3-small).
     # Do not change the dimension without a documented re-embedding migration.
-    embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(1536), nullable=True
-    )
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -22,12 +22,7 @@ from dotenv import load_dotenv
 # Load .env from repo root when running locally (no-op if vars already set).
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from neo4j import AsyncDriver, AsyncGraphDatabase
-from starlette.exceptions import HTTPException
-
+import httpx
 from api.middleware.auth import AuthMiddleware
 from api.middleware.errors import (
     http_exception_handler,
@@ -35,7 +30,14 @@ from api.middleware.errors import (
     validation_exception_handler,
 )
 from api.router import router
+from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from models.base import close_db, init_db
+from neo4j import AsyncDriver, AsyncGraphDatabase
+from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await neo4j_driver.verify_connectivity()
     app.state.neo4j_driver = neo4j_driver
 
+    # Fetch Supabase JWKS for ES256 token verification (new Supabase projects).
+    # Stored on app.state so the auth middleware can access it without an env var.
+    # Falls back gracefully to None; middleware then tries SUPABASE_JWT_SECRET (HS256).
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    app.state.jwks: dict | None = None
+    if supabase_url:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{supabase_url}/auth/v1/.well-known/jwks.json", timeout=5.0
+                )
+                resp.raise_for_status()
+                app.state.jwks = resp.json()
+                logger.info("Startup: Supabase JWKS fetched successfully.")
+        except Exception as exc:
+            logger.warning("Startup: could not fetch Supabase JWKS: %s", exc)
+
     logger.info("Startup complete: all connections established.")
 
     yield
@@ -122,7 +141,9 @@ def create_app() -> FastAPI:
 
     # Exception handlers — registered before middleware so they apply globally.
     application.add_exception_handler(HTTPException, http_exception_handler)
-    application.add_exception_handler(RequestValidationError, validation_exception_handler)
+    application.add_exception_handler(
+        RequestValidationError, validation_exception_handler
+    )
     application.add_exception_handler(Exception, unhandled_exception_handler)
 
     # Middleware — Starlette inserts each at the front of the stack, so
@@ -143,6 +164,30 @@ def create_app() -> FastAPI:
 
     # Versioned API router — all endpoints live under /api/v1/.
     application.include_router(router)
+
+    # Serve the built React SPA in staging/production.
+    # The static/ directory is present in the Docker image (copied from the
+    # frontend build stage) but absent in local development, where Vite runs
+    # separately.
+    #
+    # StaticFiles(html=True) only serves index.html for directory requests, not
+    # for unknown paths like /login. A catch-all route is required so React
+    # Router can handle client-side navigation: serve the requested file if it
+    # exists (JS/CSS assets), otherwise fall back to index.html.
+    _static_dir = Path(__file__).parent / "static"
+    if _static_dir.is_dir():
+        application.mount(
+            "/assets",
+            StaticFiles(directory=str(_static_dir / "assets")),
+            name="assets",
+        )
+
+        @application.get("/{full_path:path}", include_in_schema=False)
+        async def serve_spa(full_path: str) -> FileResponse:
+            file_path = _static_dir / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(_static_dir / "index.html")
 
     return application
 

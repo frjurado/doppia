@@ -15,6 +15,8 @@ See docs/roadmap/component-2-corpus-browsing.md §Step 3.
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import io
 import uuid
 import zipfile
@@ -27,11 +29,43 @@ import pytest_asyncio
 import yaml
 from celery.exceptions import Ignore
 from httpx import AsyncClient
+from services.object_storage import make_storage_client
+from services.tasks.generate_incipit import _generate_incipit_async
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.object_storage import make_storage_client
-from services.tasks.generate_incipit import _generate_incipit_async
+pytestmark = pytest.mark.integration
+
+
+# ---------------------------------------------------------------------------
+# Thread-isolated runner
+# ---------------------------------------------------------------------------
+
+
+async def _run_generate_incipit(movement_id: str) -> None:
+    """Run ``_generate_incipit_async`` in a worker thread via ``asyncio.run()``.
+
+    ``_generate_incipit_async`` is designed to be called by Celery via
+    ``asyncio.run()``, which creates and closes its own event loop per
+    invocation.  Calling it directly from within pytest-asyncio's session
+    event loop triggers ``RuntimeError: There is no current event loop`` on
+    Python 3.12, because the internal asyncpg/SQLAlchemy pool creation path
+    calls ``asyncio.get_event_loop()`` rather than ``asyncio.get_running_loop()``.
+
+    Running the coroutine in a ``ThreadPoolExecutor`` thread gives it an
+    isolated event loop — exactly the environment it runs in production —
+    without interfering with the pytest-asyncio session loop.  Exceptions
+    (including ``celery.exceptions.Ignore``) propagate correctly across the
+    thread boundary via the Future returned by ``run_in_executor``.
+
+    Args:
+        movement_id: UUID string of the target movement row.
+    """
+    loop = asyncio.get_running_loop()
+    coro = _generate_incipit_async(movement_id)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        await loop.run_in_executor(pool, lambda: asyncio.run(coro))
+
 
 # ---------------------------------------------------------------------------
 # Fixtures directory
@@ -249,8 +283,10 @@ class TestGenerateIncipit:
             },
         )
 
-        with patch("services.ingestion.ingest_movement_analysis") as mock_analysis, \
-             patch("services.ingestion.generate_incipit") as mock_incipit:
+        with (
+            patch("services.ingestion.ingest_movement_analysis") as mock_analysis,
+            patch("services.ingestion.generate_incipit") as mock_incipit,
+        ):
             mock_analysis.delay = MagicMock()
             mock_incipit.delay = MagicMock()
             resp = await integration_test_client.post(
@@ -277,7 +313,7 @@ class TestGenerateIncipit:
         """Running the task sets incipit_object_key and incipit_generated_at."""
         movement_id = await _get_movement_id(db_session)
 
-        await _generate_incipit_async(movement_id)
+        await _run_generate_incipit(movement_id)
 
         row = (
             await db_session.execute(
@@ -305,7 +341,7 @@ class TestGenerateIncipit:
         """The object written to MinIO is valid UTF-8 XML starting with <svg."""
         movement_id = await _get_movement_id(db_session)
 
-        await _generate_incipit_async(movement_id)
+        await _run_generate_incipit(movement_id)
 
         key_row = (
             await db_session.execute(
@@ -318,9 +354,9 @@ class TestGenerateIncipit:
         svg_bytes = await storage.get_mei(key_row.incipit_object_key)
         svg_text = svg_bytes.decode("utf-8")
 
-        assert svg_text.lstrip().startswith("<svg"), (
-            f"Expected SVG output to start with '<svg', got: {svg_text[:120]!r}"
-        )
+        assert svg_text.lstrip().startswith(
+            "<svg"
+        ), f"Expected SVG output to start with '<svg', got: {svg_text[:120]!r}"
 
     # ------------------------------------------------------------------
     # Test 3 — idempotent re-run
@@ -333,7 +369,7 @@ class TestGenerateIncipit:
         """Calling the task twice overwrites the SVG; incipit_generated_at advances."""
         movement_id = await _get_movement_id(db_session)
 
-        await _generate_incipit_async(movement_id)
+        await _run_generate_incipit(movement_id)
         generated_at_1 = (
             await db_session.execute(
                 text("SELECT incipit_generated_at FROM movement WHERE id = :mid"),
@@ -341,7 +377,7 @@ class TestGenerateIncipit:
             )
         ).scalar_one()
 
-        await _generate_incipit_async(movement_id)
+        await _run_generate_incipit(movement_id)
         generated_at_2 = (
             await db_session.execute(
                 text("SELECT incipit_generated_at FROM movement WHERE id = :mid"),
@@ -349,9 +385,9 @@ class TestGenerateIncipit:
             )
         ).scalar_one()
 
-        assert generated_at_2 >= generated_at_1, (
-            "incipit_generated_at should not regress on re-run"
-        )
+        assert (
+            generated_at_2 >= generated_at_1
+        ), "incipit_generated_at should not regress on re-run"
 
     # ------------------------------------------------------------------
     # Test 4 — nonexistent movement raises Ignore
@@ -361,4 +397,4 @@ class TestGenerateIncipit:
         """A bogus movement_id causes the task to raise Ignore silently."""
         bogus_id = str(uuid.uuid4())
         with pytest.raises(Ignore):
-            await _generate_incipit_async(bogus_id)
+            await _run_generate_incipit(bogus_id)

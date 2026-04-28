@@ -12,12 +12,9 @@ its unit tests bypass the validator.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import lxml.etree
-import pytest
-
 from services.mei_normalizer import normalize_mei
 
 # ---------------------------------------------------------------------------
@@ -81,9 +78,9 @@ def _round_trip(tmp_path: Path, first_output: bytes, fixture_name: str) -> bytes
     src2.write_bytes(first_output)
     dst2 = tmp_path / f"second_out_{fixture_name}"
     report2 = normalize_mei(str(src2), str(dst2))
-    assert report2.changes_applied == [], (
-        f"Second pass applied changes (idempotence failure): {report2.changes_applied}"
-    )
+    assert (
+        report2.changes_applied == []
+    ), f"Second pass applied changes (idempotence failure): {report2.changes_applied}"
     return dst2.read_bytes()
 
 
@@ -107,7 +104,10 @@ class TestPickupBar:
         assert measures[0].get("metcon") == "false"
         assert measures[1].get("n") == "1"
         assert measures[2].get("n") == "2"
-        assert any("pickup" in c.lower() or "renumber" in c.lower() for c in report.changes_applied)
+        assert any(
+            "pickup" in c.lower() or "renumber" in c.lower()
+            for c in report.changes_applied
+        )
 
     def test_n1_pickup_idempotent(self, tmp_path: Path) -> None:
         """Renumbered pickup: second pass is byte-identical and clean."""
@@ -227,7 +227,8 @@ class TestRepeatBarlinePairing:
         """The first rptend without a preceding rptstart is allowed — no warning."""
         report, _ = _run(tmp_path, "rptend_unpaired_first.mei")
         paired_warnings = [
-            w for w in report.warnings
+            w
+            for w in report.warnings
             if "unpaired" in w.lower() or "unmatched" in w.lower()
         ]
         assert paired_warnings == []
@@ -252,7 +253,9 @@ class TestRepeatBarlinePairing:
     def test_rptstart_no_close_warns(self, tmp_path: Path) -> None:
         """An rptstart with no matching rptend produces a warning."""
         report, _ = _run(tmp_path, "rptstart_no_close.mei")
-        assert any("unclosed" in w.lower() or "rptstart" in w.lower() for w in report.warnings)
+        assert any(
+            "unclosed" in w.lower() or "rptstart" in w.lower() for w in report.warnings
+        )
 
     def test_rptstart_no_close_idempotent(self, tmp_path: Path) -> None:
         """Unclosed rptstart: second pass byte-identical."""
@@ -264,7 +267,8 @@ class TestRepeatBarlinePairing:
         """rptboth is a valid close+open event; no pairing errors expected."""
         report, _ = _run(tmp_path, "rptboth.mei")
         paired_warnings = [
-            w for w in report.warnings
+            w
+            for w in report.warnings
             if "unpaired" in w.lower() or "unclosed" in w.lower()
         ]
         assert paired_warnings == []
@@ -306,13 +310,17 @@ class TestMeasureNOutsideEndings:
             "//mei:measure[not(ancestor::mei:ending)]", namespaces=ns
         )
         n_values = [m.get("n") for m in bare_measures]
-        assert "12a" in n_values, "Pass 5 should NOT strip suffix from @n outside endings"
+        assert (
+            "12a" in n_values
+        ), "Pass 5 should NOT strip suffix from @n outside endings"
         assert any("non-integer" in w.lower() or "12a" in w for w in report.warnings)
 
     def test_non_integer_n_idempotent(self, tmp_path: Path) -> None:
         """Non-integer @n outside ending: second pass byte-identical."""
         _, first_out = _run(tmp_path, "non_integer_n_outside_ending.mei")
-        second_out = _round_trip(tmp_path, first_out, "non_integer_n_outside_ending.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "non_integer_n_outside_ending.mei"
+        )
         assert first_out == second_out
 
     def test_large_gap_warns(self, tmp_path: Path) -> None:
@@ -347,7 +355,10 @@ class TestEndingMeasureNs:
         assert "2" in n_values
         assert "2a" not in n_values
         assert "2b" not in n_values
-        assert any("suffix" in c.lower() or "stripped" in c.lower() for c in report.changes_applied)
+        assert any(
+            "suffix" in c.lower() or "stripped" in c.lower()
+            for c in report.changes_applied
+        )
 
     def test_suffix_stripped_idempotent(self, tmp_path: Path) -> None:
         """After suffix stripping, second pass is byte-identical."""
@@ -364,10 +375,7 @@ class TestEndingMeasureNs:
         """@n=2 appearing in ending n='1' and ending n='2' is expected — no warning."""
         report, _ = _run(tmp_path, "ending_suffix_n.mei")
         # After stripping, both endings have @n=2 — this is the shared-slot convention.
-        cross_ending_warnings = [
-            w for w in report.warnings
-            if "duplicate" in w.lower()
-        ]
+        cross_ending_warnings = [w for w in report.warnings if "duplicate" in w.lower()]
         assert cross_ending_warnings == []
 
 
@@ -401,9 +409,9 @@ class TestSplitMeasures:
         measures = tree.xpath("//mei:measure", namespaces=ns)
 
         # m3 (index 2, first after rptstart at m2) should now carry @metcon='false'
-        assert measures[2].get("metcon") == "false", (
-            "Complement measure (m3) should have @metcon='false' after normalization"
-        )
+        assert (
+            measures[2].get("metcon") == "false"
+        ), "Complement measure (m3) should have @metcon='false' after normalization"
         assert any("metcon" in c.lower() for c in report.changes_applied)
 
     def test_complement_metcon_set_idempotent(self, tmp_path: Path) -> None:

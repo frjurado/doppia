@@ -21,18 +21,17 @@ from dotenv import load_dotenv
 # No-op if the variables are already set in the environment.
 load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
-from alembic import context
-from sqlalchemy import engine_from_config, pool
-
-from models.base import Base
+import models.analysis  # noqa: F401
+import models.fragment  # noqa: F401
+import models.music  # noqa: F401
 
 # Import all ORM models so they register their tables on Base.metadata.
 # These imports have no other effect; they are purely for side-effect
 # registration on the declarative base.
 import models.user  # noqa: F401
-import models.music  # noqa: F401
-import models.fragment  # noqa: F401
-import models.analysis  # noqa: F401
+from alembic import context
+from models.base import Base
+from sqlalchemy import engine_from_config, pool
 
 # Alembic Config object — gives access to values in alembic.ini.
 config = context.config

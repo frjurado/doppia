@@ -43,10 +43,8 @@ Example usage::
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import lxml.etree
-
 from models.normalization import NormalizationReport
 
 # ---------------------------------------------------------------------------
@@ -160,9 +158,7 @@ def _normalize_pickup_bar(
         changes_applied: Mutable list; auto-corrections are appended here.
         _warnings: Not used by this pass; kept for signature uniformity.
     """
-    all_measures: list[lxml.etree._Element] = _xpath(
-        root, "//mei:measure"
-    )
+    all_measures: list[lxml.etree._Element] = _xpath(root, "//mei:measure")
     if not all_measures:
         return
 
@@ -383,26 +379,21 @@ def _check_measure_n_outside_endings(
         xp = _xp(root, measure)
 
         if n_str is None:
-            warnings.append(
-                f"<measure> outside <ending> at {xp} is missing @n."
-            )
+            warnings.append(f"<measure> outside <ending> at {xp} is missing @n.")
             continue
 
         try:
             n_int = int(n_str)
         except ValueError:
             warnings.append(
-                f"<measure> outside <ending> at {xp} has non-integer "
-                f"@n={n_str!r}."
+                f"<measure> outside <ending> at {xp} has non-integer " f"@n={n_str!r}."
             )
             continue
 
         if n_int in seen_ns:
             if not seen_ns[n_int]:
                 # Warn once per duplicate value.
-                warnings.append(
-                    f"Duplicate @n={n_int} on <measure> outside <ending>."
-                )
+                warnings.append(f"Duplicate @n={n_int} on <measure> outside <ending>.")
                 seen_ns[n_int] = True
         else:
             seen_ns[n_int] = False

@@ -11,6 +11,7 @@ MinIO, Redis) to be running before the test session starts.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -22,6 +23,31 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
 from starlette.exceptions import HTTPException
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def pin_event_loop() -> AsyncGenerator[None, None]:
+    """Pin the running loop as the thread's current event loop before each test.
+
+    pytest-asyncio 0.24 (with ``asyncio_default_fixture_loop_scope = "session"``)
+    runs all fixtures and tests inside a single session event loop, but it does
+    not always call ``asyncio.set_event_loop()`` between test items.  After some
+    test items complete, ``asyncio.DefaultEventLoopPolicy._local._loop`` can be
+    ``None`` even though the session loop is still running.
+
+    ``pytest_asyncio.plugin.wrap_in_sync`` calls ``asyncio.get_event_loop()``
+    at the start of each test to obtain the loop for ``run_until_complete``.
+    When ``_local._loop`` is ``None`` and ``_set_called`` is ``True`` (because
+    ``set_event_loop`` was called previously), Python 3.12 raises::
+
+        RuntimeError: There is no current event loop in thread 'MainThread'.
+
+    Running this fixture before *every* test (function scope, not session scope)
+    re-registers the running loop, ensuring ``asyncio.get_event_loop()`` always
+    finds it.
+    """
+    asyncio.set_event_loop(asyncio.get_running_loop())
+    yield
 
 
 @asynccontextmanager

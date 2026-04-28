@@ -15,6 +15,7 @@ Override with:
 from __future__ import annotations
 
 import os
+import ssl
 from pathlib import Path
 
 from celery import Celery
@@ -40,3 +41,14 @@ celery_app.conf.accept_content = ["json"]
 # Prevent tasks from being acknowledged before they finish, so a worker crash
 # does not silently lose the task.
 celery_app.conf.task_acks_late = True
+celery_app.conf.broker_connection_retry_on_startup = True
+
+# When the broker URL uses TLS (rediss://), disable strict certificate
+# verification. Upstash uses SNI-based certificates that fail Python's default
+# strict check, causing "Connection closed by server" errors on the worker.
+# This only applies in production; local dev uses plain redis://.
+_broker_url = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+if _broker_url.startswith("rediss://"):
+    _ssl_opts = {"ssl_cert_reqs": ssl.CERT_NONE}
+    celery_app.conf.broker_use_ssl = _ssl_opts
+    celery_app.conf.redis_backend_use_ssl = _ssl_opts

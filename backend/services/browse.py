@@ -14,9 +14,6 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from models.browse import (
     ComposerResponse,
     CorpusResponse,
@@ -25,6 +22,8 @@ from models.browse import (
 )
 from models.music import Composer, Corpus, Movement, Work
 from services.object_storage import StorageClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Signed URL lifetime matching MEI URL policy (ADR-002): 15 minutes.
 _INCIPIT_URL_TTL_SECONDS = 900

@@ -22,6 +22,8 @@ What follows is the per-issue breakdown. Items are roughly ordered from highest 
 
 ## Issue 1: Frontend test suite does not exist
 
+**[SOLVED]**
+
 **Issue.** `frontend/package.json` has `dev`, `build`, `preview`, `lint`, and `format` scripts — but no `test` script and no test runner in dependencies. `find frontend -name '*.test.*' -o -name '*.spec.*'` returns nothing. There are React components (`src/components/browse/`, `src/components/ui/`), a routing layer (`src/routes/`), and a service layer (`src/services/`) — and none of it has any test coverage. ESLint and Prettier are configured, so static checking is in place, but there is no behavioural test harness at all.
 
 For Phase 1 this is defensible — the frontend is mostly thin UI on top of the four browse endpoints, and integration tests on the backend cover the contract. But it should be a deliberate choice, not an oversight, and it's worth recording as a known gap so that as the frontend grows (Phase 2 adds tagging, Phase 3 adds AI-assisted analysis) the absence is visible rather than incidental.
@@ -36,6 +38,8 @@ For Phase 1 this is defensible — the frontend is mostly thin UI on top of the 
 ---
 
 ## Issue 2: Empty test directories advertised as runnable
+
+**[SOLVED]**
 
 **Issue.** `backend/tests/snapshots/` and `backend/tests/graph/` each contain only `__init__.py`. The first commit history doesn't matter here — the point is that `CLAUDE.md` lists `pytest tests/snapshots/` and `pytest tests/graph/` as commands a contributor should be able to run. Today both commands collect zero tests and exit with `no tests ran` (which pytest actually treats as exit code 5 — failure — by default).
 
@@ -93,6 +97,8 @@ The integration tests do exercise `_dcml_branch` and `_build_measure_map` (the v
 ---
 
 ## Issue 5: No `integration` pytest marker, no skip-if-no-docker
+
+**[SOLVED]**
 
 **Issue.** `pyproject.toml`'s pytest config does not declare any markers. The integration tests in `backend/tests/integration/` rely on Docker services being up, but if a contributor runs `pytest backend/tests/` (which is what `testpaths` configures as the default), the integration tests will be collected and will fail with cryptic asyncpg connection errors. There's no way to do `pytest -m "not integration"` to run only the unit tests, short of manually targeting `backend/tests/unit/`.
 
@@ -320,6 +326,8 @@ Then audit the test files and apply the convention consistently. It's a 30-minut
 ---
 
 ## Issue 14: Defaults in conftest can silently mask environment misconfiguration
+
+**[SOLVED]**
 
 **Issue.** Both root `conftest.py` (lines 113–115, 150–152, 172–175) and `integration/conftest.py` (lines 62–73) read environment variables and fall back to hardcoded defaults that match `.env.example`. If a developer has a custom `DATABASE_URL` in their `.env` but a test process doesn't load `.env` (which is the default for `pytest`), the test silently uses `postgresql+asyncpg://postgres:localpassword@localhost/doppia` — which may or may not match what's running. The failure mode is a misleading error: tests fail with "auth failed" or "database doppia does not exist" without any hint that the env var fallback kicked in.
 

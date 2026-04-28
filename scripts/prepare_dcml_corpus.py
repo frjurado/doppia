@@ -306,7 +306,7 @@ def discover_movements(
 # ---------------------------------------------------------------------------
 
 
-def convert_mscx_to_mxl(mscx_path: Path, tmpdir: Path, mscore_exe: str) -> Path:
+def convert_mscx_to_mxl(mscx_path: Path, tmpdir: Path, mscore_exe: str = "mscore") -> Path:
     """Convert a MuseScore ``.mscx`` file to compressed MusicXML (``.mxl``).
 
     Calls the MuseScore CLI (3.6.2).  Pass the resolved executable path via
@@ -387,7 +387,7 @@ def find_harmonies_tsv(repo_path: Path, mscx_path: Path) -> Path | None:
     Returns:
         Path to the TSV file, or ``None`` if it does not exist.
     """
-    tsv_path = repo_path / "harmonies" / (mscx_path.stem + ".harmonies.tsv")
+    tsv_path = repo_path / "harmonies" / (mscx_path.stem + ".tsv")
     return tsv_path if tsv_path.exists() else None
 
 

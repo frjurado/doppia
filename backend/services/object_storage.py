@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 
 import aioboto3
+from botocore.config import Config as BotocoreConfig
 
 
 class StorageClient:
@@ -78,7 +79,10 @@ class StorageClient:
             "endpoint_url": self._endpoint_url,
             "aws_access_key_id": self._access_key_id,
             "aws_secret_access_key": self._secret_access_key,
-            "region_name": "us-east-1",
+            "region_name": "auto",
+            # Cloudflare R2 requires SigV4; boto3 defaults to SigV2 for
+            # presigned URLs against custom endpoints.
+            "config": BotocoreConfig(signature_version="s3v4"),
         }
 
     async def _put(self, key: str, content: bytes) -> None:

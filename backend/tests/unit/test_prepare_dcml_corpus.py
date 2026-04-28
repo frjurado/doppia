@@ -19,13 +19,12 @@ from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
 
-import pytest
-import yaml
-
 # prepare_dcml_corpus is importable because pyproject.toml adds "scripts/" to
 # pytest's pythonpath.  The module-level sys.path.insert in the script adds
 # backend/ automatically, so all backend imports resolve correctly.
 import prepare_dcml_corpus as pdc
+import pytest
+import yaml
 from models.ingestion import IngestMetadata
 
 # ---------------------------------------------------------------------------
@@ -147,56 +146,45 @@ class TestConvertMscxToMxl:
 
 
 class TestConvertMxlToMei:
-    """convert_mxl_to_mei calls verovio and returns the emitted MEI bytes."""
+    """convert_mxl_to_mei uses the verovio Python API to return MEI bytes."""
 
-    def _make_mei_side_effect(
-        self,
-        mxl_path: Path,
-        tmpdir: Path,
-        mei_content: bytes,
-    ):
-        """Return a side_effect that writes mei_content to the expected output path."""
-
-        def _side_effect(cmd: list, **kwargs):
-            out_mei = tmpdir / (mxl_path.stem + ".mei")
-            out_mei.write_bytes(mei_content)
-
-        return _side_effect
+    def _verovio_mock(
+        self, mei_content: bytes | None = None
+    ) -> tuple[MagicMock, MagicMock]:
+        """Return (mock_verovio_module, mock_toolkit_instance) for sys.modules patching."""
+        mock_tk = MagicMock()
+        mock_tk.loadFile.return_value = mei_content is not None
+        if mei_content is not None:
+            mock_tk.getMEI.return_value = mei_content.decode("utf-8")
+        mock_verovio = MagicMock()
+        mock_verovio.toolkit.return_value = mock_tk
+        return mock_verovio, mock_tk
 
     def test_calls_verovio_with_correct_args(
         self, tmp_path: Path, valid_mei_bytes: bytes
     ) -> None:
         mxl = tmp_path / "K331-1.mxl"
         mxl.touch()
-        side_effect = self._make_mei_side_effect(mxl, tmp_path, valid_mei_bytes)
-        with patch(
-            "prepare_dcml_corpus.subprocess.run", side_effect=side_effect
-        ) as mock_run:
+        mock_verovio, mock_tk = self._verovio_mock(valid_mei_bytes)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
             pdc.convert_mxl_to_mei(mxl, tmp_path)
-        call_args = mock_run.call_args[0][0]
-        assert call_args[0] == "verovio"
-        assert call_args[1] == "--to"
-        assert call_args[2] == "mei"
-        assert call_args[3] == str(mxl)
-        assert call_args[4] == "-o"
-        assert call_args[5].endswith("K331-1.mei")
+        mock_tk.loadFile.assert_called_once_with(str(mxl))
 
     def test_returns_mei_bytes(self, tmp_path: Path, valid_mei_bytes: bytes) -> None:
         mxl = tmp_path / "K331-1.mxl"
         mxl.touch()
-        side_effect = self._make_mei_side_effect(mxl, tmp_path, valid_mei_bytes)
-        with patch("prepare_dcml_corpus.subprocess.run", side_effect=side_effect):
+        mock_verovio, _ = self._verovio_mock(valid_mei_bytes)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
             result = pdc.convert_mxl_to_mei(mxl, tmp_path)
-        assert result == valid_mei_bytes
+        assert isinstance(result, bytes)
+        assert b"<mei" in result
 
-    def test_propagates_called_process_error(self, tmp_path: Path) -> None:
+    def test_raises_runtime_error_on_load_failure(self, tmp_path: Path) -> None:
         mxl = tmp_path / "K331-1.mxl"
         mxl.touch()
-        with patch(
-            "prepare_dcml_corpus.subprocess.run",
-            side_effect=CalledProcessError(1, "verovio"),
-        ):
-            with pytest.raises(CalledProcessError):
+        mock_verovio, _ = self._verovio_mock(mei_content=None)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
+            with pytest.raises(RuntimeError, match="verovio failed to load"):
                 pdc.convert_mxl_to_mei(mxl, tmp_path)
 
 
@@ -248,7 +236,9 @@ class TestBuildIngestMetadata:
         discovered_entries: list[pdc.MovementEntry],
         valid_mei_bytes: bytes,
     ) -> None:
-        accepted = self._make_accepted(discovered_entries, valid_mei_bytes, _DCML_SUBSET)
+        accepted = self._make_accepted(
+            discovered_entries, valid_mei_bytes, _DCML_SUBSET
+        )
         metadata = pdc.build_ingest_metadata(test_config, "abc1234", accepted)
         assert isinstance(metadata, IngestMetadata)
 
@@ -258,7 +248,9 @@ class TestBuildIngestMetadata:
         discovered_entries: list[pdc.MovementEntry],
         valid_mei_bytes: bytes,
     ) -> None:
-        accepted = self._make_accepted(discovered_entries, valid_mei_bytes, _DCML_SUBSET)
+        accepted = self._make_accepted(
+            discovered_entries, valid_mei_bytes, _DCML_SUBSET
+        )
         metadata = pdc.build_ingest_metadata(test_config, "deadbeef", accepted)
         assert metadata.corpus.source_commit == "deadbeef"
 
@@ -268,7 +260,9 @@ class TestBuildIngestMetadata:
         discovered_entries: list[pdc.MovementEntry],
         valid_mei_bytes: bytes,
     ) -> None:
-        accepted = self._make_accepted(discovered_entries, valid_mei_bytes, _DCML_SUBSET)
+        accepted = self._make_accepted(
+            discovered_entries, valid_mei_bytes, _DCML_SUBSET
+        )
         metadata = pdc.build_ingest_metadata(test_config, "abc1234", accepted)
         assert metadata.composer.slug == "mozart"
         assert metadata.composer.birth_year == 1756
@@ -279,7 +273,9 @@ class TestBuildIngestMetadata:
         discovered_entries: list[pdc.MovementEntry],
         valid_mei_bytes: bytes,
     ) -> None:
-        accepted = self._make_accepted(discovered_entries, valid_mei_bytes, _DCML_SUBSET)
+        accepted = self._make_accepted(
+            discovered_entries, valid_mei_bytes, _DCML_SUBSET
+        )
         metadata = pdc.build_ingest_metadata(test_config, "abc1234", accepted)
         flat = metadata.flat_movements()
         assert flat[0][1].mei_filename == "mei/k331/movement-1.mei"
@@ -291,7 +287,9 @@ class TestBuildIngestMetadata:
         discovered_entries: list[pdc.MovementEntry],
         valid_mei_bytes: bytes,
     ) -> None:
-        accepted = self._make_accepted(discovered_entries, valid_mei_bytes, _DCML_SUBSET)
+        accepted = self._make_accepted(
+            discovered_entries, valid_mei_bytes, _DCML_SUBSET
+        )
         metadata = pdc.build_ingest_metadata(test_config, "abc1234", accepted)
         flat = metadata.flat_movements()
         assert flat[0][1].harmonies_filename == "harmonies/k331/movement-1.tsv"
@@ -448,14 +446,17 @@ class TestValidationAbort:
             with pytest.raises(SystemExit) as exc:
                 for entry in discovered_entries:
                     import tempfile
+
                     with tempfile.TemporaryDirectory() as td:
                         tmpdir = Path(td)
                         mxl_path = pdc.convert_mscx_to_mxl(entry.mscx_path, tmpdir)
                         mei_bytes = pdc.convert_mxl_to_mei(mxl_path, tmpdir)
                         from services.mei_validator import validate_mei
+
                         report = validate_mei(mei_bytes)
                         if not report.is_valid:
                             import sys
+
                             sys.exit(1)
         assert exc.value.code == 1
 
@@ -478,7 +479,9 @@ class TestDiscoverMovements:
         assert discovered_entries[0].movement_slug == "movement-1"
         assert discovered_entries[1].movement_slug == "movement-2"
 
-    def test_mscx_paths_exist(self, discovered_entries: list[pdc.MovementEntry]) -> None:
+    def test_mscx_paths_exist(
+        self, discovered_entries: list[pdc.MovementEntry]
+    ) -> None:
         for entry in discovered_entries:
             assert entry.mscx_path.exists()
 
@@ -530,7 +533,9 @@ class TestFullSmokePipeline:
         out = tmp_path / "piano-sonatas.zip"
 
         with (
-            patch.object(pdc, "convert_mscx_to_mxl", return_value=tmp_path / "dummy.mxl"),
+            patch.object(
+                pdc, "convert_mscx_to_mxl", return_value=tmp_path / "dummy.mxl"
+            ),
             patch.object(pdc, "convert_mxl_to_mei", return_value=valid_mei_bytes),
             patch.object(pdc, "validate_mei") as mock_validate,
         ):

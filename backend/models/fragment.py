@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from models.base import Base
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -35,8 +36,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
-
-from models.base import Base
 
 
 class Fragment(Base):
@@ -85,9 +84,7 @@ class Fragment(Base):
     summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
     prose_annotation: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_licence: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="draft"
-    )
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default="draft")
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("app_user.id"),

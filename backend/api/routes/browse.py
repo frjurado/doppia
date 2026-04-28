@@ -17,14 +17,18 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from api.dependencies import require_role
+from fastapi import APIRouter, Depends, HTTPException, status
 from models.base import get_db
-from models.browse import ComposerResponse, CorpusResponse, MovementResponse, WorkResponse
+from models.browse import (
+    ComposerResponse,
+    CorpusResponse,
+    MovementResponse,
+    WorkResponse,
+)
 from services.browse import list_composers, list_corpora, list_movements, list_works
 from services.object_storage import make_storage_client
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["Browse"])
 
@@ -115,9 +119,7 @@ async def get_works(
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                f"Composer '{composer_slug}' or corpus '{corpus_slug}' not found."
-            ),
+            detail=(f"Composer '{composer_slug}' or corpus '{corpus_slug}' not found."),
         )
     return result
 

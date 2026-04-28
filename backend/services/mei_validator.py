@@ -33,7 +33,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import lxml.etree
-
 from models.validation import ValidationIssue, ValidationReport
 
 # ---------------------------------------------------------------------------
@@ -78,9 +77,7 @@ def _get_relaxng() -> lxml.etree.RelaxNG:
 # ---------------------------------------------------------------------------
 
 
-def _xpath(
-    elem: lxml.etree._Element, expr: str
-) -> list[lxml.etree._Element]:
+def _xpath(elem: lxml.etree._Element, expr: str) -> list[lxml.etree._Element]:
     """Evaluate *expr* against *elem* in the MEI namespace.
 
     Args:
@@ -240,9 +237,7 @@ def validate_mei(xml_bytes: bytes) -> ValidationReport:
     if score_defs:
         expected_staves = len(_xpath(score_defs[0], ".//mei:staffDef"))
         if expected_staves > 0:
-            all_measures: list[lxml.etree._Element] = _xpath(
-                root, "//mei:measure"
-            )
+            all_measures: list[lxml.etree._Element] = _xpath(root, "//mei:measure")
             for measure in all_measures:
                 actual = len(_xpath(measure, "mei:staff"))
                 if actual != expected_staves:

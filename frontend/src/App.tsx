@@ -1,4 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import RequireAuth from './components/auth/RequireAuth';
+import Login from './routes/Login';
 import CorpusBrowser from './routes/CorpusBrowser';
 import ScoreViewerStub from './routes/ScoreViewerStub';
 
@@ -15,9 +17,23 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<CorpusBrowser />} />
-        <Route path="/tag/:movementId" element={<ScoreViewerStub />} />
-        {/* Component 8: <Route path="/fragments" element={<FragmentBrowser />} /> */}
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <CorpusBrowser />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/tag/:movementId"
+          element={
+            <RequireAuth>
+              <ScoreViewerStub />
+            </RequireAuth>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );
