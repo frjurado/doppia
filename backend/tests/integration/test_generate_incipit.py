@@ -28,13 +28,13 @@ import pytest
 import pytest_asyncio
 import yaml
 from celery.exceptions import Ignore
-
-pytestmark = pytest.mark.integration
 from httpx import AsyncClient
 from services.object_storage import make_storage_client
 from services.tasks.generate_incipit import _generate_incipit_async
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+pytestmark = pytest.mark.integration
 
 
 # ---------------------------------------------------------------------------
