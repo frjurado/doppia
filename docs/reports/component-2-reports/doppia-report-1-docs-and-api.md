@@ -54,6 +54,8 @@ But `backend/api/middleware/auth.py` lines 80–88 explicitly check `if environm
 
 ## Issue 3: Empty orphan `backend/api/routers/` directory
 
+**[SOLVED]**
+
 **Issue.** `backend/api/` contains both `routes/` (the real one, used by `router.py`) and `routers/` (only `__init__.py`, empty). Likely a rename leftover from an earlier iteration. Confusing for new contributors who'll have to figure out which is canonical.
 
 **Solution.** Delete `backend/api/routers/` and its `__init__.py`.
@@ -63,6 +65,8 @@ But `backend/api/middleware/auth.py` lines 80–88 explicitly check `if environm
 ---
 
 ## Issue 4: Broken docstring example for `require_role()`
+
+**[SOLVED]**
 
 **Issue.** `backend/api/dependencies.py` line 73 shows this usage example:
 
@@ -82,6 +86,8 @@ So we have three documented styles, only one of which (the `dependencies=[...]` 
 
 ## Issue 5: `AppUser` vs `AuthenticatedUser` — documentation uses a name the code doesn't have
 
+**[SOLVED]**
+
 **Issue.** Every doc reference (CLAUDE.md, CONTRIBUTING.md, the docstring inside `dependencies.py` itself) calls the type `AppUser`. The actual class defined in `backend/api/dependencies.py` is `AuthenticatedUser`. New readers searching the codebase for `AppUser` will find nothing.
 
 **Solution.** Rename **either the class or the documentation references**, but make them consistent. Recommendation: rename the class to `AppUser` — it's shorter, fits CONTRIBUTING's tone, and the class isn't widely used yet (only `dependencies.py` and `middleware/auth.py` import it). If you keep `AuthenticatedUser`, update three files: CLAUDE.md, CONTRIBUTING.md §5 "Role enforcement", and the docstring example inside `dependencies.py`.
@@ -91,6 +97,8 @@ So we have three documented styles, only one of which (the `dependencies=[...]` 
 ---
 
 ## Issue 6: README "Project layout" section describes structure that doesn't exist yet
+
+**[SOLVED]**
 
 **Issue.** README.md lines 118–151 list a project layout that includes:
 
@@ -111,6 +119,8 @@ So we have three documented styles, only one of which (the `dependencies=[...]` 
 
 ## Issue 7: CLAUDE.md describes commands that won't run
 
+**[SOLVED]**
+
 **Issue.** CLAUDE.md "Commands" section advertises operations that fail or no-op today:
 
 - `pytest tests/snapshots/` — `backend/tests/snapshots/` contains only `__init__.py`. No snapshot tests yet.
@@ -130,6 +140,8 @@ When a Claude Code session reads CLAUDE.md and runs these commands as part of a 
 ---
 
 ## Issue 8: README first-time-setup steps reference operations that aren't ready
+
+**[SOLVED]**
 
 **Issue.** README §4 ("Seed the knowledge graph") instructs new users:
 
@@ -190,6 +202,8 @@ assert r.json()["error"]["code"] == "COMPOSER_NOT_FOUND"
 
 ## Issue 10: Inconsistent role-enforcement style across the codebase
 
+**[SOLVED]**
+
 **Issue.** Three different styles are documented or used for `require_role()`:
 
 - `dependencies=[require_role("editor")]` — used in `routes/browse.py` and `routes/corpora.py` (the actual production style).
@@ -203,6 +217,8 @@ assert r.json()["error"]["code"] == "COMPOSER_NOT_FOUND"
 ---
 
 ## Issue 11: Code-quality nits in middleware (non-blocking)
+
+**[SOLVED]**
 
 **Issue.** Several minor patterns in `dependencies.py` and `middleware/auth.py`:
 

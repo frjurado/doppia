@@ -89,7 +89,7 @@ async def supabase_client(
     monkeypatch.setenv("AUTH_MODE", "supabase")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", _TEST_SECRET)
 
-    from api.dependencies import AuthenticatedUser, require_role
+    from api.dependencies import AppUser, require_role
     from api.middleware.auth import AuthMiddleware
     from api.middleware.errors import (
         http_exception_handler,
@@ -99,13 +99,13 @@ async def supabase_client(
     from api.router import router as api_router
 
     # Test-only protected route — not part of the production router.
-    # Use the classic `= Depends(...)` syntax; AuthenticatedUser is a dataclass
+    # Use the classic `= Depends(...)` syntax; AppUser is a dataclass
     # and FastAPI would otherwise parse it from the request body.
     _test_router = APIRouter()
 
     @_test_router.get("/api/v1/protected")
     async def _protected(
-        user: AuthenticatedUser = require_role("editor"),
+        user: AppUser = require_role("editor"),
     ) -> dict:
         return {"user_id": user.id, "role": user.role}
 

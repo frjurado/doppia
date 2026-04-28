@@ -181,8 +181,16 @@ async def http_exception_handler(
     code = _HTTP_STATUS_TO_ERROR_CODE.get(
         exc.status_code, ErrorCode.INTERNAL_SERVER_ERROR
     )
-    message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-    body = ErrorResponse.make(code=code, message=message)
+    if isinstance(exc.detail, str):
+        message = exc.detail
+        extra_detail: dict | None = None
+    elif isinstance(exc.detail, dict):
+        message = exc.detail.get("message", "HTTP error occurred.")
+        extra_detail = exc.detail
+    else:
+        message = str(exc.detail)
+        extra_detail = None
+    body = ErrorResponse.make(code=code, message=message, detail=extra_detail)
     headers: dict[str, str] = getattr(exc, "headers", None) or {}
     return JSONResponse(
         status_code=exc.status_code,

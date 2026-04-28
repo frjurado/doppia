@@ -37,9 +37,9 @@ pip install -r requirements-dev.txt   # local dev (includes all prod deps)
 
 ### Knowledge graph seeding and validation
 ```bash
-python scripts/seed.py --domain cadences
-python scripts/validate_graph.py           # run after every change to YAML seed files
-python scripts/visualize_domain.py --domain <name>  # pyvis HTML for visual inspection
+python scripts/seed.py --domain cadences           # (Phase 1 — not yet implemented: no seed YAML exists)
+python scripts/validate_graph.py                   # (Phase 1 — not yet implemented: no seeded graph to validate)
+python scripts/visualize_domain.py --domain <name> # (Phase 1 — not yet implemented: scripts are stubs)
 ```
 
 ### Frontend

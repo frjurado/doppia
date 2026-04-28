@@ -394,7 +394,7 @@ from fastapi import Request, HTTPException
 
 _DEV_TOKEN = "dev-token"
 
-async def validate_auth(request: Request) -> AuthenticatedUser:
+async def validate_auth(request: Request) -> AppUser:
     environment = os.environ.get("ENVIRONMENT", "production")
     auth_mode   = os.environ.get("AUTH_MODE", "supabase")
 
@@ -412,7 +412,7 @@ async def validate_auth(request: Request) -> AuthenticatedUser:
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if token != _DEV_TOKEN:
             raise HTTPException(status_code=401, detail="Invalid dev token.")
-        return AuthenticatedUser(id="dev-user", role="admin", email="dev@local")
+        return AppUser(id="dev-user", role="admin", email="dev@local")
 
     # Normal path: validate the JWT against Supabase.
     return await validate_supabase_jwt(request)

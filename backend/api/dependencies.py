@@ -17,9 +17,11 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 
+_ROLE_HIERARCHY: dict[str, int] = {"editor": 1, "admin": 2}
+
 
 @dataclass(frozen=True)
-class AuthenticatedUser:
+class AppUser:
     """Represents the authenticated caller on a request.
 
     Attributes:
@@ -33,7 +35,7 @@ class AuthenticatedUser:
     email: str
 
 
-async def get_current_user(request: Request) -> AuthenticatedUser:
+async def get_current_user(request: Request) -> AppUser:
     """FastAPI dependency that returns the authenticated user for the current request.
 
     Reads the user attached to ``request.state.user`` by ``AuthMiddleware``.
@@ -49,7 +51,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     Raises:
         HTTPException: 401 if no user is attached to the request state.
     """
-    user: AuthenticatedUser | None = getattr(request.state, "user", None)
+    user: AppUser | None = getattr(request.state, "user", None)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -59,7 +61,7 @@ async def get_current_user(request: Request) -> AuthenticatedUser:
     return user
 
 
-def require_role(role: str) -> Annotated[AuthenticatedUser, Depends]:
+def require_role(role: str) -> Annotated[AppUser, Depends]:
     """Dependency factory that enforces a minimum role requirement.
 
     This is the **only** permitted way to enforce roles in route handlers.
@@ -70,9 +72,15 @@ def require_role(role: str) -> Annotated[AuthenticatedUser, Depends]:
         @router.post("/fragments/{id}/approve")
         async def approve_fragment(
             id: UUID,
-            _: AppUser = require_role("editor"),
+            db: AsyncSession = Depends(get_db),
         ) -> Fragment:
             ...
+
+        # Register the role check via the router decorator:
+        @router.post(
+            "/fragments/{id}/approve",
+            dependencies=[require_role("editor")],
+        )
 
     Args:
         role: The minimum role required. Currently ``"editor"`` or ``"admin"``.
@@ -81,11 +89,10 @@ def require_role(role: str) -> Annotated[AuthenticatedUser, Depends]:
         A FastAPI Depends that resolves to the authenticated user if authorised,
         or raises HTTP 403 Forbidden.
     """
-    _ROLE_HIERARCHY = {"editor": 1, "admin": 2}
 
     async def _check(
-        user: Annotated[AuthenticatedUser, Depends(get_current_user)]
-    ) -> AuthenticatedUser:
+        user: Annotated[AppUser, Depends(get_current_user)]
+    ) -> AppUser:
         required_level = _ROLE_HIERARCHY.get(role, 0)
         user_level = _ROLE_HIERARCHY.get(user.role, 0)
         if user_level < required_level:
