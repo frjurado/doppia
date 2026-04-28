@@ -95,6 +95,8 @@ So three different TTL values exist (300s, 900s, 3600s) and none of them are con
 
 ## Issue 4: `security-model.md` AUTH bypass uses `RuntimeError` (refuse to start); code returns 401 (per request)
 
+**[SOLVED]**
+
 **Issue.** `security-model.md` line 405–410 specifies that misconfiguring the dev auth bypass — setting `AUTH_MODE=local` without `ENVIRONMENT=local` — should make the application **refuse to start**:
 
 ```python

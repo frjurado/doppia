@@ -87,6 +87,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         auth_mode = os.environ.get("AUTH_MODE", "supabase")
 
         # Dev bypass — guarded: only valid when ENVIRONMENT=local too.
+        # The primary guard is in main.py's lifespan, which refuses to start if
+        # AUTH_MODE=local is set outside a local environment. This per-request
+        # check is belt-and-suspenders (e.g. if env vars change at runtime).
         if auth_mode == "local":
             if environment != "local":
                 return _make_401(
