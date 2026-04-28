@@ -45,6 +45,17 @@ logger = logging.getLogger(__name__)
 
 # Allowed origins per environment — never use ["*"] with allow_credentials=True.
 # See docs/architecture/security-model.md § CORS policy.
+_REQUIRED_ENV_VARS: list[str] = [
+    "DATABASE_URL",
+    "NEO4J_URI",
+    "NEO4J_USER",
+    "NEO4J_PASSWORD",
+    "R2_ENDPOINT_URL",
+    "R2_BUCKET_NAME",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+]
+
 _ALLOWED_ORIGINS: dict[str, list[str]] = {
     "local": [
         "http://localhost:5173",  # Vite dev server
@@ -93,6 +104,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Refusing to start: the dev auth bypass is only permitted when "
             "ENVIRONMENT=local. Set AUTH_MODE=supabase (or remove AUTH_MODE) "
             "for non-local environments."
+        )
+
+    missing_vars = [v for v in _REQUIRED_ENV_VARS if not os.environ.get(v)]
+    if missing_vars:
+        raise RuntimeError(
+            f"Missing required environment variables: {missing_vars}. "
+            "Refusing to start."
         )
 
     database_url = os.environ["DATABASE_URL"]

@@ -10,7 +10,9 @@ Implements the seven-step upload workflow described in
    normalisation (:func:`~services.mei_normalizer.normalize_mei`).
 5. Intra-corpus coherence checks (catalogue uniqueness, year plausibility).
 6. Single DB transaction with storage writes: upsert all entities, write MEI files.
-7. Dispatch one Celery analysis-ingestion task per accepted movement.
+7. Dispatch two Celery tasks per accepted movement:
+   - ingest_movement_analysis (DCML harmony parsing)
+   - generate_incipit (Verovio first-page SVG render)
 
 The public surface is a single async function:
 
@@ -345,6 +347,7 @@ async def ingest_corpus(
             MovementAccepted(
                 movement_slug=f"{acc.work_meta.slug}/{acc.mov_meta.slug}",
                 warnings=acc.norm_report.warnings,
+                changes_applied=acc.norm_report.changes_applied,
             )
             for acc in accepted
         ],

@@ -428,10 +428,16 @@ class MovementAccepted(BaseModel):
     ``movement_slug`` uses the compound form ``"{work_slug}/{movement_slug}"``
     to make the report unambiguous without requiring the caller to cross-reference
     the work list.
+
+    ``changes_applied`` lists the auto-corrections the normalizer applied
+    (e.g. pickup-bar renumbering).  An empty list means the file was already
+    well-formed.  Surfaced here so uploaders can verify nothing unexpected was
+    auto-corrected before accepting the ingestion.
     """
 
     movement_slug: str
     warnings: list[str] = []
+    changes_applied: list[str] = []
 
 
 class MovementRejected(BaseModel):

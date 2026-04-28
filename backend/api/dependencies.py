@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from services.object_storage import StorageClient, make_storage_client
 
 _ROLE_HIERARCHY: dict[str, int] = {"editor": 1, "admin": 2}
 
@@ -103,3 +104,14 @@ def require_role(role: str) -> Annotated[AppUser, Depends]:
         return user
 
     return Depends(_check)
+
+
+def get_storage() -> StorageClient:
+    """FastAPI dependency that returns a configured object storage client.
+
+    Returns:
+        A :class:`~services.object_storage.StorageClient` built from
+        environment variables.  Use ``app.dependency_overrides[get_storage]``
+        in tests to inject a fake storage without hitting MinIO/R2.
+    """
+    return make_storage_client()

@@ -1,9 +1,11 @@
 """MEI file validation pipeline.
 
 Applies five sequential checks to a raw MEI byte string and returns a
-structured :class:`~models.validation.ValidationReport`.  Hard failures
-(checks 1, 2, 5) short-circuit immediately; advisory checks (3, 4) collect
-all findings before returning.
+structured :class:`~models.validation.ValidationReport`.  Checks 1 and 2
+short-circuit on failure (no further checks run).  Checks 3, 4, and 5 are
+non-short-circuiting: they all run regardless.  Check 5 produces an error
+(not a warning) if no notes or rests exist; the file is still considered
+invalid.
 
 Checks (in order):
 

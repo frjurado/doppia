@@ -144,7 +144,6 @@ def _build_repeat_sections(
 def _normalize_pickup_bar(
     root: lxml.etree._Element,
     changes_applied: list[str],
-    _warnings: list[str],
 ) -> None:
     """Pass 1 — Pickup bar encoding.
 
@@ -156,7 +155,6 @@ def _normalize_pickup_bar(
     Args:
         root: Document root element.
         changes_applied: Mutable list; auto-corrections are appended here.
-        _warnings: Not used by this pass; kept for signature uniformity.
     """
     all_measures: list[lxml.etree._Element] = _xpath(root, "//mei:measure")
     if not all_measures:
@@ -618,7 +616,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
     changes_applied: list[str] = []
     warnings: list[str] = []
 
-    _normalize_pickup_bar(root, changes_applied, warnings)
+    _normalize_pickup_bar(root, changes_applied)
     _propagate_meter_changes(root, changes_applied)
     _normalize_ending_ns(root, changes_applied, warnings)
     _check_repeat_barlines(root, warnings)

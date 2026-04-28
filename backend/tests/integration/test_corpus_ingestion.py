@@ -42,6 +42,12 @@ _HARMONIES_DIR = _FIXTURES / "dcml-subset" / "harmonies"
 # Synthetic volta TSV
 # ---------------------------------------------------------------------------
 
+# DCML synthetic fixture covering volta (first/second-time ending) handling:
+# - mc 1: I chord in measure 1 (no volta)
+# - mc 2: V chord in measure 2, first-time ending (volta=1)
+# - mc 3: IV chord, also "measure 2" by score numbering (mn=2), second-time ending (volta=2)
+# - mc 4: I chord in measure 3 (no volta)
+# Tests that the parser produces both volta=1 and volta=2 events for mn=2.
 _VOLTA_TSV = (
     "mc\tmn\tquarterbeats\tduration_qb\tkeysig\ttimesig\tact_dur\t"
     "mc_onset\tmn_onset\tevent\ttimesig_num\tvolta\tchord_tones\tadded_tones\t"

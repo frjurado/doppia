@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 
 import verovio
 from celery.exceptions import Ignore
@@ -132,12 +133,9 @@ async def _generate_incipit_async(movement_id: str) -> None:
         )
         # Strip XML comments before loading: Verovio's XML parser does not
         # handle comments that appear between the XML declaration and the root
-        # element, which causes it to miss <music>.  Using re.sub here avoids
-        # pulling in lxml as a dependency.
-        import re as _re
-
-        mei_text = _re.sub(
-            r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=_re.DOTALL
+        # element, which causes it to miss <music>.
+        mei_text = re.sub(
+            r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=re.DOTALL
         )
         ok = tk.loadData(mei_text)
         if not ok:

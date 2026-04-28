@@ -111,6 +111,8 @@ This test will fail today and reveals the double-wrap. Fixing it confirms the is
 
 ## Issue 3: Unused import in `services/ingestion.py`
 
+**[SOLVED]**
+
 **Issue.** Line 37: `from models.analysis import MovementAnalysis`. Never referenced in the file. Ruff (`F401`) would catch this. Either Ruff isn't running over this file in CI, or the rule is disabled.
 
 **Solution.** Delete the import. Verify Ruff config (`pyproject.toml`) includes `F401` and runs over `backend/services/`.
@@ -120,6 +122,8 @@ This test will fail today and reveals the double-wrap. Fixing it confirms the is
 ---
 
 ## Issue 4: Top-level docstring in `services/ingestion.py` lists six pipeline steps; code does seven
+
+**[SOLVED]**
 
 **Issue.** The module docstring (lines 1–18) describes the pipeline as ending with: *"7. Dispatch one Celery analysis-ingestion task per accepted movement."* But the actual code (lines 315–323) dispatches **two** tasks per movement: `ingest_movement_analysis` and `generate_incipit`. The docstring predates the Component 2 incipit work and was never updated. New readers will assume only one task is dispatched and miss the incipit pipeline entirely.
 
@@ -137,6 +141,8 @@ This test will fail today and reveals the double-wrap. Fixing it confirms the is
 
 ## Issue 5: Top-level docstring in `services/mei_validator.py` mis-describes check 5
 
+**[SOLVED]**
+
 **Issue.** Lines 4–6:
 
 > Hard failures (checks 1, 2, 5) short-circuit immediately; advisory checks (3, 4) collect all findings before returning.
@@ -152,6 +158,8 @@ Check 5 (lines 263–272) does **not** short-circuit. It appends to `errors` and
 ---
 
 ## Issue 6: `_dcml_branch` holds an open Postgres transaction across an S3 read
+
+**[SOLVED]**
 
 **Issue.** `services/tasks/ingest_analysis.py` lines 636–751 wrap the entire branch in `async with session.begin():`. Inside that transaction, line 657 does:
 
@@ -188,6 +196,8 @@ async with factory() as session:
 
 ## Issue 7: `make_storage_client()` is constructed at the route layer, not injected
 
+**[SOLVED]**
+
 **Issue.** CONTRIBUTING.md says route handlers should be thin and delegate to services. But two routes construct service dependencies in the handler:
 
 - `routes/browse.py` line 154: `storage = make_storage_client()`
@@ -222,6 +232,8 @@ Tests can then override `app.dependency_overrides[get_storage] = lambda: fake_st
 
 ## Issue 8: `_normalize_pickup_bar` keeps an unused `_warnings` parameter "for signature uniformity" that the other passes don't follow
 
+**[SOLVED]**
+
 **Issue.** `services/mei_normalizer.py` line 161 docstring says `_warnings: Not used by this pass; kept for signature uniformity.` But the other passes have varying signatures: some take `(root, changes_applied)`, some `(root, warnings)`, some `(root, changes_applied, warnings)`. There is no signature uniformity to preserve.
 
 **Solution.** Either:
@@ -236,6 +248,8 @@ Option 2 is nicer if you ever want to make the pass list configurable; option 1 
 ---
 
 ## Issue 9: `make_storage_client()` raises `KeyError` from `os.environ[...]`, but no surrounding code catches it
+
+**[SOLVED]**
 
 **Issue.** `services/object_storage.py` line 212–217 reads four required env vars via `os.environ[...]`. If any are missing, a `KeyError` propagates upward. At the route-handler layer, this becomes an unhandled exception → the global handler returns 500 with `INTERNAL_SERVER_ERROR`. The actual cause (missing env var) is buried in logs.
 
@@ -261,6 +275,8 @@ Then `make_storage_client()` is a safe internal helper.
 
 ## Issue 10: In-function `import re as _re` inside `generate_incipit`
 
+**[SOLVED]**
+
 **Issue.** `services/tasks/generate_incipit.py` line 136:
 
 ```python
@@ -277,6 +293,8 @@ mei_text = _re.sub(r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=_re.DOTAL
 ---
 
 ## Issue 11: `NormalizationReport.changes_applied` is captured by the normalizer but never persisted
+
+**[SOLVED]**
 
 **Issue.** `services/mei_normalizer.py` produces `NormalizationReport(changes_applied=..., warnings=..., duration_bars=...)`. In `services/ingestion.py` line 491–494:
 
@@ -332,6 +350,8 @@ For Phase 1, option 1 is right-sized. Worth an ADR documenting the choice.
 ---
 
 ## Issue 13: `_VOLTA_TSV` test fixture has no docstring explaining what it tests
+
+**[SOLVED]**
 
 **Issue.** `backend/tests/integration/test_corpus_ingestion.py` lines 43–56 hardcode a TSV fixture for a volta scenario. The fixture has `mc=3, mn=2, volta=2` — same `mn` as the previous row — which is correct DCML for first/second-time endings, but completely opaque to anyone who doesn't already know DCML conventions.
 

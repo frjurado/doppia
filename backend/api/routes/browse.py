@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from api.dependencies import require_role
+from api.dependencies import get_storage, require_role
 from errors import ComposerNotFoundError, CorpusNotFoundError, WorkNotFoundError
 from fastapi import APIRouter, Depends
 from models.base import get_db
@@ -28,7 +28,7 @@ from models.browse import (
     WorkResponse,
 )
 from services.browse import list_composers, list_corpora, list_movements, list_works
-from services.object_storage import make_storage_client
+from services.object_storage import StorageClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["Browse"])
@@ -137,6 +137,7 @@ async def get_works(
 async def get_movements(
     work_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    storage: StorageClient = Depends(get_storage),
 ) -> list[MovementResponse]:
     """Return all movements for the work, ordered by ``movement_number``.
 
@@ -147,6 +148,7 @@ async def get_movements(
     Args:
         work_id: UUID primary key of the work.
         db: Async database session (injected).
+        storage: Object storage client (injected).
 
     Returns:
         List of :class:`~models.browse.MovementResponse` items.
@@ -154,7 +156,6 @@ async def get_movements(
     Raises:
         WorkNotFoundError: 404 if the work ID is not found.
     """
-    storage = make_storage_client()
     result = await list_movements(work_id=work_id, db=db, storage=storage)
     if result is None:
         raise WorkNotFoundError(
