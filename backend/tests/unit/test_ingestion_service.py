@@ -31,6 +31,7 @@ from models.ingestion import IngestionReport
 from models.normalization import NormalizationReport
 from models.validation import ValidationIssue, ValidationReport
 from services.ingestion import ingest_corpus
+from tests.fixtures.builders import HARMONIES_TSV_PATH, minimal_metadata as _minimal_metadata
 
 # ---------------------------------------------------------------------------
 # Paths to fixtures
@@ -38,64 +39,6 @@ from services.ingestion import ingest_corpus
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _ALREADY_CLEAN_MEI = _FIXTURES / "mei" / "normalizer" / "already_clean.mei"
-_HARMONIES_TSV = _FIXTURES / "dcml-subset" / "harmonies" / "K331-1.tsv"
-
-
-# ---------------------------------------------------------------------------
-# Helpers: build in-memory ZIPs and metadata YAML dicts
-# ---------------------------------------------------------------------------
-
-
-def _minimal_metadata(
-    *,
-    composer_slug: str = "mozart",
-    corpus_slug: str = "piano-sonatas",
-    analysis_source: str = "DCML",
-    licence: str = "CC-BY-SA-4.0",
-    source_repository: str = "DCMLab/mozart_piano_sonatas",
-    source_commit: str = "abc1234",
-    works: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Return a minimal IngestMetadata-compatible dict."""
-    if works is None:
-        works = [
-            {
-                "slug": "k331",
-                "title": "Piano Sonata No. 11 in A major, K. 331",
-                "catalogue_number": "K. 331",
-                "year_composed": 1783,
-                "movements": [
-                    {
-                        "slug": "movement-1",
-                        "movement_number": 1,
-                        "title": "Andante grazioso",
-                        "meter": "6/8",
-                        "mei_filename": "mei/k331/movement-1.mei",
-                        "harmonies_filename": "harmonies/k331/movement-1.tsv",
-                    }
-                ],
-            }
-        ]
-    return {
-        "composer": {
-            "slug": composer_slug,
-            "name": "Wolfgang Amadeus Mozart",
-            "sort_name": "Mozart, Wolfgang Amadeus",
-            "birth_year": 1756,
-            "death_year": 1791,
-            "nationality": "Austrian",
-            "wikidata_id": "Q254",
-        },
-        "corpus": {
-            "slug": corpus_slug,
-            "title": "Piano Sonatas",
-            "source_repository": source_repository,
-            "source_commit": source_commit,
-            "analysis_source": analysis_source,
-            "licence": licence,
-            "works": works,
-        },
-    }
 
 
 def _build_zip(
@@ -129,7 +72,7 @@ def valid_mei_bytes() -> bytes:
 @pytest.fixture()
 def harmonies_bytes() -> bytes:
     """Return K331-1.tsv bytes."""
-    return _HARMONIES_TSV.read_bytes()
+    return HARMONIES_TSV_PATH.read_bytes()
 
 
 @pytest.fixture()

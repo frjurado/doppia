@@ -16,6 +16,7 @@ See docs/roadmap/component-1-mei-corpus-ingestion.md §Step 9.
 from __future__ import annotations
 
 import io
+import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ import yaml
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fixtures.builders import VOLTA_TSV_PATH
+from tests.integration.helpers import delete_test_composer
 
 pytestmark = pytest.mark.integration
 
@@ -39,37 +42,23 @@ _MEI_DIR = _FIXTURES / "mei"
 _HARMONIES_DIR = _FIXTURES / "dcml-subset" / "harmonies"
 
 # ---------------------------------------------------------------------------
-# Synthetic volta TSV
+# Synthetic volta TSV (loaded from fixture file)
 # ---------------------------------------------------------------------------
 
-# DCML synthetic fixture covering volta (first/second-time ending) handling:
-# - mc 1: I chord in measure 1 (no volta)
-# - mc 2: V chord in measure 2, first-time ending (volta=1)
-# - mc 3: IV chord, also "measure 2" by score numbering (mn=2), second-time ending (volta=2)
-# - mc 4: I chord in measure 3 (no volta)
-# Tests that the parser produces both volta=1 and volta=2 events for mn=2.
-_VOLTA_TSV = (
-    "mc\tmn\tquarterbeats\tduration_qb\tkeysig\ttimesig\tact_dur\t"
-    "mc_onset\tmn_onset\tevent\ttimesig_num\tvolta\tchord_tones\tadded_tones\t"
-    "root_roman\tbass_note\tglobalkey\tlocalkey\tpedal\tchord\tnumeral\tform\t"
-    "figbass\tchanges\trelativeroot\tpedalend\tphraseend\tchord_tones_num\tadded_tones_num\n"
-    "1\t1\t0\t4\t0\t4/4\t4/4\t0\t0\tI\t4\tNaN\t(0, 4, 7)\t()\tI\t0\t"
-    "C\tI\tNaN\tI\tI\tM\t\tNaN\tNaN\tNaN\tNaN\t3\t0\n"
-    "2\t2\t0\t4\t0\t4/4\t4/4\t0\t0\tV\t4\t1\t(7, 11, 2)\t()\tV\t7\t"
-    "C\tI\tNaN\tV\tV\tM\t\tNaN\tNaN\tNaN\tNaN\t3\t0\n"
-    "3\t2\t0\t4\t0\t4/4\t4/4\t0\t0\tIV\t4\t2\t(5, 9, 0)\t()\tIV\t5\t"
-    "C\tI\tNaN\tIV\tIV\tM\t\tNaN\tNaN\tNaN\tNaN\t3\t0\n"
-    "4\t3\t0\t4\t0\t4/4\t4/4\t0\t0\tI\t4\tNaN\t(0, 4, 7)\t()\tI\t0\t"
-    "C\tI\tNaN\tI\tI\tM\t\tNaN\tNaN\tNaN\tNaN\t3\t0\n"
-)
+# DCML synthetic fixture covering volta (first/second-time ending) handling.
+# See tests/fixtures/dcml-subset/harmonies/volta-movement.tsv for content.
+_VOLTA_TSV = VOLTA_TSV_PATH.read_text()
 
 # ---------------------------------------------------------------------------
 # Metadata template for the main fixture (K331 movements 1–2)
 # ---------------------------------------------------------------------------
 
+# Unique per session so that interrupted runs don't leave colliding rows.
+_COMPOSER_SLUG = f"test-mozart-{uuid.uuid4().hex[:8]}"
+
 _MAIN_METADATA: dict[str, Any] = {
     "composer": {
-        "slug": "test-mozart",
+        "slug": _COMPOSER_SLUG,
         "name": "Wolfgang Amadeus Mozart",
         "sort_name": "Mozart, Wolfgang Amadeus",
         "birth_year": 1756,
@@ -158,79 +147,6 @@ def _build_zip(metadata_dict: dict[str, Any], files: dict[str, bytes | str]) -> 
 
 
 # ---------------------------------------------------------------------------
-# DB cleanup helper
-# ---------------------------------------------------------------------------
-
-
-async def _delete_test_composer(session: AsyncSession, slug: str) -> None:
-    """Delete a test composer and all descendant rows (RESTRICT FKs → manual order).
-
-    Args:
-        session: Open async session with an active transaction.
-        slug: Composer slug to delete.
-    """
-    # movement_analysis.movement_id has ON DELETE CASCADE from movement,
-    # but work/corpus/composer use RESTRICT — delete bottom-up.
-    await session.execute(
-        text(
-            """
-            DELETE FROM movement_analysis
-            WHERE movement_id IN (
-                SELECT m.id FROM movement m
-                JOIN work w ON m.work_id = w.id
-                JOIN corpus c ON w.corpus_id = c.id
-                JOIN composer co ON c.composer_id = co.id
-                WHERE co.slug = :slug
-            )
-            """
-        ),
-        {"slug": slug},
-    )
-    await session.execute(
-        text(
-            """
-            DELETE FROM movement
-            WHERE work_id IN (
-                SELECT w.id FROM work w
-                JOIN corpus c ON w.corpus_id = c.id
-                JOIN composer co ON c.composer_id = co.id
-                WHERE co.slug = :slug
-            )
-            """
-        ),
-        {"slug": slug},
-    )
-    await session.execute(
-        text(
-            """
-            DELETE FROM work
-            WHERE corpus_id IN (
-                SELECT c.id FROM corpus c
-                JOIN composer co ON c.composer_id = co.id
-                WHERE co.slug = :slug
-            )
-            """
-        ),
-        {"slug": slug},
-    )
-    await session.execute(
-        text(
-            """
-            DELETE FROM corpus
-            WHERE composer_id IN (
-                SELECT id FROM composer WHERE slug = :slug
-            )
-            """
-        ),
-        {"slug": slug},
-    )
-    await session.execute(
-        text("DELETE FROM composer WHERE slug = :slug"),
-        {"slug": slug},
-    )
-
-
-# ---------------------------------------------------------------------------
 # Test class
 # ---------------------------------------------------------------------------
 
@@ -248,7 +164,7 @@ class TestCorpusIngestion:
         # (autobegin may already have started a transaction), then run the
         # deletes in a clean autobegin transaction and commit.
         await db_session.rollback()
-        await _delete_test_composer(db_session, "test-mozart")
+        await delete_test_composer(db_session, _COMPOSER_SLUG)
         await db_session.commit()
 
     # ------------------------------------------------------------------
@@ -301,7 +217,7 @@ class TestCorpusIngestion:
             mock_task.delay = MagicMock(side_effect=_capture_delay)
             mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
-                "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+                f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
                 headers={"Authorization": "Bearer dev-token"},
             )
@@ -310,7 +226,7 @@ class TestCorpusIngestion:
         assert response.status_code == 201, response.text
         report = response.json()
         assert report["corpus"] == {
-            "composer_slug": "test-mozart",
+            "composer_slug": _COMPOSER_SLUG,
             "corpus_slug": "piano-sonatas",
         }
         accepted_slugs = [m["movement_slug"] for m in report["movements_accepted"]]
@@ -326,7 +242,8 @@ class TestCorpusIngestion:
         # ── Assert DB hierarchy ────────────────────────────────────────
         composer_row = (
             await db_session.execute(
-                text("SELECT id FROM composer WHERE slug = 'test-mozart'")
+                text("SELECT id FROM composer WHERE slug = :slug"),
+                {"slug": _COMPOSER_SLUG},
             )
         ).one()
         composer_id = composer_row.id
@@ -381,7 +298,7 @@ class TestCorpusIngestion:
 
         # MEI object key convention
         assert mov1_row.mei_object_key == (
-            "test-mozart/piano-sonatas/k331/movement-1.mei"
+            f"{_COMPOSER_SLUG}/piano-sonatas/k331/movement-1.mei"
         )
 
         # ── Assert MinIO: normalized + original MEI exist ─────────────
@@ -389,12 +306,12 @@ class TestCorpusIngestion:
 
         storage = make_storage_client()
         norm_bytes = await storage.get_mei(
-            "test-mozart/piano-sonatas/k331/movement-1.mei"
+            f"{_COMPOSER_SLUG}/piano-sonatas/k331/movement-1.mei"
         )
         assert b"<mei" in norm_bytes
 
         orig_bytes = await storage.get_mei(
-            "originals/test-mozart/piano-sonatas/k331/movement-1.mei"
+            f"originals/{_COMPOSER_SLUG}/piano-sonatas/k331/movement-1.mei"
         )
         assert b"<mei" in orig_bytes
 
@@ -547,7 +464,7 @@ class TestCorpusIngestion:
                 mock_task.delay = MagicMock(side_effect=_capture)
                 mock_incipit.delay = MagicMock()
                 resp = await integration_test_client.post(
-                    "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+                    f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                     files={"archive": ("corpus.zip", archive, "application/zip")},
                     headers={"Authorization": "Bearer dev-token"},
                 )
@@ -619,7 +536,8 @@ class TestCorpusIngestion:
         # Exactly one row per entity
         composer_count = (
             await db_session.execute(
-                text("SELECT COUNT(*) FROM composer WHERE slug = 'test-mozart'")
+                text("SELECT COUNT(*) FROM composer WHERE slug = :slug"),
+                {"slug": _COMPOSER_SLUG},
             )
         ).scalar_one()
         corpus_count = (
@@ -627,8 +545,9 @@ class TestCorpusIngestion:
                 text(
                     "SELECT COUNT(*) FROM corpus "
                     "WHERE slug = 'piano-sonatas' "
-                    "AND composer_id = (SELECT id FROM composer WHERE slug = 'test-mozart')"
-                )
+                    "AND composer_id = (SELECT id FROM composer WHERE slug = :slug)"
+                ),
+                {"slug": _COMPOSER_SLUG},
             )
         ).scalar_one()
         assert composer_count == 1, f"Expected 1 composer row, got {composer_count}"
@@ -690,7 +609,7 @@ class TestCorpusIngestion:
             mock_task.delay = MagicMock(side_effect=_capture)
             mock_incipit.delay = MagicMock()
             response = await integration_test_client.post(
-                "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+                f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
                 headers={"Authorization": "Bearer dev-token"},
             )
@@ -762,7 +681,7 @@ class TestIngestionErrorEnvelopes:
     ) -> None:
         """Uploading a non-ZIP body returns 422 with INVALID_ZIP code."""
         resp = await integration_test_client.post(
-            "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+            f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
             headers={"Authorization": "Bearer dev-token"},
             files={"archive": ("bad.zip", b"not a zip file", "application/zip")},
         )
@@ -786,7 +705,7 @@ class TestIngestionErrorEnvelopes:
         archive_bytes = buf.getvalue()
 
         resp = await integration_test_client.post(
-            "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+            f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
             headers={"Authorization": "Bearer dev-token"},
             files={"archive": ("no_metadata.zip", archive_bytes, "application/zip")},
         )
@@ -809,7 +728,7 @@ class TestIngestionErrorEnvelopes:
         archive_bytes = buf.getvalue()
 
         resp = await integration_test_client.post(
-            "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
+            f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
             headers={"Authorization": "Bearer dev-token"},
             files={"archive": ("mismatch.zip", archive_bytes, "application/zip")},
         )

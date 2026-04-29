@@ -167,6 +167,8 @@ Independently of which option you choose: write a test (or a comment block in th
 
 ## Issue 7: Hardcoded test composer slug allows state leaks across runs
 
+**[SOLVED]**
+
 **Issue.** `test_corpus_ingestion.py` uses the composer slug `"test-mozart"` everywhere. `test_browse_api.py` uses `"browse-test-mozart"`. Both are constants — not generated per test run. `test_object_storage.py` correctly uses `f"test-{uuid.uuid4().hex[:8]}"` for bucket names, so the pattern exists in the codebase already.
 
 What goes wrong:
@@ -238,6 +240,8 @@ Roughly 1–2 tests per endpoint covering: success with empty data, success with
 ---
 
 ## Issue 10: Test fixture data is hand-written and fragile
+
+**[SOLVED]**
 
 **Issue.** Most fixtures are constructed inline as Python dicts (`_valid_ingest_dict()`, `_minimal_metadata()`, `_MAIN_METADATA`, `_METADATA`, etc.) — sometimes the same metadata block is rebuilt three or four times across files with minor variations. The `_HARMONIES_TSV` string in `test_browse_api.py` is hand-typed with 28 columns; the `_VOLTA_TSV` in `test_corpus_ingestion.py` is similar. The MEI fixtures in `tests/fixtures/mei/` are the genuine cleanly-shared resource (used by both unit and integration tests), but the metadata YAML and harmonies TSV side is duplicated.
 
