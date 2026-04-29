@@ -74,6 +74,8 @@ This matters more than it sounds. The whole two-tier architecture (unit vs integ
 
 ## Issue 4: `services/tasks/ingest_analysis.py` is mostly untested at the unit level
 
+**[SOLVED]**
+
 **Issue.** This file is 822 lines — the largest in the backend, and the heart of the DCML-to-events pipeline. `test_ingest_analysis.py` has 85 tests across ten classes — but every single one of them targets a *pure helper function* (`_is_nan`, `_compute_beat`, `_resolve_key`, `_parse_numeral`, `_map_figbass`, `_build_numeral`, `_map_form`, `_parse_changes`, `_parse_dcml_harmonies`, `_merge_events`).
 
 What's *not* unit-tested:
@@ -95,6 +97,16 @@ The integration tests do exercise `_dcml_branch` and `_build_measure_map` (the v
 4. `ingest_movement_analysis`: test that it routes to `_dcml_branch` when `analysis_source="DCML"` and to the music21 branch otherwise. Two tests.
 
 **Verification.** After this work, `pytest --cov=backend.services.tasks.ingest_analysis backend/tests/unit/` should show line coverage above 80% for that module specifically. The integration tests should still pass unchanged — these unit tests are *additive*, not a replacement.
+
+**Results.** Four new test classes were added to `test_ingest_analysis.py` (15 + 13 + 5 + 5 = 38 tests), bringing the file from 85 to 124 tests. Combined with the existing `test_ingest_task.py` (10 tests), coverage for `services/tasks/ingest_analysis.py` is now **93%** — well above the 80% target.
+
+**Findings from `_build_measure_map` tests.** The exhaustive 15-test suite surfaced several silent degradation paths that were previously untested:
+
+- **Non-integer `@n` is silently dropped.** `int(n_attr)` raises `ValueError` and the `except ValueError: continue` branch discards the measure with no warning. This is already causing real-world alignment warnings in the Mozart staging ingest: K.279, K.283, and K.331 all contain measures with `@n='X1'`, `@n='X2'` (rehearsal labels). Every TSV row pointing to those measures produces a spurious alignment warning even though the musical content is correct. The test `test_real_world_x1_x2_labels_dropped` pins this behavior as a known, expected consequence.
+
+- **Ending with no `@n` silently collides with the non-volta key space.** When an `<ending>` element has no `@n` attribute (or `@n=""`), the `int(v) if v else None` branch resolves to `volta=None`. This gives the enclosed measure the key `(mn, None)` — identical to a plain non-volta measure with the same `@mn`. If a normal measure with that number already exists in the map, the ending measure silently overwrites it. The test `test_ending_no_n_overwrites_normal_measure` demonstrates the collision. The same path is triggered by `@n="abc"` (non-integer ending label), as the `except (ValueError, TypeError)` branch also resolves to `volta=None`.
+
+- **`_FLAT_KEY_TONICS` contains unreachable multi-char entries.** The `TestParseGlobalKey` suite exposed a bug in `_parse_global_key`: `_FLAT_KEY_TONICS = {"F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"}` is checked against `letter`, which is always a single character. The multi-char entries (`"Bb"`, `"Eb"`, etc.) are therefore unreachable — only `"F"` ever matches. As a result, `_parse_global_key("Bb")` returns `use_flats=False`, and Roman-numeral resolution from a Bb-major global key will produce sharp spellings instead of flat ones. This is documented in tests `test_bb_major_use_flats_false` and `test_eb_major_use_flats_false` as known-limitation tests (they assert the actual, buggy behavior so any future fix causes a clear test failure rather than silent drift).
 
 ---
 
