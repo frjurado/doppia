@@ -213,6 +213,8 @@ Roughly 5–10 tests, no Docker required (unit-level only).
 
 ## Issue 9: The four browse endpoints lack route-level unit tests
 
+**[SOLVED]**
+
 **Issue.** `backend/api/routes/browse.py` is 161 lines and defines four endpoints (`/composers`, `/composers/{slug}/corpora`, `/composers/{slug}/corpora/{slug}/works`, `/works/{id}/movements`). The browse *service layer* is well-tested at the unit level (`test_browse_service.py` mocks `db.execute` thoroughly). The browse *integration layer* exercises the whole path through Postgres (`test_browse_api.py`).
 
 What's missing: route-level unit tests using the existing `test_client` fixture. These would cover the API contract — request validation, response serialization, status codes, auth boundaries, error envelopes — without needing Docker.
