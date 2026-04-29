@@ -56,6 +56,8 @@ This was already noted in the earlier doc audit, but it has a specific test-suit
 
 ## Issue 3: No CI, no automated coverage measurement
 
+**[SOLVED]**
+
 **Issue.** `pytest-cov==6.0.0` is in `requirements-dev.txt`, but there is no script, Makefile target, GitHub Actions workflow, or pre-commit hook that invokes it. Looking at the repo: no `.github/`, no `Makefile`, no `tox.ini`, nothing. Tests pass or fail entirely on the contributor's local machine, and coverage is unmeasured.
 
 This matters more than it sounds. The whole two-tier architecture (unit vs integration) is built around the idea that unit tests should pass without Docker — but nothing actually verifies that on every commit. A future test that accidentally imports a module that opens a DB connection at import time would pass on the contributor's machine (where Docker is up) and fail silently for everyone else. CI is the only way to enforce the unit/integration boundary.
