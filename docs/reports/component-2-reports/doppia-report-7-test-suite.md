@@ -122,6 +122,8 @@ This makes the two-tier architecture less useful than it should be. The whole po
 
 ## Issue 6: Manual cache-poking in `test_corpus_ingestion.py` is a smell pointing at a real bug
 
+**[SOLVED]**
+
 **Issue.** In `backend/tests/integration/test_corpus_ingestion.py`, the cleanup fixture does this:
 
 ```python

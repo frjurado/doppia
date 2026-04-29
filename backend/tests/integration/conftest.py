@@ -86,8 +86,8 @@ async def integration_test_client(
 
     # DB + MinIO env vars — fall back to Docker Compose defaults if not set.
     for key, default in (
-        # DATABASE_URL is read directly (no default) by _get_session_factory()
-        # in the Celery task, so we must ensure it is present.
+        # DATABASE_URL is read directly by _dcml_branch() and _generate_incipit_async()
+        # via os.environ["DATABASE_URL"] (no default fallback), so it must be present.
         (
             "DATABASE_URL",
             "postgresql+asyncpg://postgres:localpassword@localhost/doppia",
