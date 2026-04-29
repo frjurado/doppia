@@ -256,6 +256,8 @@ While doing this: consider adding a `factory_boy` or `polyfactory` setup. Given 
 
 ## Issue 11: No tests for Celery task wrappers themselves
 
+**[SOLVED]**
+
 **Issue.** The unit tests cover the inner async functions: `_dcml_branch`, `_generate_incipit_async`. The integration tests call those inner functions directly (`from services.tasks.ingest_analysis import _dcml_branch; await _dcml_branch(...)`). The actual Celery `@shared_task` wrappers — `ingest_movement_analysis` and `generate_incipit` — are never invoked end-to-end in the test suite.
 
 What's not tested:
@@ -291,6 +293,8 @@ Even better: a test that calls `services.ingestion.ingest_corpus` with `CELERY_T
 
 ## Issue 12: Object storage test coverage is integration-only
 
+**[SOLVED]**
+
 **Issue.** `services/object_storage.py` is 217 lines. The only test file touching it is `tests/integration/test_object_storage.py` (164 lines, 7 tests), which spins up a real MinIO bucket and round-trips bytes. There are no unit tests — meaning no tests cover the cases where the boto3 client raises (network errors, auth errors, missing keys) or the cases where the object key construction has edge cases.
 
 **Solution.** Add `tests/unit/test_object_storage.py`. Use `unittest.mock.AsyncMock` for the aioboto3 session and verify:
@@ -308,6 +312,8 @@ About 8–12 tests. No Docker required.
 ---
 
 ## Issue 13: `pytest.mark.asyncio` usage is inconsistent
+
+**[SOLVED]**
 
 **Issue.** Some test classes use `@pytest.mark.asyncio(loop_scope="session")` (e.g., `test_browse_api.py:187`, `test_corpus_ingestion.py:230`); other test functions are plain `async def` and rely on `asyncio_mode = "auto"` from `pyproject.toml`; a few use `@pytest.mark.asyncio` without `loop_scope`. The classes with explicit `loop_scope="session"` are clearly chosen to deal with the session-scoped engine fixture, but the rationale isn't documented and the inconsistency suggests the convention was discovered iteratively.
 

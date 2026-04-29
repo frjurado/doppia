@@ -13,6 +13,23 @@ Fixtures are split into two tiers:
 
 All fixtures follow the pattern: set up → yield → tear down.
 Do not assume a clean database between tests; do not leave test data behind.
+
+asyncio marker convention
+--------------------------
+``pyproject.toml`` sets ``asyncio_mode = "auto"``, which means every
+``async def test_*`` is automatically treated as an asyncio test.  Do **not**
+add ``@pytest.mark.asyncio`` to unit tests — it is redundant and adds noise.
+
+Integration test *classes* that share a session-scoped fixture (the
+SQLAlchemy engine / connection pool) must declare::
+
+    @pytest.mark.asyncio(loop_scope="session")
+    class TestFoo:
+        ...
+
+This ensures the class's tests all run on the same event loop as the
+session-scoped engine, avoiding "attached to a different loop" errors.
+Do not mix ``loop_scope`` values within a single class.
 """
 
 from __future__ import annotations
