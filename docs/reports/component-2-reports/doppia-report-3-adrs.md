@@ -76,6 +76,8 @@ The columns themselves are correctly nullable — that's still ADR-005 conforman
 
 ## Issue 3: `roadmap/phase-1.md` contradicts itself and ADR-005 on the same topic
 
+**[SOLVED]**
+
 **Issue.** `docs/roadmap/phase-1.md` line 421 (in the "Rhythmic subdivision grid" subsection) reads:
 
 > **Decision (ADR-005):** implement measure-level precision in Phase 1; extend to beat-level in Phase 2.
@@ -151,6 +153,8 @@ Currently fails. After the fix it should succeed.
 
 ## Issue 5: ADR-001 references `ENVIRONMENT=development` but code requires `ENVIRONMENT=local`
 
+**[SOLVED]**
+
 **Issue.** ADR-001 line 51:
 
 > The solution is the `AUTH_MODE=local` bypass documented in the README: when `ENVIRONMENT=development`, the backend accepts a fixed development token.
@@ -164,6 +168,8 @@ Currently fails. After the fix it should succeed.
 ---
 
 ## Issue 6: ADR-002 storage-key conventions don't fully match the code
+
+**[SOLVED]**
 
 **Issue.** ADR-002 line 39 specifies the MEI key format:
 
@@ -201,6 +207,8 @@ ADR-008 covers preview generation but doesn't explicitly cover incipits (incipit
 
 ## Issue 7: ADR-004 is implicitly superseded by ADR-009 + the actual analysis dispatch
 
+**[SOLVED]**
+
 **Issue.** ADR-004 ("music21 Preprocessing Pipeline Trigger") is dated 2026-03-27 and assumes **music21 is the analysis engine**. Title, abstract, and Decision section all describe a music21 task triggered on MEI upload. The smart-merge policy (lines 56–60) is described in terms of `source = "music21_auto"` vs `"manual"` etc.
 
 ADR-009 (2026-04-14) and the corpus-and-analysis-sources document introduced **DCML and WhenInRome as primary analysis sources, with music21 as a fallback for corpora that have neither**. The actual code in `services/tasks/ingest_analysis.py` line 802–822 dispatches on `analysis_source`:
@@ -229,6 +237,8 @@ Recommendation: option 1 with a note. Rename to "Analysis Pipeline Trigger and S
 
 ## Issue 8: ADR-011 references a "historical artefact" file that's been removed
 
+**[SOLVED]**
+
 **Issue.** ADR-011 line 107:
 
 > `multi-level-tagging-draft.md` is superseded by `tagging-tool-design.md`. The draft is retained in the repository as a historical artefact but should not be consulted as a current design reference.
@@ -247,6 +257,8 @@ Recommendation: option 1. Historical drafts are usually noise once superseded; r
 ---
 
 ## Issue 9: ADR-008 preview-key path doesn't match the convention used by `services/object_storage.py`
+
+**[SOLVED]**
 
 **Issue.** ADR-008 line 36 specifies the preview storage-key pattern:
 
@@ -282,6 +294,8 @@ ADR-008 itself should be updated to use slugs everywhere except the trailing `{f
 
 ## Issue 10: ADR cross-references don't always point to existing files
 
+**[SOLVED]**
+
 **Issue.** Several ADRs reference paths that should exist but I couldn't verify all of them in this pass. Confirmed live: `mei-ingest-normalization.md`, `tagging-tool-design.md`, `prototype-tagging-tool.md`, `real-audio-playback-research.md`, `corpus-and-analysis-sources.md`. Confirmed missing: `multi-level-tagging-draft.md` (Issue 8 above).
 
 ADR-005 line 5 says it supersedes content in `docs/roadmap/phase-1.md` "Open Decisions table". `phase-1.md` has the related row at line 697 (correctly current) and an inconsistent prose paragraph at line 421 (Issue 3).
@@ -295,6 +309,8 @@ ADR-009 line 10 says: *"see `docs/architecture/corpus-and-analysis-sources.md`"*
 ---
 
 ## Issue 11: ADR-013 lists snapshot-baseline regeneration as required, but `tests/snapshots/` is empty
+
+**[SOLVED]**
 
 **Issue.** ADR-013 line 22:
 
@@ -314,6 +330,8 @@ So ADR-013's verification claim ("upgrade must pass the snapshot test suite") is
 ---
 
 ## Issue 12: ADR-006's CC BY-SA section conflict with the Wikidata field
+
+**[SOLVED]**
 
 **Issue.** This is a smaller observation. ADR-006 doesn't address Wikidata. But `backend/migrations/versions/0001_initial_schema.py` adds a `wikidata_id` column to `composer` (line 73-area) and the corpus ingestion code (`services/ingestion.py` line 367) populates it. Wikidata data is CC0; nothing in ADR-009 or ADR-006 covers the licensing of any Wikidata-derived fields surfaced via the API. Currently moot — the `wikidata_id` is just an external reference, not derived content — but worth a single sentence in ADR-009 saying "external reference identifiers (Wikidata IDs, MusicBrainz IDs, etc.) are not derivative works and carry no licence obligation."
 

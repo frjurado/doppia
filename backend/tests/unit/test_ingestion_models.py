@@ -16,7 +16,6 @@ All tests are synchronous — no DB or HTTP client needed.
 from __future__ import annotations
 
 import copy
-from typing import Any
 
 import pytest
 from models.ingestion import (
@@ -26,78 +25,7 @@ from models.ingestion import (
     WorkMetadata,
 )
 from pydantic import ValidationError
-
-# ---------------------------------------------------------------------------
-# Base fixture factory
-# ---------------------------------------------------------------------------
-
-
-def _valid_ingest_dict() -> dict[str, Any]:
-    """Return a complete, valid ingest payload as a plain dict.
-
-    Every test that exercises an invalid case should call this, deep-copy the
-    result, and mutate only the field under test.  This keeps each test
-    semantically isolated from unrelated validation rules.
-
-    Returns:
-        A fresh dict matching the full IngestMetadata schema.
-    """
-    return {
-        "composer": {
-            "slug": "mozart",
-            "name": "Wolfgang Amadeus Mozart",
-            "sort_name": "Mozart, Wolfgang Amadeus",
-            "birth_year": 1756,
-            "death_year": 1791,
-            "nationality": "Austrian",
-            "wikidata_id": "Q254",
-        },
-        "corpus": {
-            "slug": "piano-sonatas",
-            "title": "Piano Sonatas",
-            "source_repository": "dcml/mozart-piano-sonatas",
-            "source_url": "https://github.com/DCMLab/mozart_piano_sonatas",
-            "source_commit": "abc1234",
-            "analysis_source": "DCML",
-            "licence": "CC-BY-SA-4.0",
-            "licence_notice": "© 2023 DCML",
-            "notes": None,
-            "works": [
-                {
-                    "slug": "k331",
-                    "title": "Piano Sonata No. 11 in A major",
-                    "catalogue_number": "K. 331",
-                    "year_composed": 1783,
-                    "year_notes": "ca. 1783",
-                    "key_signature": "A major",
-                    "instrumentation": "Piano",
-                    "notes": None,
-                    "movements": [
-                        {
-                            "slug": "movement-1",
-                            "movement_number": 1,
-                            "title": "Andante grazioso",
-                            "tempo_marking": "Andante grazioso",
-                            "key_signature": "A major",
-                            "meter": "6/8",
-                            "mei_filename": "mei/k331/movement-1.mei",
-                            "harmonies_filename": "harmonies/k331/movement-1.tsv",
-                        },
-                        {
-                            "slug": "movement-2",
-                            "movement_number": 2,
-                            "title": "Menuetto",
-                            "tempo_marking": "Menuetto",
-                            "key_signature": "A major",
-                            "meter": "3/4",
-                            "mei_filename": "mei/k331/movement-2.mei",
-                            "harmonies_filename": "harmonies/k331/movement-2.tsv",
-                        },
-                    ],
-                },
-            ],
-        },
-    }
+from tests.fixtures.builders import valid_ingest_dict as _valid_ingest_dict
 
 
 def _errors_by_loc(exc: ValidationError) -> dict[str, list[str]]:

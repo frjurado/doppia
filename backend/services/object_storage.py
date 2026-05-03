@@ -34,6 +34,15 @@ import os
 import aioboto3
 from botocore.config import Config as BotocoreConfig
 
+# TTL constants for signed URLs (per security-model.md §4 TTL policy).
+# Client-facing URLs (MEI rendering, SVG preview images) use 1 hour so they
+# remain valid for a full user session without a re-fetch.
+CLIENT_FACING_URL_TTL: int = 3600  # 1 hour
+
+# Backend-to-backend URLs (music21 processing, Verovio server-side rendering)
+# use 15 minutes — consumed immediately in a background task.
+BACKEND_PROCESSING_TTL: int = 900  # 15 minutes
+
 
 class StorageClient:
     """Async S3-compatible storage client for MEI files.
@@ -156,7 +165,9 @@ class StorageClient:
                 ContentType="image/svg+xml",
             )
 
-    async def signed_url(self, key: str, expires_in: int = 300) -> str:
+    async def signed_url(
+        self, key: str, expires_in: int = CLIENT_FACING_URL_TTL
+    ) -> str:
         """Generate a pre-signed GET URL for a stored file.
 
         The URL is valid for *expires_in* seconds from the moment it is
@@ -165,7 +176,9 @@ class StorageClient:
 
         Args:
             key: S3 object key of the file to expose.
-            expires_in: URL lifetime in seconds (default 300).
+            expires_in: URL lifetime in seconds (default: ``CLIENT_FACING_URL_TTL``,
+                1 hour). Use ``BACKEND_PROCESSING_TTL`` for backend-to-backend
+                access where the URL is consumed immediately in a task.
 
         Returns:
             A pre-signed URL string.

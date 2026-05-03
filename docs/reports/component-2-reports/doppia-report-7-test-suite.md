@@ -56,6 +56,8 @@ This was already noted in the earlier doc audit, but it has a specific test-suit
 
 ## Issue 3: No CI, no automated coverage measurement
 
+**[SOLVED]**
+
 **Issue.** `pytest-cov==6.0.0` is in `requirements-dev.txt`, but there is no script, Makefile target, GitHub Actions workflow, or pre-commit hook that invokes it. Looking at the repo: no `.github/`, no `Makefile`, no `tox.ini`, nothing. Tests pass or fail entirely on the contributor's local machine, and coverage is unmeasured.
 
 This matters more than it sounds. The whole two-tier architecture (unit vs integration) is built around the idea that unit tests should pass without Docker — but nothing actually verifies that on every commit. A future test that accidentally imports a module that opens a DB connection at import time would pass on the contributor's machine (where Docker is up) and fail silently for everyone else. CI is the only way to enforce the unit/integration boundary.
@@ -71,6 +73,8 @@ This matters more than it sounds. The whole two-tier architecture (unit vs integ
 ---
 
 ## Issue 4: `services/tasks/ingest_analysis.py` is mostly untested at the unit level
+
+**[SOLVED]**
 
 **Issue.** This file is 822 lines — the largest in the backend, and the heart of the DCML-to-events pipeline. `test_ingest_analysis.py` has 85 tests across ten classes — but every single one of them targets a *pure helper function* (`_is_nan`, `_compute_beat`, `_resolve_key`, `_parse_numeral`, `_map_figbass`, `_build_numeral`, `_map_form`, `_parse_changes`, `_parse_dcml_harmonies`, `_merge_events`).
 
@@ -93,6 +97,16 @@ The integration tests do exercise `_dcml_branch` and `_build_measure_map` (the v
 4. `ingest_movement_analysis`: test that it routes to `_dcml_branch` when `analysis_source="DCML"` and to the music21 branch otherwise. Two tests.
 
 **Verification.** After this work, `pytest --cov=backend.services.tasks.ingest_analysis backend/tests/unit/` should show line coverage above 80% for that module specifically. The integration tests should still pass unchanged — these unit tests are *additive*, not a replacement.
+
+**Results.** Four new test classes were added to `test_ingest_analysis.py` (15 + 13 + 5 + 5 = 38 tests), bringing the file from 85 to 124 tests. Combined with the existing `test_ingest_task.py` (10 tests), coverage for `services/tasks/ingest_analysis.py` is now **93%** — well above the 80% target.
+
+**Findings from `_build_measure_map` tests.** The exhaustive 15-test suite surfaced several silent degradation paths that were previously untested:
+
+- **Non-integer `@n` is silently dropped.** `int(n_attr)` raises `ValueError` and the `except ValueError: continue` branch discards the measure with no warning. This is already causing real-world alignment warnings in the Mozart staging ingest: K.279, K.283, and K.331 all contain measures with `@n='X1'`, `@n='X2'` (rehearsal labels). Every TSV row pointing to those measures produces a spurious alignment warning even though the musical content is correct. The test `test_real_world_x1_x2_labels_dropped` pins this behavior as a known, expected consequence.
+
+- **Ending with no `@n` silently collides with the non-volta key space.** When an `<ending>` element has no `@n` attribute (or `@n=""`), the `int(v) if v else None` branch resolves to `volta=None`. This gives the enclosed measure the key `(mn, None)` — identical to a plain non-volta measure with the same `@mn`. If a normal measure with that number already exists in the map, the ending measure silently overwrites it. The test `test_ending_no_n_overwrites_normal_measure` demonstrates the collision. The same path is triggered by `@n="abc"` (non-integer ending label), as the `except (ValueError, TypeError)` branch also resolves to `volta=None`.
+
+- **`_FLAT_KEY_TONICS` contains unreachable multi-char entries.** The `TestParseGlobalKey` suite exposed a bug in `_parse_global_key`: `_FLAT_KEY_TONICS = {"F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"}` is checked against `letter`, which is always a single character. The multi-char entries (`"Bb"`, `"Eb"`, etc.) are therefore unreachable — only `"F"` ever matches. As a result, `_parse_global_key("Bb")` returns `use_flats=False`, and Roman-numeral resolution from a Bb-major global key will produce sharp spellings instead of flat ones. This is documented in tests `test_bb_major_use_flats_false` and `test_eb_major_use_flats_false` as known-limitation tests (they assert the actual, buggy behavior so any future fix causes a clear test failure rather than silent drift).
 
 ---
 
@@ -121,6 +135,8 @@ This makes the two-tier architecture less useful than it should be. The whole po
 ---
 
 ## Issue 6: Manual cache-poking in `test_corpus_ingestion.py` is a smell pointing at a real bug
+
+**[SOLVED]**
 
 **Issue.** In `backend/tests/integration/test_corpus_ingestion.py`, the cleanup fixture does this:
 
@@ -167,6 +183,8 @@ Independently of which option you choose: write a test (or a comment block in th
 
 ## Issue 7: Hardcoded test composer slug allows state leaks across runs
 
+**[SOLVED]**
+
 **Issue.** `test_corpus_ingestion.py` uses the composer slug `"test-mozart"` everywhere. `test_browse_api.py` uses `"browse-test-mozart"`. Both are constants — not generated per test run. `test_object_storage.py` correctly uses `f"test-{uuid.uuid4().hex[:8]}"` for bucket names, so the pattern exists in the codebase already.
 
 What goes wrong:
@@ -211,6 +229,8 @@ Roughly 5–10 tests, no Docker required (unit-level only).
 
 ## Issue 9: The four browse endpoints lack route-level unit tests
 
+**[SOLVED]**
+
 **Issue.** `backend/api/routes/browse.py` is 161 lines and defines four endpoints (`/composers`, `/composers/{slug}/corpora`, `/composers/{slug}/corpora/{slug}/works`, `/works/{id}/movements`). The browse *service layer* is well-tested at the unit level (`test_browse_service.py` mocks `db.execute` thoroughly). The browse *integration layer* exercises the whole path through Postgres (`test_browse_api.py`).
 
 What's missing: route-level unit tests using the existing `test_client` fixture. These would cover the API contract — request validation, response serialization, status codes, auth boundaries, error envelopes — without needing Docker.
@@ -239,6 +259,8 @@ Roughly 1–2 tests per endpoint covering: success with empty data, success with
 
 ## Issue 10: Test fixture data is hand-written and fragile
 
+**[SOLVED]**
+
 **Issue.** Most fixtures are constructed inline as Python dicts (`_valid_ingest_dict()`, `_minimal_metadata()`, `_MAIN_METADATA`, `_METADATA`, etc.) — sometimes the same metadata block is rebuilt three or four times across files with minor variations. The `_HARMONIES_TSV` string in `test_browse_api.py` is hand-typed with 28 columns; the `_VOLTA_TSV` in `test_corpus_ingestion.py` is similar. The MEI fixtures in `tests/fixtures/mei/` are the genuine cleanly-shared resource (used by both unit and integration tests), but the metadata YAML and harmonies TSV side is duplicated.
 
 The cost of this isn't just duplication — it's that when the schema legitimately changes (a new required field on `corpus`, a new column on the DCML harmonies TSV), every test file needs to be updated, and it's easy to miss one.
@@ -255,6 +277,8 @@ While doing this: consider adding a `factory_boy` or `polyfactory` setup. Given 
 ---
 
 ## Issue 11: No tests for Celery task wrappers themselves
+
+**[SOLVED]**
 
 **Issue.** The unit tests cover the inner async functions: `_dcml_branch`, `_generate_incipit_async`. The integration tests call those inner functions directly (`from services.tasks.ingest_analysis import _dcml_branch; await _dcml_branch(...)`). The actual Celery `@shared_task` wrappers — `ingest_movement_analysis` and `generate_incipit` — are never invoked end-to-end in the test suite.
 
@@ -291,6 +315,8 @@ Even better: a test that calls `services.ingestion.ingest_corpus` with `CELERY_T
 
 ## Issue 12: Object storage test coverage is integration-only
 
+**[SOLVED]**
+
 **Issue.** `services/object_storage.py` is 217 lines. The only test file touching it is `tests/integration/test_object_storage.py` (164 lines, 7 tests), which spins up a real MinIO bucket and round-trips bytes. There are no unit tests — meaning no tests cover the cases where the boto3 client raises (network errors, auth errors, missing keys) or the cases where the object key construction has edge cases.
 
 **Solution.** Add `tests/unit/test_object_storage.py`. Use `unittest.mock.AsyncMock` for the aioboto3 session and verify:
@@ -308,6 +334,8 @@ About 8–12 tests. No Docker required.
 ---
 
 ## Issue 13: `pytest.mark.asyncio` usage is inconsistent
+
+**[SOLVED]**
 
 **Issue.** Some test classes use `@pytest.mark.asyncio(loop_scope="session")` (e.g., `test_browse_api.py:187`, `test_corpus_ingestion.py:230`); other test functions are plain `async def` and rely on `asyncio_mode = "auto"` from `pyproject.toml`; a few use `@pytest.mark.asyncio` without `loop_scope`. The classes with explicit `loop_scope="session"` are clearly chosen to deal with the session-scoped engine fixture, but the rationale isn't documented and the inconsistency suggests the convention was discovered iteratively.
 

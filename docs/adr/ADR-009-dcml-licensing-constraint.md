@@ -31,6 +31,7 @@ The licensing situation across DCML corpora is not uniform:
 - Concept tags and their property values.
 - The fragment schema, API design, and application code.
 - Scores sourced from OpenScore (CC0) and their MEI representations.
+- External reference identifiers (Wikidata IDs, MusicBrainz IDs, etc.) are not derivative works and carry no licence obligation.
 
 ---
 

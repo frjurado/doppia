@@ -182,7 +182,7 @@ def _parse_global_key(globalkey: str) -> tuple[int, bool]:
     acc = m.group(2)
     note = letter + acc
     tonic_pc = _NOTE_TO_PC[note]
-    use_flats = letter in _FLAT_KEY_TONICS or (not acc and letter == "F")
+    use_flats = note in _FLAT_KEY_TONICS
     return tonic_pc, use_flats
 
 
@@ -646,64 +646,69 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
         connect_args={"statement_cache_size": 0},
     )
     try:
+        # Phase 1: read what we need from Postgres, then exit the transaction so
+        # that the connection is not held open across the S3 round-trip below.
+        async with AsyncSession(engine) as session:
+            row = (
+                await session.execute(
+                    text(
+                        "SELECT mei_object_key, key_signature "
+                        "FROM movement WHERE id = :id"
+                    ),
+                    {"id": movement_id},
+                )
+            ).one_or_none()
+        if row is None:
+            raise ValueError(
+                "ingest_movement_analysis: no movement found for"
+                f" id={movement_id!r}."
+            )
+        mei_object_key: str = row.mei_object_key
+        existing_key_sig: str | None = row.key_signature
+
+        # Phase 2: external I/O + parsing — no DB transaction open.
+        storage = make_storage_client()
+        mei_bytes = await storage.get_mei(mei_object_key)
+
+        events, _phrase_boundaries, alignment_warnings = _parse_dcml_harmonies(
+            harmonies_tsv_content, mei_bytes
+        )
+
+        # Global key cross-check (pure computation; no DB needed yet).
+        canonical_gk: str | None = None
+        if events:
+            first_globalkey = _extract_first_globalkey(harmonies_tsv_content)
+            if first_globalkey:
+                try:
+                    canonical_gk = _resolve_key(first_globalkey, first_globalkey)
+                except ValueError:
+                    canonical_gk = None
+
+                if (
+                    canonical_gk
+                    and existing_key_sig is not None
+                    and existing_key_sig != canonical_gk
+                ):
+                    alignment_warnings.append(
+                        f"globalkey mismatch: TSV says {canonical_gk!r}, "
+                        f"movement.key_signature is {existing_key_sig!r}."
+                    )
+
+        # Phase 3: writes in a fresh transaction.
         async with AsyncSession(engine) as session:
             async with session.begin():
-                # 1. Fetch movement metadata needed for storage access and key check.
-                row = (
+                # 1. Back-fill key_signature if it was absent.
+                if canonical_gk and existing_key_sig is None:
                     await session.execute(
                         text(
-                            "SELECT mei_object_key, key_signature "
-                            "FROM movement WHERE id = :id"
+                            "UPDATE movement "
+                            "SET key_signature = :ks "
+                            "WHERE id = :id"
                         ),
-                        {"id": movement_id},
+                        {"ks": canonical_gk, "id": movement_id},
                     )
-                ).one_or_none()
-                if row is None:
-                    raise ValueError(
-                        "ingest_movement_analysis: no movement found for"
-                        f" id={movement_id!r}."
-                    )
-                mei_object_key: str = row.mei_object_key
-                existing_key_sig: str | None = row.key_signature
 
-                # 2. Fetch normalized MEI from object storage.
-                storage = make_storage_client()
-                mei_bytes = await storage.get_mei(mei_object_key)
-
-                # 3. Parse TSV + alignment verification.
-                events, _phrase_boundaries, alignment_warnings = _parse_dcml_harmonies(
-                    harmonies_tsv_content, mei_bytes
-                )
-
-                # 4. Global key cross-check: back-fill movement.key_signature if absent;
-                #    flag disagreement as an alignment warning.
-                if events:
-                    first_globalkey = _extract_first_globalkey(harmonies_tsv_content)
-                    if first_globalkey:
-                        try:
-                            canonical_gk = _resolve_key(
-                                first_globalkey, first_globalkey
-                            )
-                        except ValueError:
-                            canonical_gk = None
-
-                        if canonical_gk:
-                            if existing_key_sig is None:
-                                await session.execute(
-                                    text(
-                                        "UPDATE movement "
-                                        "SET key_signature = :ks "
-                                        "WHERE id = :id"
-                                    ),
-                                    {"ks": canonical_gk, "id": movement_id},
-                                )
-                            elif existing_key_sig != canonical_gk:
-                                alignment_warnings.append(
-                                    f"globalkey mismatch: TSV says {canonical_gk!r}, "
-                                    f"movement.key_signature is {existing_key_sig!r}."
-                                )
-
-                # 5. Load existing events for smart-merge on re-analysis.
+                # 2. Load existing events for smart-merge on re-analysis.
                 existing_row = (
                     await session.execute(
                         text(
@@ -717,14 +722,14 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
                     existing_row.events if existing_row else []
                 )
 
-                # 6. Apply smart-merge.
+                # 3. Apply smart-merge.
                 final_events = (
                     _merge_events(existing_events, events)
                     if existing_events
                     else events
                 )
 
-                # 7. Upsert movement_analysis.
+                # 4. Upsert movement_analysis.
                 await session.execute(
                     text(
                         """
@@ -748,7 +753,7 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
                     },
                 )
 
-                # 8. Store alignment warnings in movement.normalization_warnings.
+                # 5. Store alignment warnings in movement.normalization_warnings.
                 if alignment_warnings:
                     await session.execute(
                         text(

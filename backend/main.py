@@ -25,11 +25,13 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 import httpx
 from api.middleware.auth import AuthMiddleware
 from api.middleware.errors import (
+    doppia_error_handler,
     http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )
 from api.router import router
+from errors import DoppiaError
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +45,17 @@ logger = logging.getLogger(__name__)
 
 # Allowed origins per environment — never use ["*"] with allow_credentials=True.
 # See docs/architecture/security-model.md § CORS policy.
+_REQUIRED_ENV_VARS: list[str] = [
+    "DATABASE_URL",
+    "NEO4J_URI",
+    "NEO4J_USER",
+    "NEO4J_PASSWORD",
+    "R2_ENDPOINT_URL",
+    "R2_BUCKET_NAME",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+]
+
 _ALLOWED_ORIGINS: dict[str, list[str]] = {
     "local": [
         "http://localhost:5173",  # Vite dev server
@@ -61,6 +74,10 @@ _ALLOWED_ORIGINS: dict[str, list[str]] = {
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan: open DB connections on startup, close on shutdown.
 
+    Raises ``RuntimeError`` at startup if ``AUTH_MODE=local`` is set outside a
+    local environment — the misconfiguration must fail loudly at deploy time, not
+    silently per-request. See ``docs/architecture/security-model.md`` § auth bypass.
+
     Initialises:
         - SQLAlchemy async engine (PostgreSQL via asyncpg) via ``models.base.init_db``
         - Neo4j async driver
@@ -76,6 +93,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Yields:
         Control to the running application between startup and shutdown.
     """
+    # Refuse to start if the dev auth bypass is enabled outside a local environment.
+    # Per docs/architecture/security-model.md: misconfiguration must be loud at
+    # deploy time, not silent until someone hits the API and gets 401s.
+    auth_mode = os.environ.get("AUTH_MODE", "supabase")
+    environment = os.environ.get("ENVIRONMENT", "production")
+    if auth_mode == "local" and environment != "local":
+        raise RuntimeError(
+            f"AUTH_MODE=local is set but ENVIRONMENT={environment!r}. "
+            "Refusing to start: the dev auth bypass is only permitted when "
+            "ENVIRONMENT=local. Set AUTH_MODE=supabase (or remove AUTH_MODE) "
+            "for non-local environments."
+        )
+
+    missing_vars = [v for v in _REQUIRED_ENV_VARS if not os.environ.get(v)]
+    if missing_vars:
+        raise RuntimeError(
+            f"Missing required environment variables: {missing_vars}. "
+            "Refusing to start."
+        )
+
     database_url = os.environ["DATABASE_URL"]
     neo4j_uri = os.environ["NEO4J_URI"]
     neo4j_user = os.environ["NEO4J_USER"]
@@ -140,6 +177,9 @@ def create_app() -> FastAPI:
     )
 
     # Exception handlers — registered before middleware so they apply globally.
+    # DoppiaError is registered first: typed domain exceptions take priority
+    # over the bare HTTPException fallback.
+    application.add_exception_handler(DoppiaError, doppia_error_handler)
     application.add_exception_handler(HTTPException, http_exception_handler)
     application.add_exception_handler(
         RequestValidationError, validation_exception_handler

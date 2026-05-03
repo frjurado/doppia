@@ -86,8 +86,8 @@ async def integration_test_client(
 
     # DB + MinIO env vars — fall back to Docker Compose defaults if not set.
     for key, default in (
-        # DATABASE_URL is read directly (no default) by _get_session_factory()
-        # in the Celery task, so we must ensure it is present.
+        # DATABASE_URL is read directly by _dcml_branch() and _generate_incipit_async()
+        # via os.environ["DATABASE_URL"] (no default fallback), so it must be present.
         (
             "DATABASE_URL",
             "postgresql+asyncpg://postgres:localpassword@localhost/doppia",
@@ -116,13 +116,16 @@ async def integration_test_client(
 
     from api.middleware.auth import AuthMiddleware
     from api.middleware.errors import (
+        doppia_error_handler,
         http_exception_handler,
         unhandled_exception_handler,
         validation_exception_handler,
     )
     from api.router import router as api_router
+    from errors import DoppiaError
 
     app = FastAPI(lifespan=_noop_lifespan)
+    app.add_exception_handler(DoppiaError, doppia_error_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

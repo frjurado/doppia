@@ -2,7 +2,6 @@
 
 **Status:** Active  
 **Date:** 2026-04-15  
-**Supersedes:** `docs/architecture/multi-level-tagging-draft.md`  
 **See also:** `docs/architecture/prototype-tagging-tool.md` (prototype analysis, ghost layer architecture), `docs/adr/ADR-005-sub-measure-precision.md` (selection grid and sub-beat encoding)
 
 ---

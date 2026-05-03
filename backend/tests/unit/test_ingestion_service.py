@@ -31,6 +31,8 @@ from models.ingestion import IngestionReport
 from models.normalization import NormalizationReport
 from models.validation import ValidationIssue, ValidationReport
 from services.ingestion import ingest_corpus
+from tests.fixtures.builders import HARMONIES_TSV_PATH
+from tests.fixtures.builders import minimal_metadata as _minimal_metadata
 
 # ---------------------------------------------------------------------------
 # Paths to fixtures
@@ -38,64 +40,6 @@ from services.ingestion import ingest_corpus
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _ALREADY_CLEAN_MEI = _FIXTURES / "mei" / "normalizer" / "already_clean.mei"
-_HARMONIES_TSV = _FIXTURES / "dcml-subset" / "harmonies" / "K331-1.tsv"
-
-
-# ---------------------------------------------------------------------------
-# Helpers: build in-memory ZIPs and metadata YAML dicts
-# ---------------------------------------------------------------------------
-
-
-def _minimal_metadata(
-    *,
-    composer_slug: str = "mozart",
-    corpus_slug: str = "piano-sonatas",
-    analysis_source: str = "DCML",
-    licence: str = "CC-BY-SA-4.0",
-    source_repository: str = "DCMLab/mozart_piano_sonatas",
-    source_commit: str = "abc1234",
-    works: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Return a minimal IngestMetadata-compatible dict."""
-    if works is None:
-        works = [
-            {
-                "slug": "k331",
-                "title": "Piano Sonata No. 11 in A major, K. 331",
-                "catalogue_number": "K. 331",
-                "year_composed": 1783,
-                "movements": [
-                    {
-                        "slug": "movement-1",
-                        "movement_number": 1,
-                        "title": "Andante grazioso",
-                        "meter": "6/8",
-                        "mei_filename": "mei/k331/movement-1.mei",
-                        "harmonies_filename": "harmonies/k331/movement-1.tsv",
-                    }
-                ],
-            }
-        ]
-    return {
-        "composer": {
-            "slug": composer_slug,
-            "name": "Wolfgang Amadeus Mozart",
-            "sort_name": "Mozart, Wolfgang Amadeus",
-            "birth_year": 1756,
-            "death_year": 1791,
-            "nationality": "Austrian",
-            "wikidata_id": "Q254",
-        },
-        "corpus": {
-            "slug": corpus_slug,
-            "title": "Piano Sonatas",
-            "source_repository": source_repository,
-            "source_commit": source_commit,
-            "analysis_source": analysis_source,
-            "licence": licence,
-            "works": works,
-        },
-    }
 
 
 def _build_zip(
@@ -129,7 +73,7 @@ def valid_mei_bytes() -> bytes:
 @pytest.fixture()
 def harmonies_bytes() -> bytes:
     """Return K331-1.tsv bytes."""
-    return _HARMONIES_TSV.read_bytes()
+    return HARMONIES_TSV_PATH.read_bytes()
 
 
 @pytest.fixture()
@@ -193,100 +137,101 @@ def _mock_generate_incipit_delay():
 
 class TestZipParsing:
     async def test_non_zip_bytes_raises_422(self, mock_db, mock_storage):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", b"not a zip", mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "INVALID_ZIP"
+        assert exc_info.value.code == ErrorCode.INVALID_ZIP
 
     async def test_missing_metadata_yaml_raises_422(self, mock_db, mock_storage):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("readme.txt", "no metadata here")
         archive = buf.getvalue()
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
     async def test_malformed_metadata_yaml_raises_422(self, mock_db, mock_storage):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("metadata.yaml", "slug: !!INVALID YAML [[[")
         archive = buf.getvalue()
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
     async def test_invalid_metadata_schema_raises_422(
         self, valid_mei_bytes, mock_db, mock_storage, harmonies_bytes
     ):
         """metadata.yaml that parses as YAML but fails Pydantic."""
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata()
         meta["corpus"]["licence"] = "NOT-A-REAL-SPDX"
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
 
 class TestSlugCoherence:
     async def test_composer_slug_mismatch_raises_422(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(composer_slug="mozart")
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             # URL slug is "beethoven" but metadata says "mozart"
             await ingest_corpus(
                 "beethoven", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
+        assert exc_info.value.code == ErrorCode.CORPUS_COHERENCE_ERROR
 
     async def test_corpus_slug_mismatch_raises_422(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(corpus_slug="piano-sonatas")
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "mozart", "violin-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
+        assert exc_info.value.code == ErrorCode.CORPUS_COHERENCE_ERROR
 
     async def test_abc_repository_raises_422(
         self, valid_mei_bytes, mock_db, mock_storage
     ):
         """ABC/Beethoven deny-list is enforced at Pydantic level → METADATA_PARSE_ERROR."""
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(
             composer_slug="beethoven",
@@ -299,13 +244,12 @@ class TestSlugCoherence:
             zf.writestr("metadata.yaml", yaml.dump(meta))
         archive = buf.getvalue()
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(IngestionError) as exc_info:
             await ingest_corpus(
                 "beethoven", "piano-sonatas", archive, mock_db, mock_storage
             )
-        assert exc_info.value.status_code == 422
         # The ABC deny-list fires in Pydantic → caught as METADATA_PARSE_ERROR
-        assert exc_info.value.detail["error"]["code"] == "METADATA_PARSE_ERROR"
+        assert exc_info.value.code == ErrorCode.METADATA_PARSE_ERROR
 
 
 class TestPerMovementValidation:
@@ -376,7 +320,8 @@ class TestPerMovementValidation:
     async def test_all_movements_rejected_raises_422(
         self, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata()
         archive = _build_zip(meta, b"not valid xml", harmonies_bytes)
@@ -387,12 +332,11 @@ class TestPerMovementValidation:
             ]
         )
         with patch("services.ingestion.validate_mei", return_value=bad_report):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(IngestionError) as exc_info:
                 await ingest_corpus(
                     "mozart", "piano-sonatas", archive, mock_db, mock_storage
                 )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "INVALID_MEI"
+        assert exc_info.value.code == ErrorCode.INVALID_MEI
 
     async def test_missing_mei_file_in_zip_rejects_movement(
         self, harmonies_bytes, mock_db, mock_storage
@@ -419,7 +363,8 @@ class TestCorpusCoherence:
     async def test_duplicate_catalogue_number_raises_422(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
     ):
-        from fastapi import HTTPException
+        from errors import IngestionError
+        from models.errors import ErrorCode
 
         meta = _minimal_metadata(
             works=[
@@ -465,13 +410,12 @@ class TestCorpusCoherence:
                 "services.ingestion.normalize_mei",
                 side_effect=_mock_normalize_side_effect,
             ):
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(IngestionError) as exc_info:
                     await ingest_corpus(
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
                     )
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["error"]["code"] == "CORPUS_COHERENCE_ERROR"
-        assert "SHARED" in exc_info.value.detail["error"]["message"]
+        assert exc_info.value.code == ErrorCode.CORPUS_COHERENCE_ERROR
+        assert "SHARED" in exc_info.value.message
 
 
 class TestObjectKeys:

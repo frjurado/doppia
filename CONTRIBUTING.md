@@ -39,7 +39,7 @@ Use **Ruff** for linting:
 ruff check backend/
 ```
 
-The configuration for all three tools is in `pyproject.toml`. Do not adjust the configuration without a discussion; style debates are resolved by the existing configuration, not by opening a PR that changes it.
+The configuration for all three tools is in `pyproject.toml` at the repository root. Do not adjust the configuration without a discussion; style debates are resolved by the existing configuration, not by opening a PR that changes it.
 
 ### Type hints
 
@@ -330,12 +330,12 @@ Use standard HTTP status codes precisely:
 Role checks use the `require_role()` middleware factory, never hardcoded role strings in route handlers:
 
 ```python
-# Correct
-@router.post("/fragments/{id}/approve")
-async def approve_fragment(
-    id: UUID,
-    _: Annotated[AppUser, Depends(require_role("editor"))],
-) -> Fragment:
+# Correct — pass require_role() in the router decorator's dependencies list
+@router.post(
+    "/fragments/{id}/approve",
+    dependencies=[require_role("editor")],
+)
+async def approve_fragment(id: UUID) -> Fragment:
     ...
 
 # Wrong — do not do this
@@ -452,7 +452,7 @@ When Phase 1 is complete and adjacent domains are being modelled, follow this pr
 
 2. **Identify boundary concepts.** Every new domain references concepts from adjacent domains. List these before writing any YAML; they become stub nodes in the new domain's `stubs.yaml` section (or reference the existing stubs file if the concept is already stubbed from another domain).
 
-3. **Write the YAML seed file** following the structure in `backend/seed/cadences.yaml` as a template. Include all concept nodes, relationships, PropertySchemas, and PropertyValues. Inline comments flagging uncertainties are encouraged — they make review easier.
+3. **Write the YAML seed file** following the structure of the cadences seed file (backend/seed/cadences.yaml, added in Component 3) as a template. Include all concept nodes, relationships, PropertySchemas, and PropertyValues. Inline comments flagging uncertainties are encouraged — they make review easier. Note: the cadences seed file does not exist yet; this section will become applicable once Component 3 is built.
 
 4. **Run the seed and validate:**
    ```bash

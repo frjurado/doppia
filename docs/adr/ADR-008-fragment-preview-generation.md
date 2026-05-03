@@ -33,7 +33,7 @@ Generate fragment previews **server-side, statically, at submission time** via a
 
 **Output format:** SVG. Verovio produces clean, scalable SVG output; storing SVG avoids resolution concerns and keeps file sizes small for typical fragment lengths (2–8 bars).
 
-**Storage key pattern:** `{corpus_slug}/{work_id}/{movement_id}/previews/{fragment_id}.svg`, following the same key convention as MEI files (ADR-002).
+**Storage key pattern:** `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/fragments/{fragment_id}.svg`, following the slug-based key convention established in ADR-002. Note that the movement-level incipit SVG (a per-movement first-page render for the browse view) uses the key `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg` and is a distinct asset from the per-fragment preview.
 
 **Fallback:** if the preview has not yet been generated when the list is requested (e.g. the Celery task is still queued), the API returns `preview_url: null`. The frontend renders a placeholder. This case is transient and only affects the annotator's own recently submitted fragments.
 

@@ -14,6 +14,8 @@ The good news: the modelling docs (graph design, fragment schema, corpus-and-ana
 
 ## Issue 1: `error-handling.md` describes an exception architecture that doesn't exist
 
+**[SOLVED]**
+
 **Issue.** `docs/architecture/error-handling.md` (442 lines) is the most heavily cross-referenced architecture document — CONTRIBUTING.md links to it for "the full error propagation strategy", CLAUDE.md lists it under "Important Documentation", and `models/errors.py` itself references it as the canonical source. The document describes:
 
 - A base `DoppiaError` exception class with a hierarchy of subclasses (`InfrastructureError`, `Neo4jUnavailableError`, `PostgresUnavailableError`, `RedisUnavailableError`, `NotFoundError`, `FragmentNotFoundError`, `ConceptNotFoundError`, `CollectionNotFoundError`, `UserNotFoundError`, `ConflictError`, `FragmentAlreadyApprovedError`, `HarmonyNotReviewedError`, `AuthorizationError`, `GraphIntegrityError`).
@@ -49,6 +51,8 @@ Recommendation: **option 1**. The implementation is one or two days of focused w
 
 ## Issue 2: Stale file paths in `security-model.md` code samples
 
+**[SOLVED]**
+
 **Issue.** Two places in `security-model.md` cite file paths that don't exist:
 
 - Line 35: `# backend/api/app.py` — the actual application factory is in `backend/main.py`.
@@ -63,6 +67,8 @@ A new contributor following the document to find the cited code will get a `find
 ---
 
 ## Issue 3: Signed-URL TTL numbers don't match anywhere
+
+**[SOLVED]**
 
 **Issue.** `security-model.md` line 305–311 has a TTL policy table:
 
@@ -92,6 +98,8 @@ So three different TTL values exist (300s, 900s, 3600s) and none of them are con
 ---
 
 ## Issue 4: `security-model.md` AUTH bypass uses `RuntimeError` (refuse to start); code returns 401 (per request)
+
+**[SOLVED]**
 
 **Issue.** `security-model.md` line 405–410 specifies that misconfiguring the dev auth bypass — setting `AUTH_MODE=local` without `ENVIRONMENT=local` — should make the application **refuse to start**:
 
@@ -141,6 +149,8 @@ The middleware's per-request check can stay as belt-and-suspenders, but the star
 
 ## Issue 5: `security-model.md` lists MEI schema validation as a Phase 2 addition; it's already implemented in Phase 1
 
+**[SOLVED]**
+
 **Issue.** `security-model.md` line 464 (Phase 2 additions section):
 
 > **MEI schema validation.** Upgrade the XML parse check in section 3.5 to full MEI schema validation using an RNG or XSD file. The lxml parse with `resolve_entities=False` is sufficient for Phase 1; full schema validation catches malformed MEI that would cause silent rendering errors.
@@ -154,6 +164,8 @@ But `backend/services/mei_validator.py` lines 46–73 already implements full Re
 ---
 
 ## Issue 6: `knowledge-graph-design-reference.md` uses a Cypher pattern with an edge type the architecture rejects
+
+**[SOLVED]**
 
 **Issue.** `knowledge-graph-design-reference.md` line 547–557 shows this Cypher example:
 
@@ -198,6 +210,8 @@ WHERE concept_id = ANY(:direct_id || :via_property_ids)
 
 ## Issue 7: `mei-ingest-normalization.md` references a `normalization_status` field that doesn't exist
 
+**[SOLVED]**
+
 **Issue.** `mei-ingest-normalization.md` line 133 says:
 
 > Files with warnings are stored but tagged with a `normalization_status = "warnings"` field in the `movement` metadata table; the tagging tool displays this status to annotators so they can interpret unexpected ghost behaviour in context.
@@ -213,6 +227,8 @@ The `movement` table has no `normalization_status` column. It has `normalization
 ---
 
 ## Issue 8: `project-architecture.md` overview describes a music21 pipeline that's been deprioritised
+
+**[SOLVED]**
 
 **Issue.** `project-architecture.md` is the top-of-funnel doc — likely the first thing a new contributor reads. Its Phase 1 deliverable list (line 203–209) and the "How the Components Relate" diagram (line 146) describe music21 as the analysis pipeline. The diagram has:
 
@@ -241,6 +257,8 @@ Add a one-paragraph note in the "Core Components → Fragment Database" section 
 
 ## Issue 9: `tech-stack-and-database-reference.md` fragment "sketch" omits load-bearing columns
 
+**[SOLVED]**
+
 **Issue.** `tech-stack-and-database-reference.md` line 169–191 has a "Fragment table (core schema sketch)" that lists `id`, `movement_id`, `bar_start`, `bar_end`, `summary`, and timestamps — and explicitly says the sketch is "intentionally minimal."
 
 But the **actual** fragment table (per migration and `fragment-schema.md`) has nine more columns: `beat_start`, `beat_end`, `repeat_context`, `parent_fragment_id`, `prose_annotation`, `data_licence`, `status`, `created_by`, plus a `CHECK (status IN (...))` constraint. The doc is supposed to be the authoritative database reference — being "intentionally minimal" while pointing to `fragment-schema.md` for the rest leaves the reader uncertain what they can rely on.
@@ -259,6 +277,8 @@ Recommendation: option 3. Less work, makes the partial coverage explicit instead
 
 ## Issue 10: `tagging-tool-design.md` and ADR-011 both reference a missing "historical artefact" file
 
+**[SOLVED]**
+
 **Issue.** Already noted in Report 3 Issue 8 for ADR-011. The same dangling reference appears in `tagging-tool-design.md` line 4:
 
 ```
@@ -274,6 +294,8 @@ The file does not exist. Two documents are pointing at it.
 ---
 
 ## Issue 11: `fragment-schema.md` mentions a migration directory that doesn't exist
+
+**[SOLVED]**
 
 **Issue.** Same finding as Report 1 Issue 6, surfacing again in this doc. Line 9 of `fragment-schema.md`:
 
@@ -291,6 +313,8 @@ The file does not exist. Two documents are pointing at it.
 ---
 
 ## Issue 12: `fragment-schema.md` `bass_pitch` / `soprano_pitch` perpetually null for DCML corpora
+
+**[SOLVED]**
 
 **Issue.** This is a code-level observation surfaced by the doc. `fragment-schema.md` line 392:
 
@@ -310,6 +334,8 @@ Recommendation: option 1 for now, option 2 if any consumer of `bass_pitch` / `so
 ---
 
 ## Issue 13: `security-model.md` shows a module-global cached S3 client; code uses per-call clients
+
+**[SOLVED]**
 
 **Issue.** `security-model.md` lines 321–333 show a code sample using a module-global cached `_S3_CLIENT`:
 
@@ -341,6 +367,8 @@ But a contributor reading `security-model.md` will see the wrong pattern modeled
 
 ## Issue 14: Multiple "deferred to Phase 2" items in `security-model.md` are blocked on Phase 1 work that's done
 
+**[SOLVED]**
+
 **Issue.** `security-model.md` section 6 lists several Phase 2 additions. Most are correctly deferred (rate limiting, CSP, HSTS). Two are worth flagging:
 
 - **CORS preview environments** (line 466) — the recommended approach is reading a comma-separated `ALLOWED_ORIGINS` env var. This is a 5-line change to `main.py` and requires no Phase 2 infrastructure. Given that staging is already deployed (per ADR-002 / `fly.toml`) and the static `_ALLOWED_ORIGINS` dict is already tightly coupled to the three known environments, doing this opportunistically saves a future ADR.
@@ -355,6 +383,8 @@ This isn't a bug — it's just that the "Phase 2" framing is loose and a few ite
 ---
 
 ## Issue 15: `mei-ingest-normalization.md` still has spike findings that have been corrected
+
+**[SOLVED]**
 
 **Issue.** `mei-ingest-normalization.md` § "Verovio bar-range selection: observed behaviour" (line 141 onward) documents the Component 2 Step 1 spike. Line 145 says: *"A subsequent code review found a bug in the spike script that invalidated Findings 1 and 2 from both runs; the corrected findings are documented below."*
 

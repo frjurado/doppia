@@ -2,7 +2,7 @@
 
 Reads the ``Authorization: Bearer <token>`` header on every request,
 validates it against the Supabase public key, and attaches the resulting
-``AuthenticatedUser`` to ``request.state.user``.
+``AppUser`` to ``request.state.user``.
 
 If no ``Authorization`` header is present, ``request.state.user`` is set to
 ``None`` and the request proceeds — individual route handlers enforce
@@ -26,22 +26,29 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 
-from api.dependencies import AuthenticatedUser
+from api.dependencies import AppUser
 from fastapi import Request, Response
 from jose import ExpiredSignatureError, JWTError, jwt
+from models.errors import ErrorCode, ErrorResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
 _DEV_TOKEN = "dev-token"
-_DEV_USER = AuthenticatedUser(id="dev-user", role="admin", email="dev@local")
+_DEV_USER = AppUser(id="dev-user", role="admin", email="dev@local")
+
+# Read once at import time; the primary guard (refusing to start with
+# AUTH_MODE=local outside ENVIRONMENT=local) lives in main.py's lifespan.
+# These module-level reads are a belt-and-suspenders check on each request.
+_ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "production")
+_AUTH_MODE: str = os.environ.get("AUTH_MODE", "supabase")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Starlette HTTP middleware that validates JWTs on every request.
 
     On a valid ``Authorization: Bearer`` token, sets
-    ``request.state.user`` to an ``AuthenticatedUser``.
+    ``request.state.user`` to an ``AppUser``.
     On a missing header, sets ``request.state.user = None`` and continues.
     On a malformed or expired token, returns HTTP 401 immediately.
 
@@ -83,12 +90,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         token = authorization.removeprefix("Bearer ").strip()
 
-        environment = os.environ.get("ENVIRONMENT", "production")
-        auth_mode = os.environ.get("AUTH_MODE", "supabase")
-
         # Dev bypass — guarded: only valid when ENVIRONMENT=local too.
-        if auth_mode == "local":
-            if environment != "local":
+        # The primary guard is in main.py's lifespan, which refuses to start if
+        # AUTH_MODE=local is set outside a local environment. This per-request
+        # check is belt-and-suspenders (e.g. if env vars change at runtime).
+        if _AUTH_MODE == "local":
+            if _ENVIRONMENT != "local":
                 return _make_401(
                     "AUTH_MODE=local is not permitted outside ENVIRONMENT=local."
                 )
@@ -133,15 +140,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         email: str = payload.get("email", "")
         role: str = payload.get("app_metadata", {}).get("role", "")
 
-        request.state.user = AuthenticatedUser(id=sub, role=role, email=email)
+        request.state.user = AppUser(id=sub, role=role, email=email)
         return await call_next(request)
 
 
 def _make_401(message: str) -> JSONResponse:
     """Build a JSON 401 response using the standard error envelope.
-
-    Imported lazily to break any potential circular import between middleware
-    and models at module load time.
 
     Args:
         message: Human-readable explanation for the caller.
@@ -149,8 +153,6 @@ def _make_401(message: str) -> JSONResponse:
     Returns:
         A ``JSONResponse`` with status 401 and a ``WWW-Authenticate`` header.
     """
-    from models.errors import ErrorCode, ErrorResponse  # noqa: PLC0415
-
     body = ErrorResponse.make(code=ErrorCode.INVALID_TOKEN, message=message)
     return JSONResponse(
         status_code=401,

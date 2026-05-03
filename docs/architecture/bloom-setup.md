@@ -90,7 +90,7 @@ To add a category rule: click `Concept` label → **Styling** → **Color** → 
 
 Click **Save perspective** at the bottom of the perspective panel. The perspective is stored in Bloom and will be available the next time you open it against the same database. Perspectives are per-user and per-database connection — each team member should configure their own copy using these instructions, or import an exported perspective file.
 
-**Exporting for the team:** once configured, export the perspective via the perspective panel's menu → **Export**. This produces a JSON file. Commit it to the repository at `docs/bloom-perspective-cadence.json`. Team members can import it directly: perspective panel → **Import** → select the file. This avoids each person repeating the manual setup.
+**Exporting for the team:** once configured, export the perspective via the perspective panel's menu → **Export**. This produces a JSON file. Commit it to the repository at docs/bloom-perspective-cadence.json. Team members can import it directly: perspective panel → **Import** → select the file. This avoids each person repeating the manual setup.
 
 ---
 

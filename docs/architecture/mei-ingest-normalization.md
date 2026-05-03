@@ -130,7 +130,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
 - `is_clean: bool` — True if no warnings were raised (the file was already normalized or required only minor auto-corrections)
 - `duration_bars: int` — maximum integer `@n` value found across all measures; stored as `movement.duration_bars`
 
-The ingest pipeline calls `normalize_mei()` after schema validation. If `report.warnings` is non-empty, the ingestion report surfaced to the admin includes those warnings. Files with warnings are stored but tagged with a `normalization_status = "warnings"` field in the `movement` metadata table; the tagging tool displays this status to annotators so they can interpret unexpected ghost behaviour in context.
+The ingest pipeline calls `normalize_mei()` after schema validation. If `report.warnings` is non-empty, the ingestion report surfaced to the admin includes those warnings. Files with warnings are stored with structured warnings written to `movement.normalization_warnings` (JSONB; null when clean). The tagging tool reads this column and surfaces a status indicator to annotators when it is non-null, so they can interpret unexpected ghost behaviour in context.
 
 **Duration metadata.** `normalize_mei()` also returns the **maximum integer `@n` value found across all measures in the document** (inside and outside `<ending>` elements) as `NormalizationReport.duration_bars`. The ingest pipeline stores this as `movement.duration_bars`. Using the maximum rather than the last `@n` outside endings is necessary because pieces frequently end inside a final or second ending; the "last outside endings" value would give the bar before the endings begin, not the actual last bar. Pickup bars (`@n="0"`) are excluded by being the minimum; split measure complements are counted because both halves carry distinct sequential integers.
 
@@ -145,6 +145,8 @@ The ingest pipeline calls `normalize_mei()` after schema validation. If `report.
 This section documents the findings of the Component 2 Step 1 spike, run against the `k331-movement-1.mei` integration fixture (6 measures, 6/8, no pickup bar) and an inline pickup-bar fixture (4/4, `@n="0"` anacrusis). The spike was run first against 4.3.1, then re-run after the upgrade to 6.1.0. A subsequent code review found a bug in the spike script that invalidated Findings 1 and 2 from both runs; the corrected findings are documented below. Findings inform the `generate_incipit` Celery task (Component 2, Step 3) and Component 3's fragment rendering implementation.
 
 ### Finding 1 — `setOptions({"select": ...})` is unsupported; `tk.select()` + `tk.redoLayout()` is the correct API
+
+> **⚠ The original Finding 1 result was INVALIDATED** by the spike bug (missing `tk.redoLayout()` call). The corrected finding is documented below.
 
 The `select` option is **not a `setOptions` key** in any tested version:
 
@@ -179,6 +181,8 @@ svg = tk.renderToSVG(1)              # renders page 1 of the selected content
 **Consequence for the incipit task:** the `generate_incipit` task uses the smart-break page-1 approach (Finding 5), which does not require `select`. See Finding 5. For Component 3 (mid-score fragment rendering), the corrected `select()` + `redoLayout()` sequence is the recommended approach; see "Implications for Component 3" below.
 
 ### Finding 2 — Pickup bar (`@n="0"`) addressing via `measureRange`: original results invalid
+
+> **⚠ The original Finding 2 result was INVALIDATED** by the spike bug (missing `tk.redoLayout()` call). The corrected finding is documented below.
 
 The original spike compared `measureRange "0-4"` and `measureRange "1-4"` and found they produced identical 6-measure output. That result was an artefact of the missing `redoLayout()` call — neither range was actually doing anything, so both rendered the full score.
 

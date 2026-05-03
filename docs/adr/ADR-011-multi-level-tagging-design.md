@@ -104,7 +104,6 @@ Type Refinement is distinct from property values: it changes the structure of th
 
 ### Neutral
 
-- `multi-level-tagging-draft.md` is superseded by `tagging-tool-design.md`. The draft is retained in the repository as a historical artefact but should not be consulted as a current design reference.
 - The prototype's ghost layer architecture and beat boundary inference algorithm carry forward unchanged. The decisions in this ADR concern the layers built on top of that foundation.
 
 ---

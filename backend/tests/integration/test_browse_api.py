@@ -26,15 +26,17 @@ pytestmark = pytest.mark.integration
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fixtures.builders import HARMONIES_TSV_PATH
+from tests.integration.helpers import delete_test_composer
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _MEI_DIR = _FIXTURES / "mei"
 
 # ---------------------------------------------------------------------------
-# Fixture metadata
+# Fixture metadata — unique slug per session to prevent state leaks
 # ---------------------------------------------------------------------------
 
-_COMPOSER_SLUG = "browse-test-mozart"
+_COMPOSER_SLUG = f"browse-test-mozart-{uuid.uuid4().hex[:8]}"
 
 _METADATA: dict[str, Any] = {
     "composer": {
@@ -84,15 +86,7 @@ _METADATA: dict[str, Any] = {
     },
 }
 
-# Minimal DCML harmonies TSV row (required by the ingestion validator).
-_HARMONIES_TSV = (
-    "mc\tmn\tquarterbeats\tduration_qb\tkeysig\ttimesig\tact_dur\t"
-    "mc_onset\tmn_onset\tevent\ttimesig_num\tvolta\tchord_tones\tadded_tones\t"
-    "root_roman\tbass_note\tglobalkey\tlocalkey\tpedal\tchord\tnumeral\tform\t"
-    "figbass\tchanges\trelativeroot\tpedalend\tphraseend\tchord_tones_num\tadded_tones_num\n"
-    "1\t1\t0\t4\t0\t4/4\t4/4\t0\t0\tI\t4\tNaN\t(0, 4, 7)\t()\tI\t0\t"
-    "A\tI\tNaN\tI\tI\tM\t\tNaN\tNaN\tNaN\tNaN\t3\t0\n"
-)
+_HARMONIES_TSV = HARMONIES_TSV_PATH.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -112,73 +106,6 @@ def _build_zip() -> bytes:
         zf.writestr("harmonies/k331/movement-1.tsv", _HARMONIES_TSV)
         zf.writestr("harmonies/k331/movement-2.tsv", _HARMONIES_TSV)
     return buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# DB cleanup
-# ---------------------------------------------------------------------------
-
-
-async def _delete_test_composer(session: AsyncSession) -> None:
-    """Delete the browse-test composer and all descendant rows."""
-    await session.execute(
-        text(
-            """
-            DELETE FROM movement_analysis
-            WHERE movement_id IN (
-                SELECT m.id FROM movement m
-                JOIN work w ON m.work_id = w.id
-                JOIN corpus c ON w.corpus_id = c.id
-                JOIN composer co ON c.composer_id = co.id
-                WHERE co.slug = :slug
-            )
-            """
-        ),
-        {"slug": _COMPOSER_SLUG},
-    )
-    await session.execute(
-        text(
-            """
-            DELETE FROM movement
-            WHERE work_id IN (
-                SELECT w.id FROM work w
-                JOIN corpus c ON w.corpus_id = c.id
-                JOIN composer co ON c.composer_id = co.id
-                WHERE co.slug = :slug
-            )
-            """
-        ),
-        {"slug": _COMPOSER_SLUG},
-    )
-    await session.execute(
-        text(
-            """
-            DELETE FROM work
-            WHERE corpus_id IN (
-                SELECT c.id FROM corpus c
-                JOIN composer co ON c.composer_id = co.id
-                WHERE co.slug = :slug
-            )
-            """
-        ),
-        {"slug": _COMPOSER_SLUG},
-    )
-    await session.execute(
-        text(
-            """
-            DELETE FROM corpus
-            WHERE composer_id IN (
-                SELECT id FROM composer WHERE slug = :slug
-            )
-            """
-        ),
-        {"slug": _COMPOSER_SLUG},
-    )
-    await session.execute(
-        text("DELETE FROM composer WHERE slug = :slug"),
-        {"slug": _COMPOSER_SLUG},
-    )
-    await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +138,8 @@ class TestBrowseApi:
 
         yield
 
-        await _delete_test_composer(db_session)
+        await delete_test_composer(db_session, _COMPOSER_SLUG)
+        await db_session.commit()
 
     # ------------------------------------------------------------------
     # GET /api/v1/composers
@@ -282,12 +210,15 @@ class TestBrowseApi:
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown composer slug returns 404."""
+        """Unknown composer slug returns 404 with COMPOSER_NOT_FOUND code."""
         resp = await integration_test_client.get(
             "/api/v1/composers/nonexistent-composer/corpora",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "COMPOSER_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     # ------------------------------------------------------------------
     # GET /api/v1/composers/{slug}/corpora/{slug}/works
@@ -314,23 +245,29 @@ class TestBrowseApi:
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown corpus slug returns 404."""
+        """Unknown corpus slug returns 404 with CORPUS_NOT_FOUND code."""
         resp = await integration_test_client.get(
             f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/nonexistent/works",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "CORPUS_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     async def test_list_works_404_unknown_composer(
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown composer slug returns 404."""
+        """Unknown composer slug returns 404 with CORPUS_NOT_FOUND code."""
         resp = await integration_test_client.get(
             "/api/v1/composers/nonexistent/corpora/piano-sonatas/works",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "CORPUS_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     # ------------------------------------------------------------------
     # GET /api/v1/works/{work_id}/movements
@@ -416,12 +353,15 @@ class TestBrowseApi:
         self,
         integration_test_client: AsyncClient,
     ) -> None:
-        """Unknown work UUID returns 404."""
+        """Unknown work UUID returns 404 with WORK_NOT_FOUND code."""
         resp = await integration_test_client.get(
             f"/api/v1/works/{uuid.uuid4()}/movements",
             headers={"Authorization": "Bearer dev-token"},
         )
         assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "WORK_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
 
     async def test_list_movements_required_fields(
         self,

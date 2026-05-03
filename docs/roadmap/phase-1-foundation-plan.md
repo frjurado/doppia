@@ -27,7 +27,7 @@ Within `backend/`: add `__init__.py` to each subfolder. Within `frontend/`: add 
 
 **Also in this step:**
 
-- `backend/pyproject.toml` — Python project config with Black + isort + ruff + pytest settings
+- `pyproject.toml` — Python project config with Black + isort + ruff + pytest settings
 - `backend/requirements.txt` and `backend/requirements-dev.txt` — runtime deps (FastAPI, SQLAlchemy, Pydantic v2, neomodel, aioboto3, celery, music21, lxml, alembic) and dev deps (black, isort, ruff, pytest, httpx)
 - `frontend/package.json` — React 18 + Vite + TypeScript
 - `frontend/.eslintrc` and `frontend/tsconfig.json`

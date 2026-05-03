@@ -19,7 +19,7 @@ Starting with version 5.0 (February 2025), Verovio adopted a calendar-based majo
 
 Three categories of change require verification before deploying the upgrade:
 
-**SVG structure (5.3, May 2025).** The way SMuFL font glyphs are embedded in the SVG output was refactored to improve compatibility with third-party SVG renderers. All snapshot baselines in `tests/snapshots/` are invalidated and must be regenerated. All incipit SVGs already stored in object storage were rendered under 4.3.1 and must be backfilled.
+**SVG structure (5.3, May 2025).** The way SMuFL font glyphs are embedded in the SVG output was refactored to improve compatibility with third-party SVG renderers. All snapshot baselines in `tests/snapshots/` are invalidated and must be regenerated. All incipit SVGs already stored in object storage were rendered under 4.3.1 and must be backfilled. *Note: as of the 6.1.0 upgrade (2026-04-23), the snapshot test suite in `tests/snapshots/` has not yet been built — the upgrade was verified manually against the spike script in `docs/architecture/mei-ingest-normalization.md` §"Verovio bar-range selection: observed behaviour". Building the snapshot suite is a Phase 1 deliverable; until it exists, the annual-upgrade verification must be performed manually.*
 
 **Time map key names (5.4, July 2025).** JSON key names in the time map output changed. Any code calling `getTimesForElement()` and parsing its response must be audited against the new names before the upgrade is deployed.
 

@@ -37,9 +37,9 @@ pip install -r requirements-dev.txt   # local dev (includes all prod deps)
 
 ### Knowledge graph seeding and validation
 ```bash
-python scripts/seed.py --domain cadences
-python scripts/validate_graph.py           # run after every change to YAML seed files
-python scripts/visualize_domain.py --domain <name>  # pyvis HTML for visual inspection
+python scripts/seed.py --domain cadences           # (Phase 1 — not yet implemented: no seed YAML exists)
+python scripts/validate_graph.py                   # (Phase 1 — not yet implemented: no seeded graph to validate)
+python scripts/visualize_domain.py --domain <name> # (Phase 1 — not yet implemented: scripts are stubs)
 ```
 
 ### Frontend
@@ -139,6 +139,14 @@ Conventional Commits with a project-specific `seed:` type for knowledge graph YA
 ### Branching
 - `main` is always deployable to staging and must pass CI (tests + linting + graph validation).
 - Feature branches: `feature/{short-description}`; fix branches: `fix/{short-description}`.
+
+## Definition of Done
+
+Before finishing any implementation task:
+1. Check whether any file in `docs/architecture/` or `docs/adr/` describes the area you changed — if so, update it in the same commit.
+2. Don't introduce any design decision that isn't already captured in an ADR without checking with me first. If accepted, note it either a new `docs/adr/` file or an addition to an existing one.
+3. Always verify an implementation against the invariants listed above.
+4. Run `black backend/ && isort backend/ && ruff check backend/` and fix any errors before committing.
 
 ## Important Documentation
 | Document | Purpose |

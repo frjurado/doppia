@@ -57,12 +57,14 @@ pip install -r requirements.txt
 
 ### 4. Seed the knowledge graph
 
-```bash
-python scripts/seed.py --domain cadences
-python scripts/validate_graph.py
-```
-
-The seed script uses Cypher `MERGE` statements and is idempotent — safe to re-run at any time. `validate_graph.py` checks structural invariants (no orphaned nodes, no broken cross-references, unique `CONTAINS` order values) and exits non-zero if anything fails. Run it after every change to YAML seed files.
+> **Phase 1 — not yet implemented.** Knowledge graph seeding is part of Component 3 (in progress). Until then, Neo4j stays empty after `docker compose up`. Skip this step and continue to step 5.
+>
+> When Component 3 lands, restore these instructions:
+> ```bash
+> python scripts/seed.py --domain cadences
+> python scripts/validate_graph.py
+> ```
+> The seed script uses Cypher `MERGE` statements and is idempotent — safe to re-run at any time. `validate_graph.py` checks structural invariants (no orphaned nodes, no broken cross-references, unique `CONTAINS` order values) and exits non-zero if anything fails.
 
 ### 5. Install frontend dependencies
 
@@ -90,26 +92,15 @@ Do not use development auth mode in any environment that handles real data.
 ## Running tests
 
 ```bash
-# From the backend directory, with the Docker stack running
-pytest
-
-# Graph structure tests only (fast; no Docker required if Neo4j is running)
-pytest tests/graph/
-
-# With coverage
-pytest --cov=backend --cov-report=term-missing
+# From the backend directory
+pytest                                          # unit tests only (no Docker required)
+DOPPIA_RUN_INTEGRATION=1 pytest tests/integration/  # requires docker compose up
+pytest --cov=backend --cov-report=term-missing  # with coverage (unit tests only)
 ```
 
-The test suite requires a running Neo4j and PostgreSQL instance. The Docker stack satisfies this. CI runs tests against the same Docker Compose configuration.
+Graph structure tests use `python scripts/validate_graph.py` directly (not pytest). *(Phase 1 — not yet implemented: no seeded graph to validate.)*
 
-To run the Verovio rendering snapshot tests:
-
-```bash
-pytest tests/snapshots/ --update-snapshots  # regenerate baseline
-pytest tests/snapshots/                     # assert against baseline
-```
-
-Snapshot tests pin a specific Verovio version. If Verovio is upgraded, regenerate snapshots and commit the new baselines alongside the version bump.
+Verovio snapshot tests (`tests/snapshots/`) are deferred to Phase 2 once the rendering pipeline is stable.
 
 ---
 
@@ -118,37 +109,38 @@ Snapshot tests pin a specific Verovio version. If Verovio is upgraded, regenerat
 ```
 /
 ├── backend/
-│   ├── api/            Route handlers (all prefixed /api/v1/)
-│   ├── services/       Business logic; the layer that owns cross-database joins
-│   ├── models/         Pydantic models and SQLAlchemy ORM definitions
+│   ├── api/            Route handlers (all prefixed /api/v1/)          [built]
+│   ├── services/       Business logic; the layer that owns cross-database joins  [built]
+│   ├── models/         Pydantic models and SQLAlchemy ORM definitions   [built]
+│   ├── migrations/     Alembic migration scripts                        [built]
 │   ├── graph/
-│   │   ├── queries/    Raw Cypher query functions (neo4j driver)
-│   │   └── neomodel/   neomodel class definitions (routine CRUD only)
-│   └── seed/           YAML seed files (seeding script is scripts/seed.py)
+│   │   ├── queries/    Raw Cypher query functions (neo4j driver)        [stub — no query functions yet]
+│   │   └── neomodel/   neomodel class definitions (routine CRUD only)  [stub — empty]
+│   └── seed/           YAML seed files (seeding script is scripts/seed.py)  [stub — no YAML yet]
 │
 ├── frontend/
-│   ├── components/     Verovio renderer, MIDI player, tagging UI, browsing UI
-│   └── services/       API client, graph query client
+│   └── src/            React 18 + TypeScript source tree (Vite)        [built]
+│       ├── components/ Verovio renderer, MIDI player, tagging UI        [stub — scaffolded]
+│       └── services/   API client, graph query client                   [stub — scaffolded]
 │
 ├── scripts/
-│   ├── seed.py         Knowledge graph seeding (idempotent)
-│   ├── validate_graph.py   Post-seed structural validation
-│   ├── visualize_domain.py Pyvis HTML export for dev-time graph inspection
-│   └── migrations/     Summary JSONB version migration scripts
+│   ├── seed.py         Knowledge graph seeding (idempotent)             [stub — Phase 1]
+│   ├── validate_graph.py   Post-seed structural validation              [stub — Phase 1]
+│   └── visualize_domain.py Pyvis HTML export for dev-time graph inspection  [stub — Phase 1]
 │
-├── docker/             Dockerfile and Docker Compose service configs
-│
-├── output/             Pyvis dev-time graph exports (gitignored; produced by scripts/visualize_domain.py)
+├── docker/             Dockerfile and Docker Compose service configs    [built]
 │
 └── docs/
-    ├── architecture/   System design documents and setup guides (including bloom-setup.md)
-    ├── roadmap/        Phase build plans (checked off as work completes)
-    ├── adr/            Architecture Decision Records
+    ├── architecture/   System design documents and setup guides         [built]
+    ├── roadmap/        Phase build plans (checked off as work completes) [built]
+    ├── adr/            Architecture Decision Records                    [built]
     ├── mockups/
     │   └── opus_urtext/
-    │       └── DESIGN.md   Design system: colour tokens, typography, component rules
-    └── deployment.md   Staging and production deployment procedure
+    │       └── DESIGN.md   Design system: colour tokens, typography, component rules  [built]
+    └── deployment.md   Staging and production deployment procedure      [built]
 ```
+
+`[stub]` entries exist in the repository but contain only scaffolding. `[stub — Phase 1]` entries are planned for the current phase. See `docs/roadmap/phase-1.md` for the full build plan.
 
 ---
 

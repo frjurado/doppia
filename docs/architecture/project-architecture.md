@@ -143,8 +143,11 @@ MEI Corpus (OpenScore / DCML / other open sources)
         │     ├── Structured JSON summaries (analysis)             │
         │     └── Hierarchical tags (→ Knowledge Graph nodes)      │
         │                                                          │
-        ├──► Preprocessing pipeline (music21)                      │
-        │     └── Auto-extracted harmonic/structural features      │
+        ├──► Analysis ingestion pipeline (per corpus.analysis_source) │
+        │     ├── DCML TSV parsing (primary; Phase 1)              │
+        │     ├── When in Rome RomanText (deferred)                │
+        │     └── music21 auto-analysis (deferred; Component 6)    │
+        │     → movement_analysis.events                           │
         │                                                          ▼
         └──► Expert Annotations ──► Vector Store (RAG prose layer)
                                     ▲         │
@@ -203,7 +206,7 @@ The foundation. All later features depend on a populated, well-tagged fragment d
 - Set up MEI corpus ingestion pipeline from OpenScore and similar sources.
 - Build the Verovio-based tagging interface for expert annotators.
 - Define the knowledge graph schema and relationship vocabulary; implement the graph database. Seed the Cadence domain first — the seed domain whose modelling decisions established the three-layer architecture. The full planned domain scope is in [`knowledge-graph-domain-map.md`](knowledge-graph-domain-map.md).
-- Build the music21 preprocessing pipeline for auto-extracting harmonic/structural summaries, with human review workflow.
+- Build the analysis ingestion pipeline. The primary Phase 1 source is DCML TSV (pre-computed harmonic analyses for DCML corpora), dispatched via `ingest_analysis.py`. When in Rome RomanText support is deferred to the first non-DCML corpus; music21 auto-analysis is deferred to Component 6. See [`corpus-and-analysis-sources.md`](corpus-and-analysis-sources.md) for the provenance taxonomy and [`fragment-schema.md`](fragment-schema.md) §"Harmonic analysis: movement-level single source of truth" for the storage pattern.
 - Implement the fragment database with MEI pointer storage, JSON summary fields, and hierarchical tag references.
 - Build the Verovio rendering component and MIDI playback for the front-end.
 - Begin populating the corpus with tagged fragments and concept nodes.

@@ -16,7 +16,6 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from services.browse import list_composers, list_corpora, list_movements, list_works
 
 # ---------------------------------------------------------------------------
@@ -133,7 +132,6 @@ def _mock_db_scalars(items: list[Any]) -> AsyncMock:
 
 
 class TestListComposers:
-    @pytest.mark.asyncio
     async def test_returns_all_composers_ordered(self) -> None:
         bach = _make_composer(slug="bach", sort_name="Bach, Johann Sebastian")
         mozart = _make_composer(slug="mozart", sort_name="Mozart, Wolfgang Amadeus")
@@ -145,13 +143,11 @@ class TestListComposers:
         assert result[0].slug == "bach"
         assert result[1].slug == "mozart"
 
-    @pytest.mark.asyncio
     async def test_empty_list(self) -> None:
         db = _mock_db_scalars([])
         result = await list_composers(db)
         assert result == []
 
-    @pytest.mark.asyncio
     async def test_response_fields(self) -> None:
         composer = _make_composer()
         db = _mock_db_scalars([composer])
@@ -173,7 +169,6 @@ class TestListComposers:
 
 
 class TestListCorpora:
-    @pytest.mark.asyncio
     async def test_returns_none_for_unknown_composer(self) -> None:
         # First execute call (composer lookup) returns None.
         result_mock = MagicMock()
@@ -185,7 +180,6 @@ class TestListCorpora:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_returns_corpora_with_work_count(self) -> None:
         composer = _make_composer()
         corpus = _make_corpus(composer_id=composer.id)
@@ -210,7 +204,6 @@ class TestListCorpora:
         assert item.work_count == work_count
         assert item.source_repository == corpus.source_repository
 
-    @pytest.mark.asyncio
     async def test_empty_corpora_list(self) -> None:
         composer = _make_composer()
         execute_results = [
@@ -231,7 +224,6 @@ class TestListCorpora:
 
 
 class TestListWorks:
-    @pytest.mark.asyncio
     async def test_returns_none_for_unknown_composer(self) -> None:
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
@@ -242,7 +234,6 @@ class TestListWorks:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_returns_none_for_unknown_corpus(self) -> None:
         composer = _make_composer()
         execute_results = [
@@ -256,7 +247,6 @@ class TestListWorks:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_returns_works_with_movement_count(self) -> None:
         composer = _make_composer()
         corpus = _make_corpus(composer_id=composer.id)
@@ -288,7 +278,6 @@ class TestListWorks:
 
 
 class TestListMovements:
-    @pytest.mark.asyncio
     async def test_returns_none_for_unknown_work(self) -> None:
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
@@ -300,7 +289,6 @@ class TestListMovements:
 
         assert result is None
 
-    @pytest.mark.asyncio
     async def test_incipit_url_is_none_when_not_generated(self) -> None:
         work = _make_work()
         movement = _make_movement(work_id=work.id, incipit_object_key=None)
@@ -326,7 +314,6 @@ class TestListMovements:
         assert result[0].incipit_ready is False
         storage.signed_url.assert_not_called()
 
-    @pytest.mark.asyncio
     async def test_incipit_url_resolved_when_key_present(self) -> None:
         work = _make_work()
         key = "mozart/piano-sonatas/k331/movement-1/incipit.svg"
@@ -354,9 +341,8 @@ class TestListMovements:
         assert result is not None
         assert result[0].incipit_url == signed
         assert result[0].incipit_ready is True
-        storage.signed_url.assert_awaited_once_with(key, expires_in=900)
+        storage.signed_url.assert_awaited_once_with(key, expires_in=3600)
 
-    @pytest.mark.asyncio
     async def test_movement_fields(self) -> None:
         work = _make_work()
         movement = _make_movement(work_id=work.id)
