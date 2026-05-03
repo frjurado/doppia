@@ -182,7 +182,7 @@ def _parse_global_key(globalkey: str) -> tuple[int, bool]:
     acc = m.group(2)
     note = letter + acc
     tonic_pc = _NOTE_TO_PC[note]
-    use_flats = letter in _FLAT_KEY_TONICS or (not acc and letter == "F")
+    use_flats = note in _FLAT_KEY_TONICS
     return tonic_pc, use_flats
 
 

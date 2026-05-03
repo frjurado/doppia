@@ -243,6 +243,14 @@ class TestResolveKey:
     def test_c_major_i(self) -> None:
         assert _resolve_key("I", "C") == "C major"
 
+    def test_flat_key_bb_iv_uses_flats(self) -> None:
+        # IV in Bb major = Eb major (not D# major)
+        assert _resolve_key("IV", "Bb") == "Eb major"
+
+    def test_flat_key_eb_iv_uses_flats(self) -> None:
+        # IV in Eb major = Ab major (not G# major)
+        assert _resolve_key("IV", "Eb") == "Ab major"
+
 
 # ===========================================================================
 # _parse_numeral
@@ -1011,33 +1019,47 @@ class TestParseGlobalKey:
         assert pc == 5
         assert flats is True
 
-    def test_f_sharp_use_flats_true_due_to_letter_f(self) -> None:
-        """'F#' → letter='F' which is in _FLAT_KEY_TONICS → use_flats=True.
-
-        Counterintuitive: F# major uses sharps, but the set-membership check
-        operates on the bare letter ('F') not the full note name ('F#').
-        Documents actual behavior.
-        """
+    def test_f_sharp_use_flats_false(self) -> None:
+        """'F#' → note='F#'; 'F#' is not in _FLAT_KEY_TONICS → use_flats=False."""
         pc, flats = _parse_global_key("F#")
         assert pc == 6
-        assert flats is True  # 'F' in _FLAT_KEY_TONICS even for F#
+        assert flats is False
 
-    def test_bb_major_use_flats_false(self) -> None:
-        """'Bb' → letter='B'; 'B' is not in _FLAT_KEY_TONICS (which has 'Bb', not 'B').
-
-        Known limitation: Bb major should prefer flat spellings, but the code
-        extracts a single-char letter so the multi-char 'Bb' entry in
-        _FLAT_KEY_TONICS is unreachable.  use_flats=False is the actual result.
-        """
+    def test_bb_major_use_flats(self) -> None:
+        """'Bb' → note='Bb'; 'Bb' is in _FLAT_KEY_TONICS → use_flats=True."""
         pc, flats = _parse_global_key("Bb")
         assert pc == 10
-        assert flats is False  # 'B' not in _FLAT_KEY_TONICS — known limitation
+        assert flats is True
 
-    def test_eb_major_use_flats_false(self) -> None:
-        """'Eb' → letter='E'; same known limitation: 'E' not in _FLAT_KEY_TONICS."""
+    def test_eb_major_use_flats(self) -> None:
+        """'Eb' → note='Eb'; 'Eb' is in _FLAT_KEY_TONICS → use_flats=True."""
         pc, flats = _parse_global_key("Eb")
         assert pc == 3
-        assert flats is False
+        assert flats is True
+
+    def test_ab_major_use_flats(self) -> None:
+        """'Ab' → note='Ab'; 'Ab' is in _FLAT_KEY_TONICS → use_flats=True."""
+        pc, flats = _parse_global_key("Ab")
+        assert pc == 8
+        assert flats is True
+
+    def test_db_major_use_flats(self) -> None:
+        """'Db' → note='Db'; 'Db' is in _FLAT_KEY_TONICS → use_flats=True."""
+        pc, flats = _parse_global_key("Db")
+        assert pc == 1
+        assert flats is True
+
+    def test_gb_major_use_flats(self) -> None:
+        """'Gb' → note='Gb'; 'Gb' is in _FLAT_KEY_TONICS → use_flats=True."""
+        pc, flats = _parse_global_key("Gb")
+        assert pc == 6
+        assert flats is True
+
+    def test_cb_major_use_flats(self) -> None:
+        """'Cb' → note='Cb'; 'Cb' is in _FLAT_KEY_TONICS → use_flats=True."""
+        pc, flats = _parse_global_key("Cb")
+        assert pc == 11
+        assert flats is True
 
     def test_d_major(self) -> None:
         """'D' → tonic_pc=2, use_flats=False."""
