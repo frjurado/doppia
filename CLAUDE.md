@@ -140,6 +140,13 @@ Conventional Commits with a project-specific `seed:` type for knowledge graph YA
 - `main` is always deployable to staging and must pass CI (tests + linting + graph validation).
 - Feature branches: `feature/{short-description}`; fix branches: `fix/{short-description}`.
 
+## Definition of Done
+
+Before finishing any implementation task:
+1. Check whether any file in `docs/architecture/` or `docs/adr/` describes the area you changed — if so, update it in the same commit.
+2. Don't introduce any design decision that isn't already captured in an ADR without checking with me first. If accepted, note it either a new `docs/adr/` file or an addition to an existing one.
+3. Always verify an implementation against the invariants listed above.
+
 ## Important Documentation
 | Document | Purpose |
 |---|---|
