@@ -146,6 +146,7 @@ Before finishing any implementation task:
 1. Check whether any file in `docs/architecture/` or `docs/adr/` describes the area you changed — if so, update it in the same commit.
 2. Don't introduce any design decision that isn't already captured in an ADR without checking with me first. If accepted, note it either a new `docs/adr/` file or an addition to an existing one.
 3. Always verify an implementation against the invariants listed above.
+4. Run `black backend/ && isort backend/ && ruff check backend/` and fix any errors before committing.
 
 ## Important Documentation
 | Document | Purpose |
