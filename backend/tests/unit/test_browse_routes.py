@@ -182,7 +182,9 @@ def _corpus_response(**kwargs: Any) -> Any:
         id=kwargs.get("id", uuid.uuid4()),
         slug=kwargs.get("slug", "piano-sonatas"),
         title=kwargs.get("title", "Piano Sonatas"),
-        source_repository=kwargs.get("source_repository", "DCMLab/mozart_piano_sonatas"),
+        source_repository=kwargs.get(
+            "source_repository", "DCMLab/mozart_piano_sonatas"
+        ),
         licence=kwargs.get("licence", "CC-BY-SA-4.0"),
         work_count=kwargs.get("work_count", 3),
     )
@@ -366,9 +368,7 @@ class TestGetWorks:
         monkeypatch.setattr(
             "api.routes.browse.list_works", AsyncMock(return_value=None)
         )
-        resp = await client.get(
-            "/api/v1/composers/mozart/corpora/nonexistent/works"
-        )
+        resp = await client.get("/api/v1/composers/mozart/corpora/nonexistent/works")
         assert resp.status_code == 404
         body = resp.json()
         assert body["error"]["code"] == "CORPUS_NOT_FOUND"

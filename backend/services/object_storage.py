@@ -34,7 +34,6 @@ import os
 import aioboto3
 from botocore.config import Config as BotocoreConfig
 
-
 # TTL constants for signed URLs (per security-model.md §4 TTL policy).
 # Client-facing URLs (MEI rendering, SVG preview images) use 1 hour so they
 # remain valid for a full user session without a re-fetch.
@@ -166,7 +165,9 @@ class StorageClient:
                 ContentType="image/svg+xml",
             )
 
-    async def signed_url(self, key: str, expires_in: int = CLIENT_FACING_URL_TTL) -> str:
+    async def signed_url(
+        self, key: str, expires_in: int = CLIENT_FACING_URL_TTL
+    ) -> str:
         """Generate a pre-signed GET URL for a stored file.
 
         The URL is valid for *expires_in* seconds from the moment it is

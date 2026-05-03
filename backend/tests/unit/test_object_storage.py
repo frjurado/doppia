@@ -16,8 +16,7 @@ Test structure:
 
 from __future__ import annotations
 
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
@@ -203,9 +202,7 @@ class TestSignedUrl:
     async def test_default_ttl_is_client_facing(self) -> None:
         """signed_url defaults to CLIENT_FACING_URL_TTL (1 hour)."""
         expected_url = "https://example.com/signed?Expires=3600"
-        s3 = _make_mock_s3(
-            generate_presigned_url=AsyncMock(return_value=expected_url)
-        )
+        s3 = _make_mock_s3(generate_presigned_url=AsyncMock(return_value=expected_url))
         sc = _make_storage_client(s3)
 
         url = await sc.signed_url("some/key.mei")
@@ -252,9 +249,7 @@ class TestGetMei:
         expected = b"<mei><music/></mei>"
         body_mock = AsyncMock()
         body_mock.read = AsyncMock(return_value=expected)
-        s3 = _make_mock_s3(
-            get_object=AsyncMock(return_value={"Body": body_mock})
-        )
+        s3 = _make_mock_s3(get_object=AsyncMock(return_value={"Body": body_mock}))
         sc = _make_storage_client(s3)
 
         result = await sc.get_mei("mozart/piano-sonatas/k331/movement-1.mei")
@@ -265,9 +260,7 @@ class TestGetMei:
         """get_mei raises ClientError when the S3 client does."""
         error_response = {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}
         s3 = _make_mock_s3(
-            get_object=AsyncMock(
-                side_effect=ClientError(error_response, "GetObject")
-            )
+            get_object=AsyncMock(side_effect=ClientError(error_response, "GetObject"))
         )
         sc = _make_storage_client(s3)
 

@@ -13,7 +13,6 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from services.tasks.ingest_analysis import (
     _build_measure_map,
     _build_numeral,
@@ -1254,9 +1253,7 @@ class TestDcmlBranch:
         assert len(ks_calls) == 1, "Expected exactly one UPDATE key_signature call"
         assert ks_calls[0].args[1]["ks"] == "A major"
 
-    async def test_no_key_signature_update_when_already_set(
-        self, monkeypatch
-    ) -> None:
+    async def test_no_key_signature_update_when_already_set(self, monkeypatch) -> None:
         """key_signature already set → no UPDATE key_signature issued."""
         monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://fake/db")
         engine, session_class, storage_factory, write_session = self._build_mocks(
@@ -1330,4 +1327,6 @@ class TestDcmlBranch:
         warn_calls = [
             c for c in all_calls if len(c.args) > 1 and "warnings" in c.args[1]
         ]
-        assert warn_calls == [], "Should not issue normalization_warnings when TSV aligns with MEI"
+        assert (
+            warn_calls == []
+        ), "Should not issue normalization_warnings when TSV aligns with MEI"

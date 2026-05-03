@@ -13,11 +13,10 @@ Test structure:
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import patch
 
 import pytest
 from services.tasks.ingest_analysis import ingest_movement_analysis
-
 
 # ---------------------------------------------------------------------------
 # TestIngestMovementAnalysisRouting
@@ -32,11 +31,10 @@ class TestIngestMovementAnalysisRouting:
         movement_id = str(uuid.uuid4())
         tsv = "mc\tmn\n1\t1\n"
 
-        with patch(
-            "services.tasks.ingest_analysis.asyncio.run"
-        ) as mock_run, patch(
-            "services.tasks.ingest_analysis._dcml_branch"
-        ) as mock_branch:
+        with (
+            patch("services.tasks.ingest_analysis.asyncio.run") as mock_run,
+            patch("services.tasks.ingest_analysis._dcml_branch") as mock_branch,
+        ):
             # asyncio.run is synchronous in the task; we just need to confirm it
             # is called with the coroutine returned by _dcml_branch.
             ingest_movement_analysis(
@@ -112,8 +110,9 @@ class TestIngestMovementAnalysisSignature:
 
     def test_accepts_movement_id_kwarg(self) -> None:
         """Task accepts movement_id as a keyword argument."""
-        with patch("services.tasks.ingest_analysis.asyncio.run"), patch(
-            "services.tasks.ingest_analysis._dcml_branch"
+        with (
+            patch("services.tasks.ingest_analysis.asyncio.run"),
+            patch("services.tasks.ingest_analysis._dcml_branch"),
         ):
             # Should not raise TypeError.
             ingest_movement_analysis(
@@ -123,8 +122,9 @@ class TestIngestMovementAnalysisSignature:
 
     def test_accepts_analysis_source_kwarg(self) -> None:
         """Task accepts analysis_source as a keyword argument."""
-        with patch("services.tasks.ingest_analysis.asyncio.run"), patch(
-            "services.tasks.ingest_analysis._dcml_branch"
+        with (
+            patch("services.tasks.ingest_analysis.asyncio.run"),
+            patch("services.tasks.ingest_analysis._dcml_branch"),
         ):
             ingest_movement_analysis(
                 movement_id=str(uuid.uuid4()),
@@ -133,8 +133,9 @@ class TestIngestMovementAnalysisSignature:
 
     def test_accepts_harmonies_tsv_content_kwarg(self) -> None:
         """Task accepts harmonies_tsv_content as a keyword argument (optional)."""
-        with patch("services.tasks.ingest_analysis.asyncio.run"), patch(
-            "services.tasks.ingest_analysis._dcml_branch"
+        with (
+            patch("services.tasks.ingest_analysis.asyncio.run"),
+            patch("services.tasks.ingest_analysis._dcml_branch"),
         ):
             ingest_movement_analysis(
                 movement_id=str(uuid.uuid4()),

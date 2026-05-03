@@ -31,7 +31,8 @@ from models.ingestion import IngestionReport
 from models.normalization import NormalizationReport
 from models.validation import ValidationIssue, ValidationReport
 from services.ingestion import ingest_corpus
-from tests.fixtures.builders import HARMONIES_TSV_PATH, minimal_metadata as _minimal_metadata
+from tests.fixtures.builders import HARMONIES_TSV_PATH
+from tests.fixtures.builders import minimal_metadata as _minimal_metadata
 
 # ---------------------------------------------------------------------------
 # Paths to fixtures

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 # Any DoppiaError subclass not listed here falls back to 500.
 _DOPPIA_STATUS_MAP: dict[type[DoppiaError], int] = {}
 
+
 # Populated lazily to avoid circular imports at module load time — all
 # concrete subclasses are imported from ``errors`` which imports ``ErrorCode``
 # from ``models.errors``.  Registering them here keeps the mapping in one place.

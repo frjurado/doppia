@@ -684,7 +684,11 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
                 except ValueError:
                     canonical_gk = None
 
-                if canonical_gk and existing_key_sig is not None and existing_key_sig != canonical_gk:
+                if (
+                    canonical_gk
+                    and existing_key_sig is not None
+                    and existing_key_sig != canonical_gk
+                ):
                     alignment_warnings.append(
                         f"globalkey mismatch: TSV says {canonical_gk!r}, "
                         f"movement.key_signature is {existing_key_sig!r}."

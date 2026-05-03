@@ -538,5 +538,3 @@ async def _upsert_movement(
     ).returning(Movement.id)
     result = await db.execute(stmt)
     return result.scalar_one()
-
-

@@ -91,9 +91,7 @@ def require_role(role: str) -> Annotated[AppUser, Depends]:
         or raises HTTP 403 Forbidden.
     """
 
-    async def _check(
-        user: Annotated[AppUser, Depends(get_current_user)]
-    ) -> AppUser:
+    async def _check(user: Annotated[AppUser, Depends(get_current_user)]) -> AppUser:
         required_level = _ROLE_HIERARCHY.get(role, 0)
         user_level = _ROLE_HIERARCHY.get(user.role, 0)
         if user_level < required_level:

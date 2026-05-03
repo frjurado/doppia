@@ -134,9 +134,7 @@ async def _generate_incipit_async(movement_id: str) -> None:
         # Strip XML comments before loading: Verovio's XML parser does not
         # handle comments that appear between the XML declaration and the root
         # element, which causes it to miss <music>.
-        mei_text = re.sub(
-            r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=re.DOTALL
-        )
+        mei_text = re.sub(r"<!--.*?-->", "", mei_bytes.decode("utf-8"), flags=re.DOTALL)
         ok = tk.loadData(mei_text)
         if not ok:
             raise RuntimeError(
