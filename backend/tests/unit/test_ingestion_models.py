@@ -16,7 +16,6 @@ All tests are synchronous — no DB or HTTP client needed.
 from __future__ import annotations
 
 import copy
-from typing import Any
 
 import pytest
 from models.ingestion import (
