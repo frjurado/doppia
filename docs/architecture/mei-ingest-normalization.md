@@ -411,3 +411,44 @@ Some movements render only one bar on page 1. This happens when the first measur
 A few movements produce incipits where notes are packed so tightly they overlap or are visually unreadable. This is the converse of the above: many bars fit in 800px but at scale 35 the notation is too compressed.
 
 **Potential fix:** A higher `scale` value (e.g. 40–45) increases note spacing and glyph size. This trades off against fitting fewer bars on the first system. Testing with `scale=40` and `pageWidth=1000` on the affected movements (primarily K.331/movement-1 and K.279/movement-2) is recommended before finalising the incipit parameters.
+
+---
+
+## § Verovio `measureRange` keyword syntax: observed behaviour (2026-05-04)
+
+*Spike script: `scripts/spike_verovio_measurerange.py`. Verovio version: 6.1.0. Fixtures: `k331-movement-1.mei` (6 measures, no endings), inline `PICKUP_MEI` (pickup at `@n="0"` + 5 full measures), `volta-movement.mei` (4 positions, `@n="2"` shared across two `<ending>` elements).*
+
+These findings answer the four questions left open by the April 2026 spike and govern the incipit implementation and `mc_start`/`mc_end` fragment rendering described in `docs/roadmap/measure-number-redesign-plan.md`.
+
+### Finding 6 — `"start-N"` syntax works and is equivalent to `"1-N"`
+
+`measureRange: "start-4"` produces exactly the same SVG as `measureRange: "1-4"` on a movement with no pickup bar (identical measure count and pixel dimensions). `"start-N"` with N equal to the total measure count renders all measures. This syntax is safe to adopt as the production incipit range.
+
+| Sub-test | `measureRange` | Measures rendered | Dimensions |
+|---|---|---|---|
+| baseline | `"1-4"` | 4 | 504×124 px |
+| `start-N` | `"start-4"` | 4 | 504×124 px |
+| `start-N` all | `"start-6"` | 6 | 720×124 px |
+
+### Finding 7 — `"start-N"` includes the pickup bar automatically
+
+On the pickup fixture (pickup at `@n="0"` occupying position 1), `"start-4"` and `"1-4"` both render 4 measures (positions 1–4: the pickup + the first 3 full bars). They produce identical SVG dimensions (415×124 px). No special casing is required for movements with pickup bars: `"start-4"` is correct in all cases.
+
+### Finding 8 — Position-index addressing is correct under volta endings
+
+`measureRange` uses document-order position indices even when `@n` values repeat across `<ending>` elements. On the volta fixture (positions: n=1, ending1/n=2, ending2/n=2, n=3):
+
+| `measureRange` | Measures rendered | Meaning |
+|---|---|---|
+| full render | 4 | all positions |
+| `"1-2"` | 2 | n=1 + ending1/n=2 |
+| `"3-4"` | 2 | ending2/n=2 + n=3 |
+| `"2-3"` | 2 | ending1/n=2 + ending2/n=2 (both `@n="2"`) |
+
+Verovio correctly isolates the individual `<ending>` elements by document order. This confirms that `mc_start`/`mc_end` (1-based document-order position indices, same counter as DCML `mc`) can be passed directly as `measureRange` operands for fragment rendering without any coordinate conversion.
+
+### Finding 9 — `"end"` keyword works; `"start-100"` clamps gracefully
+
+`"3-end"` on the 6-measure k331 fixture renders positions 3–6 (4 measures, 492×124 px). `"start-end"` renders all 6 measures (identical to the full render). `"start-100"` on a 6-measure piece clamps to the last measure and renders all 6 measures correctly (720×124 px). Verovio emits a warning to stderr (`Measure range end for selection 'start-100' could not be found`) but `tk.getLog()` returns empty — the render succeeds. Use `"start-end"` rather than `"start-{large_N}"` when a full render fallback is needed; it is cleaner and silent.
+
+**Production recommendation:** Update `generate_incipit.py` to use `select({measureRange: "start-4"}) + redoLayout()` with `pageWidth=2200` and `breaks="none"`. This guarantees exactly 4 bars regardless of notation density or measure width, includes pickup bars automatically, and replaces the `breaks="smart"` / page-1 approach whose quality problems are documented above. For movements with fewer than 4 measures, use `"start-end"` as the fallback range (guard with `movement.duration_bars < 4`).
