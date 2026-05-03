@@ -30,8 +30,8 @@ from api.middleware.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from errors import DoppiaError
 from api.router import router
+from errors import DoppiaError
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
