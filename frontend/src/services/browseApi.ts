@@ -3,6 +3,7 @@
  *
  * Thin wrappers over the four corpus browse endpoints. Each function maps
  * to one endpoint in the Composer → Corpus → Work → Movement hierarchy.
+ * All responses are validated against Zod schemas at the API boundary.
  *
  * Endpoints (all require editor role in Phase 1):
  *   GET /api/v1/composers
@@ -11,7 +12,14 @@
  *   GET /api/v1/works/{workId}/movements
  */
 
+import { z } from 'zod';
 import { apiFetch } from './api';
+import {
+  ComposerSchema,
+  CorpusSchema,
+  MovementSchema,
+  WorkSchema,
+} from '../types/browse';
 import type {
   ComposerResponse,
   CorpusResponse,
@@ -25,7 +33,7 @@ const BASE = '/api/v1';
  * Fetch all composers, ordered alphabetically by sort_name.
  */
 export async function fetchComposers(): Promise<ComposerResponse[]> {
-  return apiFetch<ComposerResponse[]>(`${BASE}/composers`);
+  return apiFetch(`${BASE}/composers`, undefined, z.array(ComposerSchema));
 }
 
 /**
@@ -34,7 +42,11 @@ export async function fetchComposers(): Promise<ComposerResponse[]> {
  * @throws ApiError with status 404 if the composer slug is not found.
  */
 export async function fetchCorpora(composerSlug: string): Promise<CorpusResponse[]> {
-  return apiFetch<CorpusResponse[]>(`${BASE}/composers/${encodeURIComponent(composerSlug)}/corpora`);
+  return apiFetch(
+    `${BASE}/composers/${encodeURIComponent(composerSlug)}/corpora`,
+    undefined,
+    z.array(CorpusSchema),
+  );
 }
 
 /**
@@ -46,8 +58,10 @@ export async function fetchWorks(
   composerSlug: string,
   corpusSlug: string,
 ): Promise<WorkResponse[]> {
-  return apiFetch<WorkResponse[]>(
+  return apiFetch(
     `${BASE}/composers/${encodeURIComponent(composerSlug)}/corpora/${encodeURIComponent(corpusSlug)}/works`,
+    undefined,
+    z.array(WorkSchema),
   );
 }
 
@@ -59,5 +73,9 @@ export async function fetchWorks(
  * @throws ApiError with status 404 if the work ID is not found.
  */
 export async function fetchMovements(workId: string): Promise<MovementResponse[]> {
-  return apiFetch<MovementResponse[]>(`${BASE}/works/${encodeURIComponent(workId)}/movements`);
+  return apiFetch(
+    `${BASE}/works/${encodeURIComponent(workId)}/movements`,
+    undefined,
+    z.array(MovementSchema),
+  );
 }
