@@ -606,12 +606,13 @@ class TestParseDcmlHarmonies:
         from pathlib import Path
 
         fixture = (
-            Path(__file__).parent.parent / "fixtures/dcml-subset/harmonies/K331-1.tsv"
+            Path(__file__).parent.parent
+            / "fixtures/dcml-subset/harmonies/K331-1.harmonies.tsv"
         )
         if not fixture.exists():
             import pytest
 
-            pytest.skip("K331-1.tsv fixture not available")
+            pytest.skip("K331-1.harmonies.tsv fixture not available")
         tsv_content = fixture.read_text(encoding="utf-8")
         events, phrases, _ = _parse_dcml_harmonies(tsv_content, b"")
         # 7 rows total: 1 phrase-open, 5 chords with event column + 1 V/V row

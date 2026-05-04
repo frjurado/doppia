@@ -274,7 +274,7 @@ class TestGenerateIncipit:
         to be called directly by each test.
         """
         mei1 = (_MEI_DIR / "k331-movement-1.mei").read_bytes()
-        tsv1 = (_HARMONIES_DIR / "K331-1.tsv").read_bytes()
+        tsv1 = (_HARMONIES_DIR / "K331-1.harmonies.tsv").read_bytes()
         archive = _build_zip(
             _METADATA,
             {
