@@ -45,7 +45,7 @@ import sys
 import tempfile
 import tomllib
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -138,9 +138,7 @@ def parse_args() -> argparse.Namespace:
         Parsed namespace with ``repo_path``, ``config``, and ``output``.
     """
     parser = argparse.ArgumentParser(
-        description=(
-            "Convert a cloned DCML repository into an upload ZIP for Doppia."
-        )
+        description=("Convert a cloned DCML repository into an upload ZIP for Doppia.")
     )
     parser.add_argument(
         "--repo-path",
@@ -306,7 +304,9 @@ def discover_movements(
 # ---------------------------------------------------------------------------
 
 
-def convert_mscx_to_mxl(mscx_path: Path, tmpdir: Path, mscore_exe: str = "mscore") -> Path:
+def convert_mscx_to_mxl(
+    mscx_path: Path, tmpdir: Path, mscore_exe: str = "mscore"
+) -> Path:
     """Convert a MuseScore ``.mscx`` file to compressed MusicXML (``.mxl``).
 
     Calls the MuseScore CLI (3.6.2).  Pass the resolved executable path via
@@ -387,7 +387,7 @@ def find_harmonies_tsv(repo_path: Path, mscx_path: Path) -> Path | None:
     Returns:
         Path to the TSV file, or ``None`` if it does not exist.
     """
-    tsv_path = repo_path / "harmonies" / (mscx_path.stem + ".tsv")
+    tsv_path = repo_path / "harmonies" / (mscx_path.stem + ".harmonies.tsv")
     return tsv_path if tsv_path.exists() else None
 
 
@@ -540,9 +540,7 @@ def main() -> None:
     # Resolve the mscore executable once up front so a missing binary fails
     # immediately rather than mid-conversion.
     mscore_exe: str = args.mscore_path or shutil.which("mscore") or ""
-    if not mscore_exe or not (
-        Path(mscore_exe).exists() or shutil.which(mscore_exe)
-    ):
+    if not mscore_exe or not (Path(mscore_exe).exists() or shutil.which(mscore_exe)):
         _err(
             f"Cannot find mscore executable: {mscore_exe!r}. "
             "Pass --mscore-path with the full path, e.g. "
@@ -591,7 +589,7 @@ def main() -> None:
 
     _log(f"git SHA: {git_sha}")
     _log(f"Converted {len(accepted)} movements.")
-    _log(f"Skipped 0 movements.")
+    _log("Skipped 0 movements.")
     _log(f"Output: {args.output}")
     sys.exit(0)
 

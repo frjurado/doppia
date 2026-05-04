@@ -191,8 +191,8 @@ class TestCorpusIngestion:
 
         mei1 = (_MEI_DIR / "k331-movement-1.mei").read_bytes()
         mei2 = (_MEI_DIR / "k331-movement-2.mei").read_bytes()
-        tsv1 = (_HARMONIES_DIR / "K331-1.tsv").read_bytes()
-        tsv2 = (_HARMONIES_DIR / "K331-2.tsv").read_bytes()
+        tsv1 = (_HARMONIES_DIR / "K331-1.harmonies.tsv").read_bytes()
+        tsv2 = (_HARMONIES_DIR / "K331-2.harmonies.tsv").read_bytes()
 
         archive = _build_zip(
             _MAIN_METADATA,
@@ -417,7 +417,7 @@ class TestCorpusIngestion:
         from services.tasks.ingest_analysis import _dcml_branch
 
         mei1 = (_MEI_DIR / "k331-movement-1.mei").read_bytes()
-        tsv1 = (_HARMONIES_DIR / "K331-1.tsv").read_bytes()
+        tsv1 = (_HARMONIES_DIR / "K331-1.harmonies.tsv").read_bytes()
 
         # Single-movement metadata for brevity.
         metadata = {

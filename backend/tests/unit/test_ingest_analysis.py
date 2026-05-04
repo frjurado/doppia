@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from services.tasks.ingest_analysis import (
+    MeasureEntry,
     _build_measure_map,
     _build_numeral,
     _compute_beat,
@@ -576,11 +577,11 @@ class TestParseDcmlHarmonies:
         assert events[0]["volta"] is None
 
     def test_alignment_warning_on_unknown_measure(self) -> None:
-        """TSV row with mn=99 (not in MEI) → alignment warning."""
+        """TSV row with mc=99 (not in MEI, which has 6 positions) → alignment warning."""
         tsv = _make_tsv(_row(mc=99, mn=99))
         _, _, warnings = _parse_dcml_harmonies(tsv, _MEI_SIMPLE)
         assert len(warnings) == 1
-        assert "mn=99" in warnings[0]
+        assert "mc=99" in warnings[0]
 
     def test_no_alignment_warning_on_known_measure(self) -> None:
         tsv = _make_tsv(_row(mc=1, mn=1))
@@ -588,7 +589,11 @@ class TestParseDcmlHarmonies:
         assert warnings == []
 
     def test_volta_alignment_with_endings(self) -> None:
-        """Events inside endings resolve to the correct (mn, volta) pair."""
+        """TSV rows at mc=3 and mc=4 resolve to positions 3 and 4 in the fixture MEI.
+
+        _MEI_WITH_ENDINGS has 5 positions: m1(1), m2(2), m3v1(3), m3v2(4), m4(5).
+        mc=3 and mc=4 both exist → no alignment warnings.
+        """
         tsv = _make_tsv(
             _row(mc=3, mn=3, volta="1"),
             _row(mc=4, mn=3, volta="2"),
@@ -601,12 +606,13 @@ class TestParseDcmlHarmonies:
         from pathlib import Path
 
         fixture = (
-            Path(__file__).parent.parent / "fixtures/dcml-subset/harmonies/K331-1.tsv"
+            Path(__file__).parent.parent
+            / "fixtures/dcml-subset/harmonies/K331-1.harmonies.tsv"
         )
         if not fixture.exists():
             import pytest
 
-            pytest.skip("K331-1.tsv fixture not available")
+            pytest.skip("K331-1.harmonies.tsv fixture not available")
         tsv_content = fixture.read_text(encoding="utf-8")
         events, phrases, _ = _parse_dcml_harmonies(tsv_content, b"")
         # 7 rows total: 1 phrase-open, 5 chords with event column + 1 V/V row
@@ -739,15 +745,15 @@ class TestMergeEvents:
 class TestBuildMeasureMap:
     """Unit tests for _build_measure_map.
 
-    Covers happy paths (simple score, volta endings, pickup bar) and the
-    documented edge cases where the function silently degrades or produces
-    counterintuitive results.
+    The function now returns ``{position_index: MeasureEntry}`` keyed by
+    1-based document order. Non-integer @n values are preserved in n_raw
+    rather than silently dropped (ADR-015).
     """
 
     # ── Happy paths ──────────────────────────────────────────────────────────
 
     def test_simple_linear_score(self) -> None:
-        """Measures 1–3, no endings → all keyed (n, None) with correct xml:ids."""
+        """Measures 1–3, no endings → keyed by position index 1–3."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -757,10 +763,14 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert result == {(1, None): "m1", (2, None): "m2", (3, None): "m3"}
+        assert result == {
+            1: MeasureEntry(n_raw="1", volta=None, xml_id="m1"),
+            2: MeasureEntry(n_raw="2", volta=None, xml_id="m2"),
+            3: MeasureEntry(n_raw="3", volta=None, xml_id="m3"),
+        }
 
     def test_volta_endings_produce_distinct_keys(self) -> None:
-        """Measures inside endings are keyed (mn, volta_int); same mn, different volta."""
+        """Measures inside endings get contiguous position indices; same @n, different volta."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -772,14 +782,14 @@ class TestBuildMeasureMap:
 </mei>"""
         result = _build_measure_map(mei)
         assert result == {
-            (1, None): "m1",
-            (2, 1): "m2v1",
-            (2, 2): "m2v2",
-            (3, None): "m3",
+            1: MeasureEntry(n_raw="1", volta=None, xml_id="m1"),
+            2: MeasureEntry(n_raw="2", volta=1, xml_id="m2v1"),
+            3: MeasureEntry(n_raw="2", volta=2, xml_id="m2v2"),
+            4: MeasureEntry(n_raw="3", volta=None, xml_id="m3"),
         }
 
     def test_pickup_bar_n_zero(self) -> None:
-        """@n='0' is a valid integer → (0, None) entry in the map."""
+        """@n='0' pickup bar gets position 1; subsequent measures get 2, 3."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -789,32 +799,35 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert (0, None) in result
-        assert result[(0, None)] == "pickup"
-        assert result[(1, None)] == "m1"
+        assert result[1] == MeasureEntry(n_raw="0", volta=None, xml_id="pickup")
+        assert result[2] == MeasureEntry(n_raw="1", volta=None, xml_id="m1")
+        assert len(result) == 3
 
     def test_volta_movement_fixture(self) -> None:
-        """Smoke test against the shared volta-movement.mei fixture file."""
+        """Smoke test against the shared volta-movement.mei fixture file.
+
+        The fixture has 4 positions:
+          1 → n='1', volta=None
+          2 → n='2', volta=1  (inside ending n=1)
+          3 → n='2', volta=2  (inside ending n=2)
+          4 → n='3', volta=None
+        """
         from pathlib import Path
 
         fixture = Path(__file__).parent.parent / "fixtures/mei/volta-movement.mei"
         if not fixture.exists():
             pytest.skip("volta-movement.mei fixture not found")
         result = _build_measure_map(fixture.read_bytes())
-        assert (1, None) in result
-        assert (2, 1) in result
-        assert (2, 2) in result
-        assert (3, None) in result
-        assert (2, None) not in result  # no un-ended duplicate at mn=2
+        assert len(result) == 4
+        assert result[1].n_raw == "1" and result[1].volta is None
+        assert result[2].volta == 1
+        assert result[3].volta == 2
+        assert result[4].n_raw == "3" and result[4].volta is None
 
-    # ── Edge case: missing @n silently skipped ────────────────────────────────
+    # ── Edge case: missing @n → n_raw is empty string ─────────────────────────
 
-    def test_missing_n_attr_silently_skipped(self) -> None:
-        """Measures with no @n attribute are omitted — no warning, no entry.
-
-        Any TSV row referencing such a measure by logical number will produce a
-        spurious alignment warning because the (mn, volta) key is absent.
-        """
+    def test_missing_n_attr_n_raw_is_empty_string(self) -> None:
+        """Measures with no @n get n_raw='' and are still included in the map."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -823,12 +836,14 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert result == {(2, None): "m2"}
+        assert len(result) == 2
+        assert result[1] == MeasureEntry(n_raw="", volta=None, xml_id="no-n")
+        assert result[2] == MeasureEntry(n_raw="2", volta=None, xml_id="m2")
 
-    # ── Edge case: non-integer @n silently dropped ────────────────────────────
+    # ── Edge case: non-integer @n preserved in n_raw ──────────────────────────
 
-    def test_non_integer_n_silently_dropped(self) -> None:
-        """@n that cannot be parsed by int() raises ValueError → measure silently dropped."""
+    def test_non_integer_n_preserved_in_n_raw(self) -> None:
+        """@n that cannot be parsed as int is preserved as n_raw — no longer dropped."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -837,13 +852,16 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert result == {(3, None): "m3"}
+        assert len(result) == 2
+        assert result[1] == MeasureEntry(n_raw="bad", volta=None, xml_id="bad")
+        assert result[2] == MeasureEntry(n_raw="3", volta=None, xml_id="m3")
 
-    def test_real_world_x1_x2_labels_dropped(self) -> None:
-        """@n='X1', @n='X2' (seen in K.279/K.283/K.331 staging ingest) are silently dropped.
+    def test_real_world_x1_x2_labels_preserved(self) -> None:
+        """@n='X1', @n='X2' (seen in K.279/K.283/K.331 staging ingest) are now preserved.
 
-        Expected behavior, but means every TSV row referencing those measures
-        produces an alignment warning even when the musical content is correct.
+        Previously these were silently dropped, producing spurious alignment
+        warnings for every DCML TSV row referencing those positions. Now all
+        four measures appear at positions 1–4 with their raw @n strings.
         """
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
@@ -855,10 +873,36 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert set(result.keys()) == {(1, None), (2, None)}
+        assert len(result) == 4
+        assert result[1] == MeasureEntry(n_raw="X1", volta=None, xml_id="rehearsal1")
+        assert result[2] == MeasureEntry(n_raw="1", volta=None, xml_id="m1")
+        assert result[3] == MeasureEntry(n_raw="X2", volta=None, xml_id="rehearsal2")
+        assert result[4] == MeasureEntry(n_raw="2", volta=None, xml_id="m2")
 
-    def test_n_with_alpha_suffix_dropped(self) -> None:
-        """@n='12a' (another real-world non-integer pattern) is silently dropped."""
+    def test_x1_x2_position_indices_are_stable(self) -> None:
+        """Position indices are document-order regardless of @n value.
+
+        Given X1, 1, X2, 2 in document order, position 1 = X1, position 2 = 1,
+        position 3 = X2, position 4 = 2. This directly documents the fix for
+        the Mozart staging corpus alignment warnings (ADR-015).
+        """
+        mei = b"""<?xml version="1.0"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei">
+  <music><body><mdiv><score><section>
+    <measure n="X1" xml:id="x1"/>
+    <measure n="1"  xml:id="m1"/>
+    <measure n="X2" xml:id="x2"/>
+    <measure n="2"  xml:id="m2"/>
+  </section></score></mdiv></body></music>
+</mei>"""
+        result = _build_measure_map(mei)
+        assert result[1].n_raw == "X1"
+        assert result[2].n_raw == "1"
+        assert result[3].n_raw == "X2"
+        assert result[4].n_raw == "2"
+
+    def test_n_with_alpha_suffix_preserved(self) -> None:
+        """@n='12a' is now preserved as n_raw — no longer silently dropped."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -867,16 +911,14 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert set(result.keys()) == {(12, None)}
+        assert len(result) == 2
+        assert result[1] == MeasureEntry(n_raw="12a", volta=None, xml_id="m12a")
+        assert result[2] == MeasureEntry(n_raw="12", volta=None, xml_id="m12")
 
     # ── Edge case: missing xml:id ─────────────────────────────────────────────
 
     def test_no_xml_id_added_with_empty_string(self) -> None:
-        """Measures without xml:id are still included with xml_id='' as value.
-
-        The presence check (key in measure_map) still works; only the xml:id
-        value is degraded.
-        """
+        """Measures without xml:id have xml_id='' in their MeasureEntry."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -885,9 +927,8 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert (1, None) in result
-        assert result[(1, None)] == ""
-        assert result[(2, None)] == "m2"
+        assert result[1].xml_id == ""
+        assert result[2].xml_id == "m2"
 
     # ── Edge case: malformed XML ──────────────────────────────────────────────
 
@@ -901,14 +942,10 @@ class TestBuildMeasureMap:
         result = _build_measure_map(b"")
         assert result == {}
 
-    # ── Edge case: ending with no @n → volta=None → collision ────────────────
+    # ── Edge case: ending with no @n → volta=None ─────────────────────────────
 
     def test_ending_no_n_attr_gives_volta_none(self) -> None:
-        """Ending without @n → volta=None → keyed (mn, None), same as non-volta space.
-
-        This is a silent collision: if a normal measure with the same @n exists,
-        the ending measure will overwrite it in the map because both use (mn, None).
-        """
+        """Ending without @n → the measure inside gets volta=None."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -920,13 +957,11 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert (2, None) in result
-        assert result[(2, None)] == "m2-ending"
-        # No integer-keyed volta entries for mn=2
-        assert not any(k[0] == 2 and k[1] is not None for k in result)
+        assert len(result) == 3
+        assert result[2] == MeasureEntry(n_raw="2", volta=None, xml_id="m2-ending")
 
     def test_ending_empty_n_attr_gives_volta_none(self) -> None:
-        """Ending with @n='' is falsy → ``int('') if '' else None`` → volta=None."""
+        """Ending with @n='' is falsy → volta=None for the measure inside it."""
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -937,13 +972,15 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert (2, None) in result
-        assert result[(2, None)] == "m2-ending"
+        assert result[2] == MeasureEntry(n_raw="2", volta=None, xml_id="m2-ending")
 
-    def test_ending_no_n_overwrites_normal_measure(self) -> None:
-        """When a normal measure and an un-numbered ending share the same @n,
-        the ending measure silently overwrites the normal measure in the map
-        (last writer wins — both use the (mn, None) key)."""
+    def test_position_indices_unique_no_overwrite(self) -> None:
+        """Each measure gets a unique position index — no key collisions even when @n repeats.
+
+        In the old (mn, volta) design, a normal measure and an un-numbered ending
+        sharing the same @n would silently overwrite each other. Position indices
+        are unique by definition, so both measures appear in the map.
+        """
         mei = b"""<?xml version="1.0"?>
 <mei xmlns="http://www.music-encoding.org/ns/mei">
   <music><body><mdiv><score><section>
@@ -954,7 +991,9 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        assert result[(2, None)] == "ending-m2"
+        assert len(result) == 2
+        assert result[1] == MeasureEntry(n_raw="2", volta=None, xml_id="normal-m2")
+        assert result[2] == MeasureEntry(n_raw="2", volta=None, xml_id="ending-m2")
 
     def test_ending_with_non_integer_n_gives_volta_none(self) -> None:
         """Ending with @n='abc' → ValueError in int() → except branch → volta=None."""
@@ -968,9 +1007,7 @@ class TestBuildMeasureMap:
   </section></score></mdiv></body></music>
 </mei>"""
         result = _build_measure_map(mei)
-        # ValueError from int("abc") → except (ValueError, TypeError) → volta = None
-        assert (2, None) in result
-        assert not any(k[0] == 2 and isinstance(k[1], int) for k in result)
+        assert result[2] == MeasureEntry(n_raw="2", volta=None, xml_id="m2-ending")
 
 
 # ===========================================================================
@@ -1304,7 +1341,7 @@ class TestDcmlBranch:
         assert len(warn_calls) == 1, "Expected one UPDATE normalization_warnings call"
         warnings = json.loads(warn_calls[0].args[1]["warnings"])
         assert len(warnings) == 1
-        assert "mn=99" in warnings[0]
+        assert "mc=99" in warnings[0]
 
     async def test_no_alignment_warnings_for_matching_tsv(self, monkeypatch) -> None:
         """TSV row at mn=1 matches MEI measure → no normalization_warnings update."""

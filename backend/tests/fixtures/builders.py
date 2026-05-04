@@ -22,11 +22,13 @@ _HERE = Path(__file__).parent
 
 # Canonical K331 harmonies TSV — used by unit and integration tests that need
 # a valid DCML harmonies file without caring about specific content.
-HARMONIES_TSV_PATH: Path = _HERE / "dcml-subset" / "harmonies" / "K331-1.tsv"
+HARMONIES_TSV_PATH: Path = _HERE / "dcml-subset" / "harmonies" / "K331-1.harmonies.tsv"
 
 # Synthetic volta TSV — four rows covering first- and second-time endings.
 # Used by the volta-handling integration test in test_corpus_ingestion.py.
-VOLTA_TSV_PATH: Path = _HERE / "dcml-subset" / "harmonies" / "volta-movement.tsv"
+VOLTA_TSV_PATH: Path = (
+    _HERE / "dcml-subset" / "harmonies" / "volta-movement.harmonies.tsv"
+)
 
 
 # ---------------------------------------------------------------------------

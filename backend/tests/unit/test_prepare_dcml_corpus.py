@@ -199,7 +199,7 @@ class TestFindHarmoniesTsv:
     def test_returns_path_when_exists(self) -> None:
         mscx = _DCML_SUBSET / "MS3" / "K331-1.mscx"
         result = pdc.find_harmonies_tsv(_DCML_SUBSET, mscx)
-        assert result == _DCML_SUBSET / "harmonies" / "K331-1.tsv"
+        assert result == _DCML_SUBSET / "harmonies" / "K331-1.harmonies.tsv"
 
     def test_returns_none_when_missing(self, tmp_path: Path) -> None:
         mscx = tmp_path / "MS3" / "NoHarmonies.mscx"

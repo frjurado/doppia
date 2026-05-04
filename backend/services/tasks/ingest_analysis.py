@@ -25,6 +25,7 @@ import io
 import json
 import os
 import re
+from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Literal
 
@@ -341,38 +342,52 @@ def _parse_changes(changes: str) -> list[str]:
     return [x.strip() for x in c.split(",") if x.strip()]
 
 
-def _build_measure_map(mei_bytes: bytes) -> dict[tuple[int, int | None], str]:
-    """Build a ``(mn, volta) → xml:id`` map by walking the normalized MEI.
+@dataclass(frozen=True)
+class MeasureEntry:
+    """One measure's metadata, keyed in the measure map by position index (mc).
 
-    Used to verify that every TSV row's ``(mn, volta)`` pair resolves to a
-    known measure in the MEI source.  Returns an empty dict on XML parse failure
-    so alignment verification degrades gracefully.
+    n_raw is the raw @n attribute string — not parsed to int, so non-integer
+    values like "X1" or "12a" are preserved rather than dropped.
+    volta is the integer @n of the enclosing <ending>, or None if the measure
+    is not inside any <ending>.
+    xml_id is the measure's xml:id, or '' if none is present.
+    """
+
+    n_raw: str
+    volta: int | None
+    xml_id: str
+
+
+def _build_measure_map(mei_bytes: bytes) -> dict[int, MeasureEntry]:
+    """Build a ``position_index → MeasureEntry`` map by walking the normalized MEI.
+
+    The position index is 1-based document order over all ``<measure>`` elements
+    in the file — the same counter as DCML ``mc`` and Verovio's ``measureRange``
+    operand. Non-integer ``@n`` values are preserved as ``n_raw``; they no longer
+    cause the entry to be silently dropped.
+
+    Used to verify that every TSV row's ``mc`` value resolves to a known measure
+    in the MEI source. Returns an empty dict on XML parse failure so alignment
+    verification degrades gracefully.
 
     Args:
         mei_bytes: Normalized MEI bytes fetched from object storage.
 
     Returns:
-        Dict mapping ``(mn, volta)`` pairs to ``xml:id`` strings.
-        Measures outside any ``<ending>`` have ``volta=None``.
+        Dict mapping 1-based position indices to MeasureEntry instances.
     """
     try:
         root = lxml.etree.fromstring(mei_bytes)
     except lxml.etree.XMLSyntaxError:
         return {}
 
-    measure_map: dict[tuple[int, int | None], str] = {}
+    measure_map: dict[int, MeasureEntry] = {}
+    position = 0
     for measure in root.iter(f"{{{_MEI_NS}}}measure"):
-        n_attr = measure.get("n")
-        if n_attr is None:
-            continue
-        try:
-            mn = int(n_attr)
-        except ValueError:
-            continue
-
+        position += 1
+        n_raw = measure.get("n", "")
         xml_id = measure.get(f"{{{_XML_NS}}}id", "")
 
-        # Walk ancestors to find an enclosing <ending>.
         volta: int | None = None
         parent = measure.getparent()
         while parent is not None:
@@ -385,7 +400,8 @@ def _build_measure_map(mei_bytes: bytes) -> dict[tuple[int, int | None], str]:
                 break
             parent = parent.getparent()
 
-        measure_map[(mn, volta)] = xml_id
+        measure_map[position] = MeasureEntry(n_raw=n_raw, volta=volta, xml_id=xml_id)
+
     return measure_map
 
 
@@ -527,11 +543,11 @@ def _parse_dcml_harmonies(
     if mei_bytes:
         measure_map = _build_measure_map(mei_bytes)
         for ev in events:
-            key = (ev["mn"], ev["volta"])
-            if key not in measure_map:
+            mc = ev["mc"]
+            if mc is None or mc not in measure_map:
                 alignment_warnings.append(
-                    f"TSV event at mn={ev['mn']} volta={ev['volta']} "
-                    f"(mc={ev['mc']}) has no matching measure in MEI."
+                    f"TSV event at mc={mc} mn={ev['mn']} volta={ev['volta']} "
+                    f"has no matching measure in MEI."
                 )
 
     return events, phrase_boundaries, alignment_warnings
