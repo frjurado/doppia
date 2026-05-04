@@ -23,12 +23,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--color-outline-variant);
   padding-bottom: var(--footer-height);
-}
-
-.columnPanel:last-child {
-  border-right: none;
 }
 
 .columnHeader {
@@ -69,11 +64,6 @@
   border: none;
   cursor: pointer;
   padding: var(--spacing-3) var(--spacing-6);
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .ctaButton:hover {

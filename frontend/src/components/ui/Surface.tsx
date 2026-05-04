@@ -6,11 +6,14 @@ export type SurfaceLayer =
   | 'container-low'
   | 'container'
   | 'container-high'
-  | 'container-highest'
-  | 'floating';
+  | 'container-highest';
 
 interface SurfaceProps extends React.HTMLAttributes<HTMLDivElement> {
   layer?: SurfaceLayer;
+  /**
+   * Adds an ambient shadow. Floating overlays use
+   * `<Surface layer="container-highest" floating>`.
+   */
   floating?: boolean;
 }
 
@@ -21,7 +24,6 @@ const layerTokens: Record<SurfaceLayer, string> = {
   'container':          'var(--color-surface-container)',
   'container-high':     'var(--color-surface-container-high)',
   'container-highest':  'var(--color-surface-container-highest)',
-  'floating':           'var(--color-surface-container-highest)',
 };
 
 /**
@@ -42,7 +44,7 @@ export default function Surface({
   const computedStyle: React.CSSProperties = {
     backgroundColor: background,
     ...(floating
-      ? { boxShadow: '0 0 40px 0 rgba(27, 28, 23, 0.06)' }
+      ? { boxShadow: 'var(--shadow-floating)' }
       : undefined),
     ...style,
   };

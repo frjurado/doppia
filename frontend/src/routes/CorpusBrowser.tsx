@@ -200,7 +200,7 @@ export default function CorpusBrowser() {
       ) : (
         <div className={styles.grid}>
           {/* Composers column */}
-          <Surface layer="container-low" className={styles.columnPanel}>
+          <Surface layer="container-lowest" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
                 Composer
@@ -265,7 +265,7 @@ export default function CorpusBrowser() {
           </Surface>
 
           {/* Works column */}
-          <Surface layer="container-low" className={styles.columnPanel}>
+          <Surface layer="container-lowest" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
                 Work
@@ -348,7 +348,7 @@ export default function CorpusBrowser() {
               className={styles.ctaButton}
               onClick={() => navigate(`/tag/${selectedMovement.id}`)}
             >
-              Open for tagging
+              <Type variant="label-md" as="span">Open for tagging</Type>
             </button>
           </div>
         </div>
