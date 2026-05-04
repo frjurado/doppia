@@ -1,4 +1,5 @@
 import React from 'react';
+import { ApiError } from '../../services/api';
 import Type from '../ui/Type';
 import BrowseItem from './BrowseItem';
 import styles from './BrowseColumn.module.css';
@@ -11,6 +12,8 @@ interface BrowseColumnProps<T> {
   getKey: (item: T) => string;
   renderItem: (item: T, isSelected: boolean, onSelect: (id: string) => void) => React.ReactNode;
   emptyLabel?: string;
+  error?: ApiError | null;
+  onRetry?: () => void;
 }
 
 const SKELETON_COUNT = 3;
@@ -30,7 +33,26 @@ export default function BrowseColumn<T>({
   getKey,
   renderItem,
   emptyLabel = 'Nothing here',
+  error,
+  onRetry,
 }: BrowseColumnProps<T>) {
+  if (error) {
+    return (
+      <div className={styles.column}>
+        <div className={styles.errorState}>
+          <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
+            {error.message}
+          </Type>
+          {onRetry && (
+            <button type="button" onClick={onRetry} className={styles.retryButton}>
+              Retry
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className={styles.column}>

@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import RequireAuth from './components/auth/RequireAuth';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import CorpusBrowser from './routes/CorpusBrowser';
 import ScoreViewerStub from './routes/ScoreViewerStub';
@@ -22,7 +23,9 @@ export default function App() {
           path="/"
           element={
             <RequireAuth>
-              <CorpusBrowser />
+              <ErrorBoundary>
+                <CorpusBrowser />
+              </ErrorBoundary>
             </RequireAuth>
           }
         />

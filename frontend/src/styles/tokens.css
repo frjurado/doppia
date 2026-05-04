@@ -37,4 +37,7 @@
 
   /* Shape — 0px everywhere, non-negotiable */
   --border-radius: 0px;
+
+  /* Translucent surface for frosted-glass overlays (e.g. fixed footer) */
+  --color-surface-translucent: rgba(251, 249, 240, 0.80);
 }

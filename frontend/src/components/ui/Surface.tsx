@@ -9,12 +9,9 @@ export type SurfaceLayer =
   | 'container-highest'
   | 'floating';
 
-interface SurfaceProps {
+interface SurfaceProps extends React.HTMLAttributes<HTMLDivElement> {
   layer?: SurfaceLayer;
   floating?: boolean;
-  className?: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
 }
 
 const layerTokens: Record<SurfaceLayer, string> = {
@@ -38,6 +35,7 @@ export default function Surface({
   className,
   children,
   style,
+  ...rest
 }: SurfaceProps) {
   const background = layerTokens[layer];
 
@@ -50,7 +48,7 @@ export default function Surface({
   };
 
   return (
-    <div className={className} style={computedStyle}>
+    <div className={className} style={computedStyle} {...rest}>
       {children}
     </div>
   );
