@@ -8,9 +8,12 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint src --max-warnings 0",
+    "lint:css": "stylelint \"src/**/*.css\"",
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "@fontsource/newsreader": "^5.2.10",
+    "@fontsource/public-sans": "^5.2.7",
     "@tonejs/midi": "^2.0.28",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -28,6 +31,8 @@
     "eslint-plugin-react-refresh": "^0.4.16",
     "globals": "^15.13.0",
     "prettier": "^3.4.2",
+    "stylelint": "^17.10.0",
+    "stylelint-config-standard": "^40.0.0",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.59.1",
     "vite": "^6.0.5"

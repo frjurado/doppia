@@ -97,10 +97,6 @@
   text-align: center;
 }
 
-.submitButton:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
 .submitButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -109,6 +105,10 @@
 .submitButton:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
+}
+
+.submitButton:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 /* Footer note */
