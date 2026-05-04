@@ -301,7 +301,9 @@ Signed URLs are generated on demand at request time, used, and discarded. Nothin
 | Backend-to-backend: music21 processing | **15 minutes** | Used immediately in a background task; a short TTL reduces exposure without affecting functionality |
 | Backend-to-backend: Verovio server-side rendering | **15 minutes** | Same |
 
-The 1-hour TTL for client-facing URLs means a URL embedded in an API response remains valid for the full duration of a user session. If the frontend caches URLs locally (e.g. in React state), they should be treated as session-scoped and not persisted to localStorage or similar. A page reload will re-request the URL from the API, which generates a fresh one.
+The 1-hour TTL for client-facing URLs means a URL embedded in an API response remains valid for the full duration of a user session. If the frontend caches URLs locally (e.g. in React state), they should be treated as session-scoped and not persisted to `localStorage` or similar. A page reload will re-request the URL from the API, which generates a fresh one.
+
+**Note on JWT storage.** `auth.ts` stores the Supabase access token in `localStorage['doppia_access_token']`. This is a documented exception to the general guidance above: signed URLs are ephemeral and must not be stored, but the JWT is intentionally persisted across page reloads. The rationale and the conditions under which this is acceptable are recorded in ADR-016 (`docs/adr/ADR-016-jwt-browser-storage.md`). This exception is scoped to Phase 1's internal-only deployment; it must be revisited before Phase 2 public launch.
 
 ### Signed URL generation
 
