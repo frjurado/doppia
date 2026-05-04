@@ -32,30 +32,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Temporary server_default lets us add NOT NULL columns to a populated table.
-    # The default is intentionally wrong (bar_start ≠ mc_start in general);
-    # existing rows must be re-tagged to get correct values.
-    op.add_column(
-        "fragment",
-        sa.Column(
-            "mc_start",
-            sa.Integer,
-            nullable=False,
-            server_default=sa.text("bar_start"),
-        ),
-    )
-    op.add_column(
-        "fragment",
-        sa.Column(
-            "mc_end",
-            sa.Integer,
-            nullable=False,
-            server_default=sa.text("bar_end"),
-        ),
-    )
-    # Drop server defaults after backfill — they must not persist in the schema.
-    op.alter_column("fragment", "mc_start", server_default=None)
-    op.alter_column("fragment", "mc_end", server_default=None)
+    # Add nullable first — PostgreSQL does not allow column references in DEFAULT
+    # expressions, so we cannot use bar_start/bar_end as a server_default directly.
+    op.add_column("fragment", sa.Column("mc_start", sa.Integer, nullable=True))
+    op.add_column("fragment", sa.Column("mc_end", sa.Integer, nullable=True))
+
+    # Backfill from bar_start/bar_end.  These values are incorrect for any
+    # fragment that crosses a non-integer @n measure or a repeat ending; they
+    # will be corrected on next re-tag.
+    op.execute("UPDATE fragment SET mc_start = bar_start, mc_end = bar_end")
+
+    # Now that every row has a value, tighten to NOT NULL.
+    op.alter_column("fragment", "mc_start", nullable=False)
+    op.alter_column("fragment", "mc_end", nullable=False)
 
 
 def downgrade() -> None:
