@@ -23,14 +23,16 @@ CREATE TABLE fragment (
 
     -- MEI source location (resolved via the movement row)
     movement_id         UUID NOT NULL REFERENCES movement(id) ON DELETE RESTRICT,
-    bar_start           INTEGER NOT NULL,       -- inclusive; maps to MEI <measure @n>
-    bar_end             INTEGER NOT NULL,       -- inclusive; maps to MEI <measure @n>
+    bar_start           INTEGER NOT NULL,       -- inclusive; <measure @n> value (human coordinate)
+    bar_end             INTEGER NOT NULL,       -- inclusive; <measure @n> value (human coordinate)
+    mc_start            INTEGER NOT NULL,       -- 1-based document-order position index; maps directly to Verovio measureRange start operand
+    mc_end              INTEGER NOT NULL,       -- 1-based document-order position index; maps directly to Verovio measureRange end operand
 
     -- Sub-measure precision
     beat_start          FLOAT,                  -- beats from start of bar_start measure
     beat_end            FLOAT,                  -- beats from start of bar_end measure
 
-    -- Notated context (minimal; key and meter live inside summary)
+    -- Notated context (display-only; not needed for rendering since mc_start/mc_end already identify the physical measures unambiguously)
     repeat_context      TEXT,                   -- e.g. "first_ending"; null if unambiguous
 
     -- Structured analytical summary (see below for full specification)
@@ -71,13 +73,15 @@ CREATE INDEX fragment_movement_idx ON fragment (movement_id);
 
 **`movement_id`** is the foreign key to the `movement` row that owns the MEI source. The S3 object key is resolved by reading `movement.mei_object_key`; there is no `mei_file` column on the fragment itself, because the key belongs to the movement and the fragment inherits it. Keys follow the pattern `{composer.slug}/{corpus.slug}/{work.slug}/{movement.slug}.mei` (e.g. `mozart/piano-sonatas/k331/movement-1.mei`).
 
-**`bar_start` / `bar_end`** are 1-indexed integers corresponding to `<measure @n>` values in the MEI source. They are not display bar numbers, which can diverge from `@n` values due to repeats, first/second endings, and pickup bars. See `docs/adr/ADR-005-sub-measure-precision.md` for the beat-precision implementation.
+**`bar_start` / `bar_end`** are the `<measure @n>` values from the MEI source — the **human coordinate**. They are the numbers a musician sees on the score and are used for display labels ("m. 72–75"), API responses, and editorial communication. They are fragile as machine identifiers: they can be non-integer (`X1`, `X2` in MuseScore exports), repeat across volta endings (both endings share the same `@n`), and pickup bars use `@n="0"`. These columns are retained as-is for display; all rendering uses `mc_start`/`mc_end` instead. See `docs/adr/ADR-015-dual-measure-coordinate-system.md` for the full rationale and `docs/adr/ADR-005-sub-measure-precision.md` for the beat-precision implementation.
+
+**`mc_start` / `mc_end`** are 1-based document-order position indices over `<measure>` elements in the MEI source — the **machine coordinate**. They are stable, always integer, unique within a movement, and map directly to Verovio's `measureRange` operands without any conversion (`mc_start` → range start, `mc_end` → range end). They are the same counter as DCML `mc`: both count measures in document order, so `mc=N` from a DCML harmonies TSV identifies the same physical measure as position index N for any movement whose annotation was derived from that MEI file. Both coordinates are written at tag time by the tagging tool, which has the MEI in memory. `repeat_context` is display-only and is no longer needed for rendering disambiguation since `mc_start`/`mc_end` already identify the physical measures unambiguously. See `docs/adr/ADR-015-dual-measure-coordinate-system.md`.
 
 **`beat_start` / `beat_end`** define the selection boundary within their respective measures. Inclusion is *onset-based*: a note whose onset falls inside the `[beat_start, beat_end)` range is part of the fragment; a note whose onset falls outside is not, regardless of sounding duration. This creates a deliberate asymmetry at the start boundary — a note sounding at `beat_start` but attacked before it is excluded — and at the end boundary — a note attacked before `beat_end` but sustaining past it is included.
 
 **Rendered extent vs. data boundary.** The beat-level fields govern *data inclusion* — which notes' analytical properties are part of the fragment's summary — but not *visual inclusion*. The rendered score always displays full measures `[bar_start, bar_end]` inclusive, because Verovio cannot render a partial bar without distorting the metre and because theorists need the surrounding metric context to read the excerpt. The UI may apply visual emphasis (bracket, shading, muted notes outside the boundary) to indicate the data range within the rendered bars, but it must never truncate a bar. A consequence at the end boundary: a note whose onset is within `[beat_start, beat_end)` but whose duration extends past `beat_end` is still part of the fragment's data; the renderer shows the note in full because the rest of the bar is shown in full anyway.
 
-**`repeat_context`** disambiguates fragments that fall within repeated sections. Permitted values are `first_ending`, `second_ending`, and any further values documented as they arise. Null means the fragment's range is unambiguous with respect to repeats.
+**`repeat_context`** is a display-only field that records which repeat ending a fragment falls in: `first_ending`, `second_ending`, or further values as they arise. Null means the fragment does not fall inside any ending. It is no longer used for rendering disambiguation — `mc_start`/`mc_end` already identify the physical measures unambiguously without it. It remains in use for the approval-gate harmony event range query, where it filters `movement_analysis` events by `volta` when a fragment falls inside a repeat ending (e.g. `repeat_context = "first_ending"` restricts the check to events with `volta = 1`). The cleaner long-term approach — filtering harmony events by `mc` range directly (`event.mc >= mc_start AND event.mc <= mc_end`) — avoids this indirection entirely and is deferred to Component 3. See ADR-015.
 
 **`parent_fragment_id`** records sub-part nesting. The database imposes no depth limit: nesting may be arbitrarily deep when it is conceptually valid (a composite concept whose stages themselves have stages). The tagging UI performs visual flattening beyond two visible levels so the score does not become unreadable, but the data model preserves the true hierarchy. A sub-part's `bar_start`/`bar_end` must fall within its parent's range; this constraint is enforced by the service layer, not the database.
 
@@ -292,7 +296,7 @@ The tagging UI exposes these primitives directly. Moving a boundary and editing 
 Before a fragment can move from `submitted` to `approved`, the service layer enforces:
 
 1. Every `actual_key` object with `auto: true` must have `reviewed: true`. (If `actual_key` is absent, this check is vacuous.)
-2. Every harmony event in `movement_analysis` whose position falls within the fragment's `[bar_start, beat_start] .. [bar_end, beat_end)` range must have `reviewed: true` — but only if the fragment's concepts include at least one that requires harmony review. For fragments whose concepts do not capture harmony (e.g. a Hemiola), this check is skipped; the harmonic context is still displayed when rendering the fragment, but unreviewed events do not block approval. The range query matches on `mn` against the fragment's `bar_start`/`bar_end`; when the fragment carries a non-null `repeat_context`, the query additionally filters events by `volta` (e.g. `repeat_context = "first_ending"` restricts to events with `volta = 1`), so that only the events belonging to the correct ending pass are checked.
+2. Every harmony event in `movement_analysis` whose position falls within the fragment's `[bar_start, beat_start] .. [bar_end, beat_end)` range must have `reviewed: true` — but only if the fragment's concepts include at least one that requires harmony review. For fragments whose concepts do not capture harmony (e.g. a Hemiola), this check is skipped; the harmonic context is still displayed when rendering the fragment, but unreviewed events do not block approval. The range query currently matches on `mn` against the fragment's `bar_start`/`bar_end`; when the fragment carries a non-null `repeat_context`, the query additionally filters events by `volta` (e.g. `repeat_context = "first_ending"` restricts to events with `volta = 1`), so that only the events belonging to the correct ending pass are checked. The cleaner long-term approach — filtering directly by `mc` range (`event.mc >= mc_start AND event.mc <= mc_end`) — avoids the `(mn, volta)` indirection entirely and will produce correct results because `mc` is unique per ending. This simplification is deferred to Component 3 when the harmony query is first implemented. See ADR-015.
 
 Which concepts require harmony review is determined by their `capture_extensions` spec (see `docs/architecture/capture_extensions.md`): a concept that declares a `harmony` extension is asserting that harmony matters for its analysis, and approval of fragments tagged with that concept therefore depends on the harmony events in their range being reviewed.
 
@@ -450,7 +454,7 @@ The following do not belong in `summary` and should never be added:
 
 **Things that belong in the knowledge graph:** concept definitions, relationship types, PropertySchema metadata, pedagogical sequencing information. These are stable across all instances of a concept and live in Neo4j.
 
-**Things that belong in the fragment table columns:** `bar_start`, `bar_end`, `status`, `prose_annotation`, `repeat_context`, `data_licence`, `movement_id`. These are first-class columns because they are used as filter and sort conditions in queries and because they carry identity / foreign-key semantics that JSONB cannot express.
+**Things that belong in the fragment table columns:** `bar_start`, `bar_end`, `mc_start`, `mc_end`, `status`, `prose_annotation`, `repeat_context`, `data_licence`, `movement_id`. These are first-class columns because they are used as filter, sort, and render conditions in queries and because they carry identity / foreign-key semantics that JSONB cannot express. `mc_start`/`mc_end` belong here rather than inside `summary` because they are operands passed directly to the rendering API on the common read path; a join or JSONB extraction for every render call would be unnecessary overhead.
 
 **Things that belong in `movement_analysis`:** chord-level harmonic events — their bar and beat positions, roots, qualities, inversions, Roman numerals, bass and soprano pitches, source provenance, and review state. Harmony is movement-level, not fragment-level; see "Harmonic analysis: movement-level single source of truth" above. A fragment's `summary` never duplicates the harmony for its range.
 

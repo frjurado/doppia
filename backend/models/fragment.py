@@ -41,10 +41,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 class Fragment(Base):
     """A tagged musical excerpt.
 
-    Bar positions are 1-indexed integers corresponding to ``<measure @n>``
-    values in the MEI source (not display bar numbers). Beat positions define
-    sub-measure precision; see ADR-005 and fragment-schema.md for the onset-
-    based inclusion semantics.
+    Bar positions use two coordinate systems. ``bar_start``/``bar_end`` are
+    ``<measure @n>`` values from the MEI source — human-readable, but fragile
+    (non-integer in some exports, repeating across volta endings).
+    ``mc_start``/``mc_end`` are 1-based document-order position indices over
+    ``<measure>`` elements — machine-stable, directly usable as ``measureRange``
+    operands in Verovio. Both coordinates are written at tag time by the tagging
+    tool, which has the MEI in memory. ``repeat_context`` is display-only
+    ("first ending", "second ending") and is no longer needed for measure
+    disambiguation. See ADR-015 for the full rationale.
+
+    Beat positions define sub-measure precision; see ADR-005 and
+    fragment-schema.md for the onset-based inclusion semantics.
 
     ``status`` drives the peer review state machine:
     draft → submitted → approved (or rejected → draft). Only ``approved``
@@ -71,6 +79,15 @@ class Fragment(Base):
     )
     bar_start: Mapped[int] = mapped_column(Integer, nullable=False)
     bar_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Machine coordinates (ADR-015): 1-based document-order position indices
+    # over <measure> elements in the MEI source. Map directly to Verovio
+    # measureRange operands at render time without any conversion.
+    # TODO(tagging-tool): mc_start, mc_end must be supplied at write time by
+    # the tagging tool (Component 3), which computes them from the MEI in
+    # memory. Do not derive from bar_start/bar_end — they are different
+    # coordinate systems.
+    mc_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    mc_end: Mapped[int] = mapped_column(Integer, nullable=False)
     # Sub-measure precision (ADR-005); null in Phase 1 until beat-level
     # extraction is implemented.
     beat_start: Mapped[float | None] = mapped_column(Float, nullable=True)

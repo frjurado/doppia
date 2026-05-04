@@ -5,11 +5,12 @@ DB transaction commits (alongside ``ingest_movement_analysis``).  It is fire-and
 forget: its success or failure does not affect the ingestion report returned to
 the caller.
 
-Approach (Finding 5, docs/architecture/mei-ingest-normalization.md):
-    Use the smart-break page-1 strategy — set ``breaks="smart"`` with a narrow
-    ``pageWidth`` so Verovio fits the first system on page 1, then render that
-    single page.  This naturally includes pickup bars (measure ``@n="0"``) without
-    any ``@n`` addressing logic.
+Approach (Findings 6–9, docs/architecture/mei-ingest-normalization.md §2026-05-04):
+    Use ``tk.select({"measureRange": "start-N"})`` + ``tk.redoLayout()`` to render
+    a fixed bar count regardless of notation density or measure width.  ``"start-N"``
+    is equivalent to ``"1-N"`` and includes pickup bars (``@n="0"``) automatically
+    because position indexing is document-order, not ``@n``-based.  For movements
+    shorter than ``_INCIPIT_BARS``, ``"start-end"`` renders all measures.
 
 On failure, ``incipit_object_key`` and ``incipit_generated_at`` remain null.
 The browse API (Component 2 Step 5) handles the null case gracefully by returning
@@ -33,6 +34,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 logger = logging.getLogger(__name__)
+
+# Number of measures to include in the incipit.  Movements shorter than this
+# fall back to "start-end" (all measures).  Promote to an env var if per-corpus
+# configurability is needed.
+_INCIPIT_BARS = 4
 
 
 def _verovio_resource_path() -> str | None:
@@ -94,6 +100,7 @@ async def _generate_incipit_async(movement_id: str) -> None:
                     text(
                         """
                         SELECT mv.mei_object_key,
+                               mv.duration_bars,
                                mv.slug           AS movement_slug,
                                w.slug            AS work_slug,
                                c.slug            AS corpus_slug,
@@ -124,10 +131,9 @@ async def _generate_incipit_async(movement_id: str) -> None:
             tk.setResourcePath(res_path)
         tk.setOptions(
             {
-                "pageWidth": 800,
-                "pageHeight": 800,
+                "pageWidth": 2200,
                 "adjustPageHeight": True,
-                "breaks": "smart",
+                "breaks": "none",
                 "scale": 35,
             }
         )
@@ -141,6 +147,15 @@ async def _generate_incipit_async(movement_id: str) -> None:
                 f"Verovio failed to load MEI for movement {movement_id}. "
                 f"Log: {tk.getLog()}"
             )
+
+        duration_bars: int | None = row.duration_bars
+        if duration_bars is not None and duration_bars < _INCIPIT_BARS:
+            measure_range = "start-end"
+        else:
+            measure_range = f"start-{_INCIPIT_BARS}"
+
+        tk.select({"measureRange": measure_range})
+        tk.redoLayout()
         svg = tk.renderToSVG(1)
 
         key = incipit_key(
