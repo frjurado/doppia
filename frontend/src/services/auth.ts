@@ -7,7 +7,12 @@
  *
  * This module is intentionally interface-compatible with the Supabase session
  * shape so that swapping the implementation for a proper Supabase client in
- * Phase 2 requires no changes in apiFetch or any consumer.
+ * Phase 2 requires no changes in apiFetch or any consumer. However, the
+ * current Session interface is a strict subset of the full Supabase shape.
+ * Phase 1 consumers must access only `access_token`. Accessing other Supabase
+ * session fields requires expanding this interface to the full Supabase
+ * `Session` shape — do that in Phase 2 when the real Supabase client is
+ * wired in.
  */
 
 const TOKEN_KEY = 'doppia_access_token';

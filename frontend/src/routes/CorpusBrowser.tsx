@@ -6,6 +6,7 @@ import BrowseItem from '../components/browse/BrowseItem';
 import MovementCard from '../components/browse/MovementCard';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import {
   fetchComposers,
@@ -46,6 +47,7 @@ export default function CorpusBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 767px)');
+  usePageTitle('Browse — Doppia');
 
   const composerSlug = searchParams.get('composer');
   const corpusSlug = searchParams.get('corpus');

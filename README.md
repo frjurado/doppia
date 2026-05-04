@@ -42,7 +42,7 @@ This starts:
 - **MinIO** on `localhost:9000` (console at `localhost:9001`)
 - **Redis** on `localhost:6379`
 - **FastAPI backend** on `localhost:8000` (OpenAPI docs at `localhost:8000/api/docs`)
-- **Frontend dev server** on `localhost:3000`
+- **Frontend dev server** on `localhost:5173`
 
 On first run, the database init scripts create the PostgreSQL schema and enable pgvector. Neo4j starts empty; seed the knowledge graph separately (see step 4).
 
@@ -118,10 +118,17 @@ Verovio snapshot tests (`tests/snapshots/`) are deferred to Phase 2 once the ren
 │   │   └── neomodel/   neomodel class definitions (routine CRUD only)  [stub — empty]
 │   └── seed/           YAML seed files (seeding script is scripts/seed.py)  [stub — no YAML yet]
 │
-├── frontend/
-│   └── src/            React 18 + TypeScript source tree (Vite)        [built]
-│       ├── components/ Verovio renderer, MIDI player, tagging UI        [stub — scaffolded]
-│       └── services/   API client, graph query client                   [stub — scaffolded]
+├── frontend/src/       React 18 + TypeScript source tree (Vite)
+│   ├── App.tsx, main.tsx   Entry points + router setup
+│   ├── components/
+│   │   ├── browse/     Corpus browser UI (Component 2)                  [built]
+│   │   └── ui/         Surface, Type primitives                         [built]
+│   ├── routes/
+│   │   ├── CorpusBrowser   Four-level browse hierarchy                  [built]
+│   │   └── ScoreViewer     Verovio rendering + MIDI playback (Component 3) [stub]
+│   ├── services/       api.ts, auth.ts, browseApi.ts                    [built]
+│   ├── styles/         base.css, tokens.css                             [built]
+│   └── types/          TypeScript response shapes                       [built]
 │
 ├── scripts/
 │   ├── seed.py         Knowledge graph seeding (idempotent)             [stub — Phase 1]
@@ -151,7 +158,8 @@ Verovio snapshot tests (`tests/snapshots/`) are deferred to Phase 2 once the ren
 | FastAPI | `localhost:8000/api/docs` | OpenAPI documentation and interactive API explorer |
 | Neo4j Browser | `localhost:7474` | Graph inspection and ad-hoc Cypher queries |
 | MinIO Console | `localhost:9001` | MEI file storage (S3-compatible) |
-| Frontend | `localhost:3000` | Score viewer and tagging tool |
+| Frontend (dev) | `localhost:5173` | Score viewer and tagging tool |
+| Frontend (preview) | `localhost:4173` | Vite production preview (`npm run preview`) |
 
 Default local credentials are in `.env.example`. Do not use them outside of local development.
 

@@ -1,6 +1,7 @@
 import { useParams } from 'react-router-dom';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
+import { usePageTitle } from '../hooks/usePageTitle';
 
 /**
  * Placeholder page at /tag/:movementId.
@@ -8,6 +9,7 @@ import Type from '../components/ui/Type';
  */
 export default function ScoreViewerStub() {
   const { movementId } = useParams<{ movementId: string }>();
+  usePageTitle('Score Viewer — Doppia');
 
   return (
     <Surface
@@ -19,6 +21,7 @@ export default function ScoreViewerStub() {
     >
       <Type variant="headline">Score Viewer</Type>
       <Type variant="body-lg" style={{ marginTop: 'var(--spacing-4)' }}>
+        {/* dev-only: replaced by Component 3 */}
         Movement ID: {movementId}
       </Type>
       <Type
