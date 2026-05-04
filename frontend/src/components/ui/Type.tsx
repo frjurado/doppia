@@ -22,10 +22,10 @@ interface TypeProps {
 }
 
 const defaultTags: Record<TypeVariant, AsProp> = {
-  'display-lg': 'h1',
-  'display-sm': 'h2',
-  'headline':   'h3',
-  'title':      'h4',
+  'display-lg': 'span',
+  'display-sm': 'span',
+  'headline':   'span',
+  'title':      'span',
   'body-lg':    'p',
   'body-sm':    'p',
   'label-md':   'span',

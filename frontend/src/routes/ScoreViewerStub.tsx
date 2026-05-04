@@ -19,7 +19,7 @@ export default function ScoreViewerStub() {
         padding: 'var(--spacing-8)',
       }}
     >
-      <Type variant="headline">Score Viewer</Type>
+      <Type variant="headline" as="h1">Score Viewer</Type>
       <Type variant="body-lg" style={{ marginTop: 'var(--spacing-4)' }}>
         {/* dev-only: replaced by Component 3 */}
         Movement ID: {movementId}

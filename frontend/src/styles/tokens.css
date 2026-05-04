@@ -43,4 +43,7 @@
 
   /* Shadows */
   --shadow-floating: 0 0 40px 0 rgba(27, 28, 23, 0.06);
+
+  /* Focus */
+  --color-focus: var(--color-primary);
 }

@@ -29,3 +29,12 @@ body {
 /* Forbid pure black and pure white as direct values in component CSS.
    Use token variables only. This comment is the enforcement rule;
    ESLint cannot lint CSS, so it lives here as documentation. */
+
+/* Focus indicators (WCAG 2.1 AA) — applies to all interactive elements.
+   outline-offset: -2px places the ring inside the element's box,
+   which works correctly at 0px border-radius. */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
