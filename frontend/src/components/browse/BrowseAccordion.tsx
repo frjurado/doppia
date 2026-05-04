@@ -1,10 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type {
-  ComposerResponse,
-  CorpusResponse,
-  MovementResponse,
-  WorkResponse,
-} from '../../types/browse';
+import type { UseBrowseSelectionReturn } from '../../hooks/useBrowseSelection';
 import Surface from '../ui/Surface';
 import Type from '../ui/Type';
 import BrowseColumn from './BrowseColumn';
@@ -13,28 +8,6 @@ import MovementCard from './MovementCard';
 import styles from './BrowseAccordion.module.css';
 
 type Level = 'composer' | 'corpus' | 'work' | 'movement';
-
-interface BrowseAccordionProps {
-  composers: ComposerResponse[];
-  selectedComposerSlug: string | null;
-  onSelectComposer: (slug: string) => void;
-  composersLoading: boolean;
-
-  corpora: CorpusResponse[];
-  selectedCorpusSlug: string | null;
-  onSelectCorpus: (slug: string) => void;
-  corporaLoading: boolean;
-
-  works: WorkResponse[];
-  selectedWorkId: string | null;
-  onSelectWork: (id: string) => void;
-  worksLoading: boolean;
-
-  movements: MovementResponse[];
-  selectedMovementId: string | null;
-  onSelectMovement: (id: string) => void;
-  movementsLoading: boolean;
-}
 
 interface AccordionSectionProps {
   title: string;
@@ -84,43 +57,36 @@ function AccordionSection({
  * Purpose-built — not a generic accordion. Each section auto-expands
  * when its parent level gains a selection.
  */
-export default function BrowseAccordion({
-  composers,
-  selectedComposerSlug,
-  onSelectComposer,
-  composersLoading,
-  corpora,
-  selectedCorpusSlug,
-  onSelectCorpus,
-  corporaLoading,
-  works,
-  selectedWorkId,
-  onSelectWork,
-  worksLoading,
-  movements,
-  selectedMovementId,
-  onSelectMovement,
-  movementsLoading,
-}: BrowseAccordionProps) {
+export default function BrowseAccordion({ selection }: { selection: UseBrowseSelectionReturn }) {
+  const {
+    composers,
+    composerSlug,
+    composersLoading,
+    corpora,
+    corpusSlug,
+    corporaLoading,
+    works,
+    workId,
+    worksLoading,
+    movements,
+    movementId,
+    movementsLoading,
+    select,
+  } = selection;
+
   const [openSection, setOpenSection] = useState<Level>('composer');
 
   // Auto-advance to next section when a parent selection is made.
   useEffect(() => {
-    if (selectedComposerSlug) setOpenSection('corpus');
-  }, [selectedComposerSlug]);
+    if (workId) setOpenSection('movement');
+    else if (corpusSlug) setOpenSection('work');
+    else if (composerSlug) setOpenSection('corpus');
+  }, [composerSlug, corpusSlug, workId]);
 
-  useEffect(() => {
-    if (selectedCorpusSlug) setOpenSection('work');
-  }, [selectedCorpusSlug]);
-
-  useEffect(() => {
-    if (selectedWorkId) setOpenSection('movement');
-  }, [selectedWorkId]);
-
-  const selectedComposer = composers.find((c) => c.slug === selectedComposerSlug);
-  const selectedCorpus = corpora.find((c) => c.slug === selectedCorpusSlug);
-  const selectedWork = works.find((w) => w.id === selectedWorkId);
-  const selectedMovement = movements.find((m) => m.id === selectedMovementId);
+  const selectedComposer = composers.find((c) => c.slug === composerSlug);
+  const selectedCorpus = corpora.find((c) => c.slug === corpusSlug);
+  const selectedWork = works.find((w) => w.id === workId);
+  const selectedMovement = movements.find((m) => m.id === movementId);
 
   function toggle(level: Level) {
     setOpenSection((prev) => (prev === level ? 'composer' : level));
@@ -136,12 +102,12 @@ export default function BrowseAccordion({
       >
         <BrowseColumn
           items={composers}
-          selectedId={selectedComposerSlug}
-          onSelect={onSelectComposer}
+          selectedId={composerSlug}
+          onSelect={(slug) => select('composer', slug)}
           isLoading={composersLoading}
           getKey={(c) => c.slug}
           renderItem={(c, isSelected, onSelect) => (
-            <BrowseItem key={c.slug} id={c.slug} isSelected={isSelected} onClick={onSelect}>
+            <BrowseItem id={c.slug} isSelected={isSelected} onClick={onSelect}>
               <Type variant="body-lg" as="span">{c.name}</Type>
             </BrowseItem>
           )}
@@ -153,16 +119,16 @@ export default function BrowseAccordion({
         value={selectedCorpus?.title ?? 'Select a corpus'}
         isOpen={openSection === 'corpus'}
         onToggle={() => toggle('corpus')}
-        disabled={!selectedComposerSlug}
+        disabled={!composerSlug}
       >
         <BrowseColumn
           items={corpora}
-          selectedId={selectedCorpusSlug}
-          onSelect={onSelectCorpus}
+          selectedId={corpusSlug}
+          onSelect={(slug) => select('corpus', slug)}
           isLoading={corporaLoading}
           getKey={(c) => c.slug}
           renderItem={(c, isSelected, onSelect) => (
-            <BrowseItem key={c.slug} id={c.slug} isSelected={isSelected} onClick={onSelect}>
+            <BrowseItem id={c.slug} isSelected={isSelected} onClick={onSelect}>
               <Type variant="body-lg" as="span">{c.title}</Type>
             </BrowseItem>
           )}
@@ -175,16 +141,16 @@ export default function BrowseAccordion({
         value={selectedWork?.title ?? 'Select a work'}
         isOpen={openSection === 'work'}
         onToggle={() => toggle('work')}
-        disabled={!selectedCorpusSlug}
+        disabled={!corpusSlug}
       >
         <BrowseColumn
           items={works}
-          selectedId={selectedWorkId}
-          onSelect={onSelectWork}
+          selectedId={workId}
+          onSelect={(id) => select('work', id)}
           isLoading={worksLoading}
           getKey={(w) => w.id}
           renderItem={(w, isSelected, onSelect) => (
-            <BrowseItem key={w.id} id={w.id} isSelected={isSelected} onClick={onSelect}>
+            <BrowseItem id={w.id} isSelected={isSelected} onClick={onSelect}>
               <Type variant="body-lg" as="span">{w.title}</Type>
               {w.catalogue_number && (
                 <Type
@@ -210,16 +176,16 @@ export default function BrowseAccordion({
         }
         isOpen={openSection === 'movement'}
         onToggle={() => toggle('movement')}
-        disabled={!selectedWorkId}
+        disabled={!workId}
       >
         <BrowseColumn
           items={movements}
-          selectedId={selectedMovementId}
-          onSelect={onSelectMovement}
+          selectedId={movementId}
+          onSelect={(id) => select('movement', id)}
           isLoading={movementsLoading}
           getKey={(m) => m.id}
           renderItem={(m, isSelected, onSelect) => (
-            <MovementCard key={m.id} movement={m} isSelected={isSelected} onClick={onSelect} />
+            <MovementCard movement={m} isSelected={isSelected} onClick={onSelect} />
           )}
           emptyLabel="No movements found"
         />

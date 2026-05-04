@@ -11,7 +11,7 @@ export type TypeVariant =
   | 'label-md'     // 0.875rem Public Sans, uppercase
   | 'label-sm';    // 0.75rem Public Sans, uppercase
 
-type AsProp = keyof JSX.IntrinsicElements;
+type AsProp = keyof React.JSX.IntrinsicElements;
 
 interface TypeProps {
   variant: TypeVariant;
