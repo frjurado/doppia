@@ -42,18 +42,25 @@ export interface RenderOptions {
 /**
  * Subset of the Verovio 6.1.0 toolkit API used by this module.
  *
- * Typed locally rather than relying on the verovio package's own declarations
- * so that this interface is stable regardless of how the package types evolve.
+ * Typed locally — the verovio package ships no .d.ts files, so we define only
+ * the methods this module calls. Verified against verovio/dist/verovio.mjs.
+ *
+ * Notable API facts:
+ *   - getElementsAtTime takes a single millisecond offset, not (bar, beat).
+ *   - redoLayout returns void (not boolean).
+ *   - setOptions / select take plain objects (the class JSON-stringifies them
+ *     before forwarding to the Emscripten layer).
  */
 interface VerovioToolkitInstance {
   setOptions(options: Record<string, unknown>): void;
   loadData(data: string): boolean;
   select(selection: { measureRange: string }): boolean;
-  redoLayout(): boolean;
+  redoLayout(options?: Record<string, unknown>): void;
   getPageCount(): number;
   renderToSVG(page: number): string;
   renderToMIDI(): string;
-  getElementsAtTime(measureNumber: number, beat: number): string;
+  /** @param millisec - MIDI time offset in milliseconds. */
+  getElementsAtTime(millisec: number): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,11 +83,18 @@ let _verovioPromise: Promise<VerovioToolkitInstance> | null = null;
  */
 export function getVerovioToolkit(): Promise<VerovioToolkitInstance> {
   if (!_verovioPromise) {
-    _verovioPromise = import('verovio/wasm').then(
-      ({ VerovioToolkit }: { VerovioToolkit: new () => VerovioToolkitInstance }) => {
-        return new VerovioToolkit();
-      },
-    );
+    // Two-step initialisation required by the verovio 6.x package structure:
+    //   verovio/wasm  — default export is createVerovioModule(), an async
+    //                   Emscripten factory that resolves to the C++ bindings.
+    //   verovio/esm   — named export VerovioToolkit is the JS class; its
+    //                   constructor takes the resolved Emscripten module.
+    _verovioPromise = Promise.all([
+      import('verovio/wasm') as Promise<{ default: () => Promise<unknown> }>,
+      import('verovio/esm') as Promise<{ VerovioToolkit: new (m: unknown) => VerovioToolkitInstance }>,
+    ]).then(async ([wasmMod, esmMod]) => {
+      const VerovioModule = await wasmMod.default();
+      return new esmMod.VerovioToolkit(VerovioModule);
+    });
   }
   return _verovioPromise;
 }

@@ -73,6 +73,14 @@ The version is pinned exactly — no `^` or `~` range prefix — per Decision 3.
 
 The WASM bundle is loaded lazily on first navigation to the score viewer route via a singleton promise in `frontend/src/services/verovio.ts`. The ~7–10 MB WASM binary is not bundled into the initial app chunk.
 
+The verovio 6.x npm package requires a two-step initialisation: `verovio/wasm` exports `createVerovioModule` as its default (an async Emscripten factory), while `verovio/esm` exports `VerovioToolkit` (the JS class, whose constructor takes the resolved Emscripten module). The singleton loads both subpaths in parallel then constructs the toolkit:
+
+```typescript
+const [wasmMod, esmMod] = await Promise.all([import('verovio/wasm'), import('verovio/esm')]);
+const VerovioModule = await wasmMod.default();
+return new esmMod.VerovioToolkit(VerovioModule);
+```
+
 ---
 
 ## Alternatives considered
