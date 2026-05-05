@@ -36,9 +36,9 @@ const UserSchema = z.object({ id: z.string().uuid(), name: z.string() });
 
 describe('apiFetch — Zod schema validation', () => {
   it('parses a well-formed response when a schema is provided', async () => {
-    mockFetch({ id: '00000000-0000-0000-0000-000000000001', name: 'Test' });
+    mockFetch({ id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', name: 'Test' });
     const result = await apiFetch('/api/v1/test', undefined, UserSchema);
-    expect(result).toEqual({ id: '00000000-0000-0000-0000-000000000001', name: 'Test' });
+    expect(result).toEqual({ id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479', name: 'Test' });
   });
 
   it('throws ZodError when the response shape does not match the schema', async () => {
