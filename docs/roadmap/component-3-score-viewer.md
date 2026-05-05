@@ -546,6 +546,45 @@ Write tests in `src/routes/__tests__/ScoreViewer.test.tsx`. Mock `verovio.ts` an
 
 ---
 
+### Step 12.4 — Rendering refinements: layout, scale model, page flow, and music font
+
+These four concerns are tightly coupled — they all touch the Verovio options object and the score panel's CSS — and should be implemented together in a single pass after Step 12.3 is working.
+
+**Layout: centered, width-filling score panel.**
+
+The score panel container should be `width: 100%; max-width: 1400px; margin: 0 auto`. SVG pages stack inside it with `display: flex; flex-direction: column; align-items: stretch` so each page SVG fills the full available width. Do not set an explicit height on the container — it grows to fit the stacked pages.
+
+**Scale model: switch to `--scale-to-page-size`.**
+
+Replace the bare `scale` option with the `--scale-to-page-size` rendering model. The difference: instead of computing a `pageWidth` based on the desired notation width and then letting the SVG grow to fit, you set `pageWidth` to the container's actual pixel width and let Verovio output an SVG of exactly that size. The `scale` value then controls staff density (how much music fits per line), not page dimensions.
+
+In practice:
+
+1. Enable the option by setting `{ scaleToPageSize: true }` alongside `{ scale, pageWidth }` in the options object passed to `tk.setOptions()`.
+2. On mount, after the score panel container is in the DOM, read its `offsetWidth` and use that value as `pageWidth`. Do not hardcode a pixel value.
+3. Attach a `ResizeObserver` to the score panel container. On resize, debounce 300 ms, then re-read `offsetWidth` and trigger a full re-render if the width has changed by more than 4px (avoids re-render thrash from sub-pixel browser reflows).
+4. If `offsetWidth` is below 480px, clamp `pageWidth` to 480 and render at that width; let the score panel scroll horizontally. Add a `label-md` notice beneath the toolbar: "Score is best viewed at wider widths." Hide the notice when `offsetWidth` ≥ 480px.
+
+The `scale` preset buttons (Small / Medium / Large, defined in Step 12.1) require no change in their labels or values — they continue to control staff size. What changes is that their effect is now "staff density within the container width" rather than "notation width."
+
+Update `RenderOptions` in `verovio.ts` to remove `pageWidth` as a caller-supplied field and instead document that `pageWidth` is set internally by the score viewer from the container measurement. `renderFragment` (Step 13) is exempt from this rule — fragment renders use `breaks: "none"` with a wide fixed `pageWidth` already.
+
+**Page flow: eliminate inter-page whitespace.**
+
+Add `pageMarginTop: 0` and `pageMarginBottom: 0` to the Verovio options. This removes the blank content area Verovio reserves at the top and bottom of each SVG page. Keep `pageMarginLeft` and `pageMarginRight` at their defaults (Verovio's default is 50 MEI units, approximately comfortable) — those provide the horizontal breathing room on each system.
+
+Between the stacked page `<div>` wrappers, use a CSS `gap: 12px` on the flex column container. This gives just enough visual separation to read page boundaries during scrolling without a large blank region between systems.
+
+**Music font selector.**
+
+Add a font selector to the toolbar alongside the scale and transposition controls. Offer three options: Leipzig, Bravura, Leland. Default to **Bravura** for Phase 1. The selection is session-level only — no persistence to `localStorage` at this stage.
+
+The Verovio option key is `font` (e.g. `{ font: "Bravura" }`). Changing font triggers a full re-render identically to a scale change: set new options, reload MEI, re-render all pages with the overlay pattern from Step 12.1 (keep previous SVG visible, show "Re-rendering…" label during the pass).
+
+Render the selector as a `<select>` element, styled consistently with the transposition control. Its `label-md` label is "Music font".
+
+---
+
 ### Step 13 — Fragment rendering
 
 Fragment rendering uses the `mc_start`/`mc_end` coordinates established by the measure-number redesign. No coordinate conversion is needed at render time: pass `mc_start` and `mc_end` directly to `tk.select()` as the `measureRange` operand.

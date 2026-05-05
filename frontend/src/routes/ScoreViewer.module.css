@@ -55,19 +55,20 @@
   color: var(--color-on-primary);
 }
 
-/* ── Transposition select ───────────────────────────────────────────────── */
+/* ── Toolbar select controls (transposition, music font) ────────────────── */
 
-.transposeControl {
+/* Shared by both the transposition and font select controls. */
+.toolbarSelectControl {
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
 }
 
-.transposeLabel {
+.toolbarSelectLabel {
   cursor: default;
 }
 
-.transposeSelect {
+.toolbarSelect {
   background-color: var(--color-surface-container-low);
   border: 0;
   padding: var(--spacing-2) var(--spacing-3);
@@ -80,6 +81,18 @@
   cursor: pointer;
 }
 
+/* ── Narrow-screen notice ─────────────────────────────────────────────────── */
+
+/* Shown when the score panel is narrower than 480px. */
+.narrowNotice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2) var(--spacing-6);
+  background-color: var(--color-surface-container-low);
+  flex-shrink: 0;
+}
+
 /* ── Score panel ─────────────────────────────────────────────────────────── */
 
 .scorePanelWrapper {
@@ -90,8 +103,8 @@
   flex-direction: column;
 }
 
-/* Scrollable score content — horizontal scroll handles SVGs wider than the panel;
-   bottom padding reserves space for the fixed playback bar. */
+/* Scrollable score content — horizontal scroll handles SVGs wider than the
+   panel when the viewport is below the 480px clamp threshold. */
 .scorePanel {
   flex: 1;
   overflow: auto;
@@ -99,24 +112,37 @@
   padding-bottom: calc(var(--spacing-8) + 80px);
 }
 
-/* Each SVG page from Verovio sits as a block; last page needs no bottom gap */
-.svgPage {
+/* Centered, width-filling container for stacked SVG pages.
+   ResizeObserver measures offsetWidth here and passes it to Verovio as
+   pageWidth — the SVG output exactly fills this container. */
+.scoreContent {
   width: 100%;
-  margin-bottom: var(--spacing-8);
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
 }
 
-.svgPage:last-child {
-  margin-bottom: 0;
+/* Each SVG page from Verovio. Gap on the container provides spacing between
+   pages; no per-page margin needed. */
+.svgPage {
+  width: 100%;
 }
 
 /* ── Loading and error states ─────────────────────────────────────────────── */
 
+/* Sits above the score panel (position: relative on scorePanelWrapper).
+   Shown during 'loading' and 'error' states; hidden once 'ready'. */
 .statusPanel {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--spacing-8);
+  z-index: 2;
 }
 
 /* ── Re-render overlay ────────────────────────────────────────────────────── */

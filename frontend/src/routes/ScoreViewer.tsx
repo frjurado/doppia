@@ -12,10 +12,7 @@ import styles from './ScoreViewer.module.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Page width in Verovio's internal units. 1400 suits a widescreen score panel. */
-const PAGE_WIDTH = 1400;
-
-/** Default staff size (Verovio `scale` option). Medium = 35. */
+/** Staff size used when no explicit preset is selected. */
 const DEFAULT_SCALE = 35 as const;
 
 type ScalePreset = 25 | 35 | 45;
@@ -39,6 +36,27 @@ const TRANSPOSE_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
   { label: 'Down an octave', value: '-P8' },
 ];
 
+/** Music notation fonts available in Verovio 6.1.0. Default: Bravura. */
+const FONT_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
+  { label: 'Bravura', value: 'Bravura' },
+  { label: 'Leipzig', value: 'Leipzig' },
+  { label: 'Leland', value: 'Leland' },
+];
+
+const DEFAULT_FONT = 'Bravura';
+
+/**
+ * Fallback page width (pixels) used before the container is measured.
+ * The ResizeObserver and explicit measurement replace this on first render.
+ */
+const DEFAULT_PAGE_WIDTH = 1400;
+
+/**
+ * Minimum page width passed to Verovio (pixels). Below this, the score panel
+ * scrolls horizontally rather than compressing notation further.
+ */
+const MIN_PAGE_WIDTH = 480;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -54,16 +72,24 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *
  * Three-zone layout:
  *   1. Toolbar (container-high, scrolls with page): back link, staff size,
- *      transposition controls.
- *   2. Score panel: Verovio SVG pages rendered progressively.
+ *      transposition, and music font controls.
+ *   2. Score panel: Verovio SVG pages rendered progressively inside a
+ *      centered max-width: 1400px container.
  *   3. Playback bar (container-highest, fixed bottom): Step 14 placeholder.
  *
  * Loading sequence on mount:
  *   fetchMeiUrl() → fetch MEI text → getVerovioToolkit() → renderProgressively()
  *
- * Options changes (scale / transpose) debounce 200 ms then re-render in the
- * background; the previous SVG stays visible under a translucent overlay
- * until the new render is complete.
+ * Options changes (scale / transpose / font) debounce 200 ms then re-render
+ * in the background; the previous SVG stays visible under a translucent
+ * overlay until the new render is complete.
+ *
+ * Container width measurement:
+ *   A ResizeObserver watches the .scoreContent element. On resize (debounced
+ *   300 ms, >4px threshold) it updates pageWidthRef and triggers a re-render.
+ *   The initial render reads offsetWidth synchronously before the first await.
+ *   If the container is narrower than MIN_PAGE_WIDTH (480px), pageWidth is
+ *   clamped and a notice is shown beneath the toolbar.
  */
 export default function ScoreViewer() {
   const { movementId } = useParams<{ movementId: string }>();
@@ -75,22 +101,110 @@ export default function ScoreViewer() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [svgPages, setSvgPages] = useState<string[]>([]);
   const [isRerendering, setIsRerendering] = useState(false);
+  const [isNarrow, setIsNarrow] = useState(false);
 
   // ── Controls state ───────────────────────────────────────────────────────
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
   const [transpose, setTranspose] = useState('');
+  const [font, setFont] = useState<string>(DEFAULT_FONT);
 
   // ── Refs (stable across renders, safe to read inside async callbacks) ────
   // Verovio toolkit singleton acquired after WASM loads.
   const tkRef = useRef<Awaited<ReturnType<typeof getVerovioToolkit>> | null>(null);
   // MEI text cached for re-renders; never passed directly to JSX.
   const meiTextRef = useRef<string | null>(null);
-  // Debounce timer for options-change re-renders.
+  // Debounce timer for options-change re-renders (200 ms).
   const rerenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Mirror of scale / transpose in refs so the debounced callback always reads
-  // the latest value without needing them in its dependency list.
+  // Mirrors of controls in refs so debounced/observer callbacks read latest
+  // values without needing them in dependency lists.
   const scaleRef = useRef<ScalePreset>(DEFAULT_SCALE);
   const transposeRef = useRef('');
+  const fontRef = useRef<string>(DEFAULT_FONT);
+  // Measured content width of .scoreContent; passed to Verovio as pageWidth.
+  const pageWidthRef = useRef<number>(DEFAULT_PAGE_WIDTH);
+  // Ref to the .scoreContent element for width measurement.
+  const scorePanelRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Re-render (triggered by options changes or container resize) ──────────
+  /**
+   * Schedule a debounced re-render using the latest control values and the
+   * current measured pageWidth. Rapid changes within the 200 ms window
+   * coalesce into a single render call.
+   *
+   * The previous SVG stays visible while re-rendering; a translucent overlay
+   * signals the in-progress render without a blank-screen flash.
+   *
+   * pageWidth is read from pageWidthRef at timer-fire time so that a resize
+   * which arrives within the debounce window is automatically picked up.
+   */
+  const scheduleRerender = useCallback(
+    (newScale: ScalePreset, newTranspose: string, newFont: string) => {
+      if (rerenderTimerRef.current) clearTimeout(rerenderTimerRef.current);
+      rerenderTimerRef.current = setTimeout(async () => {
+        if (!tkRef.current || !meiTextRef.current) return;
+        setIsRerendering(true);
+        const collectedPages: string[] = [];
+        try {
+          await renderProgressively(
+            tkRef.current,
+            meiTextRef.current,
+            {
+              scale: newScale,
+              transpose: newTranspose,
+              font: newFont,
+              pageWidth: pageWidthRef.current,
+            },
+            (svg) => {
+              collectedPages.push(svg);
+            },
+            () => {
+              // Atomically swap all pages once rendering is complete, so the
+              // score never shows a partial mix of old and new pages.
+              setSvgPages([...collectedPages]);
+              setIsRerendering(false);
+            },
+          );
+        } catch {
+          setIsRerendering(false);
+        }
+      }, 200);
+    },
+    [],
+  );
+
+  // ── ResizeObserver: re-render when the score panel width changes ─────────
+  // Defined after scheduleRerender so it can reference it in the dep array.
+  useEffect(() => {
+    const el = scorePanelRef.current;
+    if (!el) return;
+
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const rawWidth = entry.contentRect.width;
+      const newWidth = Math.max(rawWidth, MIN_PAGE_WIDTH);
+
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        const prevWidth = pageWidthRef.current;
+        if (Math.abs(newWidth - prevWidth) > 4) {
+          pageWidthRef.current = newWidth;
+          setIsNarrow(rawWidth < MIN_PAGE_WIDTH);
+          if (tkRef.current && meiTextRef.current) {
+            scheduleRerender(scaleRef.current, transposeRef.current, fontRef.current);
+          }
+        }
+      }, 300);
+    });
+
+    observer.observe(el);
+    return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      observer.disconnect();
+    };
+  }, [scheduleRerender]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -102,6 +216,14 @@ export default function ScoreViewer() {
       setLoadingLabel('Loading score…');
       setSvgPages([]);
       setErrorMessage(null);
+
+      // Measure container width before any await — DOM is synchronously
+      // available at effect time. This value is used for the initial render;
+      // the ResizeObserver will re-render if the width changes later.
+      const containerWidth = scorePanelRef.current?.offsetWidth ?? DEFAULT_PAGE_WIDTH;
+      const initialPageWidth = Math.max(containerWidth, MIN_PAGE_WIDTH);
+      pageWidthRef.current = initialPageWidth;
+      setIsNarrow(containerWidth < MIN_PAGE_WIDTH);
 
       try {
         // 1. Resolve MEI object key → signed URL → MEI text.
@@ -127,7 +249,8 @@ export default function ScoreViewer() {
         const options: RenderOptions = {
           scale: scaleRef.current,
           transpose: transposeRef.current,
-          pageWidth: PAGE_WIDTH,
+          font: fontRef.current,
+          pageWidth: pageWidthRef.current,
         };
 
         let firstPageReceived = false;
@@ -163,56 +286,24 @@ export default function ScoreViewer() {
     };
   }, [movementId]);
 
-  // ── Re-render (triggered by options changes) ─────────────────────────────
-  /**
-   * Schedule a debounced re-render with the given options. Rapid changes
-   * within the 200 ms window coalesce into a single render call.
-   *
-   * The previous SVG stays visible while re-rendering; a translucent overlay
-   * signals the in-progress render without a blank-screen flash.
-   */
-  const scheduleRerender = useCallback(
-    (newScale: ScalePreset, newTranspose: string) => {
-      if (rerenderTimerRef.current) clearTimeout(rerenderTimerRef.current);
-      rerenderTimerRef.current = setTimeout(async () => {
-        if (!tkRef.current || !meiTextRef.current) return;
-        setIsRerendering(true);
-        const collectedPages: string[] = [];
-        try {
-          await renderProgressively(
-            tkRef.current,
-            meiTextRef.current,
-            { scale: newScale, transpose: newTranspose, pageWidth: PAGE_WIDTH },
-            (svg) => {
-              collectedPages.push(svg);
-            },
-            () => {
-              // Atomically swap all pages once rendering is complete, so the
-              // score never shows a partial mix of old and new pages.
-              setSvgPages([...collectedPages]);
-              setIsRerendering(false);
-            },
-          );
-        } catch {
-          setIsRerendering(false);
-        }
-      }, 200);
-    },
-    [],
-  );
-
   // ── Control handlers ─────────────────────────────────────────────────────
 
   const handleScaleChange = (newScale: ScalePreset) => {
     setScale(newScale);
     scaleRef.current = newScale;
-    scheduleRerender(newScale, transposeRef.current);
+    scheduleRerender(newScale, transposeRef.current, fontRef.current);
   };
 
   const handleTransposeChange = (newTranspose: string) => {
     setTranspose(newTranspose);
     transposeRef.current = newTranspose;
-    scheduleRerender(scaleRef.current, newTranspose);
+    scheduleRerender(scaleRef.current, newTranspose, fontRef.current);
+  };
+
+  const handleFontChange = (newFont: string) => {
+    setFont(newFont);
+    fontRef.current = newFont;
+    scheduleRerender(scaleRef.current, transposeRef.current, newFont);
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -255,8 +346,8 @@ export default function ScoreViewer() {
         </div>
 
         {/* Transposition select */}
-        <div className={styles.transposeControl}>
-          <label htmlFor="transpose-select" className={styles.transposeLabel}>
+        <div className={styles.toolbarSelectControl}>
+          <label htmlFor="transpose-select" className={styles.toolbarSelectLabel}>
             <Type
               variant="label-md"
               as="span"
@@ -267,7 +358,7 @@ export default function ScoreViewer() {
           </label>
           <select
             id="transpose-select"
-            className={styles.transposeSelect}
+            className={styles.toolbarSelect}
             value={transpose}
             onChange={(e) => handleTransposeChange(e.target.value)}
           >
@@ -278,10 +369,51 @@ export default function ScoreViewer() {
             ))}
           </select>
         </div>
+
+        {/* Music font select */}
+        <div className={styles.toolbarSelectControl}>
+          <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
+            <Type
+              variant="label-md"
+              as="span"
+              style={{ color: 'var(--color-on-surface-variant)' }}
+            >
+              Music font
+            </Type>
+          </label>
+          <select
+            id="font-select"
+            className={styles.toolbarSelect}
+            value={font}
+            onChange={(e) => handleFontChange(e.target.value)}
+          >
+            {FONT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </Surface>
+
+      {/* Narrow-screen notice — shown when container is below 480px */}
+      {isNarrow && (
+        <div className={styles.narrowNotice}>
+          <Type
+            variant="label-md"
+            as="span"
+            style={{ color: 'var(--color-on-surface-variant)' }}
+          >
+            Score is best viewed at wider widths.
+          </Type>
+        </div>
+      )}
 
       {/* ── Score panel ─────────────────────────────────────────────────── */}
       <div className={styles.scorePanelWrapper}>
+        {/* Status overlays: sit above the score panel during loading/error.
+            The score panel itself stays in the DOM so scorePanelRef can
+            measure the container width even before the first render. */}
         {status === 'loading' && (
           <Surface layer="base" className={styles.statusPanel}>
             <Type variant="label-md" as="p">{loadingLabel}</Type>
@@ -296,8 +428,13 @@ export default function ScoreViewer() {
           </Surface>
         )}
 
-        {status === 'ready' && (
-          <div className={styles.scorePanel}>
+        {/* Score panel: always rendered so scorePanelRef.current is available
+            for width measurement even before the first successful render. */}
+        <div className={styles.scorePanel}>
+          {/* .scoreContent is the measured element: ResizeObserver watches it.
+              Its offsetWidth (≤ 1400px via max-width) is what we pass to
+              Verovio as pageWidth, so the SVG fills the container exactly. */}
+          <div ref={scorePanelRef} className={styles.scoreContent}>
             {svgPages.map((svg, i) => (
               <div
                 key={i}
@@ -309,7 +446,7 @@ export default function ScoreViewer() {
               />
             ))}
           </div>
-        )}
+        </div>
 
         {/* Re-render overlay: sits above SVG pages while options change */}
         {isRerendering && (

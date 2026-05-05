@@ -32,9 +32,14 @@ export interface RenderOptions {
    */
   transpose: string;
   /**
-   * Page width in pixels. Use a large value (≥ 2200) with breaks:"none" to
-   * fit a fragment on a single line. For paginated full-score renders, 1200–1600
-   * is appropriate.
+   * Music notation font. One of "Bravura" (default), "Leipzig", "Leland".
+   * Changing font triggers a full re-render — same path as a scale change.
+   */
+  font: string;
+  /**
+   * Page width in pixels. For full-score renders, measure the score panel
+   * container's offsetWidth at render time — do not hardcode. For fragment
+   * renders, use a wide fixed value (≥ 2200) so all measures fit on one line.
    */
   pageWidth: number;
 }
@@ -128,8 +133,12 @@ export async function renderPage(
     scale: options.scale,
     transpose: options.transpose,
     pageWidth: options.pageWidth,
+    font: options.font,
     adjustPageHeight: true,
     breaks: 'smart',
+    scaleToPageSize: true,
+    pageMarginTop: 0,
+    pageMarginBottom: 0,
   });
   tk.loadData(meiText);
   return tk.renderToSVG(pageNum);
@@ -165,8 +174,13 @@ export async function renderFragment(
     scale: options.scale,
     transpose: options.transpose,
     pageWidth: options.pageWidth,
+    font: options.font,
     adjustPageHeight: true,
     breaks: 'none',
+    pageMarginTop: 0,
+    pageMarginBottom: 0,
+    // No scaleToPageSize for fragment renders — the wide fixed pageWidth
+    // ensures all selected measures appear on one line without scaling.
   });
   tk.loadData(meiText);
   tk.select({ measureRange: `${mcStart}-${mcEnd}` });
@@ -229,8 +243,12 @@ export async function renderProgressively(
     scale: options.scale,
     transpose: options.transpose,
     pageWidth: options.pageWidth,
+    font: options.font,
     adjustPageHeight: true,
     breaks: 'smart',
+    scaleToPageSize: true,
+    pageMarginTop: 0,
+    pageMarginBottom: 0,
   });
   tk.loadData(meiText);
 

@@ -153,7 +153,7 @@ describe('ScoreViewer', () => {
     });
   });
 
-  it('renders the toolbar with staff size and transposition controls', async () => {
+  it('renders the toolbar with staff size, transposition, and font controls', async () => {
     vi.mocked(scoreApi.fetchMeiUrl).mockReturnValue(new Promise(() => {}));
 
     renderScoreViewer();
@@ -163,6 +163,7 @@ describe('ScoreViewer', () => {
     expect(screen.getByText('Medium')).toBeInTheDocument();
     expect(screen.getByText('Large')).toBeInTheDocument();
     expect(screen.getByLabelText(/transpose/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/music font/i)).toBeInTheDocument();
   });
 
   it('renders a back-to-browse link in the toolbar', () => {
