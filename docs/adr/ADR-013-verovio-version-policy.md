@@ -61,6 +61,20 @@ Three categories of change require verification before deploying the upgrade:
 
 ---
 
+## Addendum — Frontend WASM pin (Component 3, Step 11, 2026-05-05)
+
+The `verovio` npm package was added to `frontend/package.json` as a production dependency during Component 3, Step 11, satisfying Decision 4 (WASM and Python bindings at the same major.minor version):
+
+```json
+"verovio": "6.1.0"
+```
+
+The version is pinned exactly — no `^` or `~` range prefix — per Decision 3. This matches `backend/requirements.txt`'s `verovio==6.1.0` pin. Future annual upgrades (Decision 2) must update both files in the same commit.
+
+The WASM bundle is loaded lazily on first navigation to the score viewer route via a singleton promise in `frontend/src/services/verovio.ts`. The ~7–10 MB WASM binary is not bundled into the initial app chunk.
+
+---
+
 ## Alternatives considered
 
 **Stay on 4.3.1 and implement SVG viewBox clipping for fragment rendering.** Feasible for Component 3: render the full score with `breaks: "none"`, parse the resulting SVG to locate measure barline x-coordinates, then clip the `viewBox` to the target range. The incipit workaround (smart-break page 1) is already adequate for Component 2. This option became moot once the `select()` + `redoLayout()` sequence was identified as functional — SVG clipping is significantly more complex and remains a fallback only.
