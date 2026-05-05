@@ -18,16 +18,28 @@ from __future__ import annotations
 import uuid
 
 from api.dependencies import get_storage, require_role
-from errors import ComposerNotFoundError, CorpusNotFoundError, WorkNotFoundError
+from errors import (
+    ComposerNotFoundError,
+    CorpusNotFoundError,
+    MovementNotFoundError,
+    WorkNotFoundError,
+)
 from fastapi import APIRouter, Depends
 from models.base import get_db
 from models.browse import (
     ComposerResponse,
     CorpusResponse,
+    MeiUrlResponse,
     MovementResponse,
     WorkResponse,
 )
-from services.browse import list_composers, list_corpora, list_movements, list_works
+from services.browse import (
+    get_movement_mei_url,
+    list_composers,
+    list_corpora,
+    list_movements,
+    list_works,
+)
 from services.object_storage import StorageClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,6 +133,46 @@ async def get_works(
         raise CorpusNotFoundError(
             f"Composer '{composer_slug}' or corpus '{corpus_slug}' not found.",
             detail={"composer_slug": composer_slug, "corpus_slug": corpus_slug},
+        )
+    return result
+
+
+@router.get(
+    "/movements/{movement_id}/mei-url",
+    response_model=MeiUrlResponse,
+    dependencies=[require_role("editor")],
+    summary="Get a signed MEI URL for a movement",
+    response_description=(
+        "A short-lived signed URL for the movement's normalised MEI file."
+    ),
+)
+async def get_mei_url(
+    movement_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    storage: StorageClient = Depends(get_storage),
+) -> MeiUrlResponse:
+    """Return a fresh signed URL for the movement's MEI file.
+
+    The URL is valid for 15 minutes. Clients must fetch the MEI text
+    immediately and use the text for rendering — the URL itself should not
+    be stored or reused.
+
+    Args:
+        movement_id: UUID primary key of the movement.
+        db: Async database session (injected).
+        storage: Object storage client (injected).
+
+    Returns:
+        :class:`~models.browse.MeiUrlResponse` with the signed URL.
+
+    Raises:
+        MovementNotFoundError: 404 if the movement ID is not found.
+    """
+    result = await get_movement_mei_url(movement_id=movement_id, db=db, storage=storage)
+    if result is None:
+        raise MovementNotFoundError(
+            f"Movement '{movement_id}' not found.",
+            detail={"movement_id": str(movement_id)},
         )
     return result
 

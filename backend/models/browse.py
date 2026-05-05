@@ -70,3 +70,14 @@ class MovementResponse(BaseModel):
     duration_bars: int | None
     incipit_url: str | None
     incipit_ready: bool
+
+
+class MeiUrlResponse(BaseModel):
+    """Response shape for the MEI signed URL endpoint.
+
+    The ``url`` is a pre-signed object storage URL valid for 15 minutes.
+    Clients must fetch the MEI text immediately via this URL; the URL itself
+    should not be stored or reused after expiry.
+    """
+
+    url: str

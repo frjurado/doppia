@@ -3,7 +3,7 @@ import RequireAuth from './components/auth/RequireAuth';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import CorpusBrowser from './routes/CorpusBrowser';
-import ScoreViewerStub from './routes/ScoreViewerStub';
+import ScoreViewer from './routes/ScoreViewer';
 
 /**
  * Root application component.
@@ -30,10 +30,10 @@ export default function App() {
           }
         />
         <Route
-          path="/tag/:movementId"
+          path="/scores/:movementId"
           element={
             <RequireAuth>
-              <ScoreViewerStub />
+              <ScoreViewer />
             </RequireAuth>
           }
         />

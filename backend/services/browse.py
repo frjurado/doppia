@@ -17,6 +17,7 @@ import uuid
 from models.browse import (
     ComposerResponse,
     CorpusResponse,
+    MeiUrlResponse,
     MovementResponse,
     WorkResponse,
 )
@@ -152,6 +153,32 @@ async def list_works(
         )
         for work, movement_count in result.all()
     ]
+
+
+async def get_movement_mei_url(
+    movement_id: uuid.UUID,
+    db: AsyncSession,
+    storage: StorageClient,
+) -> MeiUrlResponse | None:
+    """Resolve the MEI object key for a movement to a signed URL.
+
+    Args:
+        movement_id: UUID primary key of the movement.
+        db: Async database session.
+        storage: Object storage client for generating signed URLs.
+
+    Returns:
+        :class:`~models.browse.MeiUrlResponse` with the signed URL, or
+        ``None`` if the movement is not found.
+    """
+    row = await db.execute(select(Movement).where(Movement.id == movement_id))
+    movement = row.scalar_one_or_none()
+    if movement is None:
+        return None
+    url = await storage.signed_url(
+        movement.mei_object_key, expires_in=CLIENT_FACING_URL_TTL
+    )
+    return MeiUrlResponse(url=url)
 
 
 async def list_movements(
