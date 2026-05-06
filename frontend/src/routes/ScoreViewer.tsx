@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import FragmentOverlay from '../components/score/FragmentOverlay';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -445,6 +446,10 @@ export default function ScoreViewer() {
                 dangerouslySetInnerHTML={{ __html: svg }}
               />
             ))}
+            {/* Step 13: fragment overlay slot — empty until Components 7/8.
+                Overlays are always HTML elements above the SVG, never injected
+                into Verovio's SVG output (see CLAUDE.md §"Verovio SVG overlay rule"). */}
+            <FragmentOverlay />
           </div>
         </div>
 

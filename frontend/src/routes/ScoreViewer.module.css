@@ -123,6 +123,11 @@
   flex-direction: column;
   align-items: stretch;
   gap: 12px;
+
+  /* Establishes the containing block for FragmentOverlay (Step 13).
+     All overlay coordinates (brackets, labels) are relative to this element,
+     which matches the SVG measure geometry exactly. */
+  position: relative;
 }
 
 /* Each SVG page from Verovio. Gap on the container provides spacing between
