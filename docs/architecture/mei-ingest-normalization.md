@@ -454,3 +454,50 @@ Verovio correctly isolates the individual `<ending>` elements by document order.
 `"3-end"` on the 6-measure k331 fixture renders positions 3–6 (4 measures, 492×124 px). `"start-end"` renders all 6 measures (identical to the full render). `"start-100"` on a 6-measure piece clamps to the last measure and renders all 6 measures correctly (720×124 px). Verovio emits a warning to stderr (`Measure range end for selection 'start-100' could not be found`) but `tk.getLog()` returns empty — the render succeeds. Use `"start-end"` rather than `"start-{large_N}"` when a full render fallback is needed; it is cleaner and silent.
 
 **Production recommendation:** Update `generate_incipit.py` to use `select({measureRange: "start-4"}) + redoLayout()` with `pageWidth=2200` and `breaks="none"`. This guarantees exactly 4 bars regardless of notation density or measure width, includes pickup bars automatically, and replaces the `breaks="smart"` / page-1 approach whose quality problems are documented above. For movements with fewer than 4 measures, use `"start-end"` as the fallback range (guard with `movement.duration_bars < 4`).
+
+---
+
+## § Verovio WASM client-side verification: fragment rendering edge cases (Component 3, Step 13)
+
+*Spike: `frontend/src/services/__tests__/verovio-fragment.wasm-spike.test.ts`.
+Run with `VEROVIO_WASM_SPIKE=1 npx vitest run src/services/__tests__/verovio-fragment.wasm-spike.test.ts`.
+Verovio 6.1.0 WASM build via the `verovio` npm package (exact version pinned in `frontend/package.json`).*
+
+The Python bindings spike (Findings 6–9, 2026-05-04 above) was verified against the
+WASM JavaScript client-side build. The WASM build wraps the same Verovio C++ library
+at the same version, so behavioural differences are not expected — this section records
+the empirical confirmation.
+
+Run the spike locally and paste the measured SVG widths in the findings below.
+
+### WASM Finding 1 — `"1-N"` and `"start-N"` produce SVGs of identical width
+
+`renderFragment(tk, FIXTURE_LINEAR, 1, 4, opts)` (which formats `measureRange` as `"1-4"`) and a
+direct call with `select({ measureRange: "start-4" })` + `redoLayout()` produce SVGs of identical
+pixel width. Confirms Finding 6 (Python) holds in WASM.
+
+*Measured:* `"1-4"` width = **392px**, `"start-4"` width = **392px**.
+
+### WASM Finding 2 — Pickup bar at position 1 renders correctly under WASM
+
+`renderFragment(tk, FIXTURE_PICKUP, 1, 2, opts)` on a movement with a pickup bar at `@n="0"`
+(position index 1) produces a non-empty SVG wider than 200px, confirming the selection resolved
+correctly. Confirms Finding 7 (Python) holds in WASM.
+
+*Measured:* mc 1-2 width = **210px**.
+
+### WASM Finding 3 — Volta ending position isolation confirmed in WASM
+
+`renderFragment(tk, FIXTURE_VOLTA, 2, 2, opts)` and `renderFragment(tk, FIXTURE_VOLTA, 3, 3, opts)`
+produce different SVG strings (position 2 = first ending, D4; position 3 = second ending, E4).
+Confirms Finding 8 (Python) holds in WASM: `measureRange` uses document-order position indices
+even when `@n` values repeat across `<ending>` elements.
+
+*Measured:* pos2 width = **121px**, pos3 width = **121px**, SVGs differ = **true**.
+
+### Workarounds required
+
+None. `renderFragment()` in `frontend/src/services/verovio.ts` requires no WASM-specific
+workarounds. The `"${mcStart}-${mcEnd}"` format string is correct for all verified edge cases.
+`mc_start`/`mc_end` values from the fragment row can be passed directly as `measureRange`
+operands without coordinate conversion.

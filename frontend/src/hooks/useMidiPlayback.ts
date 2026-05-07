@@ -1,0 +1,360 @@
+/**
+ * useMidiPlayback — MIDI playback hook via Tone.js + @tonejs/midi.
+ *
+ * This hook is the **sole interface between the playback layer and the score
+ * viewer** (docs/roadmap/component-3-score-viewer.md §14.4). The score viewer
+ * calls `play()`, `pause()`, and `stop()`. It receives the current MIDI time
+ * (milliseconds) via `onPositionUpdate`, which it uses to call
+ * `tk.getElementsAtTime(ms)` and update the SVG playback highlight.
+ *
+ * SoundFont setup (Step 14.2):
+ *   Set VITE_SOUNDFONT_BASE_URL in .env to the MinIO or R2 base URL. The
+ *   sampler loads files at `{base}/soundfonts/piano/{note}.mp3`. File names
+ *   use Tone.js note convention: C4.mp3, Ds4.mp3 (D#4), Fs4.mp3 (F#4), etc.
+ *   If VITE_SOUNDFONT_BASE_URL is not set, the sampler will attempt to load
+ *   from '' and fail silently — the status stays 'loading-instrument'.
+ *
+ * Autoplay policy (Step 14.1):
+ *   `Tone.start()` is called inside `play()`, which is triggered by a user
+ *   gesture (the play button). AudioContext is never started on mount.
+ *
+ * midiBase64 lifecycle:
+ *   - null: no MIDI available (score not loaded). Play is disabled.
+ *   - string: base64 MIDI from Verovio renderToMIDI(). When this changes
+ *     (e.g. after transposition), the hook stops playback and prepares to
+ *     reschedule on the next `play()` call.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as Tone from 'tone';
+import { Midi } from '@tonejs/midi';
+
+// ---------------------------------------------------------------------------
+// SoundFont configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Base URL for SoundFont audio files (MinIO in dev, Cloudflare R2 in prod).
+ * Convention: `{SOUNDFONT_BASE_URL}/soundfonts/piano/{note}.mp3`
+ * Note names: C4.mp3, Ds4.mp3 (D#4), Fs4.mp3 (F#4), A4.mp3, etc.
+ */
+const SOUNDFONT_BASE_URL: string = import.meta.env['VITE_SOUNDFONT_BASE_URL'] ?? '';
+
+/**
+ * Compact piano sample map. Keys are Tone.js note names (must use `#` for
+ * sharps); values are filenames using the `s`-suffix convention (URL-safe).
+ * Tone.Sampler pitch-shifts between provided samples to cover the full MIDI
+ * keyboard range (C1–C7).
+ *
+ * Key  = Tone.js note name, e.g. "D#4"  (sharp with `#`)
+ * Value = filename,         e.g. "Ds4.mp3" (sharp with `s`, URL-safe)
+ */
+const PIANO_SAMPLE_URLS: Record<string, string> = {
+  'C1': 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', 'A1': 'A1.mp3',
+  'C2': 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', 'A2': 'A2.mp3',
+  'C3': 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', 'A3': 'A3.mp3',
+  'C4': 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3', 'A4': 'A4.mp3',
+  'C5': 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3', 'A5': 'A5.mp3',
+  'C6': 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3', 'A6': 'A6.mp3',
+  'C7': 'C7.mp3', 'D#7': 'Ds7.mp3', 'F#7': 'Fs7.mp3', 'A7': 'A7.mp3',
+};
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Playback lifecycle states exposed to the score viewer. */
+export type PlaybackStatus =
+  | 'idle'               // No MIDI available; play button disabled.
+  | 'loading-instrument' // SoundFont loading on first play click.
+  | 'instrument-error'   // SoundFont failed to load (404, timeout, etc.). Retryable.
+  | 'ready'              // MIDI available, not playing. Play enabled.
+  | 'playing'            // Transport running.
+  | 'paused';            // Transport paused at current position.
+
+/** 1-indexed bar and beat position, updated during playback via RAF. */
+export interface PlaybackPosition {
+  /** 1-indexed measure number. */
+  bar: number;
+  /** 1-indexed beat within the measure. */
+  beat: number;
+}
+
+export interface UseMidiPlaybackResult {
+  /** Current playback lifecycle state. */
+  status: PlaybackStatus;
+  /** Current bar and beat (1-indexed), updated at ~60fps during playback. */
+  position: PlaybackPosition;
+  /**
+   * Start (or resume) playback.
+   * - On first call: starts AudioContext, loads SoundFont, schedules MIDI.
+   * - On subsequent calls (after pause): resumes the transport.
+   * - Always triggers from a user gesture — never called on mount.
+   */
+  play: () => Promise<void>;
+  /** Pause at current position. Resumable via play(). */
+  pause: () => void;
+  /** Stop and reset to beginning. Clears all scheduled events. */
+  stop: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Decode a base64 string (from Verovio renderToMIDI()) to a Uint8Array
+ * suitable for the @tonejs/midi Midi constructor.
+ */
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binaryStr = atob(base64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
+ * Parse a Tone.js position string ("BBB:BB:SSS", 0-indexed) to a
+ * 1-indexed PlaybackPosition for display.
+ */
+function parseTransportPosition(posStr: string): PlaybackPosition {
+  const parts = posStr.split(':').map(Number);
+  return {
+    bar: (parts[0] ?? 0) + 1,
+    beat: (parts[1] ?? 0) + 1,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+/**
+ * React hook for MIDI playback. See module-level doc for full context.
+ *
+ * @param midiBase64 - Base64-encoded MIDI from Verovio renderToMIDI(), or
+ *   null when the score is not yet rendered or MIDI generation failed.
+ * @param onPositionUpdate - Called on each animation frame during playback
+ *   with the current MIDI time in milliseconds. The score viewer passes this
+ *   to `tk.getElementsAtTime(timeMs)` to update the SVG highlight.
+ */
+export function useMidiPlayback(
+  midiBase64: string | null,
+  onPositionUpdate: (timeMs: number) => void,
+): UseMidiPlaybackResult {
+  const [status, setStatus] = useState<PlaybackStatus>('idle');
+  const [position, setPosition] = useState<PlaybackPosition>({ bar: 1, beat: 1 });
+
+  // Refs: stable identities, safe to read inside async callbacks.
+  const samplerRef = useRef<Tone.Sampler | null>(null);
+  const samplerLoadedRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
+  // Keep onPositionUpdate current without making it a play() dep.
+  const onPositionUpdateRef = useRef(onPositionUpdate);
+  // Keep midiBase64 current without making it a play() dep.
+  const midiBase64Ref = useRef(midiBase64);
+
+  useEffect(() => {
+    onPositionUpdateRef.current = onPositionUpdate;
+  }, [onPositionUpdate]);
+
+  useEffect(() => {
+    midiBase64Ref.current = midiBase64;
+  }, [midiBase64]);
+
+  // ── RAF position tracking ──────────────────────────────────────────────────
+
+  const stopTracking = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  const startTracking = useCallback(() => {
+    stopTracking();
+    const tick = () => {
+      const transport = Tone.getTransport();
+      // Notify the score viewer with current MIDI time for SVG highlight.
+      onPositionUpdateRef.current(transport.seconds * 1000);
+      // Update position display for the playback bar.
+      setPosition(parseTransportPosition(transport.position.toString()));
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [stopTracking]);
+
+  // ── midiBase64 changes (e.g. transposition) ──────────────────────────────
+
+  /**
+   * When MIDI changes, stop playback so the next play() call reschedules from
+   * the new MIDI. Events are cleared in play() (not here) so that the
+   * transport is in a clean state before the new schedule is applied.
+   * Status 14.6: "If playback is in progress, stop it first."
+   */
+  useEffect(() => {
+    const transport = Tone.getTransport();
+    if (transport.state === 'started' || transport.state === 'paused') {
+      transport.stop();
+      transport.cancel();
+    }
+    stopTracking();
+    setPosition({ bar: 1, beat: 1 });
+    if (midiBase64 !== null) {
+      // Don't interrupt 'loading-instrument' — play() will advance status.
+      setStatus((prev) => (prev !== 'loading-instrument' ? 'ready' : prev));
+    } else {
+      setStatus('idle');
+    }
+  }, [midiBase64, stopTracking]);
+
+  // ── Transport controls ─────────────────────────────────────────────────────
+
+  /**
+   * Start playback. On the first call, starts the AudioContext (requires user
+   * gesture) and loads the SoundFont. On subsequent calls after pause, resumes.
+   * Always reschedules MIDI from the beginning (except when resuming a pause).
+   */
+  const play = useCallback(async () => {
+    const midi64 = midiBase64Ref.current;
+    if (!midi64) return;
+
+    const transport = Tone.getTransport();
+
+    // Resume from pause: events already scheduled, just restart transport.
+    if (transport.state === 'paused' && samplerLoadedRef.current) {
+      transport.start();
+      setStatus('playing');
+      startTracking();
+      return;
+    }
+
+    // First play: start AudioContext (browser autoplay policy) and load SoundFont.
+    if (!samplerLoadedRef.current) {
+      setStatus('loading-instrument');
+      await Tone.start();
+
+      const loadResult = await new Promise<'ok' | 'error'>((resolve) => {
+        // Tone.js calls onerror for each sample that fails to fetch (e.g. 404).
+        // We resolve 'error' on the first failure; subsequent calls are no-ops
+        // on the already-settled promise.
+        // A 10 s timeout guards against silently hanging when the URL is
+        // reachable but returns nothing (e.g. VITE_SOUNDFONT_BASE_URL unset →
+        // requests go to the Vite dev server which never 404s synchronously).
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (!settled) { settled = true; resolve('error'); }
+        }, 10_000);
+
+        samplerRef.current = new Tone.Sampler({
+          urls: PIANO_SAMPLE_URLS,
+          baseUrl: `${SOUNDFONT_BASE_URL}/soundfonts/piano/`,
+          onload: () => {
+            if (!settled) { settled = true; clearTimeout(timer); resolve('ok'); }
+          },
+          onerror: () => {
+            if (!settled) { settled = true; clearTimeout(timer); resolve('error'); }
+          },
+        }).toDestination();
+      });
+
+      if (loadResult === 'error') {
+        setStatus('instrument-error');
+        return;
+      }
+      samplerLoadedRef.current = true;
+    }
+
+    // Clear any previous schedule and reset to beginning.
+    transport.cancel();
+    transport.stop();
+    transport.position = '0:0:0';
+
+    // Parse MIDI and schedule all note events on the transport.
+    const bytes = base64ToUint8Array(midi64);
+    const midiData = new Midi(bytes.buffer as ArrayBuffer);
+
+    // Sync the Tone.js Transport tempo and time signature with the actual MIDI
+    // header so the position display counts bars and beats at the correct
+    // musical rate. Without this, the transport always assumes 120 BPM and 4/4,
+    // making the position display wrong for any other tempo or meter.
+    //
+    // Multiple tempo changes are scheduled via bpm.setValueAtTime() so a ritard
+    // or accelerando mid-piece is reflected in the position display.
+    // Tone.js supports only a single static time signature — mid-piece meter
+    // changes are not tracked in the display (acceptable limitation).
+    const tempos = midiData.header?.tempos ?? [];
+    const timeSignatures = midiData.header?.timeSignatures ?? [];
+    if (tempos.length > 0) {
+      transport.bpm.cancelScheduledValues(0);
+      transport.bpm.value = tempos[0].bpm;
+      for (let i = 1; i < tempos.length; i++) {
+        transport.bpm.setValueAtTime(tempos[i].bpm, tempos[i].time ?? 0);
+      }
+    }
+    if (timeSignatures.length > 0) {
+      transport.timeSignature = timeSignatures[0].timeSignature;
+    }
+
+    midiData.tracks.forEach((track) => {
+      track.notes.forEach((note) => {
+        transport.schedule((audioTime) => {
+          samplerRef.current?.triggerAttackRelease(
+            note.name,
+            note.duration,
+            audioTime,
+            note.velocity,
+          );
+        }, note.time);
+      });
+    });
+
+    transport.start();
+    setStatus('playing');
+    startTracking();
+  }, [startTracking]);
+
+  /** Pause at the current position. Call play() to resume. */
+  const pause = useCallback(() => {
+    Tone.getTransport().pause();
+    stopTracking();
+    setStatus('paused');
+  }, [stopTracking]);
+
+  /**
+   * Stop playback and reset to the beginning. Clears all scheduled events.
+   * The SVG highlight is cleared separately by the score viewer's handleStop
+   * wrapper (which has access to the highlightedElRef).
+   */
+  const stop = useCallback(() => {
+    const transport = Tone.getTransport();
+    transport.stop();
+    transport.cancel();
+    transport.position = '0:0:0';
+    stopTracking();
+    setPosition({ bar: 1, beat: 1 });
+    // If MIDI is available, return to ready (not idle) after stop.
+    setStatus(midiBase64Ref.current !== null ? 'ready' : 'idle');
+  }, [stopTracking]);
+
+  // ── Cleanup on unmount ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    return () => {
+      stopTracking();
+      const transport = Tone.getTransport();
+      transport.cancel();
+      transport.stop();
+      if (samplerRef.current) {
+        samplerRef.current.dispose();
+        samplerRef.current = null;
+        samplerLoadedRef.current = false;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — runs only on unmount
+
+  return { status, position, play, pause, stop };
+}

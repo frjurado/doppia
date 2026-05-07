@@ -294,7 +294,29 @@ CREATE TABLE prose_chunk (
 
 ---
 
-### 4. Redis — Caching and Session State (Phase 2+)
+### 4. Object Storage — MEI Files and SoundFont Assets
+
+**Local dev:** MinIO (`minio/minio` image) running on port 9000. Accessed by the API to resolve `mei_object_key` values into signed URLs (15-minute TTL). Bucket name: `doppia`.
+
+**Production:** Cloudflare R2. The API generates pre-signed R2 URLs; the frontend fetches MEI content directly from R2 without proxying through the API server.
+
+**MEI object key convention** (stored in `movement.mei_object_key`):
+```
+{composer.slug}/{corpus.slug}/{work.slug}/{movement.slug}.mei
+```
+Example: `mozart/piano-sonatas/k331/movement-1.mei`
+
+**SoundFont key convention** (Step 14.2 — piano audio samples for MIDI playback):
+```
+soundfonts/piano/{note}.mp3
+```
+Example notes: `C4.mp3`, `Ds4.mp3` (D#4), `Fs4.mp3` (F#4), `A4.mp3`.
+
+The `soundfonts/piano/` prefix is a public-read path (no signed URL required). The frontend loads SoundFont files via `VITE_SOUNDFONT_BASE_URL` (set to the MinIO base URL in dev, the R2 public URL in production). Upload Salamander Grand Piano reduced samples (1–2 MB total) to this path before enabling MIDI playback.
+
+---
+
+### 5. Redis — Caching and Session State (Phase 2+)
 
 **Role:** Not required in Phase 1. Introduced in Phase 2 when user sessions and repeated knowledge graph queries start to matter.
 

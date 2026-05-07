@@ -1,23 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import BrowseAccordion from '../components/browse/BrowseAccordion';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
 import MovementCard from '../components/browse/MovementCard';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
-import {
-  fetchComposers,
-  fetchCorpora,
-  fetchMovements,
-  fetchWorks,
-} from '../services/browseApi';
-import type {
-  ComposerResponse,
-  CorpusResponse,
-  MovementResponse,
-  WorkResponse,
-} from '../types/browse';
+import { usePageTitle } from '../hooks/usePageTitle';
+import { useBrowseSelection } from '../hooks/useBrowseSelection';
 import styles from './CorpusBrowser.module.css';
 
 function useMediaQuery(query: string): boolean {
@@ -42,119 +32,44 @@ function useMediaQuery(query: string): boolean {
  * Mobile (< 768px): stacked accordion.
  */
 export default function CorpusBrowser() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 767px)');
+  usePageTitle('Browse — Doppia');
 
-  const composerSlug = searchParams.get('composer');
-  const corpusSlug = searchParams.get('corpus');
-  const workId = searchParams.get('work');
-  const movementId = searchParams.get('movement');
-
-  const [composers, setComposers] = useState<ComposerResponse[]>([]);
-  const [composersLoading, setComposersLoading] = useState(true);
-
-  const [corpora, setCorpora] = useState<CorpusResponse[]>([]);
-  const [corporaLoading, setCorporaLoading] = useState(false);
-
-  const [works, setWorks] = useState<WorkResponse[]>([]);
-  const [worksLoading, setWorksLoading] = useState(false);
-
-  const [movements, setMovements] = useState<MovementResponse[]>([]);
-  const [movementsLoading, setMovementsLoading] = useState(false);
-
-  // Fetch composers on mount.
-  useEffect(() => {
-    setComposersLoading(true);
-    fetchComposers()
-      .then(setComposers)
-      .finally(() => setComposersLoading(false));
-  }, []);
-
-  // Fetch corpora when composer selection changes.
-  useEffect(() => {
-    if (!composerSlug) {
-      setCorpora([]);
-      return;
-    }
-    setCorporaLoading(true);
-    setCorpora([]);
-    fetchCorpora(composerSlug)
-      .then(setCorpora)
-      .finally(() => setCorporaLoading(false));
-  }, [composerSlug]);
-
-  // Fetch works when corpus selection changes.
-  useEffect(() => {
-    if (!composerSlug || !corpusSlug) {
-      setWorks([]);
-      return;
-    }
-    setWorksLoading(true);
-    setWorks([]);
-    fetchWorks(composerSlug, corpusSlug)
-      .then(setWorks)
-      .finally(() => setWorksLoading(false));
-  }, [composerSlug, corpusSlug]);
-
-  // Fetch movements when work selection changes.
-  useEffect(() => {
-    if (!workId) {
-      setMovements([]);
-      return;
-    }
-    setMovementsLoading(true);
-    setMovements([]);
-    fetchMovements(workId)
-      .then(setMovements)
-      .finally(() => setMovementsLoading(false));
-  }, [workId]);
-
-  function select(key: 'composer' | 'corpus' | 'work' | 'movement', value: string) {
-    const next = new URLSearchParams(searchParams);
-    next.set(key, value);
-    if (key === 'composer') {
-      next.delete('corpus');
-      next.delete('work');
-      next.delete('movement');
-    }
-    if (key === 'corpus') {
-      next.delete('work');
-      next.delete('movement');
-    }
-    if (key === 'work') {
-      next.delete('movement');
-    }
-    setSearchParams(next, { replace: true });
-  }
-
-  const selectedMovement = movements.find((m) => m.id === movementId) ?? null;
+  const selection = useBrowseSelection();
+  const {
+    composerSlug,
+    corpusSlug,
+    workId,
+    movementId,
+    composers,
+    composersLoading,
+    composersError,
+    retryComposers,
+    corpora,
+    corporaLoading,
+    corporaError,
+    retryCorpora,
+    works,
+    worksLoading,
+    worksError,
+    retryWorks,
+    movements,
+    movementsLoading,
+    movementsError,
+    retryMovements,
+    selectedMovement,
+    select,
+  } = selection;
 
   return (
-    <Surface layer="base" className={styles.page}>
+    <Surface layer="base" className={styles.page} data-has-footer={selectedMovement ? 'true' : 'false'}>
       {isMobile ? (
-        <BrowseAccordion
-          composers={composers}
-          selectedComposerSlug={composerSlug}
-          onSelectComposer={(slug) => select('composer', slug)}
-          composersLoading={composersLoading}
-          corpora={corpora}
-          selectedCorpusSlug={corpusSlug}
-          onSelectCorpus={(slug) => select('corpus', slug)}
-          corporaLoading={corporaLoading}
-          works={works}
-          selectedWorkId={workId}
-          onSelectWork={(id) => select('work', id)}
-          worksLoading={worksLoading}
-          movements={movements}
-          selectedMovementId={movementId}
-          onSelectMovement={(id) => select('movement', id)}
-          movementsLoading={movementsLoading}
-        />
+        <BrowseAccordion selection={selection} />
       ) : (
         <div className={styles.grid}>
           {/* Composers column */}
-          <Surface layer="container-low" className={styles.columnPanel}>
+          <Surface layer="container-lowest" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
                 Composer
@@ -180,6 +95,8 @@ export default function CorpusBrowser() {
                   </Type>
                 </BrowseItem>
               )}
+              error={composersError}
+              onRetry={retryComposers}
             />
           </Surface>
 
@@ -211,11 +128,13 @@ export default function CorpusBrowser() {
                 </BrowseItem>
               )}
               emptyLabel={composerSlug ? 'No corpora found' : 'Select a composer'}
+              error={corporaError}
+              onRetry={retryCorpora}
             />
           </Surface>
 
           {/* Works column */}
-          <Surface layer="container-low" className={styles.columnPanel}>
+          <Surface layer="container-lowest" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
                 Work
@@ -244,6 +163,8 @@ export default function CorpusBrowser() {
                 </BrowseItem>
               )}
               emptyLabel={corpusSlug ? 'No works found' : 'Select a corpus'}
+              error={worksError}
+              onRetry={retryWorks}
             />
           </Surface>
 
@@ -264,6 +185,8 @@ export default function CorpusBrowser() {
                 <MovementCard movement={m} isSelected={isSelected} onClick={onSelect} />
               )}
               emptyLabel={workId ? 'No movements found' : 'Select a work'}
+              error={movementsError}
+              onRetry={retryMovements}
             />
           </Surface>
         </div>
@@ -292,9 +215,9 @@ export default function CorpusBrowser() {
             <button
               type="button"
               className={styles.ctaButton}
-              onClick={() => navigate(`/tag/${selectedMovement.id}`)}
+              onClick={() => navigate(`/scores/${selectedMovement.id}`)}
             >
-              Open for tagging
+              <Type variant="label-md" as="span">Open for tagging</Type>
             </button>
           </div>
         </div>

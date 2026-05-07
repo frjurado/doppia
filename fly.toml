@@ -8,6 +8,10 @@ primary_region = "lhr"
   [build.args]
     VITE_SUPABASE_URL = "https://vywprfptbicpvuygksad.supabase.co"
     VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5d3ByZnB0YmljcHZ1eWdrc2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzQ1ODEsImV4cCI6MjA5MjExMDU4MX0.yakwqnLrfFk-mljsVaMrXjAF1YLdrln61MWSoWZvD4o"
+    # Public URL for piano soundfont MP3s served directly to the browser.
+    # Set to the R2.dev public URL (or custom domain) after completing the
+    # SoundFont setup steps in docs/deployment.md §"SoundFont setup".
+    VITE_SOUNDFONT_BASE_URL = "https://pub-657dac2ba49c49c687faa2f1e1312ba8.r2.dev"
 
 [processes]
   app    = "uvicorn main:app --host 0.0.0.0 --port 8000"

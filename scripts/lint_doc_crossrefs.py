@@ -38,7 +38,12 @@ SCAN_EXTRA_FILES = ["README.md", "CLAUDE.md", "CONTRIBUTING.md"]
 # Subdirectories of SCAN_DIRS to skip.  ``docs/reports`` contains external
 # review documents that deliberately reference non-existent or planned files
 # (they describe problems to fix); scanning them produces only false positives.
-SCAN_EXCLUDE_PREFIXES = ("docs/reports", "docs\\reports")
+SCAN_EXCLUDE_PREFIXES = (
+    "docs/reports",
+    "docs\\reports",
+    "docs/roadmap",
+    "docs\\roadmap",
+)
 
 # Only flag paths that start with one of these top-level directories.
 # This prevents false positives from S3 key patterns, short paths relative to
@@ -47,8 +52,17 @@ ROOTED_PREFIXES = ("docs/", "backend/", "frontend/", "scripts/", "tests/")
 
 # File extensions worth checking.
 CHECKABLE_EXTENSIONS = {
-    ".md", ".py", ".ts", ".tsx", ".js", ".yml", ".yaml",
-    ".json", ".toml", ".txt", ".sql",
+    ".md",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".yml",
+    ".yaml",
+    ".json",
+    ".toml",
+    ".txt",
+    ".sql",
 }
 
 # Regex: extract the *content* of backtick spans and Markdown link targets.

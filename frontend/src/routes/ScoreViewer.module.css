@@ -1,0 +1,254 @@
+/* Score viewer — three-zone layout: toolbar + score panel + playback bar */
+
+/* Visually-hidden utility: readable by screen readers, invisible to sighted users. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viewer {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-6);
+  padding: var(--spacing-3) var(--spacing-6);
+  flex-shrink: 0;
+}
+
+.backLink {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+}
+
+/* Push controls to the right of the back link */
+.toolbarSeparator {
+  flex: 1;
+}
+
+/* ── Staff size presets ─────────────────────────────────────────────────── */
+
+.staffSizeControl {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.sizeButton {
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-on-surface-variant);
+}
+
+.sizeButton:hover {
+  color: var(--color-primary);
+}
+
+.sizeButtonActive {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* ── Toolbar select controls (transposition, music font) ────────────────── */
+
+/* Shared by both the transposition and font select controls. */
+.toolbarSelectControl {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.toolbarSelectLabel {
+  cursor: default;
+}
+
+.toolbarSelect {
+  background-color: var(--color-surface-container-low);
+  border: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-background);
+  cursor: pointer;
+}
+
+/* ── Narrow-screen notice ─────────────────────────────────────────────────── */
+
+/* Shown when the score panel is narrower than 480px. */
+.narrowNotice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-2) var(--spacing-6);
+  background-color: var(--color-surface-container-low);
+  flex-shrink: 0;
+}
+
+/* ── Score panel ─────────────────────────────────────────────────────────── */
+
+.scorePanelWrapper {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollable score content — horizontal scroll handles SVGs wider than the
+   panel when the viewport is below the 480px clamp threshold. */
+.scorePanel {
+  flex: 1;
+  overflow: auto;
+  padding: var(--spacing-8);
+  padding-bottom: calc(var(--spacing-8) + 80px);
+}
+
+/* Centered, width-filling container for stacked SVG pages.
+   ResizeObserver measures offsetWidth here and passes it to Verovio as
+   pageWidth — the SVG output exactly fills this container. */
+.scoreContent {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+
+  /* Establishes the containing block for FragmentOverlay (Step 13).
+     All overlay coordinates (brackets, labels) are relative to this element,
+     which matches the SVG measure geometry exactly. */
+  position: relative;
+}
+
+/* Each SVG page from Verovio. Gap on the container provides spacing between
+   pages; no per-page margin needed. */
+.svgPage {
+  width: 100%;
+}
+
+/* ── Loading and error states ─────────────────────────────────────────────── */
+
+/* Sits above the score panel (position: relative on scorePanelWrapper).
+   Shown during 'loading' and 'error' states; hidden once 'ready'. */
+.statusPanel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-8);
+  z-index: 2;
+}
+
+/* ── Re-render overlay ────────────────────────────────────────────────────── */
+
+/* Sits above the score panel while Verovio re-renders after an options change.
+   Previous SVG pages stay visible underneath; this overlay signals the
+   re-render in progress without a blank-screen flash. */
+.rerenderOverlay {
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-surface-translucent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ── Playback bar (Step 14.5) ─────────────────────────────────────────────── */
+
+.playbackBar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: 0 var(--spacing-6);
+  z-index: 10;
+}
+
+.loadingInstrumentLabel {
+  color: var(--color-on-surface-variant);
+}
+
+.instrumentErrorLabel {
+  color: var(--color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.retryButton {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-decoration: underline;
+}
+
+/* Play, Pause, and Stop buttons share the same base style. */
+.transportButton {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-on-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.transportButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.transportButton:hover:not(:disabled) {
+  color: var(--color-primary);
+}
+
+.positionDisplay {
+  color: var(--color-on-surface-variant);
+  min-width: 4ch;
+}
+
+/* Note: the .is-playing playback highlight class (Step 14.4) is defined in
+   src/styles/base.css, not here — Verovio SVG elements live outside React's
+   component tree so a global stylesheet is required. */

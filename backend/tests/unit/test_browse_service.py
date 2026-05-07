@@ -16,7 +16,13 @@ import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from services.browse import list_composers, list_corpora, list_movements, list_works
+from services.browse import (
+    get_movement_mei_url,
+    list_composers,
+    list_corpora,
+    list_movements,
+    list_works,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -372,3 +378,46 @@ class TestListMovements:
         assert item.key_signature == movement.key_signature
         assert item.meter == movement.meter
         assert item.duration_bars == movement.duration_bars
+
+
+# ---------------------------------------------------------------------------
+# TestGetMovementMeiUrl
+# ---------------------------------------------------------------------------
+
+
+class TestGetMovementMeiUrl:
+    """Unit tests for ``get_movement_mei_url`` — the MEI signed URL service function."""
+
+    def _make_mei_movement(self, **kwargs: Any) -> MagicMock:
+        m = MagicMock(spec_set=["id", "mei_object_key"])
+        m.id = kwargs.get("id", uuid.uuid4())
+        m.mei_object_key = kwargs.get(
+            "mei_object_key", "mozart/piano-sonatas/k331/movement-1.mei"
+        )
+        return m
+
+    async def test_returns_none_for_unknown_movement(self) -> None:
+        """Service returns None when the movement ID is not in the database."""
+        db = _mock_db_scalar(None)
+        storage = AsyncMock()
+
+        result = await get_movement_mei_url(uuid.uuid4(), db, storage)
+
+        assert result is None
+        storage.signed_url.assert_not_called()
+
+    async def test_resolves_mei_object_key_via_signed_url(self) -> None:
+        """Service resolves ``mei_object_key`` via ``storage.signed_url`` and returns
+        a ``MeiUrlResponse`` containing the resulting URL."""
+        key = "mozart/piano-sonatas/k331/movement-1.mei"
+        signed = "https://minio.example.com/signed-mei.mei?token=abc"
+        movement = self._make_mei_movement(mei_object_key=key)
+        db = _mock_db_scalar(movement)
+        storage = AsyncMock()
+        storage.signed_url = AsyncMock(return_value=signed)
+
+        result = await get_movement_mei_url(movement.id, db, storage)
+
+        assert result is not None
+        assert result.url == signed
+        storage.signed_url.assert_awaited_once_with(key, expires_in=3600)

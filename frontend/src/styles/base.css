@@ -1,4 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600&display=swap');
+@import '@fontsource/newsreader/400.css';
+@import '@fontsource/newsreader/600.css';
+@import '@fontsource/newsreader/400-italic.css';
+@import '@fontsource/public-sans/400.css';
+@import '@fontsource/public-sans/500.css';
+@import '@fontsource/public-sans/600.css';
 @import './tokens.css';
 
 *, *::before, *::after {
@@ -24,3 +29,22 @@ body {
 /* Forbid pure black and pure white as direct values in component CSS.
    Use token variables only. This comment is the enforcement rule;
    ESLint cannot lint CSS, so it lives here as documentation. */
+
+/* Focus indicators (WCAG 2.1 AA) — applies to all interactive elements.
+   outline-offset: -2px places the ring inside the element's box,
+   which works correctly at 0px border-radius. */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+/* Playback highlight (Step 14.4) — applied via direct DOM mutation to Verovio
+   SVG elements identified by tk.getElementsAtTime(). The class is removed on
+   the next position update (or stop) and cleared automatically by Verovio
+   re-renders. Global (not a CSS Module) because Verovio SVG lives outside
+   React's component tree. */
+.is-playing path,
+.is-playing use {
+  fill: var(--color-primary) !important;
+}

@@ -15,7 +15,8 @@ Read ADR-001 first — this document assumes familiarity with the Supabase Auth 
 3. [Input sanitisation beyond Pydantic](#3-input-sanitisation-beyond-pydantic)
 4. [Signed URL lifecycle for R2](#4-signed-url-lifecycle-for-r2)
 5. [The development auth bypass](#5-the-development-auth-bypass)
-6. [Phase 2 additions](#6-phase-2-additions)
+6. [PostgREST exposure and RLS enforcement](#6-postgrest-exposure-and-rls-enforcement)
+7. [Phase 2 additions](#7-phase-2-additions)
 
 ---
 
@@ -301,7 +302,9 @@ Signed URLs are generated on demand at request time, used, and discarded. Nothin
 | Backend-to-backend: music21 processing | **15 minutes** | Used immediately in a background task; a short TTL reduces exposure without affecting functionality |
 | Backend-to-backend: Verovio server-side rendering | **15 minutes** | Same |
 
-The 1-hour TTL for client-facing URLs means a URL embedded in an API response remains valid for the full duration of a user session. If the frontend caches URLs locally (e.g. in React state), they should be treated as session-scoped and not persisted to localStorage or similar. A page reload will re-request the URL from the API, which generates a fresh one.
+The 1-hour TTL for client-facing URLs means a URL embedded in an API response remains valid for the full duration of a user session. If the frontend caches URLs locally (e.g. in React state), they should be treated as session-scoped and not persisted to `localStorage` or similar. A page reload will re-request the URL from the API, which generates a fresh one.
+
+**Note on JWT storage.** `auth.ts` stores the Supabase access token in `localStorage['doppia_access_token']`. This is a documented exception to the general guidance above: signed URLs are ephemeral and must not be stored, but the JWT is intentionally persisted across page reloads. The rationale and the conditions under which this is acceptable are recorded in ADR-016 (`docs/adr/ADR-016-jwt-browser-storage.md`). This exception is scoped to Phase 1's internal-only deployment; it must be revisited before Phase 2 public launch.
 
 ### Signed URL generation
 
@@ -417,7 +420,61 @@ The specific string `"dev-token"` has no special significance in production. Eve
 
 ---
 
-## 6. Phase 2 additions
+## 6. PostgREST exposure and RLS enforcement
+
+### The gap
+
+Supabase is Doppia's managed PostgreSQL host. Supabase automatically exposes every table in the `public` schema via PostgREST, its built-in REST API, reachable at `https://[project-ref].supabase.co/rest/v1/<table>`. PostgREST grants read access to the `anon` role by default when RLS is disabled on a table.
+
+The Supabase anon key is embedded in the frontend bundle (required by the Supabase Auth SDK). Any user who opens the browser developer tools can extract it. With the anon key and no RLS, an attacker can read every row of every application table directly via PostgREST — bypassing FastAPI, its JWT middleware, and `require_role()` entirely. This applies to tables including `app_user` (emails, roles), `fragment`, `fragment_concept_tag`, `movement`, and all others in the public schema.
+
+This is unintended: all application database access is designed to flow through the FastAPI service layer. PostgREST is a side-effect of hosting on Supabase and is not used by the application.
+
+### The fix: enable RLS with default-deny on all public tables
+
+PostgreSQL's Row Level Security (RLS) feature, when enabled on a table without any explicit policies, creates a default-deny for all connections that are not the table owner. Supabase's PostgREST connects as the `anon` or `authenticated` role — both are denied. FastAPI connects as the `postgres` database owner, which is exempt from RLS by default — the application is entirely unaffected.
+
+**Implementation:** Alembic migration `0005_enable_rls.py` runs the following for every table in the public schema (added 2026-05-05):
+
+```sql
+ALTER TABLE <table_name> ENABLE ROW LEVEL SECURITY;
+```
+
+Tables to cover (as of migration 0004):
+
+```
+alembic_version
+app_user
+composer
+corpus
+work
+movement
+movement_analysis
+fragment
+fragment_concept_tag
+fragment_review
+fragment_annotation_translation
+prose_chunk
+concept_translation
+property_schema_translation
+property_value_translation
+```
+
+No RLS policies need to be written. The default-deny is the correct policy: PostgREST should never serve these tables directly, and the absence of an explicit policy makes that intent clear.
+
+### Why no other approach is needed
+
+An alternative would be revoking PostgREST's schema-level privileges (`REVOKE USAGE ON SCHEMA public FROM anon, authenticated`), or moving application tables to a private schema. Both are more invasive. Enabling RLS is the idiomatic Supabase solution, is reversible, has no operational impact, and is what the Supabase linter is recommending. The two approaches are complementary but RLS alone is sufficient.
+
+### Timing
+
+This is a Phase 1 task. Although Doppia is currently an internal tool with no public users, the anon key is present in the codebase and the staging URL is shared with the team. The PostgREST endpoints are reachable from the moment the Supabase project is provisioned. This should be closed before any staging deployment.
+
+**Status:** Migration `0005_enable_rls.py` written and merged 2026-05-05. Apply with `alembic upgrade head` on all environments.
+
+---
+
+## 7. Phase 2 additions
 
 The following controls are out of scope for Phase 1 (internal tool, no public traffic) but should be implemented before Phase 2 launches.
 

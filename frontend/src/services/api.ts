@@ -5,11 +5,14 @@
  * - Reads the current session token and sets the Authorization header.
  * - Throws ApiError on non-2xx responses, parsing the standard error envelope.
  * - Wraps network-level failures (fetch throws) as ApiError with NETWORK_ERROR.
+ * - Optionally validates the response body against a Zod schema; throws ZodError
+ *   if the shape doesn't match.
  *
  * The standard error envelope from the backend is:
  *   { "error": { "code": "SCREAMING_SNAKE", "message": "...", "detail": {} } }
  */
 
+import { z } from 'zod';
 import { getSession } from './auth';
 
 export class ApiError extends Error {
@@ -30,18 +33,37 @@ export class ApiError extends Error {
  * Automatically attaches the Bearer token from the current session. Throws
  * ApiError on any non-2xx HTTP status or network failure.
  *
+ * When a Zod schema is provided the response body is parsed through it; a
+ * ZodError is thrown if the shape doesn't match. Call sites that don't yet
+ * have a schema continue to work with the bare type cast.
+ *
+ * Content-Type is set to application/json only when a non-FormData body is
+ * present and the caller has not already set their own Content-Type. GET and
+ * multipart/form-data requests are unaffected.
+ *
  * @param path - API path relative to the origin, e.g. "/api/v1/composers".
  * @param options - Optional fetch RequestInit (method, body, etc.).
+ * @param schema - Optional Zod schema for runtime response validation.
  * @returns Parsed JSON body typed as T.
  * @throws ApiError on HTTP errors or network failures.
+ * @throws ZodError if schema is provided and the response shape doesn't match.
  */
-export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  options?: RequestInit,
+  schema?: z.ZodSchema<T>,
+): Promise<T> {
   const session = getSession();
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options?.headers as Record<string, string> | undefined),
   };
+
+  const hasBody = options?.body != null;
+  const callerSetContentType = 'Content-Type' in headers;
+  if (hasBody && !callerSetContentType && !(options?.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (session) {
     headers['Authorization'] = `Bearer ${session.access_token}`;
@@ -76,5 +98,6 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     throw new ApiError(code, message, response.status, detail);
   }
 
-  return response.json() as Promise<T>;
+  const json = await response.json();
+  return schema ? schema.parse(json) : (json as T);
 }

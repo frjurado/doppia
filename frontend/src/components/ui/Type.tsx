@@ -1,4 +1,5 @@
 import React from 'react';
+import styles from './Type.module.css';
 
 export type TypeVariant =
   | 'display-lg'   // 3.5rem Newsreader, used for major section headers
@@ -10,7 +11,7 @@ export type TypeVariant =
   | 'label-md'     // 0.875rem Public Sans, uppercase
   | 'label-sm';    // 0.75rem Public Sans, uppercase
 
-type AsProp = keyof JSX.IntrinsicElements;
+type AsProp = keyof React.JSX.IntrinsicElements;
 
 interface TypeProps {
   variant: TypeVariant;
@@ -20,66 +21,11 @@ interface TypeProps {
   style?: React.CSSProperties;
 }
 
-const variantStyles: Record<TypeVariant, React.CSSProperties> = {
-  'display-lg': {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '3.5rem',
-    fontWeight: 400,
-    lineHeight: 1.1,
-  },
-  'display-sm': {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '2rem',
-    fontWeight: 400,
-    lineHeight: 1.2,
-  },
-  'headline': {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '1.5rem',
-    fontWeight: 400,
-    lineHeight: 1.3,
-  },
-  'title': {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '1.25rem',
-    fontWeight: 400,
-    lineHeight: 1.4,
-  },
-  'body-lg': {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '1rem',
-    fontWeight: 400,
-    lineHeight: 1.6,
-  },
-  'body-sm': {
-    fontFamily: 'var(--font-serif)',
-    fontSize: '0.875rem',
-    fontWeight: 400,
-    lineHeight: 1.5,
-  },
-  'label-md': {
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.875rem',
-    fontWeight: 500,
-    lineHeight: 1.4,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
-  'label-sm': {
-    fontFamily: 'var(--font-sans)',
-    fontSize: '0.75rem',
-    fontWeight: 500,
-    lineHeight: 1.4,
-    textTransform: 'uppercase',
-    letterSpacing: '0.06em',
-  },
-};
-
 const defaultTags: Record<TypeVariant, AsProp> = {
-  'display-lg': 'h1',
-  'display-sm': 'h2',
-  'headline':   'h3',
-  'title':      'h4',
+  'display-lg': 'span',
+  'display-sm': 'span',
+  'headline':   'span',
+  'title':      'span',
   'body-lg':    'p',
   'body-sm':    'p',
   'label-md':   'span',
@@ -99,10 +45,11 @@ export default function Type({
   style,
 }: TypeProps) {
   const Tag = (as ?? defaultTags[variant]) as AsProp;
-  const computedStyle: React.CSSProperties = { ...variantStyles[variant], ...style };
+  const variantClass = styles[variant];
+  const combined = [variantClass, className].filter(Boolean).join(' ') || undefined;
 
   return (
-    <Tag className={className} style={computedStyle}>
+    <Tag className={combined} style={style}>
       {children}
     </Tag>
   );

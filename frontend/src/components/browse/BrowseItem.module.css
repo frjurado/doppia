@@ -10,15 +10,15 @@
   margin: 0;
 }
 
-.item:hover:not(:disabled) {
-  background-color: var(--color-surface-container);
+.item:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .item.selected {
   background-color: var(--color-surface-container-high);
 }
 
-.item:disabled {
-  cursor: default;
-  opacity: 0.5;
+.item:hover:not(:disabled) {
+  background-color: var(--color-surface-container);
 }
