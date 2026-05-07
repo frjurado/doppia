@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import FragmentOverlay from '../components/score/FragmentOverlay';
+import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { fetchMeiUrl } from '../services/scoreApi';
-import { getVerovioToolkit, renderProgressively } from '../services/verovio';
+import { getVerovioToolkit, renderMidi, renderProgressively } from '../services/verovio';
 import type { RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 
@@ -76,14 +77,26 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *      transposition, and music font controls.
  *   2. Score panel: Verovio SVG pages rendered progressively inside a
  *      centered max-width: 1400px container.
- *   3. Playback bar (container-highest, fixed bottom): Step 14 placeholder.
+ *   3. Playback bar (container-highest, fixed bottom): transport controls
+ *      (Play/Pause, Stop, position display) wired to useMidiPlayback.
  *
  * Loading sequence on mount:
  *   fetchMeiUrl() → fetch MEI text → getVerovioToolkit() → renderProgressively()
+ *   → renderMidi() → midiBase64 state → useMidiPlayback ready
  *
  * Options changes (scale / transpose / font) debounce 200 ms then re-render
  * in the background; the previous SVG stays visible under a translucent
- * overlay until the new render is complete.
+ * overlay until the new render is complete. After re-render, renderMidi() is
+ * called again so the MIDI follows the transposition (Step 14.6).
+ *
+ * Playback highlight (Step 14.4):
+ *   useMidiPlayback fires onPositionUpdate(timeMs) on each animation frame.
+ *   handlePositionUpdate calls tk.getElementsAtTime(timeMs), finds the SVG
+ *   element by ID, and toggles the global `.is-playing` CSS class on it via
+ *   direct DOM mutation (not React state — avoids re-render at RAF frequency).
+ *   Note: modifying a class on an existing Verovio SVG element is the one
+ *   exception to the CLAUDE.md HTML-overlay rule; it adds no new nodes and is
+ *   cleared automatically when Verovio re-renders the SVG.
  *
  * Container width measurement:
  *   A ResizeObserver watches the .scoreContent element. On resize (debounced
@@ -109,6 +122,14 @@ export default function ScoreViewer() {
   const [transpose, setTranspose] = useState('');
   const [font, setFont] = useState<string>(DEFAULT_FONT);
 
+  // ── MIDI state (Step 14) ─────────────────────────────────────────────────
+  /**
+   * Base64-encoded MIDI from Verovio renderToMIDI(). Null until the first
+   * render completes. Updated after every re-render (transposition, scale,
+   * font) so the MIDI always reflects the currently displayed score.
+   */
+  const [midiBase64, setMidiBase64] = useState<string | null>(null);
+
   // ── Refs (stable across renders, safe to read inside async callbacks) ────
   // Verovio toolkit singleton acquired after WASM loads.
   const tkRef = useRef<Awaited<ReturnType<typeof getVerovioToolkit>> | null>(null);
@@ -125,12 +146,82 @@ export default function ScoreViewer() {
   const pageWidthRef = useRef<number>(DEFAULT_PAGE_WIDTH);
   // Ref to the .scoreContent element for width measurement.
   const scorePanelRef = useRef<HTMLDivElement | null>(null);
+  // Currently highlighted SVG element (is-playing class). Cleared on stop and
+  // on each position update. Using a ref avoids React re-renders at RAF freq.
+  const highlightedElRef = useRef<Element | null>(null);
+
+  // ── Position update callback (Step 14.4) ─────────────────────────────────
+  /**
+   * Called by useMidiPlayback on each animation frame during playback with
+   * the current MIDI time in milliseconds. Calls tk.getElementsAtTime(timeMs)
+   * to identify the sounding SVG element, then applies/removes the global
+   * `.is-playing` CSS class via direct DOM mutation.
+   *
+   * getElementsAtTime returns a JSON string: { notes: string[], chords: string[] }
+   * where each entry is an xml:id from the Verovio SVG.
+   */
+  const handlePositionUpdate = useCallback((timeMs: number) => {
+    if (!tkRef.current) return;
+
+    const elementsJson = tkRef.current.getElementsAtTime(timeMs);
+    let parsed: { notes?: string[]; chords?: string[] } = {};
+    try {
+      parsed = JSON.parse(elementsJson) as { notes?: string[]; chords?: string[] };
+    } catch {
+      return;
+    }
+
+    const firstId = parsed.notes?.[0] ?? parsed.chords?.[0];
+
+    // Remove highlight from the previous element.
+    if (highlightedElRef.current) {
+      highlightedElRef.current.classList.remove('is-playing');
+    }
+
+    // Apply highlight to the new element.
+    if (firstId) {
+      const el = document.getElementById(firstId);
+      if (el) {
+        el.classList.add('is-playing');
+        highlightedElRef.current = el;
+      } else {
+        highlightedElRef.current = null;
+      }
+    } else {
+      highlightedElRef.current = null;
+    }
+  }, []);
+
+  // ── MIDI playback hook (Step 14) ──────────────────────────────────────────
+  const {
+    status: playbackStatus,
+    position: playbackPosition,
+    play,
+    pause,
+    stop,
+  } = useMidiPlayback(midiBase64, handlePositionUpdate);
+
+  /**
+   * Stop playback and also clear the SVG highlight immediately.
+   * Wraps stop() because the hook's stop() has no access to highlightedElRef.
+   */
+  const handleStop = useCallback(() => {
+    stop();
+    if (highlightedElRef.current) {
+      highlightedElRef.current.classList.remove('is-playing');
+      highlightedElRef.current = null;
+    }
+  }, [stop]);
 
   // ── Re-render (triggered by options changes or container resize) ──────────
   /**
    * Schedule a debounced re-render using the latest control values and the
    * current measured pageWidth. Rapid changes within the 200 ms window
    * coalesce into a single render call.
+   *
+   * After SVG pages are updated, renderMidi() is called so the MIDI follows
+   * the new transposition (Step 14.6). If playback is in progress,
+   * useMidiPlayback stops it automatically when midiBase64 changes.
    *
    * The previous SVG stays visible while re-rendering; a translucent overlay
    * signals the in-progress render without a blank-screen flash.
@@ -158,14 +249,25 @@ export default function ScoreViewer() {
             (svg) => {
               collectedPages.push(svg);
             },
-            () => {
-              // Atomically swap all pages once rendering is complete, so the
-              // score never shows a partial mix of old and new pages.
-              setSvgPages([...collectedPages]);
-              setIsRerendering(false);
-            },
+            () => {},
           );
+          // Atomically swap SVG pages once all are collected.
+          setSvgPages([...collectedPages]);
+
+          // Regenerate MIDI to follow the new options (Step 14.6). midiBase64
+          // change is detected by useMidiPlayback, which stops any in-progress
+          // playback and prepares to reschedule on the next play() call.
+          const midi = await renderMidi(tkRef.current);
+          setMidiBase64(midi);
+
+          // Clear stale highlight — SVG element IDs may differ in new render.
+          if (highlightedElRef.current) {
+            highlightedElRef.current.classList.remove('is-playing');
+            highlightedElRef.current = null;
+          }
         } catch {
+          // Keep existing pages on render failure.
+        } finally {
           setIsRerendering(false);
         }
       }, 200);
@@ -217,6 +319,7 @@ export default function ScoreViewer() {
       setLoadingLabel('Loading score…');
       setSvgPages([]);
       setErrorMessage(null);
+      setMidiBase64(null);
 
       // Measure container width before any await — DOM is synchronously
       // available at effect time. This value is used for the initial render;
@@ -269,10 +372,19 @@ export default function ScoreViewer() {
               setSvgPages((prev) => [...prev, svg]);
             }
           },
-          () => {
-            // All pages rendered — no additional action needed.
-          },
+          () => {},
         );
+
+        // 4. Generate MIDI from the fully loaded, rendered score (Step 14.3).
+        //    The toolkit has the MEI with current options applied after rendering.
+        if (!cancelled) {
+          try {
+            const midi = await renderMidi(tk);
+            if (!cancelled) setMidiBase64(midi);
+          } catch {
+            // MIDI generation failure is non-fatal; playback stays disabled.
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           setErrorMessage(err instanceof Error ? err.message : 'Failed to load score');
@@ -308,6 +420,11 @@ export default function ScoreViewer() {
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
+
+  const isPlaybackAvailable = midiBase64 !== null;
+  const isPlaying = playbackStatus === 'playing';
+  const isLoadingInstrument = playbackStatus === 'loading-instrument';
+  const isInstrumentError = playbackStatus === 'instrument-error';
 
   return (
     <div className={styles.viewer}>
@@ -461,15 +578,70 @@ export default function ScoreViewer() {
         )}
       </div>
 
-      {/* ── Playback bar (Step 14 placeholder) ──────────────────────────── */}
+      {/* ── Playback bar (Step 14.5) ─────────────────────────────────────── */}
       <Surface layer="container-highest" className={styles.playbackBar}>
-        <Type
-          variant="label-md"
-          as="span"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
-          MIDI playback — Step 14
-        </Type>
+        {isLoadingInstrument ? (
+          <Type
+            variant="label-md"
+            as="span"
+            className={styles.loadingInstrumentLabel}
+          >
+            Loading instrument…
+          </Type>
+        ) : isInstrumentError ? (
+          <Type
+            variant="label-md"
+            as="span"
+            className={styles.instrumentErrorLabel}
+          >
+            Audio unavailable — set{' '}
+            <code>VITE_SOUNDFONT_BASE_URL</code> and upload piano samples.
+            <button
+              type="button"
+              className={styles.retryButton}
+              onClick={play}
+            >
+              Retry
+            </button>
+          </Type>
+        ) : (
+          <>
+            {/* Play / Pause */}
+            <button
+              type="button"
+              className={styles.transportButton}
+              onClick={isPlaying ? pause : play}
+              disabled={!isPlaybackAvailable || isLoadingInstrument}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? '⏸' : '▶'}
+            </button>
+
+            {/* Stop */}
+            <button
+              type="button"
+              className={styles.transportButton}
+              onClick={handleStop}
+              disabled={!isPlaybackAvailable || playbackStatus === 'ready' || playbackStatus === 'idle'}
+              aria-label="Stop"
+            >
+              ⏹
+            </button>
+
+            {/* Position display: bar and beat, 1-indexed */}
+            <Type
+              variant="label-md"
+              as="span"
+              className={styles.positionDisplay}
+              aria-live="polite"
+              aria-label={`Bar ${playbackPosition.bar}, beat ${playbackPosition.beat}`}
+            >
+              {isPlaybackAvailable
+                ? `${playbackPosition.bar}:${playbackPosition.beat}`
+                : '—'}
+            </Type>
+          </>
+        )}
       </Surface>
     </div>
   );

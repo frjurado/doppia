@@ -168,7 +168,7 @@
   pointer-events: none;
 }
 
-/* ── Playback bar (Step 14 placeholder) ──────────────────────────────────── */
+/* ── Playback bar (Step 14.5) ─────────────────────────────────────────────── */
 
 .playbackBar {
   position: fixed;
@@ -178,6 +178,64 @@
   height: 80px;
   display: flex;
   align-items: center;
+  gap: var(--spacing-3);
   padding: 0 var(--spacing-6);
   z-index: 10;
 }
+
+.loadingInstrumentLabel {
+  color: var(--color-on-surface-variant);
+}
+
+.instrumentErrorLabel {
+  color: var(--color-on-surface-variant);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.retryButton {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-decoration: underline;
+}
+
+/* Play, Pause, and Stop buttons share the same base style. */
+.transportButton {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-on-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.transportButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.transportButton:hover:not(:disabled) {
+  color: var(--color-primary);
+}
+
+.positionDisplay {
+  color: var(--color-on-surface-variant);
+  min-width: 4ch;
+}
+
+/* Note: the .is-playing playback highlight class (Step 14.4) is defined in
+   src/styles/base.css, not here — Verovio SVG elements live outside React's
+   component tree so a global stylesheet is required. */
