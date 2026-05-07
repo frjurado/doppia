@@ -330,7 +330,6 @@ describe('ScoreViewer', () => {
     // Override Sampler so onload is never called (simulates slow/missing SoundFont).
     vi.mocked(Tone.Sampler).mockImplementation(function neverLoads(
       this: unknown,
-      _options?: unknown,
     ) {
       return {
         toDestination: vi.fn().mockReturnThis(),
