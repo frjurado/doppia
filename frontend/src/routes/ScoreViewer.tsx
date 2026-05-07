@@ -438,6 +438,10 @@ export default function ScoreViewer() {
 
   return (
     <div className={styles.viewer}>
+      {/* Visually-hidden h1 for screen readers: provides a page landmark
+          without affecting the visual toolbar layout. */}
+      <Type variant="headline" as="h1" className={styles.srOnly}>Score Viewer</Type>
+
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <Surface layer="container-high" className={styles.toolbar}>
         <Link to="/" className={styles.backLink}>

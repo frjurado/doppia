@@ -546,3 +546,68 @@ class TestErrorEnvelope:
         assert resp.status_code == 404
         body = resp.json()
         assert body["error"]["detail"]["work_id"] == str(work_id)
+
+
+# ---------------------------------------------------------------------------
+# TestGetMovementMeiUrl — GET /api/v1/movements/{id}/mei-url
+# ---------------------------------------------------------------------------
+
+
+class TestGetMovementMeiUrl:
+    """Route-level tests for GET /api/v1/movements/{movement_id}/mei-url."""
+
+    async def test_returns_signed_url_for_known_movement(
+        self,
+        browse_client: tuple[AsyncClient, Any, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A known movement returns HTTP 200 with a ``url`` field."""
+        from models.browse import MeiUrlResponse
+
+        client, _, _ = browse_client
+        signed = "https://minio.example.com/signed-mei.mei?token=xyz"
+        monkeypatch.setattr(
+            "api.routes.browse.get_movement_mei_url",
+            AsyncMock(return_value=MeiUrlResponse(url=signed)),
+        )
+        movement_id = uuid.uuid4()
+        resp = await client.get(f"/api/v1/movements/{movement_id}/mei-url")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["url"] == signed
+
+    async def test_unknown_movement_returns_404(
+        self,
+        browse_client: tuple[AsyncClient, Any, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Service returning None produces HTTP 404 with MOVEMENT_NOT_FOUND code."""
+        client, _, _ = browse_client
+        monkeypatch.setattr(
+            "api.routes.browse.get_movement_mei_url",
+            AsyncMock(return_value=None),
+        )
+        movement_id = uuid.uuid4()
+        resp = await client.get(f"/api/v1/movements/{movement_id}/mei-url")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "MOVEMENT_NOT_FOUND"
+        assert "not found" in body["error"]["message"].lower()
+        assert body["error"]["detail"]["movement_id"] == str(movement_id)
+
+    async def test_unauthenticated_returns_401(
+        self,
+        anon_browse_client: AsyncClient,
+    ) -> None:
+        """Requests without authentication are rejected with HTTP 401."""
+        resp = await anon_browse_client.get(f"/api/v1/movements/{uuid.uuid4()}/mei-url")
+        assert resp.status_code == 401
+
+    async def test_invalid_movement_id_returns_422(
+        self,
+        browse_client: tuple[AsyncClient, Any, Any],
+    ) -> None:
+        """A non-UUID ``movement_id`` path parameter is rejected with HTTP 422."""
+        client, _, _ = browse_client
+        resp = await client.get("/api/v1/movements/not-a-uuid/mei-url")
+        assert resp.status_code == 422

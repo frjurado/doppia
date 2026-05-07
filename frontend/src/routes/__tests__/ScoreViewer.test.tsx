@@ -265,6 +265,17 @@ describe('ScoreViewer', () => {
     expect(screen.getByText(/browse/i)).toBeInTheDocument();
   });
 
+  it('renders an h1 heading for screen readers', () => {
+    vi.mocked(scoreApi.fetchMeiUrl).mockReturnValue(new Promise(() => {}));
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    renderScoreViewer();
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: /score viewer/i }),
+    ).toBeInTheDocument();
+  });
+
   // ---------------------------------------------------------------------------
   // Tests — playback bar (Step 14.7)
   // ---------------------------------------------------------------------------
