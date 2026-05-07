@@ -44,6 +44,7 @@ a:focus-visible {
    the next position update (or stop) and cleared automatically by Verovio
    re-renders. Global (not a CSS Module) because Verovio SVG lives outside
    React's component tree. */
-.is-playing {
-  fill: var(--color-primary);
+.is-playing path,
+.is-playing use {
+  fill: var(--color-primary) !important;
 }

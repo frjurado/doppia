@@ -64,8 +64,22 @@ interface VerovioToolkitInstance {
   getPageCount(): number;
   renderToSVG(page: number): string;
   renderToMIDI(): string;
-  /** @param millisec - MIDI time offset in milliseconds. */
-  getElementsAtTime(millisec: number): string;
+  /**
+   * @param millisec - MIDI time offset in milliseconds.
+   * Returns an object directly in Verovio 6.x WASM (not a JSON string as the
+   * C++ API docs suggest — the JS binding deserialises before returning).
+   */
+  getElementsAtTime(millisec: number): string | { notes?: string[]; chords?: string[]; measure?: string; page?: number; rests?: string[] };
+  /**
+   * Returns a JSON string (array) mapping real-time offsets (ms) to the MEI
+   * element IDs that start or end at each offset. Repeat sections are fully
+   * expanded: a measure played twice produces two entries with the same element
+   * IDs at different tstamp values. This makes it more reliable than
+   * getElementsAtTime for building a playback-highlight schedule.
+   *
+   * Each entry shape: { tstamp: number; on?: string[]; off?: string[]; ... }
+   */
+  renderToTimemap(options?: Record<string, unknown>): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,4 +278,52 @@ export async function renderProgressively(
   }
 
   onComplete(totalPages);
+}
+
+// ---------------------------------------------------------------------------
+// Highlight schedule
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a sorted schedule of { timeMs, ids } from Verovio's timemap.
+ *
+ * Using renderToTimemap() instead of repeated getElementsAtTime() calls is
+ * more reliable because:
+ *   - The timemap expands all repeats correctly: a measure played twice appears
+ *     as two entries with the same element IDs at different tstamp values.
+ *   - getElementsAtTime() can return structural element IDs (rend, barline)
+ *     between note onsets and at repeat boundaries, causing stale highlights.
+ *
+ * Must be called after the score has been loaded and rendered so that the
+ * toolkit's internal timing model is up to date (i.e. call after
+ * renderProgressively completes).
+ *
+ * @param tk - Toolkit instance with a score already loaded and rendered.
+ * @returns Sorted schedule for use with binary search in onPositionUpdate.
+ */
+export function buildHighlightSchedule(
+  tk: VerovioToolkitInstance,
+): Array<{ timeMs: number; ids: string[] }> {
+  try {
+    const raw = tk.renderToTimemap();
+    const entries = (
+      typeof raw === 'string'
+        ? (JSON.parse(raw) as Array<{ tstamp?: number; on?: string[] }>)
+        : (raw as Array<{ tstamp?: number; on?: string[] }>)
+    );
+
+    const schedule: Array<{ timeMs: number; ids: string[] }> = [];
+    for (const entry of entries) {
+      if (!entry.on || entry.on.length === 0 || entry.tstamp === undefined) continue;
+      schedule.push({ timeMs: entry.tstamp, ids: entry.on });
+    }
+
+    // Should already be sorted by Verovio, but sort defensively.
+    schedule.sort((a, b) => a.timeMs - b.timeMs);
+    return schedule;
+  } catch {
+    // If renderToTimemap is unavailable or returns unexpected data, fall back
+    // to an empty schedule (playback highlight disabled).
+    return [];
+  }
 }

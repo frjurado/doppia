@@ -6,7 +6,7 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { fetchMeiUrl } from '../services/scoreApi';
-import { getVerovioToolkit, renderMidi, renderProgressively } from '../services/verovio';
+import { buildHighlightSchedule, getVerovioToolkit, renderMidi, renderProgressively } from '../services/verovio';
 import type { RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 
@@ -91,9 +91,11 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *
  * Playback highlight (Step 14.4):
  *   useMidiPlayback fires onPositionUpdate(timeMs) on each animation frame.
- *   handlePositionUpdate calls tk.getElementsAtTime(timeMs), finds the SVG
- *   element by ID, and toggles the global `.is-playing` CSS class on it via
- *   direct DOM mutation (not React state — avoids re-render at RAF frequency).
+ *   handlePositionUpdate binary-searches a pre-built schedule (from
+ *   buildHighlightSchedule / renderToTimemap) and toggles the global
+ *   `.is-playing` CSS class on matching SVG elements via direct DOM mutation
+ *   (not React state — avoids re-render at RAF frequency). The timemap-derived
+ *   schedule correctly expands repeats so both passes are highlighted.
  *   Note: modifying a class on an existing Verovio SVG element is the one
  *   exception to the CLAUDE.md HTML-overlay rule; it adds no new nodes and is
  *   cleared automatically when Verovio re-renders the SVG.
@@ -146,49 +148,53 @@ export default function ScoreViewer() {
   const pageWidthRef = useRef<number>(DEFAULT_PAGE_WIDTH);
   // Ref to the .scoreContent element for width measurement.
   const scorePanelRef = useRef<HTMLDivElement | null>(null);
-  // Currently highlighted SVG element (is-playing class). Cleared on stop and
-  // on each position update. Using a ref avoids React re-renders at RAF freq.
-  const highlightedElRef = useRef<Element | null>(null);
+  // Currently highlighted SVG elements (is-playing class). One entry per
+  // sounding note (multiple staves, chords). Cleared on stop and on each
+  // position update. Using a ref avoids React re-renders at RAF freq.
+  const highlightedElsRef = useRef<Element[]>([]);
+  // Highlight schedule from renderToTimemap(), rebuilt after each render.
+  // Sorted { timeMs, ids } entries with repeats fully expanded — the same note
+  // IDs appear twice (once per pass) at different timeMs values.
+  const highlightScheduleRef = useRef<Array<{ timeMs: number; ids: string[] }>>([]);
 
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
-   * Called by useMidiPlayback on each animation frame during playback with
-   * the current MIDI time in milliseconds. Calls tk.getElementsAtTime(timeMs)
-   * to identify the sounding SVG element, then applies/removes the global
-   * `.is-playing` CSS class via direct DOM mutation.
+   * Called by useMidiPlayback on each animation frame. Binary-searches the
+   * timemap-derived highlight schedule for the latest onset ≤ timeMs, then
+   * applies the `.is-playing` CSS class to matching DOM elements.
    *
-   * getElementsAtTime returns a JSON string: { notes: string[], chords: string[] }
-   * where each entry is an xml:id from the Verovio SVG.
+   * The schedule is built from renderToTimemap() after each render, which
+   * expands repeats correctly: both passes of a repeated section have entries
+   * with the same element IDs but different timeMs values. No Verovio calls
+   * at playback time.
    */
   const handlePositionUpdate = useCallback((timeMs: number) => {
-    if (!tkRef.current) return;
+    const schedule = highlightScheduleRef.current;
 
-    const elementsJson = tkRef.current.getElementsAtTime(timeMs);
-    let parsed: { notes?: string[]; chords?: string[] } = {};
-    try {
-      parsed = JSON.parse(elementsJson) as { notes?: string[]; chords?: string[] };
-    } catch {
-      return;
+    // Clear previous highlights unconditionally so they never get stuck.
+    for (const el of highlightedElsRef.current) {
+      el.classList.remove('is-playing');
+    }
+    highlightedElsRef.current = [];
+
+    if (schedule.length === 0) return;
+
+    // Binary-search for the latest onset at or before the current time.
+    let lo = 0, hi = schedule.length - 1, idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (schedule[mid].timeMs <= timeMs) { idx = mid; lo = mid + 1; }
+      else hi = mid - 1;
     }
 
-    const firstId = parsed.notes?.[0] ?? parsed.chords?.[0];
+    if (idx < 0) return;
 
-    // Remove highlight from the previous element.
-    if (highlightedElRef.current) {
-      highlightedElRef.current.classList.remove('is-playing');
-    }
-
-    // Apply highlight to the new element.
-    if (firstId) {
-      const el = document.getElementById(firstId);
+    for (const id of schedule[idx].ids) {
+      const el = document.getElementById(id);
       if (el) {
         el.classList.add('is-playing');
-        highlightedElRef.current = el;
-      } else {
-        highlightedElRef.current = null;
+        highlightedElsRef.current.push(el);
       }
-    } else {
-      highlightedElRef.current = null;
     }
   }, []);
 
@@ -203,14 +209,14 @@ export default function ScoreViewer() {
 
   /**
    * Stop playback and also clear the SVG highlight immediately.
-   * Wraps stop() because the hook's stop() has no access to highlightedElRef.
+   * Wraps stop() because the hook's stop() has no access to highlightedElsRef.
    */
   const handleStop = useCallback(() => {
     stop();
-    if (highlightedElRef.current) {
-      highlightedElRef.current.classList.remove('is-playing');
-      highlightedElRef.current = null;
+    for (const el of highlightedElsRef.current) {
+      el.classList.remove('is-playing');
     }
+    highlightedElsRef.current = [];
   }, [stop]);
 
   // ── Re-render (triggered by options changes or container resize) ──────────
@@ -254,17 +260,17 @@ export default function ScoreViewer() {
           // Atomically swap SVG pages once all are collected.
           setSvgPages([...collectedPages]);
 
-          // Regenerate MIDI to follow the new options (Step 14.6). midiBase64
-          // change is detected by useMidiPlayback, which stops any in-progress
-          // playback and prepares to reschedule on the next play() call.
+          // Regenerate MIDI and highlight schedule to follow new options
+          // (Step 14.6). midiBase64 change stops any in-progress playback.
           const midi = await renderMidi(tkRef.current);
+          highlightScheduleRef.current = buildHighlightSchedule(tkRef.current);
           setMidiBase64(midi);
 
-          // Clear stale highlight — SVG element IDs may differ in new render.
-          if (highlightedElRef.current) {
-            highlightedElRef.current.classList.remove('is-playing');
-            highlightedElRef.current = null;
+          // Clear stale highlights — SVG element IDs may differ in new render.
+          for (const el of highlightedElsRef.current) {
+            el.classList.remove('is-playing');
           }
+          highlightedElsRef.current = [];
         } catch {
           // Keep existing pages on render failure.
         } finally {
@@ -375,14 +381,18 @@ export default function ScoreViewer() {
           () => {},
         );
 
-        // 4. Generate MIDI from the fully loaded, rendered score (Step 14.3).
-        //    The toolkit has the MEI with current options applied after rendering.
+        // 4. Generate MIDI and build highlight schedule from the toolkit's
+        //    timemap (Step 14.3 / 14.4). renderToTimemap() expands repeats
+        //    correctly, so both passes of a repeated section are covered.
         if (!cancelled) {
           try {
             const midi = await renderMidi(tk);
-            if (!cancelled) setMidiBase64(midi);
+            if (!cancelled) {
+              highlightScheduleRef.current = buildHighlightSchedule(tk);
+              setMidiBase64(midi);
+            }
           } catch {
-            // MIDI generation failure is non-fatal; playback stays disabled.
+            // MIDI/timemap failure is non-fatal; playback stays disabled.
           }
         }
       } catch (err) {
