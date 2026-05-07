@@ -275,6 +275,29 @@ export function useMidiPlayback(
     // Parse MIDI and schedule all note events on the transport.
     const bytes = base64ToUint8Array(midi64);
     const midiData = new Midi(bytes.buffer);
+
+    // Sync the Tone.js Transport tempo and time signature with the actual MIDI
+    // header so the position display counts bars and beats at the correct
+    // musical rate. Without this, the transport always assumes 120 BPM and 4/4,
+    // making the position display wrong for any other tempo or meter.
+    //
+    // Multiple tempo changes are scheduled via bpm.setValueAtTime() so a ritard
+    // or accelerando mid-piece is reflected in the position display.
+    // Tone.js supports only a single static time signature — mid-piece meter
+    // changes are not tracked in the display (acceptable limitation).
+    const tempos = midiData.header?.tempos ?? [];
+    const timeSignatures = midiData.header?.timeSignatures ?? [];
+    if (tempos.length > 0) {
+      transport.bpm.cancelScheduledValues(0);
+      transport.bpm.value = tempos[0].bpm;
+      for (let i = 1; i < tempos.length; i++) {
+        transport.bpm.setValueAtTime(tempos[i].bpm, tempos[i].time);
+      }
+    }
+    if (timeSignatures.length > 0) {
+      transport.timeSignature = timeSignatures[0].timeSignature;
+    }
+
     midiData.tracks.forEach((track) => {
       track.notes.forEach((note) => {
         transport.schedule((audioTime) => {
