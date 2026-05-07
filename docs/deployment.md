@@ -59,6 +59,12 @@ CELERY_RESULT_BACKEND=redis://default:<password>@<host>:<port>
 
 # OpenAI (Phase 3; wire in now)
 OPENAI_API_KEY=<key>
+
+# Frontend build-time variables (passed as Docker build args, not runtime secrets)
+# These are baked into the JS bundle at build time — changing them requires a redeploy.
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon-key>
+VITE_SOUNDFONT_BASE_URL=https://pub-<hash>.r2.dev   # R2.dev public URL for piano MP3s
 ```
 
 Secrets are stored in Fly.io's secret store (`fly secrets set KEY=value`) and are never written to files in the deployment environment. For local development, they live in a `.env` file that is gitignored.
@@ -162,7 +168,62 @@ Then reload the page. The corpus browser and tagging tool will use this token un
 
 Update `AllowedOrigins` for each environment. See `docs/architecture/security-model.md` § "R2 and CORS" for the full rationale.
 
-### 4. Upstash Redis
+### 4. SoundFont setup
+
+MIDI playback in the score viewer uses Tone.js Sampler, which downloads piano sample MP3s directly from the browser. These files must be publicly accessible — they cannot be served via signed URLs because Tone.js constructs the filenames internally and cannot inject signed query parameters.
+
+**Required files — 28 MP3s, one every minor third across C1–C7:**
+
+```
+C1.mp3  Ds1.mp3  Fs1.mp3  A1.mp3
+C2.mp3  Ds2.mp3  Fs2.mp3  A2.mp3
+C3.mp3  Ds3.mp3  Fs3.mp3  A3.mp3
+C4.mp3  Ds4.mp3  Fs4.mp3  A4.mp3
+C5.mp3  Ds5.mp3  Fs5.mp3  A5.mp3
+C6.mp3  Ds6.mp3  Fs6.mp3  A6.mp3
+C7.mp3  Ds7.mp3  Fs7.mp3  A7.mp3
+```
+
+Sharp notes use `s` instead of `#` (URL-safe). Tone.js pitch-shifts between provided samples to cover the full keyboard, so these 28 files cover all 88 keys.
+
+**Source.** Use a compact piano soundfont set — total upload size should stay under 2 MB. The [Tonejs/midi piano samples](https://github.com/gleitz/midi-js-soundfonts) (acoustic_grand_piano, mp3 format) or similar reduced Salamander Grand Piano sets work well. Whatever source you choose, rename the files to match the convention above before uploading.
+
+**1 — Upload the MP3s to R2 at the `soundfonts/piano/` prefix:**
+
+```bash
+# Using the Cloudflare Wrangler CLI (npm install -g wrangler):
+wrangler r2 object put doppia-staging/soundfonts/piano/C1.mp3  --file C1.mp3
+wrangler r2 object put doppia-staging/soundfonts/piano/Ds1.mp3 --file Ds1.mp3
+# ... repeat for all 28 files
+
+# Or in bulk if your files are in a local soundfonts/ directory:
+for f in soundfonts/*.mp3; do
+  wrangler r2 object put "doppia-staging/soundfonts/piano/$(basename $f)" --file "$f"
+done
+```
+
+**2 — Enable public access on the R2 bucket.** The private bucket used for signed MEI URLs is the same bucket. R2 allows enabling a public R2.dev subdomain alongside the private access:
+
+Cloudflare dashboard → R2 → `doppia-staging` → **Settings** → **Public Access** → enable **R2.dev subdomain**. Note the URL displayed (format: `https://pub-<hash>.r2.dev`).
+
+The R2.dev subdomain is rate-limited and intended for staging/development. For production, attach a custom subdomain (e.g. `assets.doppia.app`) instead via Settings → Custom Domains.
+
+**3 — Set `VITE_SOUNDFONT_BASE_URL` in `fly.toml`:**
+
+```toml
+[build.args]
+  VITE_SOUNDFONT_BASE_URL = "https://pub-<hash>.r2.dev"
+```
+
+This variable is baked into the JavaScript bundle at build time (Vite `import.meta.env`). Changing it requires a redeploy. It is not a secret — the URL is public by design.
+
+**4 — Verify.** After deploying, open the score viewer, click Play on any movement, and confirm the status briefly shows "Loading instrument…" before playback starts. If it shows "Failed to load instrument", the MP3 URLs are unreachable: check the R2.dev subdomain is enabled, the files are at the correct key prefix, and `VITE_SOUNDFONT_BASE_URL` matches the R2.dev URL exactly (no trailing slash).
+
+**Local development.** MinIO (the local R2 equivalent) serves objects publicly by default. Upload the same 28 files to the local `doppia-local` bucket under `soundfonts/piano/` and set `VITE_SOUNDFONT_BASE_URL=http://localhost:9000/doppia-local` in `frontend/.env`. The MinIO console at `http://localhost:9001` can be used to upload files manually.
+
+---
+
+### 5. Upstash Redis
 
 1. Create an account at [upstash.com](https://upstash.com).
 2. Create a new Redis database. Choose the nearest region.
