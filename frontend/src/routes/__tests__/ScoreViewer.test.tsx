@@ -38,8 +38,9 @@ const mockTransport = {
  */
 function makeSamplerImpl(
   this: unknown,
-  { onload }: { onload?: () => void },
+  options?: { onload?: () => void },
 ) {
+  const onload = options?.onload;
   if (onload) Promise.resolve().then(onload);
   return {
     toDestination: vi.fn().mockReturnThis(),
@@ -130,7 +131,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
 
   // Re-apply Sampler default implementation in case a previous test overrode it.
-  vi.mocked(Tone.Sampler).mockImplementation(makeSamplerImpl);
+  vi.mocked(Tone.Sampler).mockImplementation(makeSamplerImpl as never);
 
   // Reset transport state between tests.
   mockTransport.state = 'stopped';
@@ -327,13 +328,16 @@ describe('ScoreViewer', () => {
   it('shows "Loading instrument…" while the SoundFont is loading', async () => {
     setupFullLoad();
     // Override Sampler so onload is never called (simulates slow/missing SoundFont).
-    vi.mocked(Tone.Sampler).mockImplementation(function neverLoads(this: unknown) {
+    vi.mocked(Tone.Sampler).mockImplementation(function neverLoads(
+      this: unknown,
+      _options?: unknown,
+    ) {
       return {
         toDestination: vi.fn().mockReturnThis(),
         triggerAttackRelease: vi.fn(),
         dispose: vi.fn(),
       };
-    });
+    } as never);
 
     renderScoreViewer();
 

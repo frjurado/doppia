@@ -31,6 +31,7 @@ function makeMockToolkit() {
     getPageCount: vi.fn().mockReturnValue(1),
     renderToSVG: vi.fn().mockReturnValue('<svg/>'),
     renderToMIDI: vi.fn().mockReturnValue('base64midi=='),
+    renderToTimemap: vi.fn().mockReturnValue('[]'),
     getElementsAtTime: vi.fn().mockReturnValue('{}'),
   };
 }

@@ -108,8 +108,8 @@ export function getVerovioToolkit(): Promise<VerovioToolkitInstance> {
     //   verovio/esm   — named export VerovioToolkit is the JS class; its
     //                   constructor takes the resolved Emscripten module.
     _verovioPromise = Promise.all([
-      import('verovio/wasm') as Promise<{ default: () => Promise<unknown> }>,
-      import('verovio/esm') as Promise<{ VerovioToolkit: new (m: unknown) => VerovioToolkitInstance }>,
+      import('verovio/wasm') as unknown as Promise<{ default: () => Promise<unknown> }>,
+      import('verovio/esm') as unknown as Promise<{ VerovioToolkit: new (m: unknown) => VerovioToolkitInstance }>,
     ]).then(async ([wasmMod, esmMod]) => {
       const VerovioModule = await wasmMod.default();
       return new esmMod.VerovioToolkit(VerovioModule);

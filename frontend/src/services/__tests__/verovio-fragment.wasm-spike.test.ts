@@ -28,7 +28,7 @@ import { getVerovioToolkit, renderFragment, type RenderOptions } from '../verovi
 // Gate
 // ---------------------------------------------------------------------------
 
-const RUN_WASM_SPIKE = process.env['VEROVIO_WASM_SPIKE'] === '1';
+const RUN_WASM_SPIKE = import.meta.env['VEROVIO_WASM_SPIKE'] === '1';
 
 // ---------------------------------------------------------------------------
 // MEI fixtures

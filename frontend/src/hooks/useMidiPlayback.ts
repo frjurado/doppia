@@ -274,7 +274,7 @@ export function useMidiPlayback(
 
     // Parse MIDI and schedule all note events on the transport.
     const bytes = base64ToUint8Array(midi64);
-    const midiData = new Midi(bytes.buffer);
+    const midiData = new Midi(bytes.buffer as ArrayBuffer);
 
     // Sync the Tone.js Transport tempo and time signature with the actual MIDI
     // header so the position display counts bars and beats at the correct
@@ -291,7 +291,7 @@ export function useMidiPlayback(
       transport.bpm.cancelScheduledValues(0);
       transport.bpm.value = tempos[0].bpm;
       for (let i = 1; i < tempos.length; i++) {
-        transport.bpm.setValueAtTime(tempos[i].bpm, tempos[i].time);
+        transport.bpm.setValueAtTime(tempos[i].bpm, tempos[i].time ?? 0);
       }
     }
     if (timeSignatures.length > 0) {
