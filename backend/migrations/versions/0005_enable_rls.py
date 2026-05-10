@@ -30,10 +30,11 @@ down_revision: Union[str, None] = "0004"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# All tables in the public schema as of migration 0004.
-# alembic_version is excluded: it is an Alembic internal table and
-# enabling RLS on it can break future migrations if the migration runner
-# connects as a non-owner role. The application never exposes it.
+# All application tables in the public schema as of migration 0004.
+# alembic_version is deferred to migration 0006: enabling RLS on an Alembic
+# internal table in the same migration that first runs Alembic against the
+# schema was considered overly risky at the time. Migration 0006 adds RLS
+# to alembic_version once the superuser-bypass property was confirmed.
 _TABLES = [
     "app_user",
     "composer",
