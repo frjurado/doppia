@@ -23,6 +23,7 @@ primary_region = "lhr"
   PORT = "8000"
   R2_BUCKET_NAME = "doppia-staging"
   R2_ENDPOINT_URL = "https://b0c58a6078065a6edcd5cf3ecced703d.r2.cloudflarestorage.com"
+  R2_PUBLIC_URL = "https://pub-657dac2ba49c49c687faa2f1e1312ba8.r2.dev"
 
 [http_service]
   internal_port = 8000

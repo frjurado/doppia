@@ -59,6 +59,12 @@ class StorageClient:
         bucket_name: Name of the target S3 bucket.
         access_key_id: AWS-style access key ID.
         secret_access_key: AWS-style secret access key.
+        public_url: Optional base URL for public bucket access
+            (e.g. ``https://pub-<hash>.r2.dev`` for Cloudflare R2 public
+            buckets).  When set, :meth:`signed_url` returns a plain public
+            URL instead of a presigned one — no credentials in the URL and
+            no expiry.  Leave ``None`` for local MinIO where no public
+            endpoint exists.
     """
 
     def __init__(
@@ -67,11 +73,13 @@ class StorageClient:
         bucket_name: str,
         access_key_id: str,
         secret_access_key: str,
+        public_url: str | None = None,
     ) -> None:
         self._endpoint_url = endpoint_url
         self._bucket_name = bucket_name
         self._access_key_id = access_key_id
         self._secret_access_key = secret_access_key
+        self._public_url = public_url
         self._session = aioboto3.Session()
 
     # ------------------------------------------------------------------
@@ -168,21 +176,28 @@ class StorageClient:
     async def signed_url(
         self, key: str, expires_in: int = CLIENT_FACING_URL_TTL
     ) -> str:
-        """Generate a pre-signed GET URL for a stored file.
+        """Return a URL for reading a stored file.
 
-        The URL is valid for *expires_in* seconds from the moment it is
-        generated.  Nothing persistent should store the returned URL; store
-        the object key and generate a fresh URL at request time (ADR-002).
+        When the client is configured with a ``public_url`` (Cloudflare R2
+        public bucket), returns a plain public URL — no credentials, no expiry.
+        The ``expires_in`` argument is ignored in that case.
+
+        Without a ``public_url`` (local MinIO), generates a pre-signed GET
+        URL valid for *expires_in* seconds.  Nothing persistent should store
+        the returned URL; store the object key and call this method at
+        request time (ADR-002).
 
         Args:
             key: S3 object key of the file to expose.
-            expires_in: URL lifetime in seconds (default: ``CLIENT_FACING_URL_TTL``,
-                1 hour). Use ``BACKEND_PROCESSING_TTL`` for backend-to-backend
-                access where the URL is consumed immediately in a task.
+            expires_in: Presigned URL lifetime in seconds (default:
+                ``CLIENT_FACING_URL_TTL``, 1 hour).  Ignored when
+                ``public_url`` is configured.
 
         Returns:
-            A pre-signed URL string.
+            A URL string suitable for direct browser access.
         """
+        if self._public_url is not None:
+            return f"{self._public_url}/{key}"
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             return await s3.generate_presigned_url(
                 "get_object",
@@ -231,4 +246,5 @@ def make_storage_client() -> StorageClient:
         bucket_name=os.environ["R2_BUCKET_NAME"],
         access_key_id=os.environ["R2_ACCESS_KEY_ID"],
         secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        public_url=os.environ.get("R2_PUBLIC_URL"),
     )
