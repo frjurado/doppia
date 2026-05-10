@@ -1367,3 +1367,32 @@ class TestDcmlBranch:
         assert (
             warn_calls == []
         ), "Should not issue normalization_warnings when TSV aligns with MEI"
+
+    async def test_pending_analysis_cleared_on_success(self, monkeypatch) -> None:
+        """After a successful analysis write, pending_analysis is set to FALSE."""
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://fake/db")
+        engine, session_class, storage_factory, write_session = self._build_mocks()
+
+        with (
+            patch(
+                "services.tasks.ingest_analysis.create_async_engine",
+                return_value=engine,
+            ),
+            patch("services.tasks.ingest_analysis.AsyncSession", new=session_class),
+            patch(
+                "services.tasks.ingest_analysis.make_storage_client", storage_factory
+            ),
+        ):
+            await _dcml_branch(str(uuid.uuid4()), self._TSV_A_MAJOR)
+
+        all_calls = write_session.execute.call_args_list
+        # The pending_analysis UPDATE passes {"id": movement_id} as params and
+        # its SQL text contains "pending_analysis".
+        pending_calls = [
+            c
+            for c in all_calls
+            if len(c.args) > 0 and "pending_analysis" in str(c.args[0])
+        ]
+        assert (
+            len(pending_calls) == 1
+        ), "Expected exactly one UPDATE movement SET pending_analysis = FALSE"

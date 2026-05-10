@@ -20,6 +20,7 @@ from datetime import datetime
 
 from models.base import Base
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -172,6 +173,9 @@ class Movement(Base):
     incipit_object_key: Mapped[str | None] = mapped_column(String, nullable=True)
     incipit_generated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    pending_analysis: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("TRUE")
     )
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
