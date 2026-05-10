@@ -242,7 +242,7 @@ fly secrets set \
 
 Redis is wired in from day one but is not load-bearing in Phase 1. If the Upstash connection is unavailable, the Celery task dispatch (music21 analysis, incipit generation) logs a warning and the upload continues — the core ingestion (MEI validation, R2 storage, PostgreSQL records) is unaffected. Cache misses are acceptable in Phase 1; Redis is required for correctness only from Phase 2 onward.
 
-**Note: no Celery worker is deployed in Phase 1 staging.** Tasks are enqueued into Redis but not executed. Background work (music21 analysis, incipit generation) must be triggered manually or deferred until a worker is deployed.
+**No Celery worker is deployed in Phase 1 staging.** The `worker` process group is intentionally absent from `fly.toml`; only the `app` process runs. Tasks dispatched via Celery are enqueued into Redis but never consumed. Background work (music21 analysis, incipit generation) must be triggered manually or deferred until a worker is added back in a later phase.
 
 ### 5. Fly.io
 

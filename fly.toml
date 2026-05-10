@@ -14,8 +14,7 @@ primary_region = "lhr"
     VITE_SOUNDFONT_BASE_URL = "https://pub-657dac2ba49c49c687faa2f1e1312ba8.r2.dev"
 
 [processes]
-  app    = "uvicorn main:app --host 0.0.0.0 --port 8000"
-  worker = "celery -A services.celery_app worker --loglevel=info --concurrency=1"
+  app = "uvicorn main:app --host 0.0.0.0 --port 8000"
 
 [env]
   ENVIRONMENT = "staging"
@@ -46,8 +45,3 @@ primary_region = "lhr"
   cpu_kind   = "shared"
   cpus       = 1
 
-[[vm]]
-  processes  = ["worker"]
-  memory     = "1gb"
-  cpu_kind   = "shared"
-  cpus       = 1
