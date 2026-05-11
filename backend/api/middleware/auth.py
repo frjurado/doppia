@@ -37,12 +37,6 @@ from starlette.types import ASGIApp
 _DEV_TOKEN = "dev-token"
 _DEV_USER = AppUser(id="dev-user", role="admin", email="dev@local")
 
-# Read once at import time; the primary guard (refusing to start with
-# AUTH_MODE=local outside ENVIRONMENT=local) lives in main.py's lifespan.
-# These module-level reads are a belt-and-suspenders check on each request.
-_ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "production")
-_AUTH_MODE: str = os.environ.get("AUTH_MODE", "supabase")
-
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Starlette HTTP middleware that validates JWTs on every request.
@@ -90,12 +84,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         token = authorization.removeprefix("Bearer ").strip()
 
-        # Dev bypass — guarded: only valid when ENVIRONMENT=local too.
+        # Read at request time so that test monkeypatching takes effect.
         # The primary guard is in main.py's lifespan, which refuses to start if
         # AUTH_MODE=local is set outside a local environment. This per-request
         # check is belt-and-suspenders (e.g. if env vars change at runtime).
-        if _AUTH_MODE == "local":
-            if _ENVIRONMENT != "local":
+        _auth_mode: str = os.environ.get("AUTH_MODE", "supabase")
+        _environment: str = os.environ.get("ENVIRONMENT", "production")
+
+        if _auth_mode == "local":
+            if _environment != "local":
                 return _make_401(
                     "AUTH_MODE=local is not permitted outside ENVIRONMENT=local."
                 )
