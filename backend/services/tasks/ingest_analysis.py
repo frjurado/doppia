@@ -769,7 +769,19 @@ async def _dcml_branch(movement_id: str, harmonies_tsv_content: str) -> None:
                     },
                 )
 
-                # 5. Store alignment warnings in movement.normalization_warnings.
+                # 5a. Clear the pending_analysis flag — analysis succeeded.
+                #     Only reached if the upsert above did not raise, so the
+                #     flag is only ever FALSE after a successful write.
+                await session.execute(
+                    text(
+                        "UPDATE movement "
+                        "SET pending_analysis = FALSE "
+                        "WHERE id = :id"
+                    ),
+                    {"id": movement_id},
+                )
+
+                # 6. Store alignment warnings in movement.normalization_warnings.
                 if alignment_warnings:
                     await session.execute(
                         text(

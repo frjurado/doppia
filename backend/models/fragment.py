@@ -1,9 +1,10 @@
-"""SQLAlchemy ORM models for the fragment data model.
+"""SQLAlchemy ORM models and Pydantic schemas for the fragment data model.
 
 Covers:
 - Fragment          — the central record; one row per tagged musical excerpt
 - FragmentConceptTag — join surface between PostgreSQL and Neo4j
 - FragmentReview    — per-reviewer decisions on a fragment
+- FragmentSummary   — Pydantic schema for the versioned summary JSONB field
 
 The summary JSONB schema is versioned and documented in
 docs/architecture/fragment-schema.md. The ``version`` field inside ``summary``
@@ -19,8 +20,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 
 from models.base import Base
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -36,6 +39,53 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
+
+# ---------------------------------------------------------------------------
+# Pydantic schema for fragment.summary JSONB
+# ---------------------------------------------------------------------------
+
+
+class ActualKey(BaseModel):
+    """Inferred local key at the fragment's position.
+
+    ``confidence`` reflects the machine's certainty at analysis time and is
+    preserved even after a human edit (when ``auto`` becomes ``False``).
+    Treat ``confidence`` as meaningful only when ``auto = True``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str
+    confidence: float
+    auto: bool
+    reviewed: bool
+
+
+class FragmentSummary(BaseModel):
+    """Pydantic schema for the versioned ``fragment.summary`` JSONB field.
+
+    Every field matches the version-1 spec in
+    ``docs/architecture/fragment-schema.md``.  The ``version`` field is a
+    ``Literal[1]`` discriminator so that readers can branch on schema version
+    before interpreting any other field.  Any version value other than 1 is a
+    validation error until a version-2 schema is introduced.
+
+    Callers must validate every summary dict through this model before writing
+    it to the database.  A dict that bypasses validation and reaches the DB
+    with a missing or wrong-version ``version`` key breaks the invariant that
+    ``fragment.summary["version"]`` is always present and interpretable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1]
+    key: str
+    meter: str
+    music21_version: str
+    concepts: list[str]
+    actual_key: ActualKey | None = None
+    properties: dict[str, str | list[str]] = {}
+    concept_extensions: dict[str, Any] = {}
 
 
 class Fragment(Base):

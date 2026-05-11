@@ -519,6 +519,7 @@ async def _upsert_movement(
         mei_original_object_key=f"originals/{mei_object_key}",
         duration_bars=norm_report.duration_bars if norm_report.duration_bars else None,
         normalization_warnings=normalization_warnings,
+        pending_analysis=True,
     )
     stmt = ins.on_conflict_do_update(
         index_elements=["work_id", "slug"],
@@ -532,6 +533,7 @@ async def _upsert_movement(
             "mei_original_object_key": ins.excluded.mei_original_object_key,
             "duration_bars": ins.excluded.duration_bars,
             "normalization_warnings": ins.excluded.normalization_warnings,
+            "pending_analysis": True,
             "ingested_at": func.now(),
             "updated_at": func.now(),
         },

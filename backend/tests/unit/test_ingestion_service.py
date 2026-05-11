@@ -677,3 +677,64 @@ class TestReport:
         assert len(report.movements_rejected) == 1
         assert report.movements_rejected[0].movement_slug == "k331/movement-2"
         assert report.movements_rejected[0].errors[0]["code"] == "INVALID_XML"
+
+
+# ---------------------------------------------------------------------------
+# TestPendingAnalysisFlag
+# ---------------------------------------------------------------------------
+
+
+class TestPendingAnalysisFlag:
+    """pending_analysis=TRUE is set on every movement INSERT and re-ingest."""
+
+    async def test_upsert_includes_pending_analysis_true(
+        self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
+    ) -> None:
+        """The movement INSERT statement includes pending_analysis=True."""
+        meta = _minimal_metadata()
+        archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
+
+        with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
+                with patch("services.ingestion.ingest_movement_analysis"):
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
+
+        # One of the db.execute calls should be the movement upsert.
+        # Check its compiled string contains "pending_analysis".
+        stmts = [str(c.args[0]) for c in mock_db.execute.call_args_list]
+        assert any(
+            "pending_analysis" in s for s in stmts
+        ), "Expected pending_analysis in one of the execute() statements"
+
+    async def test_pending_analysis_true_on_reingest(
+        self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
+    ) -> None:
+        """Re-ingesting a corpus resets pending_analysis=True (on_conflict_do_update)."""
+        meta = _minimal_metadata()
+        archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
+
+        with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
+                with patch("services.ingestion.ingest_movement_analysis"):
+                    # First ingest
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
+                    mock_db.execute.reset_mock()
+                    # Re-ingest (same archive)
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
+
+        stmts = [str(c.args[0]) for c in mock_db.execute.call_args_list]
+        assert any(
+            "pending_analysis" in s for s in stmts
+        ), "Re-ingest should still produce a movement upsert with pending_analysis"

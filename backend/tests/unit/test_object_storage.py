@@ -45,13 +45,16 @@ def _make_mock_s3(**method_overrides: object) -> MagicMock:
     return s3
 
 
-def _make_storage_client(s3_mock: MagicMock) -> StorageClient:
+def _make_storage_client(
+    s3_mock: MagicMock, public_url: str | None = None
+) -> StorageClient:
     """Return a StorageClient whose aioboto3 session is replaced by *s3_mock*."""
     client = StorageClient(
         endpoint_url="http://localhost:9000",
         bucket_name="test-bucket",
         access_key_id="key",
         secret_access_key="secret",
+        public_url=public_url,
     )
     # Patch the session so that .client(...) returns an async CM yielding s3_mock.
     cm = MagicMock()
@@ -74,6 +77,7 @@ class TestMakeStorageClient:
         monkeypatch.setenv("R2_BUCKET_NAME", "my-bucket")
         monkeypatch.setenv("R2_ACCESS_KEY_ID", "AKID")
         monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "SECRET")
+        monkeypatch.delenv("R2_PUBLIC_URL", raising=False)
 
         sc = make_storage_client()
 
@@ -81,6 +85,19 @@ class TestMakeStorageClient:
         assert sc._bucket_name == "my-bucket"
         assert sc._access_key_id == "AKID"
         assert sc._secret_access_key == "SECRET"
+        assert sc._public_url is None
+
+    def test_reads_optional_public_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """make_storage_client() sets public_url when R2_PUBLIC_URL is present."""
+        monkeypatch.setenv("R2_ENDPOINT_URL", "http://r2.example.com")
+        monkeypatch.setenv("R2_BUCKET_NAME", "my-bucket")
+        monkeypatch.setenv("R2_ACCESS_KEY_ID", "AKID")
+        monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "SECRET")
+        monkeypatch.setenv("R2_PUBLIC_URL", "https://pub-abc.r2.dev")
+
+        sc = make_storage_client()
+
+        assert sc._public_url == "https://pub-abc.r2.dev"
 
     def test_raises_on_missing_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """make_storage_client() raises KeyError when any env var is absent."""
@@ -228,6 +245,29 @@ class TestSignedUrl:
             Params={"Bucket": "test-bucket", "Key": "some/key.mei"},
             ExpiresIn=BACKEND_PROCESSING_TTL,
         )
+
+    async def test_public_url_returns_plain_url(self) -> None:
+        """When public_url is set, signed_url returns a plain public URL."""
+        s3 = _make_mock_s3()
+        sc = _make_storage_client(s3, public_url="https://pub-abc.r2.dev")
+
+        url = await sc.signed_url("mozart/piano-sonatas/k331/movement-1/incipit.svg")
+
+        assert (
+            url
+            == "https://pub-abc.r2.dev/mozart/piano-sonatas/k331/movement-1/incipit.svg"
+        )
+        s3.generate_presigned_url.assert_not_awaited()
+
+    async def test_public_url_ignores_expires_in(self) -> None:
+        """expires_in is ignored when public_url is configured."""
+        s3 = _make_mock_s3()
+        sc = _make_storage_client(s3, public_url="https://pub-abc.r2.dev")
+
+        url = await sc.signed_url("some/key.mei", expires_in=60)
+
+        assert url == "https://pub-abc.r2.dev/some/key.mei"
+        s3.generate_presigned_url.assert_not_awaited()
 
     def test_client_facing_ttl_is_one_hour(self) -> None:
         """CLIENT_FACING_URL_TTL is 3600 seconds (1 hour)."""

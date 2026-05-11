@@ -434,13 +434,13 @@ This is unintended: all application database access is designed to flow through 
 
 PostgreSQL's Row Level Security (RLS) feature, when enabled on a table without any explicit policies, creates a default-deny for all connections that are not the table owner. Supabase's PostgREST connects as the `anon` or `authenticated` role — both are denied. FastAPI connects as the `postgres` database owner, which is exempt from RLS by default — the application is entirely unaffected.
 
-**Implementation:** Alembic migration `0005_enable_rls.py` runs the following for every table in the public schema (added 2026-05-05):
+**Implementation:** Alembic migrations `0005_enable_rls.py` (2026-05-05) and `0006_alembic_version_rls.py` (2026-05-10) together run the following for every table in the public schema:
 
 ```sql
 ALTER TABLE <table_name> ENABLE ROW LEVEL SECURITY;
 ```
 
-Tables to cover (as of migration 0004):
+Tables covered (as of migration 0006):
 
 ```
 alembic_version
@@ -462,6 +462,8 @@ property_value_translation
 
 No RLS policies need to be written. The default-deny is the correct policy: PostgREST should never serve these tables directly, and the absence of an explicit policy makes that intent clear.
 
+**Note on `alembic_version`.** This Alembic-internal table is covered by migration 0006 rather than 0005. Alembic connects via `DATABASE_URL` as the `postgres` superuser; PostgreSQL superusers bypass RLS entirely regardless of whether any policies exist. Enabling RLS with no policies on `alembic_version` therefore has no effect on migrations — it only silences the Supabase linter warning that flagged the table as unprotected.
+
 ### Why no other approach is needed
 
 An alternative would be revoking PostgREST's schema-level privileges (`REVOKE USAGE ON SCHEMA public FROM anon, authenticated`), or moving application tables to a private schema. Both are more invasive. Enabling RLS is the idiomatic Supabase solution, is reversible, has no operational impact, and is what the Supabase linter is recommending. The two approaches are complementary but RLS alone is sufficient.
@@ -470,7 +472,7 @@ An alternative would be revoking PostgREST's schema-level privileges (`REVOKE US
 
 This is a Phase 1 task. Although Doppia is currently an internal tool with no public users, the anon key is present in the codebase and the staging URL is shared with the team. The PostgREST endpoints are reachable from the moment the Supabase project is provisioned. This should be closed before any staging deployment.
 
-**Status:** Migration `0005_enable_rls.py` written and merged 2026-05-05. Apply with `alembic upgrade head` on all environments.
+**Status:** Migration `0005_enable_rls.py` written and merged 2026-05-05; `0006_alembic_version_rls.py` written 2026-05-10. Apply with `alembic upgrade head` on all environments to silence the Supabase linter warning on `alembic_version`.
 
 ---
 
