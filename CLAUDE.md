@@ -37,10 +37,13 @@ pip install -r requirements-dev.txt   # local dev (includes all prod deps)
 
 ### Knowledge graph seeding and validation
 ```bash
-python scripts/seed.py --domain cadences           # (Phase 1 — not yet implemented: no seed YAML exists)
-python scripts/validate_graph.py                   # (Phase 1 — not yet implemented: no seeded graph to validate)
-python scripts/visualize_domain.py --domain <name> # (Phase 1 — not yet implemented: scripts are stubs)
+python scripts/seed.py --domain cadences           # seed a domain YAML into Neo4j
+python scripts/validate_graph.py                   # run 9 structural checks against live Neo4j
+python scripts/visualize_domain.py --domain <name> # export pyvis HTML for a seeded domain
+python scripts/visualize_domain.py --domain <name> --output /tmp/<name>.html
 ```
+
+**After every YAML change**, run `python scripts/visualize_domain.py --domain <name>` and visually confirm the structure before committing.
 
 ### Frontend
 ```bash
