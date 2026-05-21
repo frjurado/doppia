@@ -196,9 +196,9 @@ class PropertySchemaYAML(BaseModel):
     id: str
     name: str
     description: str
-    cardinality: Literal["ONE_OF", "MANY_OF"]
+    cardinality: Literal["ONE_OF", "MANY_OF", "BOOL"]   # BOOL: implicit true/false, no values (ADR-019)
     required: bool = False
-    values: list[PropertyValueYAML]
+    values: list[PropertyValueYAML] = []                 # empty for BOOL schemas
     model_config = {"extra": "forbid"}
 
 class RelationshipYAML(BaseModel):
@@ -276,7 +276,7 @@ Required checks:
 2. Every `IS_SUBTYPE_OF` reference points to an existing concept id.
 3. Every `CONTAINS` target is a defined concept id.
 4. Every PropertyValue with a `references` field points to an existing concept id.
-5. Every PropertySchema has at least one `HAS_VALUE` edge.
+5. Every PropertySchema has at least one `HAS_VALUE` edge — except `BOOL`-cardinality schemas, which carry no values by definition (ADR-019).
 6. `CONTAINS` edges on a given concept have unique `order` values (no two children share `order`).
 
 Add three further checks not listed in `phase-1.md` but logically required:

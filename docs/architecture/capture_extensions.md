@@ -62,12 +62,45 @@ Fragment data is composed from four distinct sources, each with a different home
       description: "Harmony events in the fragment's range must be reviewed before approval"
 ```
 
-The `type` value tells the tagging tool and the Pydantic validator how to handle the extension. Two types are currently defined:
+The `type` value tells the tagging tool and the Pydantic validator how to handle the extension. Three types are currently defined:
 
 - `harmony_object` — a single harmony event object, persisted into `summary.concept_extensions.{field}`.
 - `harmony_gate` — no persisted value; declares that approval requires all `movement_analysis` events in the fragment's range to have `reviewed: true`.
+- `fragment_pointer` — a reference to another fragment, persisted into `summary.concept_extensions.{field}` as the target fragment's id. Captures an instance-level cross-fragment relationship: a post-cadential section pointing back at the cadence it prolongs, or a reopening half cadence pointing back at the authentic cadence it undoes. See "Fragment Pointers" below.
 
 Additional types may be added as further fragment-scoped needs arise. Adding a type is a change to the Pydantic validator and the tagging-tool form renderer; no database migration is required.
+
+---
+
+## Fragment Pointers
+
+The `fragment_pointer` type captures a relationship between two fragments where the relationship is constituted at the instance level rather than being inherent to the concept. Three cadence-domain concepts use it: `ClosingSection` and `StandingOnTheDominant` (each points back at the cadence it prolongs) and `ReopeningHalfCadence` (points back at the authentic cadence whose closure it undoes).
+
+```yaml
+- id: ClosingSection
+  name: "Closing Section"
+  capture_extensions:
+    - field: prior_cadence_pointer
+      type: fragment_pointer
+      required: true
+      description: "The cadence fragment this post-cadential section prolongs."
+
+- id: ReopeningHalfCadence
+  name: "Reopening Half Cadence"
+  capture_extensions:
+    - field: prior_ac_pointer
+      type: fragment_pointer
+      required: true
+      description: "The authentic-cadence fragment whose closure this half cadence reopens."
+```
+
+**The pointer lives on the later fragment.** The dependent fragment (the closing section, the reopening HC) is tagged *after* the fragment it refers to already exists, so a backward pointer is always resolvable at tagging time. A forward pointer would force the annotator to revisit an earlier fragment once the later one is created.
+
+**The target concept comes from the concept's edge, not the field spec.** A `fragment_pointer` field is paired with the concept's `FOLLOWS` edge, which declares the target concept. The tagging tool reads that edge to pre-populate the field with the nearest preceding fragment tagged with the target concept (or a subtype). The field spec carries no target constraint of its own — duplicating the edge's target on the field would risk the two disagreeing. Example: `ClosingSection FOLLOWS AuthenticCadence` means its `prior_cadence_pointer` pre-populates from the nearest preceding fragment tagged as an authentic cadence (PAC, IAC, DC, …).
+
+**Field naming follows the shared-namespace rule.** Because `summary.concept_extensions` is a flat namespace, two concepts that declare the same field name must agree on type, required-ness, and semantics. `ClosingSection` and `StandingOnTheDominant` share `prior_cadence_pointer` — same semantics ("the cadence this post-cadential section prolongs"), differing only in target type, which each concept's `FOLLOWS` edge supplies. `ReopeningHalfCadence` uses a distinct field name `prior_ac_pointer` because its relationship (undoing closure) is genuinely different in meaning from prolongation, even though the stored datum (a prior-AC fragment id) has the same shape.
+
+**Validation.** The Pydantic write layer validates that the pointed-to fragment exists in PostgreSQL and carries a concept tag matching — or subtyping — the edge's target concept. The relationship is not a Neo4j edge: like all fragment-to-fragment links it is resolved at the application layer. This stays within the line the domain map draws (no Neo4j fragment nodes, no `fragment_relationship` graph) — the pointer is a single datum in the fragment's `summary`, not a general inter-fragment identity graph.
 
 ---
 
