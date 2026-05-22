@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from backend.seed.schemas import (
     VALID_EDGE_TYPES,
+    CaptureExtensionYAML,
     ConceptYAML,
     ContainsEntryYAML,
     DomainYAML,
@@ -130,6 +131,50 @@ def test_valid_cardinalities() -> None:
             {**MINIMAL_SCHEMA, "cardinality": cardinality}
         )
         assert schema.cardinality == cardinality
+
+
+def test_bool_cardinality_no_values_parses() -> None:
+    """BOOL schemas carry no values — the model accepts an empty (or absent) values list."""
+    schema = PropertySchemaYAML.model_validate(
+        {
+            "id": "ECP",
+            "name": "Evaded Cadential Progression",
+            "description": "True when the dominant resolves deceptively.",
+            "cardinality": "BOOL",
+        }
+    )
+    assert schema.cardinality == "BOOL"
+    assert schema.values == []
+
+
+def test_bool_cardinality_with_values_raises() -> None:
+    """BOOL schemas must not declare values."""
+    with pytest.raises(ValidationError) as exc_info:
+        PropertySchemaYAML.model_validate(
+            {
+                "id": "ECP",
+                "name": "ECP",
+                "description": "...",
+                "cardinality": "BOOL",
+                "values": [{"id": "Yes", "name": "Yes"}],
+            }
+        )
+    assert "BOOL" in str(exc_info.value)
+
+
+def test_one_of_empty_values_raises() -> None:
+    """ONE_OF schemas must have at least one value."""
+    with pytest.raises(ValidationError) as exc_info:
+        PropertySchemaYAML.model_validate(
+            {
+                "id": "EmptySchema",
+                "name": "Empty",
+                "description": "...",
+                "cardinality": "ONE_OF",
+                "values": [],
+            }
+        )
+    assert "ONE_OF" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -265,3 +310,154 @@ def test_full_domain_with_all_fields() -> None:
     assert concept.contains[0].order == 3
     assert concept.property_schemas == ["SopranoPosition"]
     assert concept.complexity == "foundational"
+
+
+# ---------------------------------------------------------------------------
+# 9. CaptureExtensionYAML model
+# ---------------------------------------------------------------------------
+
+
+def test_capture_extension_all_types_accepted() -> None:
+    """All three capture-extension types parse correctly."""
+    for ext_type in ("harmony_object", "harmony_gate", "fragment_pointer"):
+        ext = CaptureExtensionYAML.model_validate(
+            {
+                "field": "cadential_harmony",
+                "type": ext_type,
+                "required": False,
+                "description": "The harmonic object at the cadence point.",
+            }
+        )
+        assert ext.type == ext_type
+
+
+def test_capture_extension_unknown_type_raises() -> None:
+    """An unknown type raises ValidationError."""
+    with pytest.raises(ValidationError):
+        CaptureExtensionYAML.model_validate(
+            {
+                "field": "cadential_harmony",
+                "type": "unknown_type",
+                "required": False,
+                "description": "...",
+            }
+        )
+
+
+def test_capture_extension_extra_field_forbidden() -> None:
+    """extra='forbid' is active on CaptureExtensionYAML."""
+    with pytest.raises(ValidationError):
+        CaptureExtensionYAML.model_validate(
+            {
+                "field": "f",
+                "type": "harmony_object",
+                "required": False,
+                "description": "d",
+                "bogus": "value",
+            }
+        )
+
+
+def test_concept_capture_extensions_round_trip() -> None:
+    """A ConceptYAML with capture_extensions parses and round-trips cleanly."""
+    concept_data = {
+        **MINIMAL_CONCEPT,
+        "capture_extensions": [
+            {
+                "field": "cadential_harmony",
+                "type": "harmony_object",
+                "required": False,
+                "description": "Harmonic object at the cadence point.",
+            }
+        ],
+    }
+    concept = ConceptYAML.model_validate(concept_data)
+    assert len(concept.capture_extensions) == 1
+    ext = concept.capture_extensions[0]
+    assert ext.field == "cadential_harmony"
+    assert ext.type == "harmony_object"
+    assert ext.required is False
+    # Round-trip
+    concept2 = ConceptYAML.model_validate(concept.model_dump())
+    assert concept2.capture_extensions == concept.capture_extensions
+
+
+def test_concept_capture_extensions_default_empty() -> None:
+    """capture_extensions defaults to an empty list when absent."""
+    concept = ConceptYAML.model_validate(MINIMAL_CONCEPT)
+    assert concept.capture_extensions == []
+
+
+# ---------------------------------------------------------------------------
+# 10. Capture-extension field-consistency check
+# ---------------------------------------------------------------------------
+
+
+def _make_domain_with_extensions(concepts_extensions: list[list[dict]]) -> "DomainYAML":
+    """Helper: build a DomainYAML where each concept gets the given extensions list."""
+    concepts = []
+    for i, exts in enumerate(concepts_extensions):
+        concepts.append(
+            {
+                "id": f"ConceptA{i}",
+                "name": f"Concept A{i}",
+                "definition": "Test concept.",
+                "domain": "test",
+                "capture_extensions": exts,
+            }
+        )
+    return DomainYAML.model_validate({"domain": "test", "concepts": concepts})
+
+
+def test_capture_extension_consistency_no_conflicts() -> None:
+    """Two concepts declaring the same field with identical type+required → no conflict."""
+    from scripts.seed import _check_capture_extension_consistency
+
+    ext = {
+        "field": "cadential_harmony",
+        "type": "harmony_object",
+        "required": False,
+        "description": "d",
+    }
+    domain = _make_domain_with_extensions([[ext], [ext]])
+    assert _check_capture_extension_consistency([domain]) is True
+
+
+def test_capture_extension_consistency_type_conflict() -> None:
+    """Same field name with different type → conflict detected, returns False."""
+    from scripts.seed import _check_capture_extension_consistency
+
+    ext_a = {
+        "field": "cadential_harmony",
+        "type": "harmony_object",
+        "required": False,
+        "description": "d",
+    }
+    ext_b = {
+        "field": "cadential_harmony",
+        "type": "harmony_gate",
+        "required": False,
+        "description": "d",
+    }
+    domain = _make_domain_with_extensions([[ext_a], [ext_b]])
+    assert _check_capture_extension_consistency([domain]) is False
+
+
+def test_capture_extension_consistency_required_conflict() -> None:
+    """Same field name with different required flag → conflict detected, returns False."""
+    from scripts.seed import _check_capture_extension_consistency
+
+    ext_a = {
+        "field": "cadential_harmony",
+        "type": "harmony_object",
+        "required": True,
+        "description": "d",
+    }
+    ext_b = {
+        "field": "cadential_harmony",
+        "type": "harmony_object",
+        "required": False,
+        "description": "d",
+    }
+    domain = _make_domain_with_extensions([[ext_a], [ext_b]])
+    assert _check_capture_extension_consistency([domain]) is False

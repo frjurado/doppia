@@ -1,6 +1,6 @@
 """Knowledge graph validation script.
 
-Runs a suite of nine structural checks against the live Neo4j instance to
+Runs a suite of ten structural checks against the live Neo4j instance to
 verify that the seeded graph conforms to the expected structure.  Safe to
 run at any time — makes no writes.
 
@@ -10,11 +10,12 @@ Checks performed (per ``docs/roadmap/component-4-knowledge-graph.md`` § Step 8)
 2. Every IS_SUBTYPE_OF reference points to an existing concept.
 3. Every CONTAINS target is an existing concept.
 4. Every PropertyValue with a ``references`` field points to an existing concept.
-5. Every PropertySchema has at least one HAS_VALUE edge.
+5. Every non-BOOL PropertySchema has at least one HAS_VALUE edge (ADR-019).
 6. CONTAINS edges on a given concept have unique ``order`` values.
 7. Every non-stub concept has a non-empty ``definition``.
 8. Every concept id matches ``^[A-Z][A-Za-z0-9]*$`` (PascalCase).
 9. No two concept nodes share the same ``id``.
+10. No directed cycle exists over PREREQUISITE_FOR edges (ADR-020).
 
 Stub node counts by domain are reported as informational data (not errors).
 
@@ -49,6 +50,7 @@ from backend.graph.queries.validation import (  # noqa: E402
     check_contains_targets,
     check_is_subtype_of_targets,
     check_no_isolated_concepts,
+    check_prerequisite_for_acyclicity,
     check_schemas_have_values,
     check_value_references_targets,
     get_stub_counts_by_domain,
@@ -68,6 +70,7 @@ _CHECKS = [
     (7, "Non-stub concepts have definitions", check_concepts_have_definitions),
     (8, "Concept ids match PascalCase", check_concept_id_format),
     (9, "Concept ids are unique", check_concept_id_uniqueness),
+    (10, "No PREREQUISITE_FOR cycles (ADR-020)", check_prerequisite_for_acyclicity),
 ]
 
 _COL_NUM = 4
@@ -140,7 +143,7 @@ def main() -> None:
         print("[FAIL] One or more validation checks did not pass — see above.")
         sys.exit(1)
 
-    print("[PASS] All 9 checks passed.")
+    print("[PASS] All 10 checks passed.")
     sys.exit(0)
 
 

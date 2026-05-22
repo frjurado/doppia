@@ -23,7 +23,12 @@ from backend.graph.queries.seed import (
     merge_domain_node,
     merge_property_schema,
 )
+from backend.graph.queries.validation import (
+    check_prerequisite_for_acyclicity,
+    check_schemas_have_values,
+)
 from backend.seed.schemas import (
+    CaptureExtensionYAML,
     ConceptYAML,
     ContainsEntryYAML,
     DomainYAML,
@@ -302,5 +307,156 @@ def test_get_existing_concept_ids_returns_seeded_ids(neo4j_driver: Driver) -> No
 
         assert "_TestSeedConceptParent" in ids
         assert "_TestSeedConceptChild" in ids
+    finally:
+        _cleanup(neo4j_driver)
+
+
+def test_bool_schema_not_flagged_by_check_schemas_have_values(
+    neo4j_driver: Driver,
+) -> None:
+    """A BOOL PropertySchema with no HAS_VALUE edges must not trigger check 5.
+
+    ADR-019: BOOL schemas legitimately carry no values; the validation query
+    now excludes ``cardinality = 'BOOL'`` from the check.
+    """
+    bool_schema = PropertySchemaYAML(
+        id="_TestSeedBoolSchema",
+        name="Test Bool Schema",
+        description="A BOOL schema used only in seed integration tests.",
+        cardinality="BOOL",
+    )
+    bool_domain = DomainYAML(
+        domain=_DOMAIN_KEY,
+        concepts=[
+            ConceptYAML(
+                id="_TestSeedBoolConcept",
+                name="Test Bool Concept",
+                definition="Concept using a BOOL schema.",
+                domain=_DOMAIN_KEY,
+                type="CadenceType",
+                property_schemas=["_TestSeedBoolSchema"],
+            )
+        ],
+        property_schemas=[bool_schema],
+    )
+
+    from scripts.seed import SeedStats, _seed_domain  # noqa: PLC0415
+
+    with neo4j_driver.session() as session:
+        session.run(
+            "MATCH (n) WHERE n.id = '_TestSeedBoolSchema' OR n.id = '_TestSeedBoolConcept' "
+            "DETACH DELETE n"
+        )
+    try:
+        with neo4j_driver.session() as session:
+            create_fulltext_index(session)
+            merge_domain_node(session, _DOMAIN_KEY)
+            from backend.graph.queries.seed import (  # noqa: PLC0415
+                merge_property_schema,
+            )
+
+            merge_property_schema(session, bool_schema)
+            existing = get_existing_concept_ids(session)
+            _seed_domain(session, bool_domain, existing, SeedStats())
+
+        with neo4j_driver.session() as session:
+            offenders = check_schemas_have_values(session)
+
+        assert (
+            "_TestSeedBoolSchema" not in offenders
+        ), "BOOL schema was incorrectly flagged by check 5"
+    finally:
+        with neo4j_driver.session() as session:
+            session.run(
+                "MATCH (n) WHERE n.id = '_TestSeedBoolSchema' OR n.id = '_TestSeedBoolConcept' "
+                "DETACH DELETE n"
+            )
+
+
+def test_capture_extensions_persisted_as_json(neo4j_driver: Driver) -> None:
+    """capture_extensions on a concept round-trips through the seed layer as a JSON string."""
+    import json  # noqa: PLC0415
+
+    ext = CaptureExtensionYAML(
+        field="cadential_harmony",
+        type="harmony_object",
+        required=False,
+        description="The harmonic object at the cadence point.",
+    )
+    concept_with_ext = ConceptYAML(
+        id="_TestSeedExtConcept",
+        name="Test Extension Concept",
+        definition="Concept with capture_extensions.",
+        domain=_DOMAIN_KEY,
+        type="CadenceType",
+        capture_extensions=[ext],
+    )
+    ext_domain = DomainYAML(
+        domain=_DOMAIN_KEY,
+        concepts=[concept_with_ext],
+        property_schemas=[],
+    )
+
+    from scripts.seed import SeedStats, _seed_domain  # noqa: PLC0415
+
+    with neo4j_driver.session() as session:
+        session.run("MATCH (n) WHERE n.id = '_TestSeedExtConcept' DETACH DELETE n")
+    try:
+        with neo4j_driver.session() as session:
+            create_fulltext_index(session)
+            merge_domain_node(session, _DOMAIN_KEY)
+            existing = get_existing_concept_ids(session)
+            _seed_domain(session, ext_domain, existing, SeedStats())
+
+        with neo4j_driver.session() as session:
+            result = session.run(
+                "MATCH (c:Concept {id: '_TestSeedExtConcept'}) "
+                "RETURN c.capture_extensions AS ce"
+            ).single()
+
+        assert result is not None
+        stored = json.loads(result["ce"])
+        assert isinstance(stored, list)
+        assert len(stored) == 1
+        assert stored[0]["field"] == "cadential_harmony"
+        assert stored[0]["type"] == "harmony_object"
+        assert stored[0]["required"] is False
+    finally:
+        with neo4j_driver.session() as session:
+            session.run("MATCH (n) WHERE n.id = '_TestSeedExtConcept' DETACH DELETE n")
+
+
+def test_prerequisite_for_acyclicity_no_cycle(neo4j_driver: Driver) -> None:
+    """check_prerequisite_for_acyclicity returns empty list when no cycle exists."""
+    _cleanup(neo4j_driver)
+    try:
+        _seed_full_domain(neo4j_driver)
+
+        with neo4j_driver.session() as session:
+            offenders = check_prerequisite_for_acyclicity(session)
+
+        assert offenders == [], f"Unexpected PREREQUISITE_FOR cycle: {offenders}"
+    finally:
+        _cleanup(neo4j_driver)
+
+
+def test_prerequisite_for_acyclicity_detects_cycle(neo4j_driver: Driver) -> None:
+    """check_prerequisite_for_acyclicity returns involved ids when a cycle exists."""
+    _cleanup(neo4j_driver)
+    try:
+        _seed_full_domain(neo4j_driver)
+
+        # Manually create a cycle: Parent → Child → Parent via PREREQUISITE_FOR
+        with neo4j_driver.session() as session:
+            session.run(
+                "MATCH (a:Concept {id: '_TestSeedConceptParent'}), "
+                "      (b:Concept {id: '_TestSeedConceptChild'}) "
+                "MERGE (a)-[:PREREQUISITE_FOR]->(b) "
+                "MERGE (b)-[:PREREQUISITE_FOR]->(a)"
+            )
+            offenders = check_prerequisite_for_acyclicity(session)
+
+        assert "_TestSeedConceptParent" in offenders
+        assert "_TestSeedConceptChild" in offenders
     finally:
         _cleanup(neo4j_driver)

@@ -303,6 +303,60 @@ def _check_references(
 
 
 # ---------------------------------------------------------------------------
+# Capture-extension field consistency
+# ---------------------------------------------------------------------------
+
+
+def _check_capture_extension_consistency(domains: list[DomainYAML]) -> bool:
+    """Verify that the same capture-extension field name is not declared with
+    conflicting ``type`` or ``required`` across concepts.
+
+    The ``capture_extensions`` namespace is flat and shared across all concepts
+    (see ``docs/architecture/capture_extensions.md`` § Key Principles): two
+    concepts may declare the same ``field`` only if their ``type`` and
+    ``required`` values are identical.
+
+    Args:
+        domains: Validated domain models.
+
+    Returns:
+        ``True`` if no conflicts are found, ``False`` otherwise (errors printed
+        to stderr).
+    """
+    from collections import defaultdict
+
+    # seen[field_name] = [(concept_id, type, required), ...]
+    seen: dict[str, list[tuple[str, str, bool]]] = defaultdict(list)
+
+    for domain in domains:
+        for concept in domain.concepts:
+            for ext in concept.capture_extensions:
+                seen[ext.field].append((concept.id, ext.type, ext.required))
+
+    conflicts: list[str] = []
+    for field_name, declarations in seen.items():
+        types = {d[1] for d in declarations}
+        requireds = {d[2] for d in declarations}
+        if len(types) > 1 or len(requireds) > 1:
+            detail = ", ".join(
+                f"{cid!r}(type={t!r}, required={r})" for cid, t, r in declarations
+            )
+            conflicts.append(
+                f"  field {field_name!r}: conflicting declarations — {detail}"
+            )
+
+    if conflicts:
+        print(
+            f"\n[seed] ERROR: {len(conflicts)} capture_extension field conflict(s):",
+            file=sys.stderr,
+        )
+        for msg in conflicts:
+            print(msg, file=sys.stderr)
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Id-immutability guardrail
 # ---------------------------------------------------------------------------
 
@@ -480,6 +534,9 @@ def main() -> None:
     concept_ids, schema_ids = _build_known_ids(domains)
     refs_ok = _check_references(domains, concept_ids, schema_ids, args.dry_run)
     if not refs_ok:
+        sys.exit(2)
+
+    if not _check_capture_extension_consistency(domains):
         sys.exit(2)
 
     if args.dry_run:

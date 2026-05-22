@@ -14,6 +14,8 @@ See ``docs/roadmap/component-4-knowledge-graph.md`` § Step 7 for the full spec.
 
 from __future__ import annotations
 
+import json
+
 from neo4j import Session as _Session
 
 from backend.seed.schemas import ConceptYAML, ContainsEntryYAML, PropertySchemaYAML
@@ -92,22 +94,24 @@ MERGE (ps)-[:HAS_VALUE]->(pv)
 
 _MERGE_CONCEPT = """\
 MERGE (c:Concept {id: $id})
-ON CREATE SET c.name              = $name,
-              c.aliases           = $aliases,
-              c.type              = $type,
-              c.definition        = $definition,
-              c.domain            = $domain,
-              c.complexity        = $complexity,
-              c.stub              = $stub,
-              c.top_level_taggable = $top_level_taggable
-ON MATCH SET  c.name              = $name,
-              c.aliases           = $aliases,
-              c.type              = $type,
-              c.definition        = $definition,
-              c.domain            = $domain,
-              c.complexity        = $complexity,
-              c.stub              = $stub,
-              c.top_level_taggable = $top_level_taggable
+ON CREATE SET c.name               = $name,
+              c.aliases            = $aliases,
+              c.type               = $type,
+              c.definition         = $definition,
+              c.domain             = $domain,
+              c.complexity         = $complexity,
+              c.stub               = $stub,
+              c.top_level_taggable = $top_level_taggable,
+              c.capture_extensions = $capture_extensions
+ON MATCH SET  c.name               = $name,
+              c.aliases            = $aliases,
+              c.type               = $type,
+              c.definition         = $definition,
+              c.domain             = $domain,
+              c.complexity         = $complexity,
+              c.stub               = $stub,
+              c.top_level_taggable = $top_level_taggable,
+              c.capture_extensions = $capture_extensions
 """
 
 # ---------------------------------------------------------------------------
@@ -275,6 +279,9 @@ def merge_concept(session: _Session, concept: ConceptYAML) -> None:
         complexity=concept.complexity,
         stub=concept.stub,
         top_level_taggable=concept.top_level_taggable,
+        capture_extensions=json.dumps(
+            [ext.model_dump() for ext in concept.capture_extensions]
+        ),
     )
 
 

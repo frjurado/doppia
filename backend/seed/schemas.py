@@ -23,7 +23,7 @@ from __future__ import annotations
 import inspect
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from backend.graph.queries import relationships as _rel_module
 
@@ -72,9 +72,22 @@ class PropertySchemaYAML(BaseModel):
     id: str
     name: str
     description: str
-    cardinality: Literal["ONE_OF", "MANY_OF"]
+    cardinality: Literal["ONE_OF", "MANY_OF", "BOOL"]
     required: bool = False
-    values: list[PropertyValueYAML]
+    values: list[PropertyValueYAML] = []
+    """Permitted values. Must be non-empty for ONE_OF/MANY_OF; must be empty for BOOL."""
+
+    @model_validator(mode="after")
+    def _validate_values_vs_cardinality(self) -> "PropertySchemaYAML":
+        if self.cardinality == "BOOL" and self.values:
+            raise ValueError(
+                "BOOL schemas must have no values; found non-empty values list."
+            )
+        if self.cardinality in ("ONE_OF", "MANY_OF") and not self.values:
+            raise ValueError(
+                f"{self.cardinality} schemas must have at least one value."
+            )
+        return self
 
 
 class RelationshipYAML(BaseModel):
@@ -117,6 +130,24 @@ class ContainsEntryYAML(BaseModel):
     """Relative width in the default bracket layout; normalised across siblings."""
 
 
+class CaptureExtensionYAML(BaseModel):
+    """One structured field the tagging tool should collect for a concept instance.
+
+    Fields are a flat, shared namespace across all concepts
+    (see ``docs/architecture/capture_extensions.md`` § Key Principles):
+    two concepts may declare the same ``field`` only if the ``type`` and
+    ``required`` values are identical.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    """Flat-namespace field name shared across all concepts (must not conflict)."""
+    type: Literal["harmony_object", "harmony_gate", "fragment_pointer"]
+    required: bool
+    description: str
+
+
 class ConceptYAML(BaseModel):
     """A single concept node definition in the seed YAML."""
 
@@ -141,6 +172,9 @@ class ConceptYAML(BaseModel):
     contains: list[ContainsEntryYAML] = []
     property_schemas: list[str] = []
     """Ids of PropertySchema nodes applicable to this concept (and inherited by subtypes)."""
+    capture_extensions: list[CaptureExtensionYAML] = []
+    """Structured extra fields the tagging tool should collect for this concept.
+    Stored as a JSON-encoded string on the Neo4j node (``c.capture_extensions``)."""
 
 
 class DomainYAML(BaseModel):

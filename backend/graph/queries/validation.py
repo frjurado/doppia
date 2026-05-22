@@ -69,6 +69,7 @@ ORDER BY pv.id
 _SCHEMAS_WITHOUT_VALUES = """\
 MATCH (ps:PropertySchema)
 WHERE NOT (ps)-[:HAS_VALUE]->()
+  AND ps.cardinality <> 'BOOL'
 RETURN ps.id AS id
 ORDER BY ps.id
 """
@@ -118,6 +119,16 @@ WITH c.id AS id, count(*) AS n
 WHERE n > 1
 RETURN id
 ORDER BY id
+"""
+
+# ---------------------------------------------------------------------------
+# Check 10 — Directed cycles in PREREQUISITE_FOR edges  (ADR-020 §3)
+# ---------------------------------------------------------------------------
+
+_PREREQUISITE_FOR_CYCLES = """\
+MATCH path = (c:Concept)-[:PREREQUISITE_FOR*1..]->(c)
+RETURN DISTINCT c.id AS id
+ORDER BY c.id
 """
 
 # ---------------------------------------------------------------------------
@@ -274,6 +285,22 @@ def check_concept_id_uniqueness(session: _Session) -> list[str]:
         List of duplicate ids; empty on pass.
     """
     result = session.run(_DUPLICATE_CONCEPT_IDS)
+    return [r["id"] for r in result.data()]
+
+
+def check_prerequisite_for_acyclicity(session: _Session) -> list[str]:
+    """Return concept ids that participate in a directed PREREQUISITE_FOR cycle.
+
+    ADR-020 §3 asserts the PREREQUISITE_FOR relationship is acyclic; a cycle
+    would cause prerequisite-chain traversal queries to loop indefinitely.
+
+    Args:
+        session: An open synchronous Neo4j session.
+
+    Returns:
+        List of concept ids involved in a cycle; empty list on pass.
+    """
+    result = session.run(_PREREQUISITE_FOR_CYCLES)
     return [r["id"] for r in result.data()]
 
 
