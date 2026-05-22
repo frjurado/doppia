@@ -34,7 +34,7 @@ Preprocessing pipelines (e.g. using **music21**) can assist in auto-generating s
 
 ### 3. The Knowledge Graph
 
-The semantic core of the system. Rather than a flat dictionary of definitions or a simple hierarchy, the knowledge base is a **graph** where nodes are musical concepts and edges are typed relationships capturing how concepts relate to one another. The graph is organised into domains — Basic Harmony, Cadence, Sequence, Prolongation, Modulation, Rule of the Octave, Formal Function, Schema, Musical Topic, Rhetorical Figure, and Texture — developed one at a time with stub nodes at every boundary so cross-domain edges are never left dangling. The confirmed domain list, areas under exploration, and explicitly excluded scope are documented in [`knowledge-graph-domain-map.md`](knowledge-graph-domain-map.md).
+The semantic core of the system. Rather than a flat dictionary of definitions or a simple hierarchy, the knowledge base is a **graph** where nodes are musical concepts and edges are typed relationships capturing how concepts relate to one another. The graph is organised into domains — Harmonic Function, Cadence, Sequence, Prolongation, Modulation, Rule of the Octave, Formal Function, Schema, Musical Topic, Rhetorical Figure, and Texture — developed one at a time with stub nodes at every boundary so cross-domain edges are never left dangling. The confirmed domain list, areas under exploration, and explicitly excluded scope are documented in [`knowledge-graph-domain-map.md`](knowledge-graph-domain-map.md).
 
 #### Node structure
 

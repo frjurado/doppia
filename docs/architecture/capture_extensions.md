@@ -35,7 +35,9 @@ Fragment data is composed from four distinct sources, each with a different home
 
 ## Concept Node Structure
 
-`capture_extensions` is a structured property on the concept node in Neo4j. Two kinds of extension appear:
+`capture_extensions` is a structured property on the concept node in Neo4j, stored as a **single JSON-encoded string** under `c.capture_extensions`. Neo4j properties cannot hold nested maps or lists of maps, so the list of extension specs is serialised to JSON on write and parsed back on read. It is inert specification metadata: never traversed, never placed in the full-text index. The tagging tool and the Pydantic write layer read it — including specs inherited via `IS_SUBTYPE_OF` (collected over an `IS_SUBTYPE_OF*0..` walk and merged) — and the flat-namespace field-consistency rule (below) is enforced in the seed loader at graph-load time, not by the graph itself. Modelling it as child nodes was rejected: it carries no relationships and is never queried in Cypher, so a dedicated node label and edge type would add vocabulary for no traversal benefit.
+
+Two kinds of extension appear:
 
 **Genuinely fragment-scoped fields** — data that is specific to this fragment and does not live anywhere else. These are stored on the fragment under `summary.concept_extensions.{field_name}`. `post_evasion_harmony` on `EvadedCadence` is the canonical example.
 
@@ -96,7 +98,7 @@ The `fragment_pointer` type captures a relationship between two fragments where 
 
 **The pointer lives on the later fragment.** The dependent fragment (the closing section, the reopening HC) is tagged *after* the fragment it refers to already exists, so a backward pointer is always resolvable at tagging time. A forward pointer would force the annotator to revisit an earlier fragment once the later one is created.
 
-**The target concept comes from the concept's edge, not the field spec.** A `fragment_pointer` field is paired with the concept's `FOLLOWS` edge, which declares the target concept. The tagging tool reads that edge to pre-populate the field with the nearest preceding fragment tagged with the target concept (or a subtype). The field spec carries no target constraint of its own — duplicating the edge's target on the field would risk the two disagreeing. Example: `ClosingSection FOLLOWS AuthenticCadence` means its `prior_cadence_pointer` pre-populates from the nearest preceding fragment tagged as an authentic cadence (PAC, IAC, DC, …).
+**The target concept comes from the concept's edge, not the field spec.** A `fragment_pointer` field is paired with the concept's `FOLLOWS` edge, which declares the target concept. The tagging tool reads that edge to pre-populate the field with the nearest preceding fragment tagged with the target concept (or a subtype). The field spec carries no target constraint of its own — duplicating the edge's target on the field would risk the two disagreeing. Example: `ClosingSection FOLLOWS AuthenticCadenceRealised` means its `prior_cadence_pointer` pre-populates from the nearest preceding fragment tagged as a realised authentic cadence (PAC or IAC) — the deviations (DC, EC, abandoned) are excluded because they never reach the tonic a closing section prolongs (see ADR-020 §6).
 
 **Field naming follows the shared-namespace rule.** Because `summary.concept_extensions` is a flat namespace, two concepts that declare the same field name must agree on type, required-ness, and semantics. `ClosingSection` and `StandingOnTheDominant` share `prior_cadence_pointer` — same semantics ("the cadence this post-cadential section prolongs"), differing only in target type, which each concept's `FOLLOWS` edge supplies. `ReopeningHalfCadence` uses a distinct field name `prior_ac_pointer` because its relationship (undoing closure) is genuinely different in meaning from prolongation, even though the stored datum (a prior-AC fragment id) has the same shape.
 

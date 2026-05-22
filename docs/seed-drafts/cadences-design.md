@@ -6,7 +6,7 @@
 
 **Supersedes:** the working draft circulated during the Component 4 Step 10 discussion. This document is the agreed simplification of that draft, arrived at over three review passes.
 
-**See also:** `docs/architecture/knowledge-graph-design-reference.md` (three-layer architecture, modelling decision rules), `docs/architecture/edge-vocabulary-reference.md` (authoritative edge types), `docs/architecture/knowledge-graph-domain-map.md` (domain scope), `docs/adr/ADR-011-multi-level-tagging-design.md` (tagging tool design and the `top_level_taggable` / `display_mode` / `containment_mode` / `default_weight` conventions), `docs/adr/ADR-019-bool-property-cardinality.md` (the `BOOL` cardinality used by this domain), `docs/architecture/capture_extensions.md`.
+**See also:** `docs/architecture/knowledge-graph-design-reference.md` (three-layer architecture, modelling decision rules), `docs/architecture/edge-vocabulary-reference.md` (authoritative edge types), `docs/architecture/knowledge-graph-domain-map.md` (domain scope), `docs/adr/ADR-011-multi-level-tagging-design.md` (tagging tool design and the `top_level_taggable` / `display_mode` / `containment_mode` / `default_weight` conventions), `docs/adr/ADR-019-bool-property-cardinality.md` (the `BOOL` cardinality used by this domain), `docs/adr/ADR-020-cadence-prerequisite-edges.md` (pedagogical sequencing / `PREREQUISITE_FOR` edges for this domain), `docs/architecture/capture_extensions.md`.
 
 ---
 
@@ -56,8 +56,8 @@ Stages (leaves, top_level_taggable: false):
   FinalTonic     (no stage-specific schema)
 
 Post-cadential (top-level concepts, FOLLOWS edges):
-  ClosingSection      FOLLOWS AuthenticCadence
-  StandingOnDominant  FOLLOWS HalfCadence
+  ClosingSection         FOLLOWS AuthenticCadenceRealised
+  StandingOnTheDominant  FOLLOWS HalfCadence
 ```
 
 `Cadence`, `AuthenticCadence`, `HalfCadence`, and `AuthenticCadenceRealised` carry `top_level_taggable: false` because they are abstract or intermediate categories; an annotator who selects "cadence" should always pick a specific subtype (PAC, DC, …). `HalfCadenceRealised` is `top_level_taggable: true`: unlike `AuthenticCadenceRealised` (which always resolves to PAC or IAC), a realised half cadence is itself a terminal, directly-taggable type — it has only one specialisation (`ReopeningHalfCadence`, a cross-fragment special case) and is fully meaningful tagged on its own. Stage concepts carry `top_level_taggable: false` because they have no analytical meaning outside a parent cadence — a passage that "is a prolonged dominant" outside a cadential context is a different concept living in the Prolongation domain. This is exactly the override pattern ADR-011 §5 anticipated for stage concepts that have no independent tagging use case.
@@ -192,8 +192,9 @@ For each concept: `id`, parent (`IS_SUBTYPE_OF`), `CONTAINS` edges if any, schem
 ### Post-cadential concepts
 
 **ClosingSection**
-*Edges:* `FOLLOWS` → `AuthenticCadence`.
-*Capture extensions:* `prior_cadence_pointer` (type `fragment_pointer`; the prior AC fragment id; the form pre-populates from the nearest preceding tagged AC).
+*Edges:* `FOLLOWS` → `AuthenticCadenceRealised`.
+*Capture extensions:* `prior_cadence_pointer` (type `fragment_pointer`; the prior realised-AC fragment id; the form pre-populates from the nearest preceding tagged realised AC).
+*Note:* `FOLLOWS` targets `AuthenticCadenceRealised`, not the abstract `AuthenticCadence` — a closing section prolongs a tonic that was actually reached, which the deceptive/evaded/abandoned deviations never deliver. See ADR-020 §6.
 *top_level_taggable:* true.
 *Definition seed:* "A post-cadential section that follows an authentic cadence, prolonging the tonic with closing material before the next phrase or theme begins. Distinguished from a new theme by its rhetorical and harmonic dependence on the prior cadence."
 
@@ -320,7 +321,7 @@ MANY_OF because hybrid shapes (expanding-then-converging, etc.) do occur in repe
 | id | name | references |
 |---|---|---|
 | `Stage2SD4` | "Predominant on Scale Degree 4 (IV, ii, ii6, …)" | `SD4Predominant` |
-| `Stage2SharpSD4` | "Predominant on Raised Scale Degree 4 (applied V, +6, …)" | `SD#4Predominant` |
+| `Stage2SDSharp4` | "Predominant on Raised Scale Degree 4 (applied V, +6, …)" | `SDSharp4Predominant` |
 
 **Cadential64** (on `Dominant`)
 *Cardinality:* BOOL.
@@ -339,7 +340,7 @@ The cadence domain references concepts owned by domains that have not yet been b
 - `Tonic`
 - `AppliedDominant`
 - `SD4Predominant`
-- `SD#4Predominant`
+- `SDSharp4Predominant`
 - `CadentialSixFour`
 
 **`backend/seed/domains/formal-function.yaml`** (seeded subset only — see "Seeding strategy for formal-function closure" above; the full intended domain is in `formal-function-design-notes.md`)
@@ -382,6 +383,21 @@ Several places where this design differs from the reference document. Each is a 
 
 ---
 
+## Pedagogical sequencing (`PREREQUISITE_FOR`)
+
+The pedagogical layer is specified in `docs/adr/ADR-020-cadence-prerequisite-edges.md`; this is the summary. Six `PREREQUISITE_FOR` edges are seeded (source is a prerequisite for target), all anchored on the *realised* cadence forms so each edge carries information not already implied by `IS_SUBTYPE_OF` or `FOLLOWS`:
+
+- `AuthenticCadenceRealised` → `HalfCadenceRealised`
+- `PerfectAuthenticCadence` → `ImperfectAuthenticCadence`
+- `AuthenticCadenceRealised` → `DeceptiveCadence`
+- `AuthenticCadenceRealised` → `EvadedCadence`
+- `AuthenticCadenceRealised` → `AbandonedCadence`
+- `HalfCadenceRealised` → `DominantArrival`
+
+The post-cadential and cross-fragment concepts (`ClosingSection`, `StandingOnTheDominant`, `ReopeningHalfCadence`) carry **no** `PREREQUISITE_FOR` edges: their only candidate prerequisites would duplicate existing `FOLLOWS` / `IS_SUBTYPE_OF` structure, and their pedagogical sequencing is deferred to the Formal Function domain. `PREREQUISITE_FOR` is kept acyclic. The general question of whether to materialise prerequisites that duplicate structural edges (normalise vs denormalise) is deferred — see ADR-020 §5.
+
+---
+
 ## Open items
 
 The following are deferred to the appropriate later step or to community / peer review; they are not blockers for the YAML pass.
@@ -409,3 +425,4 @@ For future reference, when this design is questioned:
 7. **Bool-style properties use `cardinality: BOOL`.** The third cardinality, introduced in ADR-019; replaces the earlier "ONE_OF with two terminal values" workaround. Six such properties in the cadence domain (`ECP`, `Covered`, `Unison`, `Premature`, `ReinterpretedAsHC`, `Cadential64`).
 8. **Ambiguity captured by a `confidence` field plus prose, not by double-tagging.**
 9. **Cross-fragment relationships modelled only where they fit the `FOLLOWS` + backward-pointer pattern.** The Reopened HC case becomes the `ReopeningHalfCadence` concept (FOLLOWS `AuthenticCadenceRealised` + `prior_ac_pointer`). Relationships that don't fit — a WayStation's eventual terminal cadence — remain unmodelled (a WayStation may be unfulfilled, any cadence can be a terminal). The single-event Reinterpreted HC case is a property, not a cross-fragment link.
+10. **Pedagogical sequencing anchored on realised forms.** Six `PREREQUISITE_FOR` edges, all pointing from/to the *realised* cadence concepts so each is non-derivable from `IS_SUBTYPE_OF` / `FOLLOWS`; the post-cadential and cross-fragment concepts carry none, and the normalise/denormalise policy is deferred. This pass also corrected `ClosingSection`'s `FOLLOWS` target to `AuthenticCadenceRealised`. See ADR-020.

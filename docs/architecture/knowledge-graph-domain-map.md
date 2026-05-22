@@ -10,11 +10,15 @@ This document records the planned scope of the knowledge graph: which musical do
 
 These domains are committed to the knowledge graph. They will be developed domain by domain, in rough priority order, with stub nodes at every boundary so that cross-domain edges are never left dangling.
 
-### 1. Basic Harmony
+**Seed/machine keys.** Each domain's seed file and its `BELONGS_TO` Domain-node id is a fixed key string; the near-term keys are `harmonic-functions` (Harmonic Function), `cadences` (Cadence), `formal-function` (Formal Function), and `prolongation` (Prolongation). The mapping is loose — some keys are pluralised (`cadences`, `harmonic-functions`), so the key recorded with each domain is authoritative and is not derived from the display name. Domain keys are also not validated at seed time: a misspelled `domain:` silently creates a separate Domain node, so spell them identically across YAML files.
 
-The atomic vocabulary on which all other domains depend. Covers scales, chord quality and inversion, Roman numeral function, and the diatonic/chromatic distinction. Without this domain, every other domain requires undeclared stub nodes for its most basic inputs.
+### 1. Harmonic Function
 
-**Scope discipline:** only what other domains need as inputs is defined here. Voice-leading tendencies and resolution behaviour belong to the domains that consume those concepts (Cadence, Prolongation), not to this one. The risk is scope creep toward a complete harmonic grammar; the constraint is to model only universals that are stable across all instances of a chord type.
+**Seed key:** `harmonic-functions`.
+
+Functional (Roman-numeral) harmony: the vocabulary other domains build on — tonic, dominant, and pre-dominant function, applied dominants, the cadential six-four, and related functional entities. This is the layer the Cadence domain references for its stage components (`Tonic`, `AppliedDominant`, `SD4Predominant`, `SDSharp4Predominant`, `CadentialSixFour`, …). Without it, every consuming domain requires undeclared stub nodes for its most basic inputs.
+
+**Scope discipline:** only what other domains need as inputs is defined here. Voice-leading tendencies and resolution behaviour belong to the domains that consume these concepts (Cadence, Prolongation), not to this one. Pre-functional fundamentals — scales, chord quality and inversion, bare scale degrees, the diatonic/chromatic distinction — are **deferred to a future fundamentals domain, not yet scoped** (this entry was formerly the broader "Basic Harmony"); cross-references elsewhere in this document that lean on that fundamentals sense should be re-pointed when that domain is defined. The standing constraint is to model only universals that are stable across all instances of a chord type.
 
 ---
 
@@ -52,9 +56,9 @@ Closely related to all the other harmonic domains, as well as to certain formal 
 
 ### 6. Rule of the Octave
 
-The conventional harmonisation of a stepwise bass ascending and descending through a full octave. Sits at the intersection of Basic Harmony and Schema: it is a pedagogical/compositional framework that codifies the default voice-leading grid of tonal practice, and in Gjerdingen's framing it is effectively a background schema against which Galant schemata operate.
+The conventional harmonisation of a stepwise bass ascending and descending through a full octave. Sits at the intersection of Harmonic Function and Schema: it is a pedagogical/compositional framework that codifies the default voice-leading grid of tonal practice, and in Gjerdingen's framing it is effectively a background schema against which Galant schemata operate.
 
-Its dual nature means it has edges pointing in both directions: toward Basic Harmony (instantiating scale degree and chord concepts) and toward Schema (underpinning schema recognition as a background norm).
+Its dual nature means it has edges pointing in both directions: toward Harmonic Function (instantiating scale-degree and chord concepts) and toward Schema (underpinning schema recognition as a background norm).
 
 ---
 
@@ -106,7 +110,7 @@ These domains are identified as potentially valuable but are not yet scoped. The
 
 Likely to fracture into at least three distinct sub-domains with almost no shared node types:
 
-- **Species counterpoint** — intervallic rules, motion types (contrary, oblique, similar, parallel), forbidden parallels. Connects to Basic Harmony and Texture.
+- **Species counterpoint** — intervallic rules, motion types (contrary, oblique, similar, parallel), forbidden parallels. Connects to Harmonic Function and Texture.
 - **Invertible counterpoint** — double, triple, and quadruple counterpoint; the rules governing interval inversion at the octave, tenth, and twelfth. Highly technical, small node count.
 - **Imitative counterpoint** — canon, fugue, stretto, subject and answer. Connects strongly to Formal Function and Schema.
 
