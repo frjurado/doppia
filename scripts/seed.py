@@ -44,7 +44,7 @@ from pathlib import Path
 # Bootstrap sys.path so backend packages are importable when running directly
 # from the repo root.  When pytest imports this module (``backend`` is already
 # on pythonpath via pyproject.toml), the insert is a harmless no-op.
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yaml  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
