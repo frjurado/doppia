@@ -1,0 +1,50 @@
+domain: harmonic-functions
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Harmonic Functions — stub file
+#
+# These nodes are referenced by the cadence domain but are owned here.
+# Each carries stub: true and top_level_taggable: false until this domain is
+# fully built. When the domain is promoted, remove stub: true and fill in
+# definitions — the seed script's MERGE semantics handle the promotion.
+#
+# Reference: docs/architecture/knowledge-graph-domain-map.md
+#            docs/seed-drafts/cadences-design.md § Adjacent-domain stubs
+# ─────────────────────────────────────────────────────────────────────────────
+
+concepts:
+
+  - id: Tonic
+    name: "Tonic"
+    domain: harmonic-functions
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the harmonic-functions domain."
+
+  - id: AppliedDominant
+    name: "Applied Dominant"
+    domain: harmonic-functions
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the harmonic-functions domain."
+
+  - id: SD4Predominant
+    name: "Pre-Dominant on Scale Degree 4"
+    domain: harmonic-functions
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the harmonic-functions domain."
+
+  - id: SDSharp4Predominant
+    name: "Pre-Dominant on Raised Scale Degree 4"
+    domain: harmonic-functions
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the harmonic-functions domain."
+
+  - id: CadentialSixFour
+    name: "Cadential Six-Four"
+    domain: harmonic-functions
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the harmonic-functions domain."

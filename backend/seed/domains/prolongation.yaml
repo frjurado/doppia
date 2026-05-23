@@ -1,0 +1,30 @@
+domain: prolongation
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prolongation — stub file
+#
+# ContrapuntalCadence is referenced by the cadence domain's design
+# (CONTRASTS_WITH AuthenticCadence) and is owned here. It carries stub: true
+# and top_level_taggable: false until this domain is fully built.
+#
+# A stub may declare relationships. The CONTRASTS_WITH edge is declared here
+# (on the stub, pointing into the cadences domain) rather than on
+# AuthenticCadence, because the contrast relationship is symmetrical and the
+# stub file is the natural place to capture external edges for a not-yet-built
+# domain.
+#
+# Reference: docs/architecture/knowledge-graph-domain-map.md
+#            docs/seed-drafts/cadences-design.md § Adjacent-domain stubs
+# ─────────────────────────────────────────────────────────────────────────────
+
+concepts:
+
+  - id: ContrapuntalCadence
+    name: "Contrapuntal Cadence"
+    domain: prolongation
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the prolongation domain."
+    relationships:
+      - type: CONTRASTS_WITH
+        target: AuthenticCadence

@@ -245,19 +245,19 @@ concepts:
       subtype. Reference: Caplin, W. (2024). Cadence: A Study of Closure in 
       Tonal Music. Oxford University Press.
     contains:
-      - target: InitialTonic
+      - target: CadentialInitialTonic
         order: 1
         required: false
         display_mode: stage
         containment_mode: contiguous
         default_weight: 1.0
-      - target: PreDominant
+      - target: CadentialPreDominant
         order: 2
         required: false
         display_mode: stage
         containment_mode: contiguous
         default_weight: 1.0
-      - target: Dominant
+      - target: CadentialDominant
         order: 3
         required: false
         display_mode: stage
@@ -287,7 +287,7 @@ concepts:
       - type: IS_SUBTYPE_OF
         target: Cadence
     contains:
-      - target: FinalTonic
+      - target: CadentialFinalTonic
         order: 4
         required: false
         display_mode: stage
