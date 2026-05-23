@@ -246,6 +246,18 @@ DOPPIA_RUN_INTEGRATION=1 pytest tests/integration/
 
 Use test fixtures that set up and tear down their own data. Do not assume a clean database; do not leave test data behind. Every integration test should be runnable in any order and in parallel.
 
+### Graph integration tests
+
+Structural and behavioural tests for the knowledge graph live in `backend/tests/graph/`. All files in this directory are marked `pytestmark = pytest.mark.integration`. They require a running Neo4j instance with the cadence domain seeded:
+
+```bash
+docker compose up -d neo4j
+python scripts/seed.py --domain cadences
+DOPPIA_RUN_INTEGRATION=1 pytest -m integration backend/tests/graph/ -v
+```
+
+The suite covers: all ten validation checks pass on a clean graph (`test_validation_suite.py`), full-text search returns expected concepts (`test_concept_search.py`), and `IS_SUBTYPE_OF*` schema inheritance resolves correctly for the cadence hierarchy (`test_schema_inheritance.py`).
+
 ### Graph structure validation
 
 Validate the structure of the seeded knowledge graph: no orphaned nodes, all cross-references resolve, `CONTAINS` edges have unique `order` values per concept, every `PropertySchema` has at least one value.
@@ -254,7 +266,7 @@ Validate the structure of the seeded knowledge graph: no orphaned nodes, all cro
 python scripts/validate_graph.py
 ```
 
-Run this after every change to YAML seed files in `backend/seed/`. CI runs it automatically on commits that touch the seed directory.
+Run this after every change to YAML seed files in `backend/seed/`. CI runs it automatically on commits that touch the seed directory. The pre-commit hook also runs `python scripts/seed.py --all --dry-run` on staged YAML files to catch Pydantic validation errors before the commit lands.
 
 ### Verovio snapshot tests
 
