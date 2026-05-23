@@ -1,0 +1,599 @@
+domain: cadences
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Property Schemas
+# Declared first. The seed script merges PropertySchema / PropertyValue nodes
+# before concept nodes, so the HAS_PROPERTY_SCHEMA edges can be resolved in a
+# single pass.
+#
+# Cardinality rules (ADR-019):
+#   ONE_OF  — mutually exclusive; must have ≥1 value
+#   MANY_OF — multi-select; must have ≥1 value
+#   BOOL    — implicit true/false toggle; must have zero values
+#
+# Reference: docs/seed-drafts/cadences-design.md § "Property schemas"
+# ─────────────────────────────────────────────────────────────────────────────
+
+property_schemas:
+
+  # ── Cadence-level schemas ────────────────────────────────────────────────
+
+  - id: CadenceFunction
+    name: "Cadence Function"
+    description: >-
+      The functional weight of the cadence within its formal context.
+      Mutually exclusive: Independent closes a formal unit in its own right;
+      WayStation defers toward a subsequent stronger cadence; LimitedScope
+      marks a cadential gesture whose closing force is contained within a
+      minor formal level with no phrase-or-theme-level closing force.
+    cardinality: ONE_OF
+    required: true
+    values:
+      - id: LimitedScope
+        name: "Limited Scope"
+      - id: WayStation
+        name: "Way Station"
+      - id: Independent
+        name: "Independent"
+
+  - id: PhraseClosure
+    name: "Phrase Closure"
+    description: >-
+      The phrase-level formal unit this cadence closes. Only meaningful when
+      CadenceFunction is Independent. Multiple values permitted (e.g. a cadence
+      that closes both a Period and the Consequent). Each value references a
+      Formal Function stub. Deliberately restricted to a stable Caplinian subset;
+      see cadences-design.md § "Seeding strategy for formal-function closure".
+    cardinality: MANY_OF
+    required: false
+    values:
+      - id: ClosesSentence
+        name: "Closes a Sentence"
+        references: Sentence
+      - id: ClosesPeriod
+        name: "Closes a Period"
+        references: Period
+      - id: ClosesHybridTheme
+        name: "Closes a Hybrid Theme"
+        references: HybridTheme
+      - id: ClosesAntecedent
+        name: "Closes an Antecedent"
+        references: Antecedent
+      - id: ClosesConsequent
+        name: "Closes a Consequent"
+        references: Consequent
+      - id: ClosesContinuation
+        name: "Closes a Continuation"
+        references: Continuation
+
+  - id: ThemeClosure
+    name: "Theme Closure"
+    description: >-
+      The theme-level formal unit this cadence closes. Only meaningful when
+      CadenceFunction is Independent. Multiple values permitted. Each value
+      references a Formal Function stub. Deliberately restricted to a stable
+      Caplinian subset; see cadences-design.md § "Seeding strategy for
+      formal-function closure".
+    cardinality: MANY_OF
+    required: false
+    values:
+      - id: ClosesMainTheme
+        name: "Closes a Main Theme"
+        references: MainTheme
+      - id: ClosesTransition
+        name: "Closes a Transition"
+        references: Transition
+      - id: ClosesSubordinateTheme
+        name: "Closes a Subordinate Theme"
+        references: SubordinateTheme
+      - id: ClosesCoda
+        name: "Closes a Coda"
+        references: Coda
+
+  - id: ECP
+    name: "Expanded Cadential Progression"
+    description: >-
+      True when the cadence features an Expanded Cadential Progression: one or
+      more of the cadential stages 1 to 3 are expanded, creating a cadential 
+      progression larger than the expected size of a cadence in a given context.
+    cardinality: BOOL
+    required: false
+
+  - id: Covered
+    name: "Covered"
+    description: >-
+      True when the soprano voice at the cadential arrival is covered by another
+      voice above it, obscuring the actual melodic arrival point.
+    cardinality: BOOL
+    required: false
+
+  - id: Unison
+    name: "Unison"
+    description: >-
+      True when the cadential progression is expressed through a unison or 
+      octave doubling, the harmonic content being implicit by context.
+    cardinality: BOOL
+    required: false
+
+  # ── Subtype-level schemas ────────────────────────────────────────────────
+
+  - id: ReinterpretedAsHC
+    name: "Reinterpreted as Half Cadence"
+    description: >-
+      True when a morphologically authentic cadence is retrospectively heard
+      as carrying the functional weight of a half cadence — the single-event
+      reinterpreted HC case. The two-event case (where a subsequent separate
+      half cadence undoes the AC's closure) is modelled as the
+      ReopeningHalfCadence concept, not as this property.
+    cardinality: BOOL
+    required: false
+
+  - id: IACSopranoDegree
+    name: "IAC Soprano Scale Degree"
+    description: >-
+      The scale degree of the soprano voice at the cadential arrival of an
+      Imperfect Authentic Cadence. Mutually exclusive: scale degree 3 or 5.
+    cardinality: ONE_OF
+    required: false
+    values:
+      - id: SD3
+        name: "Scale Degree 3"
+      - id: SD5
+        name: "Scale Degree 5"
+
+  - id: HalfCadenceShape
+    name: "Half Cadence Shape"
+    description: >-
+      The approach profile of a realised half cadence. MANY_OF because hybrid
+      shapes (e.g. expanding-then-converging) do occur in repertoire.
+    cardinality: MANY_OF
+    required: false
+    values:
+      - id: Basic
+        name: "Basic"
+      - id: Converging
+        name: "Converging"
+      - id: Expanding
+        name: "Expanding"
+
+  - id: Premature
+    name: "Premature"
+    description: >-
+      True when a cadential or non-cadential dominant is reached prematurely 
+      — before the expected cadential progression is complete.
+    cardinality: BOOL
+    required: false
+
+  # ── Stage-level schemas ──────────────────────────────────────────────────
+
+  - id: Stage1Components
+    name: "Stage 1 Components"
+    description: >-
+      The harmonic entities present in Stage 1 (Initial Tonic) of the cadence.
+      Multiple values permitted. Each value references a Harmonic Function stub.
+    cardinality: MANY_OF
+    required: false
+    values:
+      - id: Stage1Tonic
+        name: "Tonic"
+        references: Tonic
+      - id: Stage1AppliedDominant
+        name: "Applied Dominant of Pre-Dominant"
+        references: AppliedDominant
+
+  - id: Stage2Components
+    name: "Stage 2 Components"
+    description: >-
+      The harmonic entities present in Stage 2 (Pre-Dominant) of the cadence.
+      Multiple values permitted. Each value references a Harmonic Function stub.
+    cardinality: MANY_OF
+    required: false
+    values:
+      - id: Stage2SD4
+        name: "Predominant on Scale Degree 4 (IV, ii, ii6, …)"
+        references: SD4Predominant
+      - id: Stage2SDSharp4
+        name: "Predominant on Raised Scale Degree 4 (applied V, +6, …)"
+        references: SDSharp4Predominant
+
+  - id: Cadential64
+    name: "Cadential 6-4"
+    description: >-
+      True when the cadential dominant (Stage 3) is preceded by a cadential 6-4
+      elaboration. Modelled as a BOOL rather than a value in an elaboration
+      bucket because the cadential 6-4 is a near-sub-stage of the dominant,
+      structurally unlike heterogeneous elaborations. Any future Stage 3
+      elaboration gets its own named BOOL (e.g. a dominant pedal). The
+      CadentialSixFour concept in the harmonic-functions domain is the
+      structural counterpart; a fragment with Cadential64=true is correlatable
+      to it at the service layer.
+    cardinality: BOOL
+    required: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Concepts
+#
+# Ordering: abstract root → authentic-cadence branch → half-cadence branch →
+#           stage leaves → post-cadential.  BELONGS_TO edges are created
+#           automatically by the seed script from each concept's domain field
+#           and must not appear in the relationships list.
+#
+# PREREQUISITE_FOR edges are declared on the source concept alongside
+# IS_SUBTYPE_OF / FOLLOWS (ADR-020).
+#
+# All CONTAINS entries carry required: false — morphological commitment lives
+# in prose definitions, not in structural required-ness (hard-locked decision 4
+# in cadences-design.md).
+#
+# Reference: docs/seed-drafts/cadences-design.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+concepts:
+
+  # ── Abstract root ──────────────────────────────────────────────────────────
+
+  - id: Cadence
+    name: "Cadence"
+    domain: cadences
+    type: CadenceType
+    top_level_taggable: false
+    definition: >-
+      A close marking the end of a phrase, theme, or section in tonal music.
+      A cadence typically proceeds through a sequence of harmonic stages
+      (initial tonic, pre-dominant, dominant) toward an arrival point. The
+      specific morphology and outcome of the close determines the cadence
+      subtype. Reference: Caplin, W. (2024). Cadence: A Study of Closure in 
+      Tonal Music. Oxford University Press.
+    contains:
+      - target: InitialTonic
+        order: 1
+        required: false
+        display_mode: stage
+        containment_mode: contiguous
+        default_weight: 1.0
+      - target: PreDominant
+        order: 2
+        required: false
+        display_mode: stage
+        containment_mode: contiguous
+        default_weight: 1.0
+      - target: Dominant
+        order: 3
+        required: false
+        display_mode: stage
+        containment_mode: contiguous
+        default_weight: 1.0
+    property_schemas:
+      - CadenceFunction
+      - PhraseClosure
+      - ThemeClosure
+      - ECP
+      - Covered
+      - Unison
+
+  # ── Authentic-cadence branch ───────────────────────────────────────────────
+
+  - id: AuthenticCadence
+    name: "Authentic Cadence"
+    domain: cadences
+    type: CadenceType
+    complexity: foundational
+    top_level_taggable: false
+    definition: >-
+      A cadence whose dominant moves toward a final tonic event. Includes both
+      realised forms (PAC, IAC) and deviations from the expected resolution
+      (deceptive, evaded, abandoned).
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: Cadence
+    contains:
+      - target: FinalTonic
+        order: 4
+        required: false
+        display_mode: stage
+        containment_mode: contiguous
+        default_weight: 1.0
+
+  - id: AuthenticCadenceRealised
+    name: "Authentic Cadence (Realised)"
+    domain: cadences
+    type: CadenceType
+    complexity: foundational
+    top_level_taggable: false
+    definition: >-
+      An authentic cadence in which the expected final tonic is actually
+      delivered. The differentia from the deviation subtypes is morphological:
+      the cadence reaches its Stage 4 root-position tonic on the metric arrival
+      point.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: AuthenticCadence
+      - type: PREREQUISITE_FOR
+        target: HalfCadenceRealised
+      - type: PREREQUISITE_FOR
+        target: DeceptiveCadence
+      - type: PREREQUISITE_FOR
+        target: EvadedCadence
+      - type: PREREQUISITE_FOR
+        target: AbandonedCadence
+    property_schemas:
+      - ReinterpretedAsHC
+
+  - id: PerfectAuthenticCadence
+    name: "Perfect Authentic Cadence"
+    aliases:
+      - PAC
+    domain: cadences
+    type: CadenceType
+    complexity: foundational
+    top_level_taggable: true
+    definition: >-
+      A realised authentic cadence in which the soprano voice arrives on scale
+      degree 1 and both V and I are in root position. The strongest cadential
+      close in the tonal system.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: AuthenticCadenceRealised
+      - type: PREREQUISITE_FOR
+        target: ImperfectAuthenticCadence
+
+  - id: ImperfectAuthenticCadence
+    name: "Imperfect Authentic Cadence"
+    aliases:
+      - IAC
+    domain: cadences
+    type: CadenceType
+    complexity: foundational
+    top_level_taggable: true
+    definition: >-
+      A realised authentic cadence whose soprano does not arrive on scale degree
+      1 — most commonly on scale degree 3, less commonly on scale degree 5.
+      Weaker than a PAC; characteristic of antecedent phrases of periods and as
+      a way station to a subsequent PAC.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: AuthenticCadenceRealised
+    property_schemas:
+      - IACSopranoDegree
+
+  - id: DeceptiveCadence
+    name: "Deceptive Cadence"
+    aliases:
+      - DC
+    domain: cadences
+    type: CadenceType
+    complexity: intermediate
+    top_level_taggable: true
+    definition: >-
+      An authentic cadence whose dominant resolves to a substitute chord (most
+      commonly VI) in place of the expected tonic. The cadential gesture is
+      morphologically complete through Stage 3; the substitution occurs at the
+      resolution point.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: AuthenticCadence
+
+  - id: EvadedCadence
+    name: "Evaded Cadence"
+    domain: cadences
+    type: CadenceType
+    complexity: intermediate
+    top_level_taggable: true
+    definition: >-
+      An authentic cadence whose dominant fails to resolve: the expected Stage 4
+      is replaced mid-stream by an unrelated harmony, typically launching a new
+      phrase or repetition, as in the "one-more-time" technique.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: AuthenticCadence
+    capture_extensions:
+      - field: post_evasion_harmony
+        type: harmony_object
+        required: true
+        description: "First harmony immediately following the evasion."
+
+  - id: AbandonedCadence
+    name: "Abandoned Cadence"
+    domain: cadences
+    type: CadenceType
+    complexity: advanced
+    top_level_taggable: true
+    definition: >-
+      An authentic cadence whose progression breaks before any cadential
+      arrival, typically by inverting the dominant or interrupting before Stage
+      3 happens. Where the evaded cadence fails at the cadential arrival, the
+      abandoned cadence undermines or avoids altogether the cadential dominant.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: AuthenticCadence
+
+  # ── Half-cadence branch ────────────────────────────────────────────────────
+
+  - id: HalfCadence
+    name: "Half Cadence"
+    domain: cadences
+    type: CadenceType
+    complexity: foundational
+    top_level_taggable: false
+    definition: >-
+      A cadence that arrives on the dominant rather than the tonic. The
+      cadential gesture closes on Stage 3 — the dominant is the arrival point,
+      not a preparation for further resolution. Includes the realised form and
+      Dominant Arrival as a deviation.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: Cadence
+
+  - id: HalfCadenceRealised
+    name: "Half Cadence (Realised)"
+    aliases:
+      - HC
+    domain: cadences
+    type: CadenceType
+    complexity: foundational
+    top_level_taggable: true
+    definition: >-
+      A half cadence whose dominant is reached through a cadential progression
+      — i.e. preceded by an initial tonic or pre-dominant function. Unlike
+      AuthenticCadenceRealised, HalfCadenceRealised is itself directly taggable:
+      it has only one specialisation (ReopeningHalfCadence, a cross-fragment
+      special case) and is fully meaningful tagged on its own. Variants are
+      captured by the HalfCadenceShape property.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: HalfCadence
+      - type: PREREQUISITE_FOR
+        target: DominantArrival
+    property_schemas:
+      - HalfCadenceShape
+
+  - id: ReopeningHalfCadence
+    name: "Reopening Half Cadence"
+    domain: cadences
+    type: CadenceType
+    complexity: advanced
+    top_level_taggable: true
+    definition: >-
+      A realised half cadence that retrospectively undoes the closure of a
+      preceding authentic cadence: the AC appears to close, but a subsequent
+      arrival on the dominant reopens the cadential process and assumes the
+      cadential weight. Modelled as a distinct concept (rather than a property
+      on the AC) so the cross-fragment relationship can be captured by a backward
+      pointer at tagging time — mirroring the post-cadential FOLLOWS pattern,
+      where the pointer lives on the later fragment tagged after the earlier one
+      already exists. The single-event case (where the AC is retrospectively
+      heard as an HC in the same moment) is modelled instead as the
+      ReinterpretedAsHC property on AuthenticCadenceRealised.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: HalfCadenceRealised
+      - type: FOLLOWS
+        target: AuthenticCadenceRealised
+    capture_extensions:
+      - field: prior_ac_pointer
+        type: fragment_pointer
+        required: true
+        description: "The authentic-cadence fragment whose closure this half cadence reopens."
+
+  - id: DominantArrival
+    name: "Dominant Arrival"
+    domain: cadences
+    type: CadenceType
+    complexity: advanced
+    top_level_taggable: true
+    definition: >-
+      A dominant that either dissolves cadential closure by inversion or
+      addition of the seventh, or that is achieved not by cadential progression
+      but through non-cadential means — for example by direct prolongation of V
+      from a prior dominant region, or as the goal of a sequence that simply
+      lands on V.
+    relationships:
+      - type: IS_SUBTYPE_OF
+        target: HalfCadence
+    property_schemas:
+      - Premature
+
+  # ── Stage leaf concepts ────────────────────────────────────────────────────
+  # Stage concepts are CONTAINS children of Cadence/AuthenticCadence. They are
+  # not IS_SUBTYPE_OF anything; their BELONGS_TO edge is auto-created from
+  # domain: cadences. top_level_taggable: false per ADR-011 §5 override: these
+  # have no analytical meaning outside a parent cadence; prolonged dominants
+  # outside a cadential context live in the Prolongation domain.
+
+  - id: CadentialInitialTonic
+    name: "Initial Tonic"
+    domain: cadences
+    top_level_taggable: false
+    definition: >-
+      Stage 1 of a cadence: the opening tonic region from which the cadential
+      motion departs. May consist of a tonic harmony alone, an applied dominant
+      of the pre-dominant, or both in succession.
+    property_schemas:
+      - Stage1Components
+
+  - id: CadentialPreDominant
+    name: "Pre-Dominant"
+    domain: cadences
+    top_level_taggable: false
+    definition: >-
+      Stage 2 of a cadence: the predominant function preceding the cadential
+      dominant. May include scale degree 4, frequently in the bass (subdominant
+      family: IV, ii, ii6, …), raised scale degree 4 (applied dominants of V,
+      augmented sixths), or both in succession.
+    property_schemas:
+      - Stage2Components
+
+  - id: CadentialDominant
+    name: "Dominant"
+    domain: cadences
+    top_level_taggable: false
+    definition: >-
+      Stage 3 of a cadence: the cadential dominant. In Caplinian theory must be
+      a root-position V or V7, optionally preceded by a cadential 6-4
+      elaboration. The dominant of a half cadence is the arrival point and must
+      be a triad; the dominant of an authentic cadence prepares Stage 4.
+    property_schemas:
+      - Cadential64
+
+  - id: CadentialFinalTonic
+    name: "Final Tonic"
+    domain: cadences
+    top_level_taggable: false
+    definition: >-
+      Stage 4 of a cadence: the tonic arrival in an authentic cadence (or the
+      substitute chord in a deceptive cadence). Absent in half cadences and in
+      evaded or abandoned authentic cadences.
+
+  # ── Post-cadential concepts ────────────────────────────────────────────────
+  # Top-level concepts in the cadence domain. Not IS_SUBTYPE_OF any cadence;
+  # they follow one via FOLLOWS and are tagged on the fragment that immediately
+  # succeeds the cadential fragment. The prior_cadence_pointer capture extension
+  # links back to the preceding cadence fragment at tagging time.
+
+  - id: ClosingSection
+    name: "Closing Section"
+    domain: cadences
+    type: FormalUnit
+    complexity: intermediate
+    top_level_taggable: true
+    definition: >-
+      A post-cadential section that follows a realised authentic cadence,
+      prolonging the tonic with closing material before the next phrase or theme
+      begins. Distinguished from a new theme by its rhetorical and harmonic
+      dependence on the prior cadence. FOLLOWS targets AuthenticCadenceRealised
+      (not the abstract AuthenticCadence): a closing section prolongs a tonic
+      that was actually reached, which the deceptive, evaded, and abandoned
+      deviation subtypes never deliver.
+    relationships:
+      - type: FOLLOWS
+        target: AuthenticCadenceRealised
+    capture_extensions:
+      - field: prior_cadence_pointer
+        type: fragment_pointer
+        required: true
+        description: >-
+          The prior realised authentic-cadence fragment id. Pre-populated from
+          the nearest preceding tagged realised AC.
+
+  - id: StandingOnTheDominant
+    name: "Standing on the Dominant"
+    domain: cadences
+    type: FormalUnit
+    complexity: intermediate
+    top_level_taggable: true
+    definition: >-
+      A post-cadential section that follows a half cadence, prolonging the
+      dominant — typically as the close of a transition or at the end of the
+      development section. FOLLOWS targets the abstract HalfCadence (not only
+      HalfCadenceRealised), because dominant prolongations can also follow
+      Dominant Arrivals in transitional contexts.
+    relationships:
+      - type: FOLLOWS
+        target: HalfCadence
+    capture_extensions:
+      - field: prior_cadence_pointer
+        type: fragment_pointer
+        required: true
+        description: >-
+          The prior half-cadence fragment id. Pre-populated from the nearest
+          preceding tagged HC.
