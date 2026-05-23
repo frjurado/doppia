@@ -196,9 +196,9 @@ class PropertySchemaYAML(BaseModel):
     id: str
     name: str
     description: str
-    cardinality: Literal["ONE_OF", "MANY_OF"]
+    cardinality: Literal["ONE_OF", "MANY_OF", "BOOL"]   # BOOL: implicit true/false, no values (ADR-019)
     required: bool = False
-    values: list[PropertyValueYAML]
+    values: list[PropertyValueYAML] = []                 # empty for BOOL schemas
     model_config = {"extra": "forbid"}
 
 class RelationshipYAML(BaseModel):
@@ -276,7 +276,7 @@ Required checks:
 2. Every `IS_SUBTYPE_OF` reference points to an existing concept id.
 3. Every `CONTAINS` target is a defined concept id.
 4. Every PropertyValue with a `references` field points to an existing concept id.
-5. Every PropertySchema has at least one `HAS_VALUE` edge.
+5. Every PropertySchema has at least one `HAS_VALUE` edge — except `BOOL`-cardinality schemas, which carry no values by definition (ADR-019).
 6. `CONTAINS` edges on a given concept have unique `order` values (no two children share `order`).
 
 Add three further checks not listed in `phase-1.md` but logically required:
@@ -295,7 +295,7 @@ Run after every seed in CI.
 
 Implement the script as `python scripts/visualize_domain.py --domain cadences --output cadences.html`. Reads the seeded graph from Neo4j (not the YAML), filters to the domain plus any directly referenced stubs from adjacent domains, and exports a pyvis HTML file with:
 
-- Concept nodes coloured by `domain` (cadences vs. stubs from harmonic-functions vs. stubs from formal-structure visibly distinct).
+- Concept nodes coloured by `domain` (cadences vs. stubs from harmonic-functions vs. stubs from formal-function and prolongation visibly distinct).
 - Stub nodes drawn with a dashed border and a "[stub]" suffix on the label.
 - PropertySchema nodes a different shape (square or diamond).
 - PropertyValue nodes smaller and lighter.
@@ -315,6 +315,24 @@ The work is structured as a tight loop rather than a single linear step because 
 
 ---
 
+### Foundation corrections required before Step 10 (second pass)
+
+Steps 6–9 were implemented before ADR-019 (`BOOL` cardinality), ADR-020 (cadence prerequisites), and the `capture_extensions` design were finalised, so the foundation needs a focused second pass before the cadence YAML can parse, seed, and validate. These are **code** changes (made via Claude Code — this Cowork project edits docs only):
+
+1. **`backend/seed/schemas.py` — `BOOL` cardinality.** `PropertySchemaYAML.cardinality` is still `Literal["ONE_OF", "MANY_OF"]` and `values` is a required field. Add `"BOOL"`; default `values` to `[]`; add a validator (`BOOL` ⇒ no values; `ONE_OF`/`MANY_OF` ⇒ at least one). Without this the six BOOL schemas (`ECP`, `Covered`, `Unison`, `Premature`, `ReinterpretedAsHC`, `Cadential64`) cannot be expressed. (ADR-019.)
+
+2. **`backend/seed/schemas.py` + `backend/graph/queries/seed.py` — `capture_extensions`.** `ConceptYAML` has no `capture_extensions` field and uses `extra="forbid"`, so any concept declaring one fails to parse (`EvadedCadence`, `ClosingSection`, `StandingOnTheDominant`, `ReopeningHalfCadence`). Add a `CaptureExtensionYAML` model (`field: str`; `type: Literal["harmony_object", "harmony_gate", "fragment_pointer"]`; `required: bool`; `description: str`) and `ConceptYAML.capture_extensions: list[CaptureExtensionYAML] = []`. Persist it in `merge_concept` as a single JSON-encoded string property `c.capture_extensions` (Neo4j cannot store lists of maps). (See `capture_extensions.md` § Concept Node Structure.)
+
+3. **`backend/graph/queries/validation.py` — exempt `BOOL` from check 5.** `_SCHEMAS_WITHOUT_VALUES` flags every BOOL schema, which legitimately carries no `HAS_VALUE` edges. Add `AND ps.cardinality <> 'BOOL'`. (ADR-019.)
+
+4. **`backend/graph/queries/validation.py` — add check 10: `PREREQUISITE_FOR` acyclicity.** The prerequisite-chain query walks `[:PREREQUISITE_FOR*1..]` unbounded; a cycle would not terminate. Add a check asserting no directed cycle over `PREREQUISITE_FOR`. (ADR-020 §3.)
+
+5. **Seed loader (`scripts/seed.py`) — capture-extension field-consistency check.** `summary.concept_extensions` is a flat namespace: two concepts declaring the same `field` must agree on `type`, `required`, and semantics. Add a load-time pass (alongside the existing reference-resolution pass) that groups declared extension fields by name and aborts on a conflict. (See `capture_extensions.md` § Key Principles.)
+
+A non-code consistency note for the YAML itself: the harmonic-stub domain key is **`harmonic-functions`** (the Harmonic Function domain — see `knowledge-graph-domain-map.md`); the cadence and stub files must spell it identically, since domain keys are not validated and a typo silently creates a separate Domain node.
+
+---
+
 ### Step 10 — MD-to-YAML first pass
 
 Inputs: the user's draft MD design.
@@ -324,11 +342,11 @@ Output: `backend/seed/domains/cadences.yaml`.
 **Working pattern.** The user shares the MD draft (likely as an attachment or pasted into chat). Together we walk through it section by section:
 
 1. List the concepts the MD names. For each, decide id, name, type (`CadenceType` for most cadence concepts; `FormalUnit` for the abstract category Cadence; etc.), domain (`"cadences"`), complexity, `stub`, `top_level_taggable`, and prose definition. Apply the "what earns a concept node" criterion from `knowledge-graph-design-reference.md` § 2 to anything ambiguous.
-2. Map relationships: every IS_SUBTYPE_OF chain from the MD's hierarchy. Use `RESOLVES_TO`, `CONTRASTS_WITH`, `FOLLOWS` only where the MD calls for them and the edge is in the active vocabulary per `edge-vocabulary-reference.md`. Anything new requires editing that doc first; flag and stop.
-3. Map `CONTAINS` for cadences with internal stage structure (PAC → Predominant + Dominant + Resolution, etc.). Each child entry gets an `order` and `required` flag.
-4. Identify the PropertySchemas the MD implies. Common cadence schemas: `SopranoPosition`, `BassPosition`, `CadentialElaboration`, `Predominant`. For each, list values; mark `cardinality` as `ONE_OF` or `MANY_OF`; mark `required`. PropertyValues that point back into the concept graph (e.g. `Cadential64` as a value of `CadentialElaboration`) get a `references` field.
+2. Map relationships: every `IS_SUBTYPE_OF` chain from the MD's hierarchy, plus `FOLLOWS` (the post-cadential and reopening edges), the six `PREREQUISITE_FOR` edges (ADR-020), and the single cross-domain `CONTRASTS_WITH` (`ContrapuntalCadence` ↔ `AuthenticCadence`). Within-domain contrasts are left implicit in sibling position — do **not** materialise them (`edge-vocabulary-reference.md`). `BELONGS_TO` is created automatically by the seed script from each concept's `domain` key; it is not authored in the relationship list. Any edge type not already in the active vocabulary requires editing `edge-vocabulary-reference.md` first; flag and stop.
+3. Map `CONTAINS` for the cadence stage structure. Stages are declared once on the abstract parents and inherited: `Cadence` contains `InitialTonic` (1), `PreDominant` (2), `Dominant` (3); `AuthenticCadence` adds `FinalTonic` (4). Per the design every stage is `required: false`. Each child entry also carries `display_mode`, `containment_mode`, and `default_weight` (ADR-011); the built `ContainsEntryYAML` already supports all five properties.
+4. Identify the PropertySchemas the MD implies. The agreed cadence schemas (`cadences-design.md`) are: `CadenceFunction` (ONE_OF), `PhraseClosure`/`ThemeClosure` (MANY_OF, with `references` into formal-function stubs), `IACSopranoDegree` (ONE_OF), `HalfCadenceShape` (MANY_OF), `Stage1Components`/`Stage2Components` (MANY_OF, with `references` into harmonic-function stubs), and the six BOOL schemas `ECP`, `Covered`, `Unison`, `Premature`, `ReinterpretedAsHC`, `Cadential64`. For each, mark `cardinality` (`ONE_OF`/`MANY_OF`/`BOOL`) and `required`; BOOL schemas declare no values. Schemas attach at concept, subtype, and stage levels and inherit via `IS_SUBTYPE_OF`. (The earlier `SopranoPosition`/`CadentialElaboration` design was superseded — see the departures section of `cadences-design.md`.) Also capture each concept's `capture_extensions`.
 5. Wire every concept's `property_schemas` list to the schemas it inherits — directly or via `IS_SUBTYPE_OF` from a parent that owns the schema. Per the design reference, schema inheritance is implicit through `IS_SUBTYPE_OF*0..` traversal at query time, so the YAML only needs to declare the schema at the *highest* concept that owns it; subtypes inherit automatically.
-6. Identify the stub references (concepts that the cadence domain points at but does not own — `Tonic`, `Dominant`, `PreDominant`, `Phrase`, `ScaleDegree1`, etc.). Hold those for Step 11.
+6. Identify the stub references (concepts the cadence domain points at but does not own — `Tonic`, `AppliedDominant`, `SD4Predominant`, `SDSharp4Predominant`, `CadentialSixFour`, the formal-function stubs, and `ContrapuntalCadence`). Note that `PreDominant` and `Dominant` are *owned* cadence stage concepts, not stubs. Hold the stubs for Step 11.
 
 **Practical mechanics.** The user drives the design decisions; I draft the YAML chunk by chunk. After each chunk:
 
@@ -353,9 +371,15 @@ Open the pyvis HTML, walk through it together, iterate. The `--dry-run` flag on 
 
 ### Step 11 — Stub nodes for adjacent domains
 
-The cadence domain references concepts owned by domains that have not yet been built: harmonic functions (`Tonic`, `Dominant`, `PreDominant`), formal structure (`Phrase`), scale degrees (`ScaleDegree1` through `ScaleDegree7`), and possibly others depending on what Step 10 produces.
+The cadence domain references concepts owned by domains that have not yet been built. Per `cadences-design.md` § Adjacent-domain stubs, these are:
 
-Per `phase-1.md` § Component 4: stub nodes live in *their eventual home domain file*, not in a separate stubs file. So harmonic-function stubs go in `backend/seed/domains/harmonic-functions.yaml`, formal-structure stubs in `backend/seed/domains/formal-structure.yaml`, scale-degree stubs in `backend/seed/domains/scale-degrees.yaml`. Each stub:
+- **`harmonic-functions.yaml`** (the Harmonic Function domain): `Tonic`, `AppliedDominant`, `SD4Predominant`, `SDSharp4Predominant`, `CadentialSixFour`.
+- **`formal-function.yaml`**: `Sentence`, `Period`, `HybridTheme`, `Antecedent`, `Consequent`, `Continuation`, `MainTheme`, `Transition`, `SubordinateTheme`, `Coda`.
+- **`prolongation.yaml`**: `ContrapuntalCadence`, which itself carries a `CONTRASTS_WITH` → `AuthenticCadence` edge (a stub may declare edges).
+
+There is no `scale-degrees` domain, and the cadence design needs no scale-degree stubs anyway (the raised/diatonic SD4 predominants are Harmonic Function stubs; the IAC soprano degrees `SD3`/`SD5` are terminal property values with no `references`).
+
+Per `phase-1.md` § Component 4: stub nodes live in *their eventual home domain file*, not in a separate stubs file. So the three files above (`harmonic-functions.yaml`, `formal-function.yaml`, `prolongation.yaml`) hold the stubs. Each stub:
 
 ```yaml
 - id: Tonic

@@ -1,0 +1,93 @@
+domain: formal-function
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Formal Function — stub file
+#
+# These nodes are referenced by the cadence domain's PhraseClosure and
+# ThemeClosure property schemas but are owned here. Each carries stub: true
+# and top_level_taggable: false until this domain is fully built.
+#
+# The set is deliberately restricted to the stable Caplinian subset used in
+# the cadence domain's closure schemas. Additional formal-function concepts
+# will be added when this domain is fully designed.
+#
+# Reference: docs/architecture/knowledge-graph-domain-map.md
+#            docs/seed-drafts/cadences-design.md § "Seeding strategy for
+#            formal-function closure"
+# ─────────────────────────────────────────────────────────────────────────────
+
+concepts:
+
+  # ── Phrase-level formal functions (PhraseClosure schema) ──────────────────
+
+  - id: Sentence
+    name: "Sentence"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: Period
+    name: "Period"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: HybridTheme
+    name: "Hybrid Theme"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: Antecedent
+    name: "Antecedent"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: Consequent
+    name: "Consequent"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: Continuation
+    name: "Continuation"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  # ── Theme-level formal functions (ThemeClosure schema) ────────────────────
+
+  - id: MainTheme
+    name: "Main Theme"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: Transition
+    name: "Transition"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: SubordinateTheme
+    name: "Subordinate Theme"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."
+
+  - id: Coda
+    name: "Coda"
+    domain: formal-function
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the formal-function domain."

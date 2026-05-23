@@ -99,7 +99,8 @@ def _checkable(path_str: str) -> str | None:
     if not any(path_str.startswith(p) for p in ROOTED_PREFIXES):
         return None
     # Template paths (S3 key patterns, example paths with placeholders).
-    if "{" in path_str:
+    # Skips both {curly-brace} and <angle-bracket> placeholder styles.
+    if "{" in path_str or "<" in path_str:
         return None
     # Must have a recognised extension.
     if Path(path_str).suffix not in CHECKABLE_EXTENSIONS:

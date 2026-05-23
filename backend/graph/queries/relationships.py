@@ -25,6 +25,10 @@ IS_SUBTYPE_OF = "IS_SUBTYPE_OF"
 """Directed edge from a more specific concept to its parent type.
 Traversed upward (zero-or-more hops) for schema inheritance queries."""
 
+BELONGS_TO = "BELONGS_TO"
+"""Concept → Domain: lightweight domain membership classification.
+Domain nodes are simple grouping entities, not full concept nodes."""
+
 # ── Schema structure ──────────────────────────────────────────────────────────
 
 HAS_PROPERTY_SCHEMA = "HAS_PROPERTY_SCHEMA"
@@ -43,14 +47,39 @@ Used when a property value selects a concept (e.g. SopranoPosition → ScaleDegr
 
 CONTAINS = "CONTAINS"
 """Concept → Concept: declares that a concept structurally contains a sub-concept.
-Carries ``order`` (int) and ``required`` (bool) edge properties.
+Carries ``order`` (int), ``required`` (bool), ``display_mode``, ``containment_mode``,
+and ``default_weight`` edge properties.
 Used to drive the sub-part tagging UI (Component 5.4)."""
+
+# ── Syntactic / temporal ordering ────────────────────────────────────────────
+
+PRECEDES = "PRECEDES"
+"""Concept → Concept: syntactic expectation — the source is the structurally dependent
+element that leads into the target (e.g. Pre-Dominant precedes Dominant)."""
+
+FOLLOWS = "FOLLOWS"
+"""Concept → Concept: structural extension — the source is the dependent element that
+refers back to the target (e.g. post-cadential codetta follows Cadence).
+Not the inverse of PRECEDES; they encode different dependency directions."""
 
 # ── Voice-leading / harmonic resolution ──────────────────────────────────────
 
 RESOLVES_TO = "RESOLVES_TO"
 """Concept → Concept: directional resolution relationship between harmonic entities
 (e.g. Dominant → Tonic). Used in prerequisite chain and exercise generation queries."""
+
+# ── Comparative / cross-domain identity ──────────────────────────────────────
+
+CONTRASTS_WITH = "CONTRASTS_WITH"
+"""Concept ↔ Concept: comparative relationship capturing cross-branch contrasts
+not derivable from sibling position in the IS_SUBTYPE_OF tree.
+Undirected by convention — always query with direction-agnostic traversal.
+Drives exercise distractor selection."""
+
+IS_EQUIVALENT_TO = "IS_EQUIVALENT_TO"
+"""Concept ↔ Concept: cross-domain conceptual identity — the same musical entity
+described from different theoretical perspectives (e.g. Monte ≡ ascending-second
+sequence). Undirected by convention. Not for aliases (use the aliases field)."""
 
 # ── Pedagogical ordering ─────────────────────────────────────────────────────
 

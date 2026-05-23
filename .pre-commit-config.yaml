@@ -13,3 +13,11 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
+  - repo: local
+    hooks:
+      - id: seed-dry-run
+        name: Validate seed YAML (dry-run)
+        language: system
+        entry: python scripts/seed.py --all --dry-run
+        files: ^backend/seed/domains/.*\.yaml$
+        pass_filenames: false

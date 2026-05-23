@@ -222,8 +222,10 @@ Rather than embedding property definitions directly on concept nodes, `PropertyS
 | `id` | Stable identifier: `SopranoPosition` |
 | `name` | Human-readable label: `"Soprano Position"` |
 | `description` | Prose explanation of what the property captures |
-| `cardinality` | `ONE_OF` (mutually exclusive) or `MANY_OF` (combinable) |
+| `cardinality` | `ONE_OF` (mutually exclusive), `MANY_OF` (combinable), or `BOOL` (binary toggle) |
 | `required` | Whether an instance must supply a value for this property |
+
+A `BOOL` schema (introduced in ADR-019) carries no `values` list, no `PropertyValue` nodes, and no `HAS_VALUE` edges — its states are an implicit `true` / `false` and it stores a JSON boolean on the fragment. Use it for intrinsically binary attributes that vary per fragment instance (e.g. "this cadence is an expanded cadential progression"). Reach for `BOOL` only when the attribute is genuinely binary, not merely binary today — a later third state forces a migration to `ONE_OF` with explicit values. The validation check "every PropertySchema has at least one `HAS_VALUE` edge" (§ 16) exempts `BOOL` schemas.
 
 A property schema is appropriate when:
 - Instances of the same concept appear in distinct configurations worth distinguishing analytically
@@ -654,6 +656,7 @@ from enum import Enum
 class Cardinality(str, Enum):
     ONE_OF = "ONE_OF"
     MANY_OF = "MANY_OF"
+    BOOL = "BOOL"      # implicit true/false; no PropertyValue children (ADR-019)
 
 class PropertySchemaDefinition(BaseModel):
     id: str
@@ -741,7 +744,7 @@ After every seed run, execute a validation suite (`python scripts/validate_graph
 - Every `IS_SUBTYPE_OF` reference points to an existing concept `id`
 - Every `CONTAINS` target is a defined concept `id`
 - Every `PropertyValue` with a `references` field points to an existing concept `id`
-- Every `PropertySchema` has at least one `HAS_VALUE` edge
+- Every `PropertySchema` has at least one `HAS_VALUE` edge — **except** `BOOL` schemas, which carry no values by definition (ADR-019)
 - `CONTAINS` edges on a given concept have unique `order` values
 
 Run this suite in CI after any YAML change.

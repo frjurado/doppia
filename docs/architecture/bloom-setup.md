@@ -51,7 +51,7 @@ Select each node label in the perspective panel and configure its visual style. 
 
 | Node label | Colour | Shape | Caption property |
 |---|---|---|---|
-| `Concept` | `#4A90D9` (blue) | Circle | `name` |
+| `Concept` | `#3f5f77` (Henle Blue) | Circle | `name` |
 | `PropertySchema` | `#E8A838` (amber) | Rounded rectangle | `name` |
 | `PropertyValue` | `#7BC67E` (green) | Diamond | `name` |
 
@@ -70,6 +70,7 @@ In the perspective panel, scroll to the **Relationship types** section. Enable t
 | `CONTAINS` | `#2D6A4F` (dark green) | Always |
 | `PRECEDES` | `#90BE6D` (sage green) | Always |
 | `FOLLOWS` | `#43AA8B` (teal) | Always |
+| `RESOLVES_TO` | `#E63946` (red) | Always |
 | `RESOLVES_TO` | `#E63946` (red) | Always |
 | `CONTRASTS_WITH` | `#457B9D` (steel blue) | Always |
 | `IS_EQUIVALENT_TO` | `#FFD166` (gold) | Always |
@@ -90,7 +91,7 @@ To add a category rule: click `Concept` label → **Styling** → **Color** → 
 
 Click **Save perspective** at the bottom of the perspective panel. The perspective is stored in Bloom and will be available the next time you open it against the same database. Perspectives are per-user and per-database connection — each team member should configure their own copy using these instructions, or import an exported perspective file.
 
-**Exporting for the team:** once configured, export the perspective via the perspective panel's menu → **Export**. This produces a JSON file. Commit it to the repository at docs/bloom-perspective-cadence.json. Team members can import it directly: perspective panel → **Import** → select the file. This avoids each person repeating the manual setup.
+**Exporting for the team:** once configured, export the perspective via the perspective panel's menu → **Export**. This produces a JSON file. Commit it to the repository at `backend/seed/bloom/cadence-perspective.json`. Team members can import it directly: perspective panel → **Import** → select the file. This avoids each person repeating the manual setup.
 
 ---
 
@@ -209,6 +210,30 @@ RETURN a, b
 Parameter: `name` (text input). Note: `CONTRASTS_WITH` is modelled as undirected in editorial queries; the `CONTRASTS_WITH` relationship may be stored in either direction in the graph.
 
 To add a search phrase: perspective panel → **Search phrases** → **Add search phrase** → enter the name and Cypher. For parameterised phrases, Bloom will prompt for the parameter value when the phrase is run.
+
+---
+
+## Adding perspectives for future domains
+
+Each new fully-built domain should have its own saved perspective committed to `backend/seed/bloom/`. Follow these conventions:
+
+**File naming:** `backend/seed/bloom/<domain-key>-perspective.json`. The domain key matches the `domain:` field in the seed YAML (e.g. `harmonic-functions`, `formal-function`).
+
+**Colour scheme:** use a new colour for the new domain's `Concept` nodes so they are visually distinct from cadences (`#3f5f77`) when a cross-domain view is needed. Pick from the design system's tonal palette: avoid reds and ambers (reserved for relationship types and PropertySchema), avoid greys (reserved for stubs). Assign the colour in `DESIGN.md` so it is not claimed by another domain later.
+
+**Stub styling:** do not change the stub rule (`stub: true` → `#CED4DA`). It applies universally across all perspectives and domains.
+
+**Relationship types:** include all types from `docs/architecture/edge-vocabulary-reference.md` that are actually used by the domain being modelled. Do not include every type by default — an empty relationship type in the perspective just clutters the legend. Remove types that produce no edges against the current graph.
+
+**Saved search phrases:** at minimum, include:
+1. "Show all `<domain>` subtypes" — walks `IS_SUBTYPE_OF*` from the domain root concept.
+2. "Show concept and its schemas" (parameterised by `name`) — the multi-hop schema traversal phrase from the cadence perspective can be reused verbatim.
+3. "Show all stub nodes" — identical across all perspectives; always include it.
+
+**Export and commit workflow:**
+1. Configure the perspective in Bloom against the local Docker Neo4j.
+2. Perspective panel menu → **Export** → save as `backend/seed/bloom/<domain-key>-perspective.json`.
+3. Commit in the same PR as the domain seed YAML, using the `seed(<domain>):` commit type.
 
 ---
 

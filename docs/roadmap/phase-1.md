@@ -306,7 +306,7 @@ Verovio supports this via the `select` option (selecting a range of measures by 
 
 **Purpose:** Define the cadence domain — the seed domain of the knowledge graph — in YAML, load it into Neo4j, and validate the graph structure. This seeds the tagging tool's concept vocabulary for Phase 1. Cadence is also where the core graph modelling decisions emerged: the three-layer architecture, `CONTAINS` edges with `order` and `required` properties, and the stub-node convention for domain boundaries. The full planned domain scope (11 confirmed domains plus areas under exploration) is in `docs/architecture/knowledge-graph-domain-map.md`.
 
-**YAML ecosystem:** domain seed files live in `backend/seed/domains/`, one file per domain (e.g. `cadences.yaml`, `harmonic-functions.yaml`, `formal-structure.yaml`). Stub nodes — concepts that will be fully defined in a later domain — live in their eventual home domain file, tagged `stub: true`. There is no separate `stubs.yaml`: keeping stubs in their home file makes promotion natural (remove `stub: true`, fill in the full definition) without moving nodes between files. The seeding script processes all files in `backend/seed/domains/` and treats `stub: true` as an informational flag, not a structural distinction. The graph validation suite reports stub counts by domain as expected tracking data.
+**YAML ecosystem:** domain seed files live in `backend/seed/domains/`, one file per domain (e.g. `cadences.yaml`, `harmonic-functions.yaml`, `formal-function.yaml`). Stub nodes — concepts that will be fully defined in a later domain — live in their eventual home domain file, tagged `stub: true`. There is no separate `stubs.yaml`: keeping stubs in their home file makes promotion natural (remove `stub: true`, fill in the full definition) without moving nodes between files. The seeding script processes all files in `backend/seed/domains/` and treats `stub: true` as an informational flag, not a structural distinction. The graph validation suite reports stub counts by domain as expected tracking data.
 
 ### Scope
 
@@ -368,7 +368,7 @@ This suite should be a Python script runnable at any time: `python scripts/valid
 
 The cadence domain references concepts from adjacent domains — harmonic functions (Tonic, Dominant, PreDominant), formal units (Phrase), scale degree concepts. These must exist as stub nodes so that edges do not point into the void.
 
-Stub nodes are defined in their eventual home domain file (e.g. `harmonic-functions.yaml`, `formal-structure.yaml`), not in a separate stubs file:
+Stub nodes are defined in their eventual home domain file (e.g. `harmonic-functions.yaml`, `formal-function.yaml`), not in a separate stubs file:
 
 ```yaml
 # harmonic-functions.yaml — concepts stub-defined here, to be fully specified when the domain is built
@@ -381,7 +381,7 @@ concepts:
   - id: Phrase
     name: "Phrase"
     stub: true
-    definition: "Stub: defined in the formal-structure domain."
+    definition: "Stub: defined in the formal-function domain."
 ```
 
 When a domain is fully implemented, the `stub: true` flag is removed and the definition is filled in — no files need to be moved. Stub nodes carry a corresponding property in Neo4j. The graph validation suite reports stub node counts by domain; stubs are expected and tracked, not errors.

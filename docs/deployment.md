@@ -306,8 +306,6 @@ fly ssh console --app doppia-staging -C "python scripts/seed.py --domain cadence
 fly ssh console --app doppia-staging -C "python scripts/validate_graph.py"
 ```
 
-**Note:** the knowledge graph seeding script and YAML domain files are not yet implemented (Component 4). These commands will work once Component 4 is built.
-
 ## Uploading a corpus
 
 Corpus upload requires an `admin` bearer token (see "Getting a bearer token" above). The upload ZIP must contain a `metadata.yaml` sidecar plus the MEI files and (for DCML corpora) harmonies TSV files referenced by it. See `scripts/prepare_dcml_corpus.py` for how to produce a compliant ZIP from a DCML repository.
