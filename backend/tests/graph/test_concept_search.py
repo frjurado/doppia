@@ -28,7 +28,7 @@ RETURN node.id AS id
 def _search(driver: Driver, query: str) -> list[str]:
     """Run a full-text search and return the matching concept ids."""
     with driver.session() as session:
-        result = session.run(_FULLTEXT_QUERY, query=query)
+        result = session.run(_FULLTEXT_QUERY, {"query": query})
         return [r["id"] for r in result.data()]
 
 
