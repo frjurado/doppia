@@ -33,6 +33,7 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
+COPY scripts/ ./scripts/
 
 # Copy the built React SPA into the image. FastAPI's StaticFiles mount
 # serves these from /app/static/ in production.
