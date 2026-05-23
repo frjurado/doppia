@@ -1,0 +1,96 @@
+{
+  "_note": "This file is the exported Neo4j Bloom perspective for the cadence domain. Update it by opening Bloom, configuring the perspective per docs/architecture/bloom-setup.md, then exporting via Perspective panel → Export and replacing this file. Commit with: seed(cadences): update Bloom perspective export.",
+  "_version_note": "Placeholder — replace with an actual Bloom export before team onboarding.",
+
+  "name": "Cadence Domain",
+
+  "categories": [
+    {
+      "label": "Concept",
+      "color": "#3f5f77",
+      "shape": "circle",
+      "captionProperty": "name",
+      "sizingProperty": null,
+      "rules": [
+        {
+          "type": "color",
+          "property": "stub",
+          "value": true,
+          "color": "#CED4DA"
+        }
+      ]
+    },
+    {
+      "label": "PropertySchema",
+      "color": "#E8A838",
+      "shape": "roundedRectangle",
+      "captionProperty": "name",
+      "rules": []
+    },
+    {
+      "label": "PropertyValue",
+      "color": "#7BC67E",
+      "shape": "diamond",
+      "captionProperty": "name",
+      "rules": []
+    },
+    {
+      "label": "Domain",
+      "color": "#ADB5BD",
+      "shape": "circle",
+      "captionProperty": "name",
+      "rules": []
+    }
+  ],
+
+  "relationshipTypes": [
+    { "type": "IS_SUBTYPE_OF",        "color": "#3f5f77" },
+    { "type": "BELONGS_TO",           "color": "#A8DADC" },
+    { "type": "CONTAINS",             "color": "#2D6A4F", "captionProperty": "order" },
+    { "type": "PRECEDES",             "color": "#90BE6D" },
+    { "type": "FOLLOWS",              "color": "#43AA8B" },
+    { "type": "RESOLVES_TO",          "color": "#E63946" },
+    { "type": "CONTRASTS_WITH",       "color": "#457B9D" },
+    { "type": "IS_EQUIVALENT_TO",     "color": "#FFD166" },
+    { "type": "PREREQUISITE_FOR",     "color": "#6D6875" },
+    { "type": "HAS_PROPERTY_SCHEMA",  "color": "#E8A838" },
+    { "type": "HAS_VALUE",            "color": "#7BC67E" },
+    { "type": "VALUE_REFERENCES",     "color": "#C77DFF" }
+  ],
+
+  "savedSearchPhrases": [
+    {
+      "name": "Show all cadence subtypes",
+      "cypher": "MATCH (c:Concept)-[:IS_SUBTYPE_OF*1..]->(root:Concept {id: 'Cadence'}) RETURN c, root"
+    },
+    {
+      "name": "Show PAC stage structure",
+      "cypher": "MATCH (pac:Concept {id: 'PerfectAuthenticCadence'})-[:CONTAINS]->(stage) RETURN pac, stage"
+    },
+    {
+      "name": "Show concept and its schemas",
+      "cypher": "MATCH (c:Concept {name: $name})-[:IS_SUBTYPE_OF*0..]->(ancestor)-[:HAS_PROPERTY_SCHEMA]->(s)-[:HAS_VALUE]->(v) OPTIONAL MATCH (v)-[:VALUE_REFERENCES]->(ref) RETURN c, ancestor, s, v, ref",
+      "parameters": [
+        { "name": "name", "type": "text", "example": "Perfect Authentic Cadence" }
+      ]
+    },
+    {
+      "name": "Show prerequisite chain for concept",
+      "cypher": "MATCH path = (c:Concept {name: $name})<-[:PREREQUISITE_FOR*1..]-(:Concept) RETURN nodes(path), relationships(path)",
+      "parameters": [
+        { "name": "name", "type": "text", "example": "Perfect Authentic Cadence" }
+      ]
+    },
+    {
+      "name": "Show all stub nodes",
+      "cypher": "MATCH (c:Concept {stub: true}) RETURN c"
+    },
+    {
+      "name": "Show concepts contrasting with",
+      "cypher": "MATCH (a:Concept {name: $name})-[:CONTRASTS_WITH]-(b:Concept) RETURN a, b",
+      "parameters": [
+        { "name": "name", "type": "text", "example": "Authentic Cadence" }
+      ]
+    }
+  ]
+}
