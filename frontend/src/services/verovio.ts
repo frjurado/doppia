@@ -288,12 +288,35 @@ export async function renderProgressively(
 // ---------------------------------------------------------------------------
 
 /**
+ * Strip Verovio's repeat-expansion suffix from a timemap element ID.
+ *
+ * When Verovio expands repeats in the timemap, it appends `-rendN` (e.g.
+ * `-rend2`, `-rend3`) to the xml:id of every element played in an additional
+ * pass through a repeated section. These are virtual IDs: the SVG DOM only
+ * ever contains the **original** ID (the score renders each repeated measure
+ * once with its repeat sign intact). Stripping the suffix maps every repeat
+ * pass back to the real DOM element.
+ *
+ * Volta-bracket endings are genuinely separate measures with their own
+ * original IDs (`first-ending-note`, `second-ending-note`) and are therefore
+ * unaffected — their IDs carry no `-rendN` suffix.
+ *
+ * @param id - Raw element ID from the timemap `on` array.
+ * @returns The canonical DOM ID (suffix removed if present).
+ */
+function stripRendSuffix(id: string): string {
+  return id.replace(/-rend\d+$/, '');
+}
+
+/**
  * Build a sorted schedule of { timeMs, ids } from Verovio's timemap.
  *
  * Using renderToTimemap() instead of repeated getElementsAtTime() calls is
  * more reliable because:
- *   - The timemap expands all repeats correctly: a measure played twice appears
- *     as two entries with the same element IDs at different tstamp values.
+ *   - The timemap expands all repeats: a measure played twice appears as two
+ *     entries at different tstamp values. On the second pass Verovio appends a
+ *     `-rendN` suffix to element IDs; stripRendSuffix() maps them back to the
+ *     real DOM element so getElementById() succeeds on every repeat pass.
  *   - getElementsAtTime() can return structural element IDs (rend, barline)
  *     between note onsets and at repeat boundaries, causing stale highlights.
  *
@@ -318,7 +341,8 @@ export function buildHighlightSchedule(
     const schedule: Array<{ timeMs: number; ids: string[] }> = [];
     for (const entry of entries) {
       if (!entry.on || entry.on.length === 0 || entry.tstamp === undefined) continue;
-      schedule.push({ timeMs: entry.tstamp, ids: entry.on });
+      // Strip -rendN suffixes so repeated-pass IDs resolve to real DOM elements.
+      schedule.push({ timeMs: entry.tstamp, ids: entry.on.map(stripRendSuffix) });
     }
 
     // Should already be sorted by Verovio, but sort defensively.
