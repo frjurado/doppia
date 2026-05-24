@@ -6,8 +6,8 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { fetchMeiUrl } from '../services/scoreApi';
-import { buildHighlightSchedule, getVerovioToolkit, renderMidi, renderProgressively } from '../services/verovio';
-import type { RenderOptions } from '../services/verovio';
+import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioToolkit, parseMeiMeterUnit, renderMidi, renderProgressively } from '../services/verovio';
+import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 
 // ---------------------------------------------------------------------------
@@ -15,11 +15,11 @@ import styles from './ScoreViewer.module.css';
 // ---------------------------------------------------------------------------
 
 /** Staff size used when no explicit preset is selected. */
-const DEFAULT_SCALE = 35 as const;
+const DEFAULT_SCALE = 45 as const;
 
-type ScalePreset = 25 | 35 | 45;
+type ScalePreset = 35 | 45 | 55;
 
-const SCALE_LABELS: Record<ScalePreset, string> = { 25: 'Small', 35: 'Medium', 45: 'Large' };
+const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 55: 'Large' };
 
 /**
  * Transposition intervals mapped to Verovio transposition string format.
@@ -51,7 +51,7 @@ const DEFAULT_FONT = 'Bravura';
  * Fallback page width (pixels) used before the container is measured.
  * The ResizeObserver and explicit measurement replace this on first render.
  */
-const DEFAULT_PAGE_WIDTH = 1400;
+const DEFAULT_PAGE_WIDTH = 1200;
 
 /**
  * Minimum page width passed to Verovio (pixels). Below this, the score panel
@@ -76,7 +76,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *   1. Toolbar (container-high, scrolls with page): back link, staff size,
  *      transposition, and music font controls.
  *   2. Score panel: Verovio SVG pages rendered progressively inside a
- *      centered max-width: 1400px container.
+ *      centered max-width: 1200px container.
  *   3. Playback bar (container-highest, fixed bottom): transport controls
  *      (Play/Pause, Stop, position display) wired to useMidiPlayback.
  *
@@ -132,6 +132,20 @@ export default function ScoreViewer() {
    */
   const [midiBase64, setMidiBase64] = useState<string | null>(null);
 
+  // ── Transport bar display state (Step 18) ─────────────────────────────────
+  /**
+   * Display position derived from the bar schedule (MEI @n values) rather
+   * than Tone.js's raw linear bar counter. Fixes three sub-defects:
+   *   1. Pickup bars: MEI @n = 0 → shows "0:beat" not "1:beat".
+   *   2. Repeated sections: same barN on both passes instead of linear count.
+   *   3. Non-quarter beats: beatDurationMs in denominator unit (e.g. 250 ms
+   *      per eighth note for 6/8 at 120 BPM) → 6 beats per 6/8 bar.
+   * Falls back to playbackPosition when the bar schedule is empty.
+   */
+  const [displayPosition, setDisplayPosition] = useState<{ bar: number; beat: number }>({
+    bar: 1, beat: 1,
+  });
+
   // ── Refs (stable across renders, safe to read inside async callbacks) ────
   // Verovio toolkit singleton acquired after WASM loads.
   const tkRef = useRef<Awaited<ReturnType<typeof getVerovioToolkit>> | null>(null);
@@ -156,6 +170,21 @@ export default function ScoreViewer() {
   // Sorted { timeMs, ids } entries with repeats fully expanded — the same note
   // IDs appear twice (once per pass) at different timeMs values.
   const highlightScheduleRef = useRef<Array<{ timeMs: number; ids: string[] }>>([]);
+  // Note info map from buildNoteInfoMap(), built once after MEI text is loaded.
+  // Maps each MEI note/rest xml:id to { barN, beat } derived from @n and @tstamp.
+  // Drives the transport bar display so it shows MEI @n (not Tone.js linear bar)
+  // and beats in the denominator unit (not quarter notes), fixing all three
+  // transport-bar sub-defects: pickup phase drift, repeat bar count, 6/8 beats.
+  const noteInfoMapRef = useRef<Map<string, NoteInfo>>(new Map());
+  // Beat duration in ms for the denominator unit (e.g. 250 ms for an eighth
+  // note at quarter=120 in a 6/8 piece). Computed from the timemap tempo and
+  // MEI @meter.unit after each render. Default 500 ms = quarter note at 120 BPM.
+  // Used as the timing-based beat fallback when @tstamp is absent (Step 18.3).
+  const beatDurationMsRef = useRef<number>(500);
+  // Tracks the start of the current bar during playback. Updated whenever barN
+  // changes so we can compute beat = floor((timeMs - barStartMs) / beatDurationMs) + 1.
+  // Reset to { barN: 1, startMs: 0 } when playback stops or returns to ready/idle.
+  const currentBarRef = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
 
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
@@ -169,6 +198,7 @@ export default function ScoreViewer() {
    * at playback time.
    */
   const handlePositionUpdate = useCallback((timeMs: number) => {
+    // ── SVG note highlight ───────────────────────────────────────────────────
     const schedule = highlightScheduleRef.current;
 
     // Clear previous highlights unconditionally so they never get stuck.
@@ -177,23 +207,60 @@ export default function ScoreViewer() {
     }
     highlightedElsRef.current = [];
 
-    if (schedule.length === 0) return;
+    if (schedule.length > 0) {
+      // Binary-search for the latest onset at or before the current time.
+      let lo = 0, hi = schedule.length - 1, idx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (schedule[mid].timeMs <= timeMs) { idx = mid; lo = mid + 1; }
+        else hi = mid - 1;
+      }
 
-    // Binary-search for the latest onset at or before the current time.
-    let lo = 0, hi = schedule.length - 1, idx = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (schedule[mid].timeMs <= timeMs) { idx = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      if (idx >= 0) {
+        for (const id of schedule[idx].ids) {
+          const el = document.getElementById(id);
+          if (el) {
+            el.classList.add('is-playing');
+            highlightedElsRef.current.push(el);
+          }
+        }
+      }
     }
 
-    if (idx < 0) return;
-
-    for (const id of schedule[idx].ids) {
-      const el = document.getElementById(id);
-      if (el) {
-        el.classList.add('is-playing');
-        highlightedElsRef.current.push(el);
+    // ── Transport bar display (Step 18) ──────────────────────────────────────
+    // Look up the first highlighted element's id in noteInfoMapRef to get the
+    // MEI @n bar number and the @tstamp-derived beat (in the time signature's
+    // denominator unit). This fixes all three transport-bar sub-defects:
+    //
+    //   1. Pickup bars: barN = 0 (from MEI @n="0"), beats renumbered from 1.
+    //      Tone.js calls the pickup "bar 1" and makes every subsequent bar wrong.
+    //
+    //   2. Repeats: Step 17 stripped -rendN so the same element is highlighted
+    //      on both passes; the map returns the same barN on both passes.
+    //      Tone.js would count linearly (bar 9, 10 … instead of 1, 2 …).
+    //
+    //   3. 6/8 beats: MEI @tstamp is in eighth-note units, so beat 1–6 are
+    //      returned directly. Tone.js counts only 3 quarter-note beats.
+    //
+    // setDisplayPosition is stable (useState setter) — no extra deps needed.
+    if (highlightedElsRef.current.length > 0) {
+      const info = noteInfoMapRef.current.get(highlightedElsRef.current[0].id);
+      if (info) {
+        if (info.beat > 0) {
+          // @tstamp present — use directly (already in denominator units).
+          setDisplayPosition({ bar: info.barN, beat: info.beat });
+        } else {
+          // @tstamp absent (e.g. OpenScore MEI) — compute beat from timing.
+          // When the bar changes, record the new bar and its start time.
+          if (info.barN !== currentBarRef.current.barN) {
+            currentBarRef.current = { barN: info.barN, startMs: timeMs };
+          }
+          const elapsed = timeMs - currentBarRef.current.startMs;
+          const beat = beatDurationMsRef.current > 0
+            ? Math.max(1, Math.floor(elapsed / beatDurationMsRef.current) + 1)
+            : 1;
+          setDisplayPosition({ bar: info.barN, beat });
+        }
       }
     }
   }, []);
@@ -218,6 +285,29 @@ export default function ScoreViewer() {
     }
     highlightedElsRef.current = [];
   }, [stop]);
+
+  // ── displayPosition sync (Step 18) ──────────────────────────────────────
+
+  // When the note info map is empty (e.g. MEI has no @tstamp on notes, or
+  // DOMParser is unavailable), fall back to the raw Tone.js position so the
+  // transport bar still shows something reasonable rather than staying at 1:1.
+  useEffect(() => {
+    if (noteInfoMapRef.current.size === 0) {
+      setDisplayPosition(playbackPosition);
+    }
+  }, [playbackPosition]);
+
+  // Reset display position when playback stops or is idle so the transport bar
+  // returns to 1:1 (or 0:1 for pickup scores if the bar schedule is populated,
+  // but the bar schedule is cleared on re-render so 1:1 is safe as default).
+  useEffect(() => {
+    if (playbackStatus === 'ready' || playbackStatus === 'idle') {
+      setDisplayPosition({ bar: 1, beat: 1 });
+      // Also reset currentBarRef so the first bar after resuming gets a fresh
+      // startMs rather than inheriting a stale value from a previous playback.
+      currentBarRef.current = { barN: 1, startMs: 0 };
+    }
+  }, [playbackStatus]);
 
   // ── Re-render (triggered by options changes or container resize) ──────────
   /**
@@ -260,10 +350,15 @@ export default function ScoreViewer() {
           // Atomically swap SVG pages once all are collected.
           setSvgPages([...collectedPages]);
 
-          // Regenerate MIDI and highlight schedule to follow new options
-          // (Step 14.6). midiBase64 change stops any in-progress playback.
+          // Regenerate MIDI and highlight schedule to follow new options (Step 14.6).
+          // noteInfoMapRef does not need rebuilding — it depends only on MEI text,
+          // which is unchanged by scale/transpose/font re-renders.
           const midi = await renderMidi(tkRef.current);
           highlightScheduleRef.current = buildHighlightSchedule(tkRef.current);
+          // Recompute beat duration — transposition may change tempo in the timemap.
+          const tempo = getTimemapTempo(tkRef.current);
+          const meterUnit = parseMeiMeterUnit(meiTextRef.current ?? '');
+          beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
           setMidiBase64(midi);
 
           // Clear stale highlights — SVG element IDs may differ in new render.
@@ -326,6 +421,9 @@ export default function ScoreViewer() {
       setSvgPages([]);
       setErrorMessage(null);
       setMidiBase64(null);
+      // Reset note info map so stale data from a previous score is not used
+      // while the new MEI loads. Rebuilt synchronously after meiText is fetched.
+      noteInfoMapRef.current = new Map();
 
       // Measure container width before any await — DOM is synchronously
       // available at effect time. This value is used for the initial render;
@@ -347,6 +445,9 @@ export default function ScoreViewer() {
         const meiText = await meiResponse.text();
         if (cancelled) return;
         meiTextRef.current = meiText;
+        // Build note info map synchronously from MEI (DOMParser, no toolkit needed).
+        // Built once per score load; does not need rebuilding on options re-renders.
+        noteInfoMapRef.current = buildNoteInfoMap(meiText);
 
         // 2. Load Verovio WASM (singleton — loads at most once per session).
         setLoadingLabel('Loading score renderer…');
@@ -389,6 +490,12 @@ export default function ScoreViewer() {
             const midi = await renderMidi(tk);
             if (!cancelled) {
               highlightScheduleRef.current = buildHighlightSchedule(tk);
+              // Compute beat duration for timing-based beat fallback (Step 18.3).
+              // beatDurationMs = (60 000 / bpm) × (4 / meterUnit), where meterUnit
+              // is the denominator of the time signature (4 for 4/4, 8 for 6/8, etc.)
+              const tempo = getTimemapTempo(tk);
+              const meterUnit = parseMeiMeterUnit(meiTextRef.current ?? '');
+              beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
               setMidiBase64(midi);
             }
           } catch {
@@ -448,84 +555,86 @@ export default function ScoreViewer() {
           <Type variant="label-md" as="span">← Browse</Type>
         </Link>
 
-        <div className={styles.toolbarSeparator} />
-
-        {/* Staff size presets */}
-        <div className={styles.staffSizeControl} role="group" aria-label="Staff size">
-          <Type
-            variant="label-md"
-            as="span"
-            style={{ color: 'var(--color-on-surface-variant)' }}
-          >
-            Size
-          </Type>
-          {([25, 35, 45] as ScalePreset[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={[
-                styles.sizeButton,
-                scale === s ? styles.sizeButtonActive : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => handleScaleChange(s)}
-              aria-pressed={scale === s}
-            >
-              <Type variant="label-sm" as="span">{SCALE_LABELS[s]}</Type>
-            </button>
-          ))}
-        </div>
-
-        {/* Transposition select */}
-        <div className={styles.toolbarSelectControl}>
-          <label htmlFor="transpose-select" className={styles.toolbarSelectLabel}>
+        {/* Centred controls group — middle column of the 1fr/auto/1fr grid */}
+        <div className={styles.toolbarControls}>
+          {/* Staff size presets */}
+          <div className={styles.staffSizeControl} role="group" aria-label="Staff size">
             <Type
               variant="label-md"
               as="span"
               style={{ color: 'var(--color-on-surface-variant)' }}
             >
-              Transpose
+              Size
             </Type>
-          </label>
-          <select
-            id="transpose-select"
-            className={styles.toolbarSelect}
-            value={transpose}
-            onChange={(e) => handleTransposeChange(e.target.value)}
-          >
-            {TRANSPOSE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
+            {([35, 45, 55] as ScalePreset[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={[
+                  styles.sizeButton,
+                  scale === s ? styles.sizeButtonActive : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => handleScaleChange(s)}
+                aria-pressed={scale === s}
+              >
+                <Type variant="label-sm" as="span">{SCALE_LABELS[s]}</Type>
+              </button>
             ))}
-          </select>
+          </div>
+
+          {/* Transposition select */}
+          <div className={styles.toolbarSelectControl}>
+            <label htmlFor="transpose-select" className={styles.toolbarSelectLabel}>
+              <Type
+                variant="label-md"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Transpose
+              </Type>
+            </label>
+            <select
+              id="transpose-select"
+              className={styles.toolbarSelect}
+              value={transpose}
+              onChange={(e) => handleTransposeChange(e.target.value)}
+            >
+              {TRANSPOSE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Music font select */}
+          <div className={styles.toolbarSelectControl}>
+            <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
+              <Type
+                variant="label-md"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Music font
+              </Type>
+            </label>
+            <select
+              id="font-select"
+              className={styles.toolbarSelect}
+              value={font}
+              onChange={(e) => handleFontChange(e.target.value)}
+            >
+              {FONT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {/* Music font select */}
-        <div className={styles.toolbarSelectControl}>
-          <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
-            <Type
-              variant="label-md"
-              as="span"
-              style={{ color: 'var(--color-on-surface-variant)' }}
-            >
-              Music font
-            </Type>
-          </label>
-          <select
-            id="font-select"
-            className={styles.toolbarSelect}
-            value={font}
-            onChange={(e) => handleFontChange(e.target.value)}
-          >
-            {FONT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
       </Surface>
 
       {/* Narrow-screen notice — shown when container is below 480px */}
@@ -564,7 +673,7 @@ export default function ScoreViewer() {
             for width measurement even before the first successful render. */}
         <div className={styles.scorePanel}>
           {/* .scoreContent is the measured element: ResizeObserver watches it.
-              Its offsetWidth (≤ 1400px via max-width) is what we pass to
+              Its offsetWidth (≤ 1200px via max-width) is what we pass to
               Verovio as pageWidth, so the SVG fills the container exactly. */}
           <div ref={scorePanelRef} className={styles.scoreContent}>
             {svgPages.map((svg, i) => (
@@ -642,16 +751,19 @@ export default function ScoreViewer() {
               ⏹
             </button>
 
-            {/* Position display: bar and beat, 1-indexed */}
+            {/* Position display: MEI @n bar and beat-in-denominator-unit.
+                Uses displayPosition (from bar schedule) when available;
+                falls back to playbackPosition (Tone.js counter) via the
+                sync effect when the bar schedule is empty. */}
             <Type
               variant="label-md"
               as="span"
               className={styles.positionDisplay}
               aria-live="polite"
-              aria-label={`Bar ${playbackPosition.bar}, beat ${playbackPosition.beat}`}
+              aria-label={`Bar ${displayPosition.bar}, beat ${displayPosition.beat}`}
             >
               {isPlaybackAvailable
-                ? `${playbackPosition.bar}:${playbackPosition.beat}`
+                ? `${displayPosition.bar}:${displayPosition.beat}`
                 : '—'}
             </Type>
           </>

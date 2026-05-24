@@ -153,6 +153,7 @@ export async function renderPage(
     scaleToPageSize: true,
     pageMarginTop: 0,
     pageMarginBottom: 0,
+    footer: 'none',
   });
   tk.loadData(meiText);
   return tk.renderToSVG(pageNum);
@@ -193,6 +194,7 @@ export async function renderFragment(
     breaks: 'none',
     pageMarginTop: 0,
     pageMarginBottom: 0,
+    footer: 'none',
     // No scaleToPageSize for fragment renders — the wide fixed pageWidth
     // ensures all selected measures appear on one line without scaling.
   });
@@ -263,6 +265,7 @@ export async function renderProgressively(
     scaleToPageSize: true,
     pageMarginTop: 0,
     pageMarginBottom: 0,
+    footer: 'none',
   });
   tk.loadData(meiText);
 
@@ -281,16 +284,243 @@ export async function renderProgressively(
 }
 
 // ---------------------------------------------------------------------------
+// Note info map (transport bar display)
+// ---------------------------------------------------------------------------
+
+/** Display position stored for each MEI element. */
+export interface NoteInfo {
+  /**
+   * MEI @n of the parent measure (display bar number).
+   * 0 for pickup (anacrusis) bars; 1 for the first full bar.
+   */
+  barN: number;
+  /**
+   * Beat within the bar (1-indexed) in the prevailing time signature's
+   * denominator unit. Derived from MEI @tstamp:
+   *   - 4/4: @tstamp 1–4 → beat 1–4 (quarter-note beats)
+   *   - 6/8: @tstamp 1–6 → beat 1–6 (eighth-note beats)
+   *   - 3/2: @tstamp 1–3 → beat 1–3 (half-note beats)
+   *
+   * For pickup bars (@n="0"), beats are renumbered from 1 (so the first
+   * pickup onset is beat 1, not the full-bar @tstamp value like 4 in 4/4).
+   *
+   * 0 when @tstamp is absent — caller keeps the previous beat value.
+   */
+  beat: number;
+}
+
+/**
+ * Parse a MEI document to build a note-id → {barN, beat} lookup map.
+ *
+ * This map drives the transport bar display during playback without relying on
+ * Tone.js's BBT counter, which has three known defects:
+ *
+ * 1. **Pickup bars**: Tone.js treats the pickup as a full bar, shifting every
+ *    subsequent bar off by one and making beats permanently out of phase.
+ *    This map reads MEI @n directly (pickup = 0), so the cascade never starts.
+ *
+ * 2. **Repeats**: Tone.js counts bars linearly (bar 9 on the second pass through
+ *    bar 1). Because Step 17 strips the -rendN suffix from highlighted IDs, the
+ *    DOM element id equals the original MEI xml:id, which this map resolves to
+ *    the same barN on both passes.
+ *
+ * 3. **Non-quarter meters**: Tone.js counts beats in quarter notes (so 6/8
+ *    appears to have 3 beats). MEI @tstamp is already in the denominator unit
+ *    (eighths for 6/8), so the correct count comes for free.
+ *
+ * Usage in ScoreViewer: on each animation frame, `handlePositionUpdate` looks
+ * up the first highlighted element's id in this map and calls `setDisplayPosition`.
+ * No Tone.js BBT reading is involved.
+ *
+ * Handles:
+ *   - `<note>` and `<rest>` with @tstamp
+ *   - `<note>` / `<rest>` inside `<chord>` — inherits chord's @tstamp
+ *   - Measures without @n — falls back to sequential 1-based index
+ *   - Pickup bars (@n="0") — beats renumbered 1, 2, … within the pickup
+ *
+ * Falls back to empty map if DOMParser is unavailable or MEI is unparseable;
+ * the caller falls back to the raw Tone.js position in that case.
+ *
+ * @param meiText - Normalized MEI content string.
+ */
+export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
+  const map = new Map<string, NoteInfo>();
+  try {
+    if (typeof DOMParser === 'undefined') return map;
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+    const measures = doc.getElementsByTagName('measure');
+
+    for (let mi = 0; mi < measures.length; mi++) {
+      const measure = measures[mi];
+      const nAttr = measure.getAttribute('n');
+      // @n = 0 is valid for pickup bars; missing @n → sequential 1-based index.
+      const barN = nAttr !== null ? parseInt(nAttr, 10) : mi + 1;
+      const isPickup = barN === 0;
+
+      // Helper: read @xml:id from an element (namespace-safe).
+      const getId = (el: Element): string | null =>
+        el.getAttribute('xml:id') ??
+        el.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
+
+      // Helper: find the nearest @tstamp walking up toward the measure root.
+      // Handles notes-inside-chords (chord carries @tstamp, note does not).
+      const getTimestamp = (el: Element): number | null => {
+        let cursor: Element | null = el;
+        while (cursor && cursor !== measure) {
+          const ts = cursor.getAttribute('tstamp');
+          if (ts !== null) {
+            const v = parseFloat(ts);
+            return Number.isNaN(v) ? null : v;
+          }
+          cursor = cursor.parentElement;
+        }
+        return null;
+      };
+
+      // Collect all note and rest elements in this measure.
+      const noteEls = Array.from(measure.getElementsByTagName('note'));
+      const restEls = Array.from(measure.getElementsByTagName('rest'));
+      const elements = [...noteEls, ...restEls];
+
+      // For pickup bars: renumber beats 1, 2, 3 … by onset order,
+      // not by the full-bar @tstamp value (which would be e.g. 4 for the
+      // last beat of a 4/4 bar). This matches the display rule in the
+      // playback-coordinates spec: "0:1 for the first event, not 0:4".
+      let pickupBeatMap: Map<number, number> | null = null;
+      if (isPickup) {
+        const uniqueTs = [...new Set(
+          elements.map(el => getTimestamp(el)).filter((v): v is number => v !== null)
+        )].sort((a, b) => a - b);
+        pickupBeatMap = new Map(uniqueTs.map((ts, idx) => [ts, idx + 1]));
+      }
+
+      for (const el of elements) {
+        const id = getId(el);
+        if (!id) continue;
+
+        const ts = getTimestamp(el);
+        let beat = 0;
+        if (ts !== null) {
+          beat = isPickup
+            ? (pickupBeatMap!.get(ts) ?? 1)
+            : Math.max(1, Math.floor(ts + 1e-9)); // floor: note on beat 1.5 shows beat 1
+        }
+        map.set(id, { barN, beat });
+      }
+    }
+  } catch {
+    // Ignore parse errors — caller falls back to Tone.js position.
+  }
+  return map;
+}
+
+/**
+ * Return the initial tempo (BPM) from the Verovio timemap.
+ *
+ * The timemap emits a `tempo` field at the first entry and again at each
+ * tempo change. Reading only the first event is sufficient for Phase 1
+ * (single-tempo pieces); multi-tempo pieces will have slightly imprecise beat
+ * display after tempo changes, which is an acceptable limitation.
+ *
+ * Returns 120 if no tempo event is found or if an error occurs.
+ */
+export function getTimemapTempo(tk: VerovioToolkitInstance): number {
+  try {
+    const raw = tk.renderToTimemap();
+    const entries = (
+      typeof raw === 'string'
+        ? (JSON.parse(raw) as Array<{ tempo?: unknown }>)
+        : (raw as Array<{ tempo?: unknown }>)
+    );
+    for (const entry of entries) {
+      if (typeof entry.tempo === 'number' && entry.tempo > 0) return entry.tempo;
+    }
+  } catch {
+    // Fall through to default.
+  }
+  return 120;
+}
+
+/**
+ * Parse the first time signature's denominator from an MEI document.
+ *
+ * MEI uses `@meter.unit` for the denominator: 4 = quarter note, 8 = eighth
+ * note, 2 = half note. This value is used to compute the beat duration:
+ * `beatDurationMs = (60 000 / bpm) × (4 / meterUnit)`.
+ *
+ * Returns 4 (quarter note) as the default when not found or on parse failure.
+ *
+ * @param meiText - Normalized MEI content string.
+ */
+export function parseMeiMeterUnit(meiText: string): number {
+  try {
+    if (typeof DOMParser === 'undefined') return 4;
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+
+    // Strategy 1: @meter.unit attribute on scoreDef or staffDef (MEI inline style,
+    // used by hand-crafted MEI and some MuseScore versions).
+    for (const tag of ['scoreDef', 'staffDef']) {
+      const els = doc.getElementsByTagName(tag);
+      for (let i = 0; i < els.length; i++) {
+        const unit = els[i].getAttribute('meter.unit');
+        if (unit) {
+          const v = parseInt(unit, 10);
+          if (!Number.isNaN(v) && v > 0) return v;
+        }
+      }
+    }
+
+    // Strategy 2: <meterSig unit="..."> child elements (MuseScore/OpenScore MEI style,
+    // also inserted by the MEI normalizer's _propagate_meter_changes step).
+    // These appear inside <staffDef>, <scoreDef>, or <measure> elements.
+    const meterSigs = doc.getElementsByTagName('meterSig');
+    for (let i = 0; i < meterSigs.length; i++) {
+      const unit = meterSigs[i].getAttribute('unit');
+      if (unit) {
+        const v = parseInt(unit, 10);
+        if (!Number.isNaN(v) && v > 0) return v;
+      }
+    }
+  } catch {
+    // Fall through to default.
+  }
+  return 4;
+}
+
+// ---------------------------------------------------------------------------
 // Highlight schedule
 // ---------------------------------------------------------------------------
+
+/**
+ * Strip Verovio's repeat-expansion suffix from a timemap element ID.
+ *
+ * When Verovio expands repeats in the timemap, it appends `-rendN` (e.g.
+ * `-rend2`, `-rend3`) to the xml:id of every element played in an additional
+ * pass through a repeated section. These are virtual IDs: the SVG DOM only
+ * ever contains the **original** ID (the score renders each repeated measure
+ * once with its repeat sign intact). Stripping the suffix maps every repeat
+ * pass back to the real DOM element.
+ *
+ * Volta-bracket endings are genuinely separate measures with their own
+ * original IDs (`first-ending-note`, `second-ending-note`) and are therefore
+ * unaffected — their IDs carry no `-rendN` suffix.
+ *
+ * @param id - Raw element ID from the timemap `on` array.
+ * @returns The canonical DOM ID (suffix removed if present).
+ */
+function stripRendSuffix(id: string): string {
+  return id.replace(/-rend\d+$/, '');
+}
 
 /**
  * Build a sorted schedule of { timeMs, ids } from Verovio's timemap.
  *
  * Using renderToTimemap() instead of repeated getElementsAtTime() calls is
  * more reliable because:
- *   - The timemap expands all repeats correctly: a measure played twice appears
- *     as two entries with the same element IDs at different tstamp values.
+ *   - The timemap expands all repeats: a measure played twice appears as two
+ *     entries at different tstamp values. On the second pass Verovio appends a
+ *     `-rendN` suffix to element IDs; stripRendSuffix() maps them back to the
+ *     real DOM element so getElementById() succeeds on every repeat pass.
  *   - getElementsAtTime() can return structural element IDs (rend, barline)
  *     between note onsets and at repeat boundaries, causing stale highlights.
  *
@@ -315,7 +545,8 @@ export function buildHighlightSchedule(
     const schedule: Array<{ timeMs: number; ids: string[] }> = [];
     for (const entry of entries) {
       if (!entry.on || entry.on.length === 0 || entry.tstamp === undefined) continue;
-      schedule.push({ timeMs: entry.tstamp, ids: entry.on });
+      // Strip -rendN suffixes so repeated-pass IDs resolve to real DOM elements.
+      schedule.push({ timeMs: entry.tstamp, ids: entry.on.map(stripRendSuffix) });
     }
 
     // Should already be sorted by Verovio, but sort defensively.

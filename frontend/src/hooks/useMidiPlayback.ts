@@ -4,8 +4,12 @@
  * This hook is the **sole interface between the playback layer and the score
  * viewer** (docs/roadmap/component-3-score-viewer.md §14.4). The score viewer
  * calls `play()`, `pause()`, and `stop()`. It receives the current MIDI time
- * (milliseconds) via `onPositionUpdate`, which it uses to call
- * `tk.getElementsAtTime(ms)` and update the SVG playback highlight.
+ * (milliseconds) via `onPositionUpdate`, which it uses to binary-search a
+ * pre-built timemap schedule (from `buildHighlightSchedule`) and update the
+ * SVG playback highlight. The timemap approach is used instead of
+ * `getElementsAtTime` because `renderToTimemap` correctly expands repeats:
+ * each note appears once per pass at the appropriate timestamp, so volta
+ * brackets highlight the right ending on each pass.
  *
  * SoundFont setup (Step 14.2):
  *   Set VITE_SOUNDFONT_BASE_URL in .env to the MinIO or R2 base URL. The
@@ -137,8 +141,10 @@ function parseTransportPosition(posStr: string): PlaybackPosition {
  * @param midiBase64 - Base64-encoded MIDI from Verovio renderToMIDI(), or
  *   null when the score is not yet rendered or MIDI generation failed.
  * @param onPositionUpdate - Called on each animation frame during playback
- *   with the current MIDI time in milliseconds. The score viewer passes this
- *   to `tk.getElementsAtTime(timeMs)` to update the SVG highlight.
+ *   with the current MIDI time in milliseconds. The score viewer binary-searches
+ *   the pre-built timemap schedule (from `buildHighlightSchedule`) to find the
+ *   active notes and applies the `.is-playing` CSS class to the matching SVG
+ *   elements. No Verovio calls happen at playback time.
  */
 export function useMidiPlayback(
   midiBase64: string | null,

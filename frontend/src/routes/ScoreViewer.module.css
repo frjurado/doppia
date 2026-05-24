@@ -22,9 +22,9 @@
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 
 .toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: var(--spacing-6);
   padding: var(--spacing-3) var(--spacing-6);
   flex-shrink: 0;
 }
@@ -38,9 +38,11 @@
   text-decoration: underline;
 }
 
-/* Push controls to the right of the back link */
-.toolbarSeparator {
-  flex: 1;
+/* Inner wrapper for the centred control group (size, transpose, font). */
+.toolbarControls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-6);
 }
 
 /* ── Staff size presets ─────────────────────────────────────────────────── */
@@ -130,7 +132,7 @@
    pageWidth — the SVG output exactly fills this container. */
 .scoreContent {
   width: 100%;
-  max-width: 1400px;
+  max-width: 1200px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -191,6 +193,7 @@
   height: 80px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--spacing-3);
   padding: 0 var(--spacing-6);
   z-index: 10;
