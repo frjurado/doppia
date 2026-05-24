@@ -13,6 +13,9 @@ vi.mock('../../services/verovio', () => ({
   renderProgressively: vi.fn(),
   renderMidi: vi.fn(),
   buildHighlightSchedule: vi.fn().mockReturnValue([]),
+  buildNoteInfoMap: vi.fn().mockReturnValue(new Map()),
+  getTimemapTempo: vi.fn().mockReturnValue(120),
+  parseMeiMeterUnit: vi.fn().mockReturnValue(4),
 }));
 
 vi.mock('../../services/scoreApi', () => ({

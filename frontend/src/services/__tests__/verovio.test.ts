@@ -13,6 +13,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildHighlightSchedule,
+  buildNoteInfoMap,
+  getTimemapTempo,
+  parseMeiMeterUnit,
   renderFragment,
   renderPage,
   renderProgressively,
@@ -365,5 +368,426 @@ describe('buildHighlightSchedule', () => {
     const parsed = [{ tstamp: 0, on: ['note1'] }];
     tk.renderToTimemap.mockReturnValue(parsed as unknown as string);
     expect(buildHighlightSchedule(tk)).toEqual([{ timeMs: 0, ids: ['note1'] }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildNoteInfoMap — Step 18 (transport bar measure:beat display)
+// ---------------------------------------------------------------------------
+
+/**
+ * buildNoteInfoMap parses MEI XML directly — no Verovio toolkit call needed.
+ *
+ * Each highlighted SVG element's DOM id is the MEI xml:id of the note.
+ * The map connects that id to the note's parent measure @n (display bar number)
+ * and its @tstamp (beat, in the time signature's denominator unit).
+ *
+ * This resolves all three transport-bar sub-defects that Tone.js cannot:
+ *
+ * 1. Pickup bars — MEI @n = 0, beats renumbered from 1 within the pickup.
+ *    Tone.js counts the pickup as a full bar, making all subsequent bars wrong.
+ *
+ * 2. Repeats — the second pass through bar 4 highlights the SAME SVG element
+ *    as the first pass (Step 17 strips the -rendN suffix). The map returns
+ *    barN = 4 on both passes. Tone.js would return 12 on the second pass.
+ *
+ * 3. Non-quarter meters — MEI @tstamp is in the denominator unit (eighths for
+ *    6/8), so notes in a 6/8 bar correctly show beats 1–6.
+ *    Tone.js would show beats 1–3 (quarter notes), regardless of time signature.
+ */
+
+// Shared MEI fixtures used across test cases.
+// Note: in jsdom DOMParser XML mode, getAttribute('xml:id') returns the value
+// correctly (jsdom stores the attribute by qualified name including the prefix).
+
+const makeMei = (meterCount: number, meterUnit: number, measures: string) =>
+  `<mei xmlns="http://www.music-encoding.org/ns/mei">
+    <music><body><mdiv><score>
+      <scoreDef meter.count="${meterCount}" meter.unit="${meterUnit}"/>
+      <section>${measures}</section>
+    </score></mdiv></body></music>
+  </mei>`;
+
+const note = (id: string, tstamp: number | string) =>
+  `<note xml:id="${id}" tstamp="${tstamp}" dur="4"/>`;
+
+const rest = (id: string, tstamp: number | string) =>
+  `<rest xml:id="${id}" tstamp="${tstamp}" dur="4"/>`;
+
+const chord = (tstamp: number, ...noteIds: string[]) =>
+  `<chord tstamp="${tstamp}" dur="4">${noteIds.map(id =>
+    `<note xml:id="${id}"/>`
+  ).join('')}</chord>`;
+
+const measure = (n: number, ...content: string[]) =>
+  `<staff n="1"><layer n="1">${content.join('')}</layer></staff>`;
+
+const bar = (n: number, content: string) =>
+  `<measure n="${n}">${content}</measure>`;
+
+describe('buildNoteInfoMap', () => {
+  // buildNoteInfoMap is a pure MEI-parsing function — no toolkit mock needed.
+
+  // ── Basic cases ──────────────────────────────────────────────────────────
+
+  it('returns an empty map for empty MEI', () => {
+    const emptyMei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section/></score></mdiv></body></music>
+    </mei>`;
+    expect(buildNoteInfoMap(emptyMei).size).toBe(0);
+  });
+
+  it('returns an empty map for MEI with measures but no notes', () => {
+    const mei = makeMei(4, 4, bar(1, ''));
+    expect(buildNoteInfoMap(mei).size).toBe(0);
+  });
+
+  it('returns an empty map when MEI is not valid XML', () => {
+    expect(buildNoteInfoMap('not xml at all').size).toBe(0);
+  });
+
+  // ── Bar number (sub-defect 2: repeat policy) ────────────────────────────
+
+  it('maps a note in measure @n=1 to barN=1', () => {
+    const mei = makeMei(4, 4, bar(1, measure(1, note('n1', 1))));
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('n1')?.barN).toBe(1);
+  });
+
+  it('maps notes to their respective measure @n values', () => {
+    const mei = makeMei(4, 4,
+      bar(1, measure(1, note('n1', 1), note('n2', 2))) +
+      bar(2, measure(1, note('n3', 1))) +
+      bar(3, measure(1, note('n4', 1))),
+    );
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('n1')?.barN).toBe(1);
+    expect(map.get('n2')?.barN).toBe(1);
+    expect(map.get('n3')?.barN).toBe(2);
+    expect(map.get('n4')?.barN).toBe(3);
+  });
+
+  it('uses sequential index when a measure lacks @n', () => {
+    // No @n attribute → falls back to 1-based sequential position.
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure>
+          <staff n="1"><layer n="1"><note xml:id="n1" tstamp="1" dur="4"/></layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('n1')?.barN).toBe(1);
+  });
+
+  // ── Beat (sub-defect 3: non-quarter beat normalisation) ──────────────────
+
+  it('reads beat directly from @tstamp for 4/4 notes (1–4)', () => {
+    const mei = makeMei(4, 4,
+      bar(1, measure(1, note('n1', 1), note('n2', 2), note('n3', 3), note('n4', 4))),
+    );
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('n1')?.beat).toBe(1);
+    expect(map.get('n2')?.beat).toBe(2);
+    expect(map.get('n3')?.beat).toBe(3);
+    expect(map.get('n4')?.beat).toBe(4);
+  });
+
+  it('reads eighth-note beats 1–6 from @tstamp for 6/8 notes', () => {
+    // In 6/8, MEI @tstamp uses eighth-note units: 1, 2, 3, 4, 5, 6.
+    // The note-info map should reflect these directly, giving the correct
+    // 6-beat display instead of Tone.js's 3-quarter-beat counter.
+    const mei = makeMei(6, 8,
+      bar(1, measure(1,
+        note('n1', 1), note('n2', 2), note('n3', 3),
+        note('n4', 4), note('n5', 5), note('n6', 6),
+      )),
+    );
+    const map = buildNoteInfoMap(mei);
+    for (let b = 1; b <= 6; b++) {
+      expect(map.get(`n${b}`)?.beat).toBe(b);
+    }
+  });
+
+  it('floors fractional @tstamp to the beat number (note on off-beat → current beat)', () => {
+    // A note with @tstamp="1.5" is on the "and" of beat 1 in 4/4.
+    // The transport displays beat 1, not beat 2.
+    const mei = makeMei(4, 4, bar(1, measure(1, note('n1', '1.5'))));
+    expect(buildNoteInfoMap(mei).get('n1')?.beat).toBe(1);
+  });
+
+  it('returns beat=0 for a note without @tstamp', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure n="1">
+          <staff n="1"><layer n="1">
+            <note xml:id="n1" dur="4"/>
+          </layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    expect(buildNoteInfoMap(mei).get('n1')?.beat).toBe(0);
+  });
+
+  // ── Chord handling ────────────────────────────────────────────────────────
+
+  it('inherits @tstamp from parent <chord> for notes inside chords', () => {
+    // In MEI, chords carry @tstamp; individual notes inside do not.
+    const mei = makeMei(4, 4,
+      bar(1, `<staff n="1"><layer n="1">${chord(3, 'n1', 'n2', 'n3')}</layer></staff>`),
+    );
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('n1')?.beat).toBe(3);
+    expect(map.get('n2')?.beat).toBe(3);
+    expect(map.get('n3')?.beat).toBe(3);
+    // All chord notes belong to the same measure.
+    expect(map.get('n1')?.barN).toBe(1);
+  });
+
+  // ── Rest handling ─────────────────────────────────────────────────────────
+
+  it('includes rests with their bar and beat', () => {
+    const mei = makeMei(4, 4, bar(2, measure(1, rest('r1', 1), rest('r2', 3))));
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('r1')).toEqual({ barN: 2, beat: 1 });
+    expect(map.get('r2')).toEqual({ barN: 2, beat: 3 });
+  });
+
+  // ── Pickup bar handling (sub-defect 1) ───────────────────────────────────
+
+  it('sets barN=0 for notes in a pickup bar (@n="0")', () => {
+    // A pickup bar has MEI @n = "0". After normalisation every piece with an
+    // anacrusis has this convention. Tone.js would call it bar 1.
+    const mei = makeMei(4, 4,
+      bar(0, measure(1, note('pickup', 4))) +  // pickup: one note on beat 4
+      bar(1, measure(1, note('b1n1', 1))),     // first full bar
+    );
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('pickup')?.barN).toBe(0);
+    expect(map.get('b1n1')?.barN).toBe(1);
+  });
+
+  it('renumbers pickup beats from 1 (not the full-bar @tstamp value)', () => {
+    // A one-beat pickup in 4/4: the note has @tstamp=4 (last beat of a 4/4 bar).
+    // The display rule: show "0:1", not "0:4". The map renumbers within the pickup.
+    const mei = makeMei(4, 4,
+      bar(0, measure(1, note('pickup', 4))),
+    );
+    expect(buildNoteInfoMap(mei).get('pickup')?.beat).toBe(1);
+  });
+
+  it('renumbers multiple pickup notes starting from 1 in onset order', () => {
+    // Three-note pickup in 4/4 with notes on beats 2, 3, 4.
+    // Expected: beat 1, 2, 3 (not 2, 3, 4).
+    const mei = makeMei(4, 4,
+      bar(0, measure(1, note('p1', 2), note('p2', 3), note('p3', 4))),
+    );
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('p1')?.beat).toBe(1);
+    expect(map.get('p2')?.beat).toBe(2);
+    expect(map.get('p3')?.beat).toBe(3);
+  });
+
+  it('non-pickup bars are unaffected by the pickup renumbering', () => {
+    // Pickup: one note at @tstamp=4 → beat 1. Bar 1: notes at 1, 2, 3, 4 → 1, 2, 3, 4.
+    const mei = makeMei(4, 4,
+      bar(0, measure(1, note('pickup', 4))) +
+      bar(1, measure(1, note('b1', 1), note('b2', 2), note('b3', 3), note('b4', 4))),
+    );
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('pickup')?.beat).toBe(1);  // renumbered
+    expect(map.get('b1')?.beat).toBe(1);      // @tstamp=1 → beat 1 (unchanged)
+    expect(map.get('b4')?.beat).toBe(4);      // @tstamp=4 → beat 4 (unchanged)
+  });
+
+  // ── Multi-staff / multi-voice ────────────────────────────────────────────
+
+  it('maps notes from different staves/voices to the same barN', () => {
+    // Two staves, same measure.
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure n="5">
+          <staff n="1"><layer n="1"><note xml:id="s1n1" tstamp="1" dur="4"/></layer></staff>
+          <staff n="2"><layer n="1"><note xml:id="s2n1" tstamp="1" dur="4"/></layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('s1n1')?.barN).toBe(5);
+    expect(map.get('s2n1')?.barN).toBe(5);
+    expect(map.get('s1n1')?.beat).toBe(1);
+    expect(map.get('s2n1')?.beat).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getTimemapTempo
+// ---------------------------------------------------------------------------
+
+describe('getTimemapTempo', () => {
+  it('returns 120 when renderToTimemap returns an empty array', () => {
+    const tk = { renderToTimemap: vi.fn().mockReturnValue('[]') };
+    expect(getTimemapTempo(tk as never)).toBe(120);
+  });
+
+  it('returns 120 when no entry has a tempo field', () => {
+    const tk = {
+      renderToTimemap: vi.fn().mockReturnValue(
+        JSON.stringify([{ tstamp: 0, on: ['n1'] }, { tstamp: 500, on: ['n2'] }]),
+      ),
+    };
+    expect(getTimemapTempo(tk as never)).toBe(120);
+  });
+
+  it('returns the first tempo value from a string timemap', () => {
+    const tk = {
+      renderToTimemap: vi.fn().mockReturnValue(
+        JSON.stringify([{ tstamp: 0, tempo: 96 }, { tstamp: 2000, tempo: 108 }]),
+      ),
+    };
+    expect(getTimemapTempo(tk as never)).toBe(96);
+  });
+
+  it('returns the first tempo value when renderToTimemap returns a parsed array', () => {
+    const tk = {
+      renderToTimemap: vi.fn().mockReturnValue(
+        [{ tstamp: 0, tempo: 72 }],
+      ),
+    };
+    expect(getTimemapTempo(tk as never)).toBe(72);
+  });
+
+  it('returns 120 when renderToTimemap throws', () => {
+    const tk = { renderToTimemap: vi.fn().mockImplementation(() => { throw new Error('fail'); }) };
+    expect(getTimemapTempo(tk as never)).toBe(120);
+  });
+
+  it('skips non-numeric tempo fields and returns the first numeric one', () => {
+    const tk = {
+      renderToTimemap: vi.fn().mockReturnValue(
+        JSON.stringify([
+          { tstamp: 0, on: ['n1'] },
+          { tstamp: 100, tempo: 'allegro' },
+          { tstamp: 200, tempo: 140 },
+        ]),
+      ),
+    };
+    expect(getTimemapTempo(tk as never)).toBe(140);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseMeiMeterUnit
+// ---------------------------------------------------------------------------
+
+describe('parseMeiMeterUnit', () => {
+  it('returns 4 for empty MEI', () => {
+    expect(parseMeiMeterUnit('<mei/>')).toBe(4);
+  });
+
+  it('returns 4 on invalid XML', () => {
+    expect(parseMeiMeterUnit('not xml <<<<')).toBe(4);
+  });
+
+  it('reads meter.unit from scoreDef', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef meter.count="6" meter.unit="8"/>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(8);
+  });
+
+  it('returns 4 for 4/4 time signature', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef meter.count="4" meter.unit="4"/>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(4);
+  });
+
+  it('reads meter.unit from staffDef when scoreDef is absent', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <staffDef n="1" meter.count="3" meter.unit="4"/>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(4);
+  });
+
+  it('returns 2 for cut time (meter.unit=2)', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef meter.count="2" meter.unit="2"/>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(2);
+  });
+
+  it('prefers scoreDef over staffDef when both present', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef meter.count="6" meter.unit="8"/>
+        <staffDef n="1" meter.count="3" meter.unit="4"/>
+      </score></mdiv></body></music>
+    </mei>`;
+    // scoreDef comes first in document order → returned first
+    expect(parseMeiMeterUnit(mei)).toBe(8);
+  });
+
+  // ── <meterSig> child element style (MuseScore/OpenScore MEI) ────────────
+
+  it('reads unit from <meterSig> child of staffDef (MuseScore style)', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef>
+          <staffGrp>
+            <staffDef n="1" lines="5">
+              <meterSig count="6" unit="8"/>
+            </staffDef>
+          </staffGrp>
+        </scoreDef>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(8);
+  });
+
+  it('reads unit from <meterSig> child of scoreDef', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef>
+          <meterSig count="2" unit="2"/>
+        </scoreDef>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(2);
+  });
+
+  it('reads unit from <meterSig> inside a measure (normalizer-inserted)', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef><staffGrp><staffDef n="1"/></staffGrp></scoreDef>
+        <section>
+          <measure n="1">
+            <meterSig count="6" unit="8"/>
+            <staff n="1"><layer n="1"><note dur="8"/></layer></staff>
+          </measure>
+        </section>
+      </score></mdiv></body></music>
+    </mei>`;
+    expect(parseMeiMeterUnit(mei)).toBe(8);
+  });
+
+  it('@meter.unit attribute takes precedence over <meterSig> when both present', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <scoreDef meter.count="3" meter.unit="4">
+          <meterSig count="6" unit="8"/>
+        </scoreDef>
+      </score></mdiv></body></music>
+    </mei>`;
+    // Attribute style checked first → returns 4
+    expect(parseMeiMeterUnit(mei)).toBe(4);
   });
 });
