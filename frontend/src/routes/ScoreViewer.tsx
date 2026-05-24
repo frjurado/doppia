@@ -15,11 +15,11 @@ import styles from './ScoreViewer.module.css';
 // ---------------------------------------------------------------------------
 
 /** Staff size used when no explicit preset is selected. */
-const DEFAULT_SCALE = 35 as const;
+const DEFAULT_SCALE = 45 as const;
 
-type ScalePreset = 25 | 35 | 45;
+type ScalePreset = 35 | 45 | 55;
 
-const SCALE_LABELS: Record<ScalePreset, string> = { 25: 'Small', 35: 'Medium', 45: 'Large' };
+const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 55: 'Large' };
 
 /**
  * Transposition intervals mapped to Verovio transposition string format.
@@ -51,7 +51,7 @@ const DEFAULT_FONT = 'Bravura';
  * Fallback page width (pixels) used before the container is measured.
  * The ResizeObserver and explicit measurement replace this on first render.
  */
-const DEFAULT_PAGE_WIDTH = 1400;
+const DEFAULT_PAGE_WIDTH = 1200;
 
 /**
  * Minimum page width passed to Verovio (pixels). Below this, the score panel
@@ -76,7 +76,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *   1. Toolbar (container-high, scrolls with page): back link, staff size,
  *      transposition, and music font controls.
  *   2. Score panel: Verovio SVG pages rendered progressively inside a
- *      centered max-width: 1400px container.
+ *      centered max-width: 1200px container.
  *   3. Playback bar (container-highest, fixed bottom): transport controls
  *      (Play/Pause, Stop, position display) wired to useMidiPlayback.
  *
@@ -448,84 +448,86 @@ export default function ScoreViewer() {
           <Type variant="label-md" as="span">← Browse</Type>
         </Link>
 
-        <div className={styles.toolbarSeparator} />
-
-        {/* Staff size presets */}
-        <div className={styles.staffSizeControl} role="group" aria-label="Staff size">
-          <Type
-            variant="label-md"
-            as="span"
-            style={{ color: 'var(--color-on-surface-variant)' }}
-          >
-            Size
-          </Type>
-          {([25, 35, 45] as ScalePreset[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={[
-                styles.sizeButton,
-                scale === s ? styles.sizeButtonActive : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => handleScaleChange(s)}
-              aria-pressed={scale === s}
-            >
-              <Type variant="label-sm" as="span">{SCALE_LABELS[s]}</Type>
-            </button>
-          ))}
-        </div>
-
-        {/* Transposition select */}
-        <div className={styles.toolbarSelectControl}>
-          <label htmlFor="transpose-select" className={styles.toolbarSelectLabel}>
+        {/* Centred controls group — middle column of the 1fr/auto/1fr grid */}
+        <div className={styles.toolbarControls}>
+          {/* Staff size presets */}
+          <div className={styles.staffSizeControl} role="group" aria-label="Staff size">
             <Type
               variant="label-md"
               as="span"
               style={{ color: 'var(--color-on-surface-variant)' }}
             >
-              Transpose
+              Size
             </Type>
-          </label>
-          <select
-            id="transpose-select"
-            className={styles.toolbarSelect}
-            value={transpose}
-            onChange={(e) => handleTransposeChange(e.target.value)}
-          >
-            {TRANSPOSE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
+            {([35, 45, 55] as ScalePreset[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={[
+                  styles.sizeButton,
+                  scale === s ? styles.sizeButtonActive : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => handleScaleChange(s)}
+                aria-pressed={scale === s}
+              >
+                <Type variant="label-sm" as="span">{SCALE_LABELS[s]}</Type>
+              </button>
             ))}
-          </select>
+          </div>
+
+          {/* Transposition select */}
+          <div className={styles.toolbarSelectControl}>
+            <label htmlFor="transpose-select" className={styles.toolbarSelectLabel}>
+              <Type
+                variant="label-md"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Transpose
+              </Type>
+            </label>
+            <select
+              id="transpose-select"
+              className={styles.toolbarSelect}
+              value={transpose}
+              onChange={(e) => handleTransposeChange(e.target.value)}
+            >
+              {TRANSPOSE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Music font select */}
+          <div className={styles.toolbarSelectControl}>
+            <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
+              <Type
+                variant="label-md"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Music font
+              </Type>
+            </label>
+            <select
+              id="font-select"
+              className={styles.toolbarSelect}
+              value={font}
+              onChange={(e) => handleFontChange(e.target.value)}
+            >
+              {FONT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {/* Music font select */}
-        <div className={styles.toolbarSelectControl}>
-          <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
-            <Type
-              variant="label-md"
-              as="span"
-              style={{ color: 'var(--color-on-surface-variant)' }}
-            >
-              Music font
-            </Type>
-          </label>
-          <select
-            id="font-select"
-            className={styles.toolbarSelect}
-            value={font}
-            onChange={(e) => handleFontChange(e.target.value)}
-          >
-            {FONT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </div>
       </Surface>
 
       {/* Narrow-screen notice — shown when container is below 480px */}
@@ -564,7 +566,7 @@ export default function ScoreViewer() {
             for width measurement even before the first successful render. */}
         <div className={styles.scorePanel}>
           {/* .scoreContent is the measured element: ResizeObserver watches it.
-              Its offsetWidth (≤ 1400px via max-width) is what we pass to
+              Its offsetWidth (≤ 1200px via max-width) is what we pass to
               Verovio as pageWidth, so the SVG fills the container exactly. */}
           <div ref={scorePanelRef} className={styles.scoreContent}>
             {svgPages.map((svg, i) => (

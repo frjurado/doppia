@@ -66,6 +66,7 @@ describe('renderFragment', () => {
       breaks: 'none',
       pageMarginTop: 0,
       pageMarginBottom: 0,
+      footer: 'none',
     });
   });
 

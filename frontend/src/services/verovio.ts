@@ -153,6 +153,7 @@ export async function renderPage(
     scaleToPageSize: true,
     pageMarginTop: 0,
     pageMarginBottom: 0,
+    footer: 'none',
   });
   tk.loadData(meiText);
   return tk.renderToSVG(pageNum);
@@ -193,6 +194,7 @@ export async function renderFragment(
     breaks: 'none',
     pageMarginTop: 0,
     pageMarginBottom: 0,
+    footer: 'none',
     // No scaleToPageSize for fragment renders — the wide fixed pageWidth
     // ensures all selected measures appear on one line without scaling.
   });
@@ -263,6 +265,7 @@ export async function renderProgressively(
     scaleToPageSize: true,
     pageMarginTop: 0,
     pageMarginBottom: 0,
+    footer: 'none',
   });
   tk.loadData(meiText);
 
