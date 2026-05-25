@@ -84,9 +84,9 @@ import * as Tone from 'tone';
 const TEST_MOVEMENT_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
 
 /** Render ScoreViewer at /scores/:movementId using a MemoryRouter. */
-function renderScoreViewer(movementId = TEST_MOVEMENT_ID) {
+function renderScoreViewer(movementId = TEST_MOVEMENT_ID, qs = '') {
   return render(
-    <MemoryRouter initialEntries={[`/scores/${movementId}`]}>
+    <MemoryRouter initialEntries={[`/scores/${movementId}${qs}`]}>
       <Routes>
         <Route path="/scores/:movementId" element={<ScoreViewer />} />
       </Routes>
@@ -258,6 +258,52 @@ describe('ScoreViewer', () => {
     expect(screen.getByText('Large')).toBeInTheDocument();
     expect(screen.getByLabelText(/transpose/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/music font/i)).toBeInTheDocument();
+  });
+
+  it('transpose options use m2/−m2 (not d2/−d2) for semitone intervals', () => {
+    vi.mocked(scoreApi.fetchMeiUrl).mockReturnValue(new Promise(() => {}));
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    renderScoreViewer();
+
+    // The trigger button is labelled by the "Transpose" label element.
+    const trigger = screen.getByLabelText(/transpose/i);
+    // Default selection is "No transposition".
+    expect(trigger).toHaveTextContent(/no transposition/i);
+    // The old broken interval strings must not appear anywhere in the DOM.
+    expect(document.body.textContent).not.toMatch(/\bd2\b/);
+  });
+
+  it('shows interval options including "Minor 2nd up"', async () => {
+    vi.mocked(scoreApi.fetchMeiUrl).mockReturnValue(new Promise(() => {}));
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    const user = userEvent.setup();
+    renderScoreViewer();
+
+    const trigger = screen.getByLabelText(/transpose/i);
+    await user.click(trigger);
+
+    expect(screen.getByText(/minor 2nd up/i)).toBeInTheDocument();
+    expect(screen.getByText(/perfect 4th up/i)).toBeInTheDocument();
+    expect(screen.getByText(/tritone up/i)).toBeInTheDocument();
+    // Old labels must not appear.
+    expect(screen.queryByText(/up a semitone/i)).toBeNull();
+    expect(screen.queryByText(/up a tone/i)).toBeNull();
+  });
+
+  it('shows resultant key hint when ?key= query param is present', async () => {
+    vi.mocked(scoreApi.fetchMeiUrl).mockReturnValue(new Promise(() => {}));
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    const user = userEvent.setup();
+    renderScoreViewer(TEST_MOVEMENT_ID, '?key=G%20major');
+
+    const trigger = screen.getByLabelText(/transpose/i);
+    await user.click(trigger);
+
+    // "Minor 2nd up" applied to G major → A♭ major
+    expect(screen.getByText(/A♭ major/)).toBeInTheDocument();
   });
 
   it('renders a back-to-browse link in the toolbar', () => {

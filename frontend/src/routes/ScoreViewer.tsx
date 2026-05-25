@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
@@ -9,6 +9,7 @@ import { fetchMeiUrl } from '../services/scoreApi';
 import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioToolkit, parseMeiMeterUnit, renderMidi, renderProgressively } from '../services/verovio';
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
+import { transposeKey } from '../utils/transposeKey';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -25,17 +26,24 @@ const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 5
  * Transposition intervals mapped to Verovio transposition string format.
  * Empty string = no transposition (identity).
  * All display-only — the MEI file is never modified.
+ *
+ * Ordered as up/down pairs by ascending interval size, per
+ * docs/architecture/playback-coordinates.md § Dropdown ordering.
  */
 const TRANSPOSE_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: 'No transposition', value: '' },
-  { label: 'Up a semitone', value: 'd2' },
-  { label: 'Up a tone', value: 'M2' },
-  { label: 'Up a major third', value: 'M3' },
-  { label: 'Down a semitone', value: '-d2' },
-  { label: 'Down a tone', value: '-M2' },
-  { label: 'Down a major third', value: '-M3' },
-  { label: 'Up an octave', value: 'P8' },
-  { label: 'Down an octave', value: '-P8' },
+  { label: 'No transposition',  value: ''    },
+  { label: 'Minor 2nd up',      value: 'm2'  },
+  { label: 'Minor 2nd down',    value: '-m2' },
+  { label: 'Major 2nd up',      value: 'M2'  },
+  { label: 'Major 2nd down',    value: '-M2' },
+  { label: 'Minor 3rd up',      value: 'm3'  },
+  { label: 'Minor 3rd down',    value: '-m3' },
+  { label: 'Major 3rd up',      value: 'M3'  },
+  { label: 'Major 3rd down',    value: '-M3' },
+  { label: 'Perfect 4th up',    value: 'P4'  },
+  { label: 'Perfect 4th down',  value: '-P4' },
+  { label: 'Tritone up',        value: 'A4'  },
+  { label: 'Tritone down',      value: '-A4' },
 ];
 
 /** Music notation fonts available in Verovio 6.1.0. Default: Bravura. */
@@ -107,8 +115,86 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *   If the container is narrower than MIN_PAGE_WIDTH (480px), pageWidth is
  *   clamped and a notice is shown beneath the toolbar.
  */
+
+// ---------------------------------------------------------------------------
+// TransposeSelect — custom dropdown to support two-tone option text
+// ---------------------------------------------------------------------------
+
+interface TransposeSelectProps {
+  id: string;
+  options: ReadonlyArray<{ label: string; value: string }>;
+  value: string;
+  onChange: (v: string) => void;
+  /** Source key signature (e.g. "G major"). When provided, each option shows
+   *  the resultant key in parentheses with a faint colour. */
+  sourceKey: string | null;
+}
+
+function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeSelectProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onPointerDown = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, []);
+
+  const selected = options.find(o => o.value === value) ?? options[0];
+  const selectedResultKey = sourceKey && value ? transposeKey(sourceKey, value) : null;
+
+  return (
+    <div ref={containerRef} className={styles.transposeContainer}>
+      <button
+        id={id}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={styles.transposeButton}
+        onClick={() => setOpen(prev => !prev)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+      >
+        <span>{selected.label}</span>
+        {selectedResultKey && (
+          <span className={styles.transposeKeyHint}> ({selectedResultKey})</span>
+        )}
+      </button>
+      {open && (
+        <ul role="listbox" aria-label="Transposition" className={styles.transposeDropdown}>
+          {options.map(opt => {
+            const resultKey = sourceKey && opt.value ? transposeKey(sourceKey, opt.value) : null;
+            return (
+              <li
+                key={opt.value}
+                role="option"
+                aria-selected={opt.value === value}
+                className={
+                  opt.value === value
+                    ? `${styles.transposeOption} ${styles.transposeOptionSelected}`
+                    : styles.transposeOption
+                }
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+              >
+                <span>{opt.label}</span>
+                {resultKey && (
+                  <span className={styles.transposeKeyHint}> ({resultKey})</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function ScoreViewer() {
   const { movementId } = useParams<{ movementId: string }>();
+  const [searchParams] = useSearchParams();
+  /** Source key from the ?key= query param, e.g. "G major". Null if not provided. */
+  const sourceKey = searchParams.get('key');
   usePageTitle('Score Viewer — Doppia');
 
   // ── Viewer state ────────────────────────────────────────────────────────
@@ -595,18 +681,13 @@ export default function ScoreViewer() {
                 Transpose
               </Type>
             </label>
-            <select
+            <TransposeSelect
               id="transpose-select"
-              className={styles.toolbarSelect}
+              options={TRANSPOSE_OPTIONS}
               value={transpose}
-              onChange={(e) => handleTransposeChange(e.target.value)}
-            >
-              {TRANSPOSE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+              onChange={handleTransposeChange}
+              sourceKey={sourceKey}
+            />
           </div>
 
           {/* Music font select */}
