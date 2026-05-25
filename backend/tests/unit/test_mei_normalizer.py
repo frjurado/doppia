@@ -484,3 +484,77 @@ class TestDurationBars:
         """Pickup bar @n=0 is the minimum, not the maximum; duration_bars > 0."""
         report, _ = _run(tmp_path, "already_clean.mei")
         assert report.duration_bars > 0
+
+
+# ---------------------------------------------------------------------------
+# Pass 8 — Spurious gestural accidentals
+# ---------------------------------------------------------------------------
+
+
+class TestSpuriousGesturalAccidentals:
+    """Pass 8: strip spurious accid.ges+glyph.auth from MEI conversion artefacts."""
+
+    _NS = {"mei": "http://www.music-encoding.org/ns/mei"}
+
+    def test_spurious_bass_accidental_stripped(self, tmp_path: Path) -> None:
+        """Bass C4 with only accid.ges (no accid, no prior in same staff) is stripped."""
+        report, out_bytes = _run(tmp_path, "spurious_gestural_accidentals.mei")
+
+        tree = lxml.etree.fromstring(out_bytes)
+        # Bass C4: xml:id="a_bass_c4" — should have accid.ges and glyph.auth removed.
+        accid_el = tree.xpath(
+            "//*[@xml:id='a_bass_c4']",
+            namespaces={"xml": "http://www.w3.org/XML/1998/namespace"},
+        )
+        assert len(accid_el) == 1, "Expected to find <accid xml:id='a_bass_c4'>"
+        el = accid_el[0]
+        assert (
+            "accid.ges" not in el.attrib
+        ), "spurious accid.ges should have been stripped"
+        assert (
+            "glyph.auth" not in el.attrib
+        ), "orphaned glyph.auth should have been stripped"
+
+    def test_legitimate_carry_preserved(self, tmp_path: Path) -> None:
+        """Treble second C#5 (within-staff carry) keeps its accid.ges."""
+        _, out_bytes = _run(tmp_path, "spurious_gestural_accidentals.mei")
+
+        tree = lxml.etree.fromstring(out_bytes)
+        accid_el = tree.xpath(
+            "//*[@xml:id='a_treble_cs5_second']",
+            namespaces={"xml": "http://www.w3.org/XML/1998/namespace"},
+        )
+        assert len(accid_el) == 1
+        el = accid_el[0]
+        assert (
+            el.get("accid.ges") == "s"
+        ), "legitimate carry accid.ges must be preserved"
+
+    def test_first_explicit_accidental_unchanged(self, tmp_path: Path) -> None:
+        """Treble first C#5 with accid+accid.ges is not modified."""
+        _, out_bytes = _run(tmp_path, "spurious_gestural_accidentals.mei")
+
+        tree = lxml.etree.fromstring(out_bytes)
+        accid_el = tree.xpath(
+            "//*[@xml:id='a_treble_cs5_first']",
+            namespaces={"xml": "http://www.w3.org/XML/1998/namespace"},
+        )
+        assert len(accid_el) == 1
+        el = accid_el[0]
+        assert el.get("accid") == "s"
+        assert el.get("accid.ges") == "s"
+
+    def test_change_recorded(self, tmp_path: Path) -> None:
+        """Exactly one spurious accidental is reported in changes_applied."""
+        report, _ = _run(tmp_path, "spurious_gestural_accidentals.mei")
+        stripped = [c for c in report.changes_applied if "spurious" in c.lower()]
+        assert len(stripped) == 1
+        assert "c4" in stripped[0]
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        """Second pass on already-stripped output applies no further changes."""
+        _, first_out = _run(tmp_path, "spurious_gestural_accidentals.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "spurious_gestural_accidentals.mei"
+        )
+        assert first_out == second_out

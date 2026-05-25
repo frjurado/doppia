@@ -1,7 +1,7 @@
 """MEI normalization pipeline.
 
-Applies seven structural normalization passes to an MEI file, writing the
-result to ``output_path`` and returning a :class:`~models.normalization.NormalizationReport`.
+Applies eight normalization passes to an MEI file, writing the result to
+``output_path`` and returning a :class:`~models.normalization.NormalizationReport`.
 
 Normalization rules (applied in this order):
 
@@ -21,13 +21,21 @@ Normalization rules (applied in this order):
 7. **Incomplete measures at repeat boundaries** — when a measure at an
    ``rptend``/``rptboth`` has ``@metcon="false"``, locates the complement
    measure and sets ``@metcon="false"`` on it if missing.
+8. **Spurious gestural accidentals** — removes ``accid.ges`` and
+   ``glyph.auth`` from ``<accid>`` elements where ``accid.ges`` is set but
+   ``@accid`` is absent and no prior note in the same staff/measure/octave
+   carries an explicit ``@accid``.  This corrects a MuseScore-to-MEI
+   conversion artefact where treble accidentals are incorrectly propagated
+   to bass notes, causing wrong MIDI pitch without affecting SVG display.
 
 Normalization is **idempotent**: running the normalizer on an already-
 normalized file produces byte-identical output and an
 :attr:`~models.normalization.NormalizationReport.is_clean` report.
 
 The normalizer never touches musical content (pitches, durations, dynamics),
-``xml:id`` values, or encoding style.
+``xml:id`` values, or encoding style, with the exception of pass 8 which
+removes spurious ``accid.ges`` values introduced by the MEI conversion
+pipeline (see ADR-021).
 
 Example usage::
 
@@ -548,6 +556,77 @@ def _normalize_split_measures(
 
 
 # ---------------------------------------------------------------------------
+# Pass 8 — Spurious gestural accidentals
+# ---------------------------------------------------------------------------
+
+_XML_ID_KEY: str = "{http://www.w3.org/XML/1998/namespace}id"
+
+
+def _strip_spurious_gestural_accidentals(
+    root: lxml.etree._Element,
+    changes_applied: list[str],
+) -> None:
+    """Pass 8 — Strip spurious gestural accidentals from MEI conversion artefacts.
+
+    The MuseScore-to-MEI converter incorrectly propagates accidentals across
+    staves: when a note in one staff carries an explicit accidental (``@accid``),
+    the converter marks same-pitch-class notes in other staves with
+    ``accid.ges`` + ``glyph.auth="smufl"`` but no ``@accid``.  This causes the
+    note to sound with the wrong chromatic pitch in MIDI/audio while displaying
+    correctly (no glyph) in SVG — the user sees C natural, hears C#.
+
+    A ``<accid>`` with ``accid.ges`` but no ``@accid`` is **legitimate** only
+    when the same staff already contains a note with the same ``@pname`` AND
+    ``@oct`` that carries an explicit ``@accid`` earlier in the same measure
+    (within-measure, within-staff, within-octave accidental carry per standard
+    notation rules).  Any other case is spurious and is stripped.
+
+    Stripped attributes: ``accid.ges`` and ``glyph.auth``.
+
+    Args:
+        root: Document root element.
+        changes_applied: Mutable list; stripped elements are recorded here.
+    """
+    for measure in _xpath(root, "//mei:measure"):
+        m_n = measure.get("n", "?")
+        for staff in measure.findall(f"{{{_MEI_NS}}}staff"):
+            staff_n = staff.get("n", "?")
+            # Set of (pname, oct) tuples that have been explicitly accidentalized
+            # in this staff/measure so far (document order).
+            explicit: set[tuple[str, str]] = set()
+
+            for note in staff.findall(f".//{{{_MEI_NS}}}note"):
+                pname = note.get("pname", "")
+                oct_ = note.get("oct", "")
+                accid_el = note.find(f"{{{_MEI_NS}}}accid")
+                if accid_el is None:
+                    continue
+
+                has_accid = "accid" in accid_el.attrib
+                has_ges = "accid.ges" in accid_el.attrib
+                has_glyph = accid_el.get("glyph.auth") == "smufl"
+
+                if has_accid:
+                    # Correctly notated accidental: record for within-measure carry.
+                    explicit.add((pname, oct_))
+                elif has_ges and has_glyph:
+                    if (pname, oct_) in explicit:
+                        # Legitimate within-staff/octave carry — do not touch.
+                        pass
+                    else:
+                        # Spurious cross-staff propagation — strip.
+                        ges_val = accid_el.attrib.pop("accid.ges")
+                        accid_el.attrib.pop("glyph.auth")
+                        note_id = note.get(_XML_ID_KEY, "?")
+                        changes_applied.append(
+                            f"Measure {m_n}, staff {staff_n}: stripped spurious "
+                            f"accid.ges='{ges_val}' from {pname}{oct_} "
+                            f"(note xml:id={note_id!r}); no prior explicit "
+                            f"accidental in this staff/measure for this pitch."
+                        )
+
+
+# ---------------------------------------------------------------------------
 # Duration metadata
 # ---------------------------------------------------------------------------
 
@@ -623,6 +702,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
     _check_measure_n_outside_endings(root, warnings)
     _normalize_ending_measure_ns(root, changes_applied, warnings)
     _normalize_split_measures(root, changes_applied, warnings)
+    _strip_spurious_gestural_accidentals(root, changes_applied)
 
     duration_bars = _compute_duration_bars(root)
 
