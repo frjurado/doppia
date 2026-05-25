@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: spurious gestural accidentals from MuseScore MEI export.
+     Measure 1 has three C notes:
+       - Treble C#5 (first in measure):  accid="s" accid.ges="s"  ← correct
+       - Treble C#5 (second in measure): accid.ges="s" glyph.auth="smufl"  ← legitimate carry
+       - Bass   C4  (should be natural): accid.ges="s" glyph.auth="smufl"  ← SPURIOUS
+
+     After pass 8:
+       - Treble first C#5: unchanged (accid + accid.ges preserved)
+       - Treble second C#5: unchanged (within-staff carry is legitimate)
+       - Bass C4: accid.ges and glyph.auth stripped → plain <accid/> (C natural)
+-->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Spurious gestural accidentals fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+              <staffDef n="2" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <!-- First C#5 in treble: explicitly notated with accid + accid.ges -->
+                  <note xml:id="n_treble_cs5_first" dur="4" oct="5" pname="c">
+                    <accid xml:id="a_treble_cs5_first" accid="s" accid.ges="s"/>
+                  </note>
+                  <!-- Second C#5 in treble: within-measure carry, only accid.ges -->
+                  <note xml:id="n_treble_cs5_second" dur="4" oct="5" pname="c">
+                    <accid xml:id="a_treble_cs5_second" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <note xml:id="n_treble_e5" dur="2" oct="5" pname="e">
+                    <accid xml:id="a_treble_e5"/>
+                  </note>
+                </layer>
+              </staff>
+              <staff n="2">
+                <layer n="1">
+                  <!-- Bass C4: should be C natural; converter wrongly set accid.ges="s" -->
+                  <note xml:id="n_bass_c4" dur="4" oct="4" pname="c">
+                    <accid xml:id="a_bass_c4" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <note xml:id="n_bass_g3" dur="4" oct="3" pname="g">
+                    <accid xml:id="a_bass_g3"/>
+                  </note>
+                  <note xml:id="n_bass_e3" dur="2" oct="3" pname="e">
+                    <accid xml:id="a_bass_e3"/>
+                  </note>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>
