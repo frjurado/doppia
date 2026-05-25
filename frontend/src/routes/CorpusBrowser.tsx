@@ -215,7 +215,12 @@ export default function CorpusBrowser() {
             <button
               type="button"
               className={styles.ctaButton}
-              onClick={() => navigate(`/scores/${selectedMovement.id}`)}
+              onClick={() => {
+                const qs = selectedMovement.key_signature
+                  ? `?key=${encodeURIComponent(selectedMovement.key_signature)}`
+                  : '';
+                navigate(`/scores/${selectedMovement.id}${qs}`);
+              }}
             >
               <Type variant="label-md" as="span">Open for tagging</Type>
             </button>

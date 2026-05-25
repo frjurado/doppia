@@ -96,6 +96,71 @@
   cursor: pointer;
 }
 
+/* ── Custom transpose dropdown ───────────────────────────────────────────── */
+
+.transposeContainer {
+  position: relative;
+}
+
+/* Trigger button — visually matches .toolbarSelect */
+.transposeButton {
+  background-color: var(--color-surface-container-low);
+  border: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-background);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.transposeDropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  list-style: none;
+  margin: 0;
+  padding: var(--spacing-1) 0;
+  background-color: var(--color-surface-container-low);
+  min-width: 100%;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.transposeOption {
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-background);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.transposeOption:hover {
+  background-color: var(--color-surface-container);
+}
+
+.transposeOptionSelected {
+  color: var(--color-primary);
+}
+
+/* Key hint in parentheses — de-emphasised relative to the interval label */
+.transposeKeyHint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-on-surface-variant);
+}
+
 /* ── Narrow-screen notice ─────────────────────────────────────────────────── */
 
 /* Shown when the score panel is narrower than 480px. */
