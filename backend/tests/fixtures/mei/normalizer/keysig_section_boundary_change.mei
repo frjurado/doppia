@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: mid-movement key change at a section boundary, with per-staff
+     keySig children on the initial staffDef elements.
+
+     This mirrors the K.331 mvt 3 (Rondo alla Turca) encoding in the real
+     corpus: the initial <scoreDef> has <staffDef n="1"><keySig sig="0"/></staffDef>
+     children (setting per-staff state to "no accidentals"), then a mid-piece
+     <scoreDef> placed between <section> siblings carries <keySig sig="3s"/>
+     as a DIRECT child (global change, no per-staff children).
+
+     The regression: without the fix, the per-staff entries set by the initial
+     staffDef block shadow the new global key, so every accid.ges in the A-major
+     section is incorrectly stripped.
+
+     Measure 1 (A minor, no key sig):
+       - n_m1_f5: accid.ges="s", no @accid, no key-sig, no carry -> SPURIOUS, strip.
+
+     Measure 2 (A major, 3 sharps: F# C# G#):
+       - n_m2_f5: accid.ges="s", key-sig carry (F# in A major) -> PRESERVE.
+       - n_m2_c5: accid.ges="s", key-sig carry (C# in A major) -> PRESERVE.
+       - n_m2_g5: accid.ges="s", key-sig carry (G# in A major) -> PRESERVE.
+
+     After pass 8: a_m1_f5 stripped; a_m2_f5, a_m2_c5, a_m2_g5 preserved;
+     changes_applied contains exactly one spurious-strip entry. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Section-boundary key change fixture (K.331 mvt 3 encoding)</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <!-- Initial scoreDef: no key.sig attribute on <scoreDef> itself;
+               key sig expressed via <keySig sig="0"/> children of <staffDef>.
+               This is the encoding form MuseScore uses for the K.331 corpus and
+               sets per-staff key-sig entries {"1": {}, "2": {}} in the normalizer.
+               A global-only mid-piece key change must clear these entries. -->
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5">
+                <keySig xml:id="ks_init_1" sig="0"/>
+              </staffDef>
+              <staffDef n="2" clef.shape="F" clef.line="4" lines="5">
+                <keySig xml:id="ks_init_2" sig="0"/>
+              </staffDef>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <!-- Inner section 1: A minor (no key sig) -->
+            <section>
+              <measure n="1">
+                <staff n="1">
+                  <layer n="1">
+                    <!-- F5 in A minor with accid.ges="s": no key-sig, no carry
+                         -> SPURIOUS; must be STRIPPED -->
+                    <note xml:id="n_m1_f5" dur="4" oct="5" pname="f">
+                      <accid xml:id="a_m1_f5" accid.ges="s" glyph.auth="smufl"/>
+                    </note>
+                    <note xml:id="n_m1_a5" dur="4" oct="5" pname="a">
+                      <accid xml:id="a_m1_a5"/>
+                    </note>
+                    <note xml:id="n_m1_e5" dur="2" oct="5" pname="e">
+                      <accid xml:id="a_m1_e5"/>
+                    </note>
+                  </layer>
+                </staff>
+              </measure>
+            </section>
+            <!-- Key change at section boundary: A minor -> A major (3 sharps).
+                 Encoding: <scoreDef> with a <keySig sig="3s"> DIRECT child,
+                 placed as a sibling of <section> elements — exactly as in K.331 mvt 3.
+                 No <staffDef> children: this is a global-only change. -->
+            <scoreDef>
+              <keySig xml:id="ks_a_major" sig="3s"/>
+            </scoreDef>
+            <!-- Inner section 2: A major (3 sharps: F#, C#, G#) -->
+            <section>
+              <measure n="2">
+                <staff n="1">
+                  <layer n="1">
+                    <!-- F#5 in A major: key-sig carry -> PRESERVE -->
+                    <note xml:id="n_m2_f5" dur="4" oct="5" pname="f">
+                      <accid xml:id="a_m2_f5" accid.ges="s" glyph.auth="smufl"/>
+                    </note>
+                    <!-- C#5 in A major: key-sig carry -> PRESERVE -->
+                    <note xml:id="n_m2_c5" dur="4" oct="5" pname="c">
+                      <accid xml:id="a_m2_c5" accid.ges="s" glyph.auth="smufl"/>
+                    </note>
+                    <!-- G#5 in A major: key-sig carry -> PRESERVE -->
+                    <note xml:id="n_m2_g5" dur="4" oct="5" pname="g">
+                      <accid xml:id="a_m2_g5" accid.ges="s" glyph.auth="smufl"/>
+                    </note>
+                    <note xml:id="n_m2_a5" dur="4" oct="5" pname="a">
+                      <accid xml:id="a_m2_a5"/>
+                    </note>
+                  </layer>
+                </staff>
+              </measure>
+            </section>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

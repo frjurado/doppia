@@ -650,6 +650,16 @@ def _build_measure_key_sigs(
     and stored under the element's document XPath path (the only identifier that
     is stable across different lxml traversal methods).
 
+    Each ``<scoreDef>`` is processed as a complete unit (global key + all
+    descendant ``<staffDef>`` per-staff keys resolved together).  When a
+    ``<scoreDef>`` declares a new global key without providing per-staff
+    overrides for staves that were set by an earlier ``<staffDef>`` block,
+    those stale per-staff entries are removed so the new global key takes
+    effect — this is the K.331-mvt-3 fix: the initial ``<staffDef n="X">``
+    elements carry ``<keySig sig="0"/>`` children that set per-staff entries,
+    and mid-piece ``<scoreDef><keySig sig="3s"/></scoreDef>`` elements (global
+    change, no per-staff children) must override them.
+
     Inline ``<staffDef>`` elements *inside* a ``<measure>`` appear after the
     measure open-tag in document order and are therefore reflected in the
     snapshot for the *next* measure.  The caller applies such inline overrides
@@ -666,20 +676,52 @@ def _build_measure_key_sigs(
     tree = root.getroottree()
     global_ks: dict[str, str] = {}
     staff_ks: dict[str, dict[str, str]] = {}
+    # id() values of <staffDef> elements already consumed while processing their
+    # parent <scoreDef> as a unit — skip them when the main loop reaches them.
+    consumed_staffdefs: set[int] = set()
     result: dict[str, dict[str | None, dict[str, str]]] = {}
 
     for elem in root.iter():
         tag = elem.tag
         if tag == f"{{{_MEI_NS}}}scoreDef":
-            ks = _read_elem_key_sig(elem)
-            if ks is not None:
-                global_ks = ks
+            # Process the entire scoreDef as a unit so that a global key change
+            # (via key.sig attribute or <keySig> child on the scoreDef itself)
+            # correctly clears per-staff entries that were set by earlier staffDef
+            # blocks.  Without this, initial <staffDef><keySig sig="0"/></staffDef>
+            # entries shadow every subsequent global key change for those staves.
+            global_ks_new = _read_elem_key_sig(elem)
+
+            # Collect per-staff key updates from all descendant staffDef elements,
+            # marking them consumed so the main loop does not double-process them.
+            staff_updates: dict[str, dict[str, str]] = {}
+            for staffdef in elem.iter(f"{{{_MEI_NS}}}staffDef"):
+                consumed_staffdefs.add(id(staffdef))
+                n = staffdef.get("n")
+                if n is not None:
+                    ks = _read_elem_key_sig(staffdef)
+                    if ks is not None:
+                        staff_updates[n] = ks
+
+            if global_ks_new is not None:
+                global_ks = global_ks_new
+                # Remove per-staff entries not explicitly overridden by this
+                # scoreDef so they fall through to the new global key.
+                for sn in list(staff_ks.keys()):
+                    if sn not in staff_updates:
+                        del staff_ks[sn]
+
+            staff_ks.update(staff_updates)
+
         elif tag == f"{{{_MEI_NS}}}staffDef":
+            # Skip staffDef elements already consumed during scoreDef processing.
+            if id(elem) in consumed_staffdefs:
+                continue
             n = elem.get("n")
             if n is not None:
                 ks = _read_elem_key_sig(elem)
                 if ks is not None:
                     staff_ks[n] = ks
+
         elif tag == f"{{{_MEI_NS}}}measure":
             snap: dict[str | None, dict[str, str]] = {None: dict(global_ks)}
             for sn, ks in staff_ks.items():

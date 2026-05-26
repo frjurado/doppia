@@ -662,3 +662,43 @@ class TestSpuriousGesturalAccidentals:
             els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=ns)
             assert len(els) == 1, f"{xml_id} missing"
             assert els[0].get("accid.ges") == "s", f"{xml_id} accid.ges stripped"
+
+    def test_keysig_section_boundary_change(self, tmp_path: Path) -> None:
+        """Section-boundary key change with initial per-staff keySig children (K.331 mvt 3 encoding).
+
+        The initial <scoreDef> has <staffDef><keySig sig="0"/></staffDef> children
+        that set per-staff key-sig state.  A mid-piece <scoreDef><keySig sig="3s"/>
+        </scoreDef> between <section> siblings declares a global key change with no
+        per-staff overrides.  Without the fix those per-staff entries shadow the new
+        global and every accid.ges in the A-major section is incorrectly stripped.
+        """
+        report, out_bytes = _run(tmp_path, "keysig_section_boundary_change.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+
+        # Measure 1 (A minor): spurious F#5 must be stripped.
+        m1_el = tree.xpath("//*[@xml:id='a_m1_f5']", namespaces=ns)
+        assert len(m1_el) == 1
+        assert (
+            "accid.ges" not in m1_el[0].attrib
+        ), "A-minor F5 accid.ges should have been stripped"
+
+        # Measure 2 (A major): F#, C#, G# must all be preserved.
+        for xml_id in ("a_m2_f5", "a_m2_c5", "a_m2_g5"):
+            els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=ns)
+            assert len(els) == 1, f"Expected element {xml_id!r}"
+            assert els[0].get("accid.ges") == "s", (
+                f"{xml_id}: A-major key-sig accid.ges must be preserved "
+                f"(per-staff shadowing bug)"
+            )
+
+        stripped = [c for c in report.changes_applied if "spurious" in c.lower()]
+        assert len(stripped) == 1, f"Expected exactly 1 spurious strip, got: {stripped}"
+
+    def test_keysig_section_boundary_change_idempotent(self, tmp_path: Path) -> None:
+        """Second pass on section-boundary key-change fixture is byte-identical."""
+        _, first_out = _run(tmp_path, "keysig_section_boundary_change.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "keysig_section_boundary_change.mei"
+        )
+        assert first_out == second_out
