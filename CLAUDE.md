@@ -138,6 +138,7 @@ Before writing any UI code, read `docs/mockups/opus_urtext/DESIGN.md`. Key const
 Conventional Commits with a project-specific `seed:` type for knowledge graph YAML changes:
 - `feat:`, `fix:`, `seed:`, `test:`, `docs:`, `chore:`, `refactor:`, `perf:`
 - `seed:` commits must include the domain in scope: `seed(cadences):`, `seed(sequences):`, etc.
+- **Do not commit without explicit human approval**, unless the change is a truly trivial fix (typo, import sort, whitespace). For any substantive code or doc change, stop and wait for the human to review before committing.
 
 ### Branching
 - `main` is always deployable to staging and must pass CI (tests + linting + graph validation).

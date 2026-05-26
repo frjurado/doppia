@@ -133,6 +133,25 @@ Then edit **ADR-021** minimally — only the header — to record the supersessi
 
 ---
 
+### Known Carry-Forward — Mid-Movement Key Signature Changes (K.331 mvt 3)
+
+**Observed after listen-testing the local ingest.** The Rondo alla Turca (K.331 mvt 3) alternates between A minor sections (no key signature) and A major sections (three sharps: F♯, C♯, G♯). The A major sections play incorrectly — notes that should be sharp sound as naturals — even after the Part 1 fix. The ingest reports 361 spurious accidentals stripped for this movement, which is implausibly high for a 240-bar rondo.
+
+**Diagnosis.** The pass 8 algorithm pre-computes a per-measure key-signature index (`_build_measure_key_sigs`) by walking the document in element order and snapshotting the key state at each `<measure>`. This works correctly for a constant key signature. It does not correctly handle movements where the key signature changes mid-piece via `<scoreDef>` or `<staffDef>` elements placed between measures: the snapshot for each measure captures the state immediately before that measure is encountered, but the bug path is not yet confirmed — it may be that the `<keySig sig="..."/>` form on inline `<staffDef>` elements at section boundaries is not being read, or that the document-order interleaving of `<scoreDef>` and `<measure>` in the actual MEI differs from the fixture layout the Step 2 mid-piece test covers.
+
+**Scope.** Only affects movements that explicitly change key signature mid-movement. In the current corpus this is K.331 mvt 3 (confirmed by ear). Other movements with 0–3 sharps throughout show plausible strip counts after the fix (K.283 mvt 1 in G major dropped from 183 to 17).
+
+**Fix (deferred to a later pass before Component 7 begins).** Steps to resolve:
+
+1. Fetch the K.331 mvt 3 MEI from MinIO and inspect the document-order structure around one A-major/A-minor boundary to confirm the exact encoding of the key change.
+2. Patch `_build_measure_key_sigs` and/or the inline-staffdef override logic in `_strip_spurious_gestural_accidentals` as the inspection dictates.
+3. Add a regression fixture that mirrors the real corpus encoding (the existing `keysig_midpiece_change.mei` uses `<scoreDef key.sig="1s">` between measures and may not reproduce the actual encoding form).
+4. Re-ingest K.331 mvt 3 and confirm the strip count drops and the A major sections play correctly.
+
+This is a data-correctness issue that affects MIDI accuracy for any annotator working on K.331 mvt 3. It does not block Parts 2–5 (the tagging infrastructure does not depend on MIDI pitch correctness), but it must land before any annotation session targeting that movement.
+
+---
+
 ## Part 2 — Backend Write Surface
 
 The endpoints the tagging UI depends on. Build these first so the frontend is never blocked on a mock. All routes are `/api/v1/`-prefixed; all role enforcement is `require_role()` (no inline checks); every write passes through a Pydantic model before it reaches a database (CLAUDE.md invariants).

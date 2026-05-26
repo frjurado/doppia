@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: <keySig sig="1s"/> encoding (Verovio/MusicXML output form).
+
+     G major expressed via <staffDef><keySig sig="1s"/></staffDef>, which is
+     the form produced by the Verovio MusicXML transcoder used in the real
+     corpus (not the key.sig="" shorthand on <scoreDef>/<staffDef>).
+
+     - F#5, no @accid, accid.ges="s" glyph.auth="smufl": key-sig carry -> PRESERVED.
+     - G5, no @accid, no accid.ges: untouched.
+
+     After pass 8: accid element on F#5 unchanged; changes_applied is empty. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>keySig sig attr fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <!-- Key sig expressed as <keySig sig="1s"/> child of <staffDef>,
+                   matching Verovio MusicXML transcoder output. -->
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5">
+                <keySig sig="1s"/>
+              </staffDef>
+              <staffDef n="2" clef.shape="F" clef.line="4" lines="5">
+                <keySig sig="1s"/>
+              </staffDef>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <!-- F#5: key-sig carry -> PRESERVED -->
+                  <note xml:id="n_f5_sharp" dur="4" oct="5" pname="f">
+                    <accid xml:id="a_f5_sharp" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <note xml:id="n_g5" dur="4" oct="5" pname="g">
+                    <accid xml:id="a_g5"/>
+                  </note>
+                  <note xml:id="n_a5" dur="2" oct="5" pname="a">
+                    <accid xml:id="a_a5"/>
+                  </note>
+                </layer>
+              </staff>
+              <staff n="2">
+                <layer n="1">
+                  <!-- F#3 in bass: also key-sig carry -> PRESERVED -->
+                  <note xml:id="n_f3_sharp" dur="4" oct="3" pname="f">
+                    <accid xml:id="a_f3_sharp" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <note xml:id="n_g3" dur="4" oct="3" pname="g">
+                    <accid xml:id="a_g3"/>
+                  </note>
+                  <note xml:id="n_d3" dur="2" oct="3" pname="d">
+                    <accid xml:id="a_d3"/>
+                  </note>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>
