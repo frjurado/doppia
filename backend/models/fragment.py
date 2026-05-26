@@ -196,6 +196,46 @@ class FragmentCreate(_FragmentWriteBase):
     sub_parts: list[SubPartFragmentCreate] = Field(default_factory=list)
 
 
+class FragmentUpdate(_FragmentWriteBase):
+    """Write model for updating a draft fragment (PATCH /api/v1/fragments/{id}).
+
+    Replaces all mutable fields of the draft in a single atomic operation:
+    concept tags, sub-parts, coordinates, summary, and prose are all replaced
+    from this payload. ``movement_id`` cannot change after creation.
+    """
+
+    sub_parts: list[SubPartFragmentCreate] = Field(default_factory=list)
+
+
+class FragmentResponse(BaseModel):
+    """API response shape for a fragment after create, update, or submit.
+
+    All timestamps are timezone-aware UTC datetimes. ``summary`` is returned
+    as the structured Pydantic model so callers get typed fields rather than
+    a raw dict.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    parent_fragment_id: uuid.UUID | None
+    summary: dict
+    prose_annotation: str | None
+    data_licence: str | None
+    status: str
+    created_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 
