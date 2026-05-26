@@ -104,6 +104,175 @@ Parameters:
 """
 
 
+# ---------------------------------------------------------------------------
+# Schema tree  (async — used by GET /api/v1/concepts/{id}/schemas)
+# ---------------------------------------------------------------------------
+
+_CHECK_CONCEPT_EXISTS = """\
+MATCH (c:Concept {id: $concept_id})
+RETURN c.id AS id
+"""
+
+_GET_CONCEPT_PROPERTY_SCHEMAS = """\
+MATCH (c:Concept {id: $concept_id})-[:IS_SUBTYPE_OF*0..]->(ancestor:Concept)
+      -[:HAS_PROPERTY_SCHEMA]->(ps:PropertySchema)
+WITH DISTINCT ps
+OPTIONAL MATCH (ps)-[:HAS_VALUE]->(pv:PropertyValue)
+WITH ps, pv
+OPTIONAL MATCH (pv)-[:VALUE_REFERENCES]->(ref:Concept)
+WITH ps, pv, ref
+ORDER BY ps.id, pv.id
+WITH ps, collect(
+  CASE WHEN pv IS NOT NULL
+    THEN {
+      id: pv.id,
+      name: pv.name,
+      referenced_concept_id: ref.id,
+      referenced_concept_name: ref.name,
+      referenced_concept_definition: ref.definition
+    }
+    ELSE null
+  END
+) AS raw_values
+RETURN ps.id          AS schema_id,
+       ps.name        AS schema_name,
+       ps.description AS schema_description,
+       ps.cardinality AS cardinality,
+       ps.required    AS required,
+       [v IN raw_values WHERE v IS NOT NULL] AS values
+ORDER BY ps.id
+"""
+"""All PropertySchemas applicable to a concept (inherited via IS_SUBTYPE_OF).
+
+For each schema, the values list is hydrated with name and optional
+VALUE_REFERENCES concept info (id, name, definition).  BOOL schemas have
+an empty values list.  Rows are ordered alphabetically by schema id.
+"""
+
+_GET_CONCEPT_CONTAINS_STAGES = """\
+MATCH (c:Concept {id: $concept_id})-[:IS_SUBTYPE_OF*0..]->(ancestor:Concept)
+      -[r:CONTAINS]->(stage:Concept)
+RETURN DISTINCT
+       stage.id                                    AS target_id,
+       stage.name                                 AS target_name,
+       r.order                                    AS order,
+       r.required                                 AS required,
+       coalesce(r.display_mode, 'stage')          AS display_mode,
+       coalesce(r.containment_mode, 'contiguous') AS containment_mode,
+       coalesce(r.default_weight, 1.0)            AS default_weight
+ORDER BY r.order
+"""
+"""All CONTAINS stages for a concept, collected from all IS_SUBTYPE_OF ancestors.
+
+Edge properties default to 'stage', 'contiguous', 1.0 when absent, matching
+the CONTAINS edge property defaults in edge-vocabulary-reference.md.
+"""
+
+_GET_TYPE_REFINEMENT_CHILDREN = """\
+MATCH (parent:Concept {id: $concept_id})<-[:IS_SUBTYPE_OF]-(child:Concept)
+WHERE child.stub = false
+CALL {
+  WITH child
+  OPTIONAL MATCH (child)-[:IS_SUBTYPE_OF*0..]->(anc:Concept)-[r:CONTAINS]->(s:Concept)
+  WITH child, collect(DISTINCT (s.id + '|' + toString(r.order))) AS fingerprint
+  RETURN fingerprint
+}
+RETURN child.id         AS child_id,
+       child.name       AS child_name,
+       child.definition AS child_definition,
+       fingerprint
+ORDER BY child.name
+"""
+"""Direct non-stub IS_SUBTYPE_OF children with their resolved CONTAINS fingerprints.
+
+The fingerprint is a list of '<stage_id>|<order>' strings collected from all
+IS_SUBTYPE_OF ancestors of the child.  The service layer compares fingerprints
+across siblings to determine whether Type Refinement should be shown.
+"""
+
+
+async def check_concept_exists(
+    session: _AsyncSession,
+    concept_id: str,
+) -> bool:
+    """Return True if a Concept node with the given id exists in the graph.
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The concept id to look up.
+
+    Returns:
+        ``True`` if the concept exists, ``False`` otherwise.
+    """
+    result = await session.run(_CHECK_CONCEPT_EXISTS, concept_id=concept_id)
+    row = await result.single()
+    return row is not None
+
+
+async def get_concept_property_schemas(
+    session: _AsyncSession,
+    concept_id: str,
+) -> list[dict[str, Any]]:
+    """Return all PropertySchemas applicable to a concept, with hydrated values.
+
+    Each dict has keys: ``schema_id``, ``schema_name``, ``schema_description``,
+    ``cardinality``, ``required``, ``values`` (list of value dicts, empty for BOOL).
+
+    Each value dict has: ``id``, ``name``, ``referenced_concept_id``,
+    ``referenced_concept_name``, ``referenced_concept_definition`` (last three
+    may be ``None`` when the value carries no VALUE_REFERENCES edge).
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The concept id to resolve schemas for.
+
+    Returns:
+        List of schema dicts ordered alphabetically by schema id.
+    """
+    result = await session.run(_GET_CONCEPT_PROPERTY_SCHEMAS, concept_id=concept_id)
+    return await result.data()
+
+
+async def get_concept_contains_stages(
+    session: _AsyncSession,
+    concept_id: str,
+) -> list[dict[str, Any]]:
+    """Return all CONTAINS stages for a concept, collected from all ancestors.
+
+    Each dict has: ``target_id``, ``target_name``, ``order``, ``required``,
+    ``display_mode``, ``containment_mode``, ``default_weight``.
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The concept id to resolve stages for.
+
+    Returns:
+        List of stage dicts ordered by ``order`` ascending.
+    """
+    result = await session.run(_GET_CONCEPT_CONTAINS_STAGES, concept_id=concept_id)
+    return await result.data()
+
+
+async def get_type_refinement_children(
+    session: _AsyncSession,
+    concept_id: str,
+) -> list[dict[str, Any]]:
+    """Return direct non-stub IS_SUBTYPE_OF children with CONTAINS fingerprints.
+
+    Each dict has: ``child_id``, ``child_name``, ``child_definition``,
+    ``fingerprint`` (list of ``'<stage_id>|<order>'`` strings).
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The parent concept id.
+
+    Returns:
+        List of child dicts ordered alphabetically by name.
+    """
+    result = await session.run(_GET_TYPE_REFINEMENT_CHILDREN, concept_id=concept_id)
+    return await result.data()
+
+
 async def search_concepts(
     session: _AsyncSession,
     *,
