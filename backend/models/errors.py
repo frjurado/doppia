@@ -74,6 +74,9 @@ class ErrorCode(StrEnum):
     METADATA_PARSE_ERROR = "METADATA_PARSE_ERROR"
     CORPUS_COHERENCE_ERROR = "CORPUS_COHERENCE_ERROR"
 
+    # Fragment write validation
+    FRAGMENT_VALIDATION_ERROR = "FRAGMENT_VALIDATION_ERROR"
+
 
 class ErrorDetail(BaseModel):
     """Optional structured detail accompanying an error."""

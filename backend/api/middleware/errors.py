@@ -52,6 +52,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         CorpusNotFoundError,
         FragmentAlreadyApprovedError,
         FragmentNotFoundError,
+        FragmentValidationError,
         GraphIntegrityError,
         HarmonyNotReviewedError,
         IngestionError,
@@ -82,6 +83,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         # Unprocessable — 422
         HarmonyNotReviewedError: 422,
         IngestionError: 422,
+        FragmentValidationError: 422,
         # Auth — 403
         AuthorizationError: 403,
         # Integrity — 500
