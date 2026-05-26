@@ -21,12 +21,12 @@ Normalization rules (applied in this order):
 7. **Incomplete measures at repeat boundaries** — when a measure at an
    ``rptend``/``rptboth`` has ``@metcon="false"``, locates the complement
    measure and sets ``@metcon="false"`` on it if missing.
-8. **Spurious gestural accidentals** — removes ``accid.ges`` and
-   ``glyph.auth`` from ``<accid>`` elements where ``accid.ges`` is set but
-   ``@accid`` is absent and no prior note in the same staff/measure/octave
-   carries an explicit ``@accid``.  This corrects a MuseScore-to-MEI
-   conversion artefact where treble accidentals are incorrectly propagated
-   to bass notes, causing wrong MIDI pitch without affecting SVG display.
+8. **Spurious gestural accidentals** — strips ``accid.ges`` (and orphaned
+   ``glyph.auth``) from ``<accid>`` elements where ``accid.ges`` is present
+   but ``@accid`` is absent and the gestural alteration is *not* explained
+   by either the active key signature or a within-staff/measure/octave carry
+   from a prior explicit ``@accid``.  Corrects a MuseScore-to-MEI artefact
+   that causes wrong MIDI pitch without affecting SVG display (ADR-022).
 
 Normalization is **idempotent**: running the normalizer on an already-
 normalized file produces byte-identical output and an
@@ -35,7 +35,7 @@ normalized file produces byte-identical output and an
 The normalizer never touches musical content (pitches, durations, dynamics),
 ``xml:id`` values, or encoding style, with the exception of pass 8 which
 removes spurious ``accid.ges`` values introduced by the MEI conversion
-pipeline (see ADR-021).
+pipeline (see ADR-022, which supersedes ADR-021).
 
 Example usage::
 
@@ -64,6 +64,10 @@ _NSMAP: dict[str, str] = {"mei": _MEI_NS}
 
 # Regex for suffix-style @n values inside <ending> elements, e.g. "12a", "12b".
 _SUFFIX_RE: re.Pattern[str] = re.compile(r"^(\d+)[a-zA-Z]+$")
+
+# Standard additive pitch-class order for key signatures (MEI pname values).
+_SHARP_ORDER: tuple[str, ...] = ("f", "c", "g", "d", "a", "e", "b")
+_FLAT_ORDER: tuple[str, ...] = ("b", "e", "a", "d", "g", "c", "f")
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +566,171 @@ def _normalize_split_measures(
 _XML_ID_KEY: str = "{http://www.w3.org/XML/1998/namespace}id"
 
 
+def _key_sig_from_attr(val: str) -> dict[str, str]:
+    """Convert a ``key.sig`` attribute value to a pitch-class → alteration map.
+
+    Args:
+        val: The ``key.sig`` value, e.g. ``"3s"``, ``"2f"``, ``"0"``.
+
+    Returns:
+        Dict mapping MEI pitch-class name to alteration string (``"s"`` or
+        ``"f"``).  Returns an empty dict for ``"0"`` (C major / A minor),
+        ``"none"``, ``"mixed"``, or unrecognised values.
+    """
+    if not val or val in ("0", "none", "mixed"):
+        return {}
+    m = re.match(r"^(\d+)(s|f)$", val)
+    if not m:
+        return {}
+    count = int(m.group(1))
+    alt = m.group(2)
+    order = _SHARP_ORDER if alt == "s" else _FLAT_ORDER
+    return {p: alt for p in order[:count]}
+
+
+def _key_sig_from_element(keysig: lxml.etree._Element) -> dict[str, str]:
+    """Parse a ``<keySig>`` element to a pitch-class → alteration map.
+
+    Handles two MEI encodings:
+
+    * **Shorthand** — ``<keySig sig="1s"/>`` (Verovio/MusicXML output); the
+      ``@sig`` attribute is decoded the same way as ``key.sig`` on
+      ``<scoreDef>``/``<staffDef>``.
+    * **Explicit** — ``<keySig><keyAccid pname="f" accid="s"/>…</keySig>``
+      (hand-encoded or MuseScore 4 export).
+
+    Args:
+        keysig: A ``<keySig>`` element.
+
+    Returns:
+        Dict mapping pitch-class name to alteration string.
+    """
+    sig_attr = keysig.get("sig")
+    if sig_attr is not None:
+        return _key_sig_from_attr(sig_attr)
+    result: dict[str, str] = {}
+    for ka in keysig.findall(f"{{{_MEI_NS}}}keyAccid"):
+        pname = ka.get("pname", "")
+        accid = ka.get("accid", "")
+        if pname and accid:
+            result[pname] = accid
+    return result
+
+
+def _read_elem_key_sig(elem: lxml.etree._Element) -> dict[str, str] | None:
+    """Extract the key signature from a ``<scoreDef>`` or ``<staffDef>`` element.
+
+    Checks the ``key.sig`` shorthand attribute first, then a ``<keySig>``
+    child element (explicit form with ``<keyAccid>`` children).
+
+    Args:
+        elem: A ``<scoreDef>`` or ``<staffDef>`` element.
+
+    Returns:
+        Pitch-class → alteration dict if a key signature is present on this
+        element, or ``None`` if the element carries no key signature information.
+    """
+    ks_attr = elem.get("key.sig")
+    if ks_attr is not None:
+        return _key_sig_from_attr(ks_attr)
+    keysig_child = elem.find(f"{{{_MEI_NS}}}keySig")
+    if keysig_child is not None:
+        return _key_sig_from_element(keysig_child)
+    return None
+
+
+def _build_measure_key_sigs(
+    root: lxml.etree._Element,
+) -> dict[str, dict[str | None, dict[str, str]]]:
+    """Pre-compute the active key signature at the start of each measure.
+
+    Walks the document in element order, maintaining a global (``<scoreDef>``-
+    level) and per-staff (``<staffDef n="X">``) key signature state.  When a
+    ``<measure>`` element is first encountered, the current state is snapshotted
+    and stored under the element's document XPath path (the only identifier that
+    is stable across different lxml traversal methods).
+
+    Each ``<scoreDef>`` is processed as a complete unit (global key + all
+    descendant ``<staffDef>`` per-staff keys resolved together).  When a
+    ``<scoreDef>`` declares a new global key without providing per-staff
+    overrides for staves that were set by an earlier ``<staffDef>`` block,
+    those stale per-staff entries are removed so the new global key takes
+    effect — this is the K.331-mvt-3 fix: the initial ``<staffDef n="X">``
+    elements carry ``<keySig sig="0"/>`` children that set per-staff entries,
+    and mid-piece ``<scoreDef><keySig sig="3s"/></scoreDef>`` elements (global
+    change, no per-staff children) must override them.
+
+    Inline ``<staffDef>`` elements *inside* a ``<measure>`` appear after the
+    measure open-tag in document order and are therefore reflected in the
+    snapshot for the *next* measure.  The caller applies such inline overrides
+    to the current measure's notes explicitly after retrieving the snapshot.
+
+    Args:
+        root: Document root element.
+
+    Returns:
+        Dict mapping each measure's XPath path to a snapshot dict of the form
+        ``{None: global_ks, "1": staff1_ks, …}`` where ``None`` is the global
+        default and per-staff entries override it.
+    """
+    tree = root.getroottree()
+    global_ks: dict[str, str] = {}
+    staff_ks: dict[str, dict[str, str]] = {}
+    # id() values of <staffDef> elements already consumed while processing their
+    # parent <scoreDef> as a unit — skip them when the main loop reaches them.
+    consumed_staffdefs: set[int] = set()
+    result: dict[str, dict[str | None, dict[str, str]]] = {}
+
+    for elem in root.iter():
+        tag = elem.tag
+        if tag == f"{{{_MEI_NS}}}scoreDef":
+            # Process the entire scoreDef as a unit so that a global key change
+            # (via key.sig attribute or <keySig> child on the scoreDef itself)
+            # correctly clears per-staff entries that were set by earlier staffDef
+            # blocks.  Without this, initial <staffDef><keySig sig="0"/></staffDef>
+            # entries shadow every subsequent global key change for those staves.
+            global_ks_new = _read_elem_key_sig(elem)
+
+            # Collect per-staff key updates from all descendant staffDef elements,
+            # marking them consumed so the main loop does not double-process them.
+            staff_updates: dict[str, dict[str, str]] = {}
+            for staffdef in elem.iter(f"{{{_MEI_NS}}}staffDef"):
+                consumed_staffdefs.add(id(staffdef))
+                n = staffdef.get("n")
+                if n is not None:
+                    ks = _read_elem_key_sig(staffdef)
+                    if ks is not None:
+                        staff_updates[n] = ks
+
+            if global_ks_new is not None:
+                global_ks = global_ks_new
+                # Remove per-staff entries not explicitly overridden by this
+                # scoreDef so they fall through to the new global key.
+                for sn in list(staff_ks.keys()):
+                    if sn not in staff_updates:
+                        del staff_ks[sn]
+
+            staff_ks.update(staff_updates)
+
+        elif tag == f"{{{_MEI_NS}}}staffDef":
+            # Skip staffDef elements already consumed during scoreDef processing.
+            if id(elem) in consumed_staffdefs:
+                continue
+            n = elem.get("n")
+            if n is not None:
+                ks = _read_elem_key_sig(elem)
+                if ks is not None:
+                    staff_ks[n] = ks
+
+        elif tag == f"{{{_MEI_NS}}}measure":
+            snap: dict[str | None, dict[str, str]] = {None: dict(global_ks)}
+            for sn, ks in staff_ks.items():
+                snap[sn] = dict(ks)
+            result[tree.getpath(elem)] = snap
+
+    return result
+
+
 def _strip_spurious_gestural_accidentals(
     root: lxml.etree._Element,
     changes_applied: list[str],
@@ -569,31 +738,76 @@ def _strip_spurious_gestural_accidentals(
     """Pass 8 — Strip spurious gestural accidentals from MEI conversion artefacts.
 
     The MuseScore-to-MEI converter incorrectly propagates accidentals across
-    staves: when a note in one staff carries an explicit accidental (``@accid``),
-    the converter marks same-pitch-class notes in other staves with
-    ``accid.ges`` + ``glyph.auth="smufl"`` but no ``@accid``.  This causes the
-    note to sound with the wrong chromatic pitch in MIDI/audio while displaying
-    correctly (no glyph) in SVG — the user sees C natural, hears C#.
+    staves: a treble-staff explicit accidental (``@accid``) sometimes causes
+    the converter to mark same-pitch-class notes in other staves or later in
+    the same staff with ``accid.ges`` (and often ``glyph.auth="smufl"``) but
+    no ``@accid``, making MIDI play the wrong chromatic pitch while SVG display
+    remains correct.
 
-    A ``<accid>`` with ``accid.ges`` but no ``@accid`` is **legitimate** only
-    when the same staff already contains a note with the same ``@pname`` AND
-    ``@oct`` that carries an explicit ``@accid`` earlier in the same measure
-    (within-measure, within-staff, within-octave accidental carry per standard
-    notation rules).  Any other case is spurious and is stripped.
+    **Algorithm** (ADR-022, supersedes ADR-021): a ``<accid>`` element with
+    ``accid.ges`` set and ``@accid`` absent is *legitimate* when the gestural
+    alteration is explained by *either* of two sources:
 
-    Stripped attributes: ``accid.ges`` and ``glyph.auth``.
+    1. **Active key signature** — the staff's key signature at this position
+       alters this pitch class (e.g. F# in G major).  The key sig is read from
+       ``key.sig`` attributes and ``<keySig>/<keyAccid>`` children on
+       ``<scoreDef>`` and ``<staffDef>`` elements, with per-staff values
+       overriding the global default.
+    2. **Within-staff/measure/octave carry** — the same ``(pname, oct)`` in this
+       staff already carries an explicit ``@accid`` earlier in the same measure.
+
+    Within-staff carry takes precedence over the key signature (a natural sign
+    written in the measure overrides the key-sig alteration for its octave).
+
+    If ``accid.ges`` is present but its value does *not* match the expected
+    alteration from either source, the element is flagged as a mismatch and
+    stripped.  Any other ``accid.ges`` without an explaining source is stripped
+    as spurious.
+
+    ``glyph.auth="smufl"`` is recorded in ``changes_applied`` as diagnostic
+    evidence when present, but is *not* used to trigger the pass — the decision
+    is driven entirely by key-signature and carry logic.
 
     Args:
         root: Document root element.
         changes_applied: Mutable list; stripped elements are recorded here.
     """
+    key_sig_index = _build_measure_key_sigs(root)
+    tree = root.getroottree()
+
     for measure in _xpath(root, "//mei:measure"):
         m_n = measure.get("n", "?")
+
+        # Start from the pre-computed snapshot for this measure.
+        raw_snap = key_sig_index.get(tree.getpath(measure), {None: {}})
+        ks_by_staff: dict[str | None, dict[str, str]] = {
+            k: dict(v) for k, v in raw_snap.items()
+        }
+
+        # Apply inline <staffDef> key-sig changes inside this measure.  The
+        # pre-pass snapshots state *before* these elements are visited, so they
+        # would otherwise only take effect for the next measure.
+        for staffdef in measure.findall(f"{{{_MEI_NS}}}staffDef"):
+            n = staffdef.get("n")
+            if n is not None:
+                ks = _read_elem_key_sig(staffdef)
+                if ks is not None:
+                    ks_by_staff[n] = ks
+        for scoredef in measure.findall(f"{{{_MEI_NS}}}scoreDef"):
+            ks = _read_elem_key_sig(scoredef)
+            if ks is not None:
+                ks_by_staff[None] = ks
+
         for staff in measure.findall(f"{{{_MEI_NS}}}staff"):
             staff_n = staff.get("n", "?")
-            # Set of (pname, oct) tuples that have been explicitly accidentalized
-            # in this staff/measure so far (document order).
-            explicit: set[tuple[str, str]] = set()
+            # Resolve active key sig: per-staff entry overrides global default.
+            if staff_n in ks_by_staff:
+                active_ks = ks_by_staff[staff_n]
+            else:
+                active_ks = ks_by_staff.get(None, {})
+
+            # Track (pname, oct) → alteration for within-staff/measure carry.
+            explicit: dict[tuple[str, str], str] = {}
 
             for note in staff.findall(f".//{{{_MEI_NS}}}note"):
                 pname = note.get("pname", "")
@@ -604,26 +818,57 @@ def _strip_spurious_gestural_accidentals(
 
                 has_accid = "accid" in accid_el.attrib
                 has_ges = "accid.ges" in accid_el.attrib
-                has_glyph = accid_el.get("glyph.auth") == "smufl"
 
                 if has_accid:
-                    # Correctly notated accidental: record for within-measure carry.
-                    explicit.add((pname, oct_))
-                elif has_ges and has_glyph:
-                    if (pname, oct_) in explicit:
-                        # Legitimate within-staff/octave carry — do not touch.
-                        pass
+                    # Correctly notated accidental — record for carry; do not touch.
+                    explicit[(pname, oct_)] = accid_el.get("accid", "")
+                elif has_ges:
+                    ges_val = accid_el.get("accid.ges", "")
+                    carry_expected = explicit.get((pname, oct_))
+                    key_expected = active_ks.get(pname)
+                    note_id = note.get(_XML_ID_KEY, "?")
+                    glyph = accid_el.get("glyph.auth", "")
+                    glyph_note = f" (glyph.auth={glyph!r})" if glyph else ""
+
+                    if carry_expected is not None:
+                        # Within-staff carry takes precedence over key sig.
+                        if carry_expected == ges_val:
+                            pass  # Legitimate carry — do not touch.
+                        else:
+                            # Carry value mismatches accid.ges — converter noise.
+                            changes_applied.append(
+                                f"Measure {m_n}, staff {staff_n}: stripped "
+                                f"mismatched accid.ges='{ges_val}' from "
+                                f"{pname}{oct_} — within-staff carry expects "
+                                f"'{carry_expected}'{glyph_note} "
+                                f"(note xml:id={note_id!r}); auditing recommended."
+                            )
+                            accid_el.attrib.pop("accid.ges")
+                            accid_el.attrib.pop("glyph.auth", None)
+                    elif key_expected is not None:
+                        if key_expected == ges_val:
+                            pass  # Legitimate key-signature carry — do not touch.
+                        else:
+                            # Key sig implies a different alteration — converter noise.
+                            changes_applied.append(
+                                f"Measure {m_n}, staff {staff_n}: stripped "
+                                f"mismatched accid.ges='{ges_val}' from "
+                                f"{pname}{oct_} — key signature expects "
+                                f"'{key_expected}'{glyph_note} "
+                                f"(note xml:id={note_id!r}); auditing recommended."
+                            )
+                            accid_el.attrib.pop("accid.ges")
+                            accid_el.attrib.pop("glyph.auth", None)
                     else:
-                        # Spurious cross-staff propagation — strip.
-                        ges_val = accid_el.attrib.pop("accid.ges")
-                        accid_el.attrib.pop("glyph.auth")
-                        note_id = note.get(_XML_ID_KEY, "?")
+                        # No key-sig or carry explanation — spurious; strip.
                         changes_applied.append(
                             f"Measure {m_n}, staff {staff_n}: stripped spurious "
                             f"accid.ges='{ges_val}' from {pname}{oct_} "
-                            f"(note xml:id={note_id!r}); no prior explicit "
-                            f"accidental in this staff/measure for this pitch."
+                            f"(note xml:id={note_id!r}){glyph_note}; no "
+                            f"key-signature or within-staff/measure cause found."
                         )
+                        accid_el.attrib.pop("accid.ges")
+                        accid_el.attrib.pop("glyph.auth", None)
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,16 @@
 # ADR-021: MEI Accidental Normalization — Stripping Spurious Gestural Accidentals
 
 **Date:** 2026-05-26  
-**Status:** Accepted  
+**Status:** Superseded by ADR-022 (2026-05-26)  
 **Branch:** `fix/accidentals-k279-mvt1`
+
+> **This ADR is preserved as the diagnostic record of the original cross-staff
+> propagation incident.** The algorithm it specifies is incomplete — it strips
+> key-signature-implied gestural accidentals, and it does not correctly handle
+> global key changes at section boundaries when per-staff key-sig state was set
+> by the initial `<staffDef>` block. Both gaps are superseded by ADR-022, which
+> retains the cross-staff diagnosis and adds key-signature awareness. Read
+> ADR-022 for the current rule; read this ADR for the incident history.
 
 ---
 

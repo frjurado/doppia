@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: key-signature-implied gestural accidentals, sharp key.
+     G major (key.sig="1s": F#).  Staff 1 has two F#5 notes whose
+     accid.ges="s" is explained entirely by the key signature — no prior
+     explicit @accid in the measure.  Both must be PRESERVED by pass 8.
+
+     After pass 8: both accid.ges="s" are untouched; changes_applied is empty. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Key-signature sharp carry fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4" key.sig="1s">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <!-- F#5 first: key-signature carry — must be KEPT -->
+                  <note xml:id="n_f5_first" dur="4" oct="5" pname="f">
+                    <accid xml:id="a_f5_first" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <!-- F#5 second: also key-signature carry — must be KEPT -->
+                  <note xml:id="n_f5_second" dur="4" oct="5" pname="f">
+                    <accid xml:id="a_f5_second" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <note xml:id="n_e5" dur="2" oct="5" pname="e">
+                    <accid xml:id="a_e5"/>
+                  </note>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

@@ -558,3 +558,147 @@ class TestSpuriousGesturalAccidentals:
             tmp_path, first_out, "spurious_gestural_accidentals.mei"
         )
         assert first_out == second_out
+
+    # ------------------------------------------------------------------
+    # New cases: key-signature awareness (ADR-022)
+    # ------------------------------------------------------------------
+
+    def test_keysig_sharp_carry_preserved(self, tmp_path: Path) -> None:
+        """G major: F#5 notes with accid.ges='s' (key-sig carry) are preserved."""
+        report, out_bytes = _run(tmp_path, "keysig_sharp_carry.mei")
+        assert (
+            not report.changes_applied
+        ), f"Unexpected changes in G-major fixture: {report.changes_applied}"
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        for xml_id in ("a_f5_first", "a_f5_second"):
+            els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=ns)
+            assert len(els) == 1, f"Expected element with xml:id={xml_id!r}"
+            assert (
+                els[0].get("accid.ges") == "s"
+            ), f"{xml_id}: key-sig accid.ges must be preserved"
+
+    def test_keysig_flat_carry_preserved(self, tmp_path: Path) -> None:
+        """F major: Bb5 notes with accid.ges='f' (key-sig carry) are preserved."""
+        report, out_bytes = _run(tmp_path, "keysig_flat_carry.mei")
+        assert (
+            not report.changes_applied
+        ), f"Unexpected changes in F-major fixture: {report.changes_applied}"
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        for xml_id in ("a_b5_first", "a_b5_second"):
+            els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=ns)
+            assert len(els) == 1
+            assert (
+                els[0].get("accid.ges") == "f"
+            ), f"{xml_id}: key-sig accid.ges must be preserved"
+
+    def test_keysig_midpiece_change(self, tmp_path: Path) -> None:
+        """Mid-movement key change: C-major F stripped; G-major F# preserved."""
+        report, out_bytes = _run(tmp_path, "keysig_midpiece_change.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        # Measure 1 (C major): F5 accid.ges must be stripped.
+        m1_els = tree.xpath("//*[@xml:id='a_m1_f5']", namespaces=ns)
+        assert len(m1_els) == 1
+        assert (
+            "accid.ges" not in m1_els[0].attrib
+        ), "C-major F5 accid.ges should have been stripped"
+        # Measure 2 (G major): F#5 accid.ges must be preserved.
+        m2_els = tree.xpath("//*[@xml:id='a_m2_f5']", namespaces=ns)
+        assert len(m2_els) == 1
+        assert (
+            m2_els[0].get("accid.ges") == "s"
+        ), "G-major F#5 accid.ges must be preserved"
+        stripped = [c for c in report.changes_applied if "spurious" in c.lower()]
+        assert len(stripped) == 1
+
+    def test_keysig_carry_coexist(self, tmp_path: Path) -> None:
+        """G major: explicit natural in measure; within-staff carry of natural kept."""
+        report, out_bytes = _run(tmp_path, "keysig_carry_coexist.mei")
+        assert (
+            not report.changes_applied
+        ), f"Unexpected changes: {report.changes_applied}"
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        # Natural carry accid must be preserved (key sig would imply 's').
+        carry_els = tree.xpath("//*[@xml:id='a_f5_carry']", namespaces=ns)
+        assert len(carry_els) == 1
+        assert (
+            carry_els[0].get("accid.ges") == "n"
+        ), "Within-staff natural carry must be preserved even in G major"
+
+    def test_keysig_cross_staff_before_trigger(self, tmp_path: Path) -> None:
+        """Spurious accid.ges on a note that precedes the explicit trigger in doc order."""
+        report, out_bytes = _run(tmp_path, "keysig_cross_staff_before_trigger.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        # Bass C4 (listed first in document order): spurious — must be stripped.
+        bass_els = tree.xpath("//*[@xml:id='a_bass_c4_early']", namespaces=ns)
+        assert len(bass_els) == 1
+        assert (
+            "accid.ges" not in bass_els[0].attrib
+        ), "Spurious bass accid.ges (before trigger in doc order) must be stripped"
+        assert "glyph.auth" not in bass_els[0].attrib
+        # Treble C#5 (listed second): explicit — must be unchanged.
+        treble_els = tree.xpath("//*[@xml:id='a_treble_c5']", namespaces=ns)
+        assert len(treble_els) == 1
+        assert treble_els[0].get("accid") == "s"
+        assert treble_els[0].get("accid.ges") == "s"
+
+    def test_keysig_idempotent_keybearing(self, tmp_path: Path) -> None:
+        """Second pass on a key-bearing file (G major) produces byte-identical output."""
+        _, first_out = _run(tmp_path, "keysig_sharp_carry.mei")
+        second_out = _round_trip(tmp_path, first_out, "keysig_sharp_carry.mei")
+        assert first_out == second_out
+
+    def test_keysig_element_sig_attr(self, tmp_path: Path) -> None:
+        """<keySig sig="1s"/> encoding (Verovio/MusicXML form) preserves key-sig-implied accid.ges."""
+        report, out_bytes = _run(tmp_path, "keysig_element_sig_attr.mei")
+        assert report.changes_applied == [], report.changes_applied
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+        for xml_id in ("a_f5_sharp", "a_f3_sharp"):
+            els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=ns)
+            assert len(els) == 1, f"{xml_id} missing"
+            assert els[0].get("accid.ges") == "s", f"{xml_id} accid.ges stripped"
+
+    def test_keysig_section_boundary_change(self, tmp_path: Path) -> None:
+        """Section-boundary key change with initial per-staff keySig children (K.331 mvt 3 encoding).
+
+        The initial <scoreDef> has <staffDef><keySig sig="0"/></staffDef> children
+        that set per-staff key-sig state.  A mid-piece <scoreDef><keySig sig="3s"/>
+        </scoreDef> between <section> siblings declares a global key change with no
+        per-staff overrides.  Without the fix those per-staff entries shadow the new
+        global and every accid.ges in the A-major section is incorrectly stripped.
+        """
+        report, out_bytes = _run(tmp_path, "keysig_section_boundary_change.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
+
+        # Measure 1 (A minor): spurious F#5 must be stripped.
+        m1_el = tree.xpath("//*[@xml:id='a_m1_f5']", namespaces=ns)
+        assert len(m1_el) == 1
+        assert (
+            "accid.ges" not in m1_el[0].attrib
+        ), "A-minor F5 accid.ges should have been stripped"
+
+        # Measure 2 (A major): F#, C#, G# must all be preserved.
+        for xml_id in ("a_m2_f5", "a_m2_c5", "a_m2_g5"):
+            els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=ns)
+            assert len(els) == 1, f"Expected element {xml_id!r}"
+            assert els[0].get("accid.ges") == "s", (
+                f"{xml_id}: A-major key-sig accid.ges must be preserved "
+                f"(per-staff shadowing bug)"
+            )
+
+        stripped = [c for c in report.changes_applied if "spurious" in c.lower()]
+        assert len(stripped) == 1, f"Expected exactly 1 spurious strip, got: {stripped}"
+
+    def test_keysig_section_boundary_change_idempotent(self, tmp_path: Path) -> None:
+        """Second pass on section-boundary key-change fixture is byte-identical."""
+        _, first_out = _run(tmp_path, "keysig_section_boundary_change.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "keysig_section_boundary_change.mei"
+        )
+        assert first_out == second_out
