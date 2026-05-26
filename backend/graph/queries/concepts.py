@@ -3,7 +3,9 @@
 Used by the concept API layer (Component 5).  Placed here so they can be
 tested independently of the HTTP layer.
 
-All functions accept a synchronous ``neo4j.Session`` object.
+Synchronous functions accept a ``neo4j.Session`` (used by graph integration
+tests and seed scripts).  Async functions accept a ``neo4j.AsyncSession``
+(used by FastAPI route handlers via the lifespan ``AsyncDriver``).
 
 See ``docs/roadmap/component-4-knowledge-graph.md`` § Step 14 for the test
 spec that pins the expected behaviour of the schema-inheritance query.
@@ -11,6 +13,9 @@ spec that pins the expected behaviour of the schema-inheritance query.
 
 from __future__ import annotations
 
+from typing import Any
+
+from neo4j import AsyncSession as _AsyncSession
 from neo4j import Session as _Session
 
 # ---------------------------------------------------------------------------
@@ -55,3 +60,79 @@ def get_inherited_schema_ids(session: _Session, concept_id: str) -> list[str]:
     """
     result = session.run(_GET_INHERITED_SCHEMAS, concept_id=concept_id)
     return [r["schema_id"] for r in result.data()]
+
+
+# ---------------------------------------------------------------------------
+# Full-text concept search  (async — used by the API layer)
+# ---------------------------------------------------------------------------
+
+_SEARCH_CONCEPTS = """\
+CALL db.index.fulltext.queryNodes("concept_search", $q)
+YIELD node, score
+WHERE node.stub = false AND node.top_level_taggable = true
+  AND ($domain IS NULL OR node.domain = $domain)
+WITH node, score ORDER BY score DESC SKIP $skip LIMIT $limit
+CALL {
+  WITH node
+  MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
+  WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
+  WITH p ORDER BY length(p) DESC LIMIT 1
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+}
+RETURN node.id                       AS id,
+       node.name                     AS name,
+       coalesce(node.aliases, [])    AS aliases,
+       node.definition               AS definition,
+       hierarchy_path,
+       score
+ORDER BY score DESC
+"""
+"""Full-text search against the ``concept_search`` index.
+
+Filters to taggable non-stub concepts; computes the IS_SUBTYPE_OF hierarchy
+path (root → concept) in a correlated subquery; paginates via SKIP/LIMIT.
+
+The subquery picks the longest path when multiple paths to a root exist
+(defensive — the graph is a tree in Phase 1, but safe for DAG structures).
+
+Parameters:
+    q      — Lucene query string (must be non-empty)
+    domain — exact domain filter, or ``null`` to search all domains
+    skip   — number of results to skip (offset)
+    limit  — max number of results to return (should be page_size + 1 to
+             detect whether a next page exists)
+"""
+
+
+async def search_concepts(
+    session: _AsyncSession,
+    *,
+    q: str,
+    domain: str | None,
+    skip: int,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Execute the full-text concept search and return raw result dicts.
+
+    Each dict has keys: ``id``, ``name``, ``aliases``, ``definition``,
+    ``hierarchy_path``, ``score``.
+
+    Args:
+        session: An open async Neo4j session.
+        q: Lucene query string (non-empty).
+        domain: Exact domain name to filter by, or ``None`` for all domains.
+        skip: Number of leading results to skip (for cursor pagination).
+        limit: Maximum number of results to return; pass ``page_size + 1``
+            to detect whether a following page exists.
+
+    Returns:
+        List of result dicts (may be empty).
+    """
+    result = await session.run(
+        _SEARCH_CONCEPTS,
+        q=q,
+        domain=domain,
+        skip=skip,
+        limit=limit,
+    )
+    return await result.data()
