@@ -450,6 +450,16 @@ export class GhostLayer {
     }
   }
 
+  /**
+   * The ghost overlay container element.
+   * Exposed so the selection behavioural layer (annotator.ts) can attach
+   * delegated event listeners. Events from active-layer ghost elements bubble
+   * through this element even though its own pointer-events is 'none'.
+   */
+  get overlay(): HTMLElement {
+    return this._overlay;
+  }
+
   /** Remove the overlay from the DOM and clear all indexes. */
   destroy(): void {
     this._overlay.remove();
