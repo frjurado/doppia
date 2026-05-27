@@ -196,6 +196,19 @@ class FragmentCreate(_FragmentWriteBase):
     sub_parts: list[SubPartFragmentCreate] = Field(default_factory=list)
 
 
+class ReviewRequest(BaseModel):
+    """Optional body for the approve and reject review endpoints.
+
+    Both approve and reject accept an optional comment.  The comment is
+    persisted in ``fragment_review.comment`` regardless of whether the
+    approval gate passes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    comment: str | None = None
+
+
 class FragmentUpdate(_FragmentWriteBase):
     """Write model for updating a draft fragment (PATCH /api/v1/fragments/{id}).
 

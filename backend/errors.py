@@ -178,6 +178,20 @@ class GraphIntegrityError(DoppiaError):
     code = ErrorCode.GRAPH_INTEGRITY_ERROR
 
 
+# ── Review errors ─────────────────────────────────────────────────────────────
+
+
+class SelfReviewForbiddenError(DoppiaError):
+    """A fragment creator attempted to review their own work.
+
+    Distinct from ``AuthorizationError`` (role check) — the caller has the
+    correct role but is prohibited from reviewing this specific fragment
+    because they created it.  Maps to HTTP 422.
+    """
+
+    code = ErrorCode.SELF_REVIEW_FORBIDDEN
+
+
 # ── Fragment write validation errors ─────────────────────────────────────────
 
 

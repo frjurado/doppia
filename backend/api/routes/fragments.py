@@ -1,14 +1,16 @@
-"""Fragment API routes: create, update, and submit fragment records.
+"""Fragment API routes: create, update, submit, and review fragment records.
 
 Routes:
-    POST  /api/v1/fragments              — create a draft fragment
-    PATCH /api/v1/fragments/{id}         — update a draft (resume a session)
-    POST  /api/v1/fragments/{id}/submit  — transition draft → submitted
+    POST  /api/v1/fragments                  — create a draft fragment
+    PATCH /api/v1/fragments/{id}             — update a draft or rejected fragment
+    POST  /api/v1/fragments/{id}/submit      — transition draft → submitted
+    POST  /api/v1/fragments/{id}/approve     — record an approval; gate → approved
+    POST  /api/v1/fragments/{id}/reject      — record a rejection → rejected
 
 All routes require the ``editor`` role. List/read/delete endpoints are
 out of scope for Component 5 and will be added in Component 7.
 
-See docs/roadmap/component-5-tagging-tool.md § Step 6.
+See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 """
 
 from __future__ import annotations
@@ -19,7 +21,12 @@ from typing import Annotated
 from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
 from fastapi import APIRouter, Depends, Path
 from models.base import get_db
-from models.fragment import FragmentCreate, FragmentResponse, FragmentUpdate
+from models.fragment import (
+    FragmentCreate,
+    FragmentResponse,
+    FragmentUpdate,
+    ReviewRequest,
+)
 from neo4j import AsyncDriver
 from services.fragments import FragmentService
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,4 +157,104 @@ async def submit_fragment(
         The :class:`~models.fragment.FragmentResponse` in ``submitted`` status.
     """
     fragment = await service.submit(fragment_id)
+    return FragmentResponse.model_validate(fragment)
+
+
+@router.post(
+    "/{fragment_id}/approve",
+    response_model=FragmentResponse,
+    dependencies=[require_role("editor")],
+    summary="Approve a submitted fragment",
+    response_description=(
+        "The fragment after processing the approval. Status is ``approved`` "
+        "when the gate passed; ``submitted`` when the threshold was not yet met."
+    ),
+)
+async def approve_fragment(
+    payload: ReviewRequest,
+    fragment_id: uuid.UUID = Path(
+        ..., description="UUID of the submitted fragment to approve"
+    ),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentResponse:
+    """Record an approval decision and apply the approval gate.
+
+    The reviewer's vote is always persisted, even when the gate fails (422).
+    This allows the creator to fix blocking items without the reviewer needing
+    to re-vote.
+
+    The gate checks (from ``fragment-schema.md`` § "Fragment approval and
+    harmony review"):
+
+    * Every ``actual_key`` with ``auto: true`` must have ``reviewed: true``.
+    * For concepts that declare a ``harmony_gate`` capture extension, every
+      ``movement_analysis`` event in the fragment's bar range must have
+      ``reviewed: true``.
+
+    Admins bypass the self-review rule and the approval threshold.
+
+    Args:
+        payload: Optional comment to accompany the review decision.
+        fragment_id: UUID of the submitted fragment.
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        The updated :class:`~models.fragment.FragmentResponse`.
+
+    Raises:
+        422 ``SELF_REVIEW_FORBIDDEN``: Reviewer is the fragment's creator.
+        422 ``HARMONY_NOT_REVIEWED``: Gate failed; detail contains blocking items.
+    """
+    fragment = await service.approve(
+        fragment_id=fragment_id,
+        reviewer_id=user.id,
+        reviewer_role=user.role,
+        comment=payload.comment,
+    )
+    return FragmentResponse.model_validate(fragment)
+
+
+@router.post(
+    "/{fragment_id}/reject",
+    response_model=FragmentResponse,
+    dependencies=[require_role("editor")],
+    summary="Reject a submitted fragment",
+    response_description="The fragment in ``rejected`` status.",
+)
+async def reject_fragment(
+    payload: ReviewRequest,
+    fragment_id: uuid.UUID = Path(
+        ..., description="UUID of the submitted fragment to reject"
+    ),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentResponse:
+    """Record a rejection decision and transition the fragment to ``rejected``.
+
+    A single rejection immediately flips the status, regardless of any prior
+    approval votes.  The creating annotator may revise by PATCHing the
+    fragment (which transitions ``rejected → draft``) and then resubmitting.
+
+    Admins bypass the self-review rule and may reject their own fragments.
+
+    Args:
+        payload: Optional comment explaining the rejection.
+        fragment_id: UUID of the submitted fragment.
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        The :class:`~models.fragment.FragmentResponse` in ``rejected`` status.
+
+    Raises:
+        422 ``SELF_REVIEW_FORBIDDEN``: Reviewer is the fragment's creator.
+    """
+    fragment = await service.reject(
+        fragment_id=fragment_id,
+        reviewer_id=user.id,
+        reviewer_role=user.role,
+        comment=payload.comment,
+    )
     return FragmentResponse.model_validate(fragment)

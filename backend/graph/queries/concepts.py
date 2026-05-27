@@ -273,6 +273,56 @@ async def get_type_refinement_children(
     return await result.data()
 
 
+# ---------------------------------------------------------------------------
+# Harmony capture gate  (async — used by the approval gate in Step 8)
+# ---------------------------------------------------------------------------
+
+_CHECK_CONCEPTS_HAVE_HARMONY_GATE = """\
+MATCH (c:Concept)-[:IS_SUBTYPE_OF*0..]->(ancestor:Concept)
+WHERE c.id IN $concept_ids
+  AND ancestor.capture_extensions IS NOT NULL
+  AND ancestor.capture_extensions CONTAINS '"harmony_gate"'
+RETURN count(*) > 0 AS has_harmony_gate
+"""
+"""Check whether any concept in the list (or any ancestor) declares a harmony gate.
+
+A concept declares a harmony gate by including an entry with
+``type: "harmony_gate"`` in its ``capture_extensions`` JSON string property.
+The IS_SUBTYPE_OF*0.. walk ensures that inherited gate declarations are found.
+
+Returns exactly one row: ``{has_harmony_gate: true/false}``.
+"""
+
+
+async def check_concepts_have_harmony_gate(
+    session: _AsyncSession,
+    concept_ids: list[str],
+) -> bool:
+    """Return True if any concept (or ancestor) in ``concept_ids`` declares a harmony gate.
+
+    A harmony gate declaration means the approval of fragments tagged with that
+    concept depends on all ``movement_analysis`` events in the fragment's range
+    having ``reviewed: true``.  See ``docs/architecture/capture_extensions.md``.
+
+    Args:
+        session: An open async Neo4j session.
+        concept_ids: Concept ids to check; may be empty (returns False).
+
+    Returns:
+        ``True`` if any concept or its ancestor carries a ``harmony_gate``
+        entry in ``capture_extensions``; ``False`` otherwise.
+    """
+    if not concept_ids:
+        return False
+    result = await session.run(
+        _CHECK_CONCEPTS_HAVE_HARMONY_GATE, concept_ids=concept_ids
+    )
+    row = await result.single()
+    if row is None:
+        return False
+    return bool(row["has_harmony_gate"])
+
+
 async def search_concepts(
     session: _AsyncSession,
     *,

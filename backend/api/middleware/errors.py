@@ -61,6 +61,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         Neo4jUnavailableError,
         PostgresUnavailableError,
         RedisUnavailableError,
+        SelfReviewForbiddenError,
         UserNotFoundError,
         WorkNotFoundError,
     )
@@ -86,6 +87,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         HarmonyNotReviewedError: 422,
         IngestionError: 422,
         FragmentValidationError: 422,
+        SelfReviewForbiddenError: 422,
         # Auth — 403
         AuthorizationError: 403,
         # Integrity — 500
