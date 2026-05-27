@@ -621,7 +621,10 @@ function adjustedMLeft(
 ): number {
   let adjusted = rawMLeft;
   for (const cls of ['clef', 'keySig', 'meterSig']) {
-    const decoEls = measureSvgEl.querySelectorAll(`:scope > g.${cls}, :scope > g[class*="${cls}"]`);
+    const decoEls = measureSvgEl.querySelectorAll(
+      `:scope > g.${cls}, :scope > g[class*="${cls}"], ` +
+      `g.staff > g.${cls}, g.staff > g[class*="${cls}"]`,
+    );
     for (const deco of decoEls) {
       const r = deco.getBoundingClientRect();
       const decoRight = r.right - containerLeft;
