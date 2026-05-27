@@ -175,12 +175,15 @@
 
 /* ── Score panel ─────────────────────────────────────────────────────────── */
 
+/* Score panel wrapper: row layout — score on the left, form panel on the right.
+   The form panel has a fixed width (FormPanel.module.css); the score panel
+   takes the remaining space via flex: 1. */
 .scorePanelWrapper {
   flex: 1;
   overflow: hidden;
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
 }
 
 /* Scrollable score content — horizontal scroll handles SVGs wider than the

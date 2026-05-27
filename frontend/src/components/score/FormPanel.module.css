@@ -1,0 +1,60 @@
+/* FormPanel — tagging-tool-design.md §7
+   Design system: DESIGN.md — tonal layering, no divider lines, 0px radius. */
+
+.panel {
+  width: 320px;
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-low);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  /* Leave room for the fixed playback bar (80px) at the bottom. */
+  padding-bottom: 88px;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.section {
+  padding: var(--spacing-4) var(--spacing-4) var(--spacing-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+/* Section headings use uppercase label-sm per the design system convention for
+   form sections. Depth between sections is tonal (background shifts), not lines. */
+.section + .section {
+  background-color: var(--color-surface-container);
+}
+
+.sectionHeading {
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+/* ── Schema fetch status ─────────────────────────────────────────────────── */
+
+.schemaStatus {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.schemaError {
+  color: var(--color-error, #b3261e);
+  margin: 0;
+}
+
+/* ── No-selection hint ────────────────────────────────────────────────────── */
+
+.noSelectionHint {
+  padding: var(--spacing-6) var(--spacing-4);
+  margin-top: auto;
+}
+
+.hintText {
+  color: var(--color-on-surface-variant);
+  text-align: center;
+  margin: 0;
+}

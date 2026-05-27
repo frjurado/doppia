@@ -19,6 +19,7 @@ interface TypeProps {
   className?: string;
   children: React.ReactNode;
   style?: React.CSSProperties;
+  role?: React.AriaRole;
 }
 
 const defaultTags: Record<TypeVariant, AsProp> = {
@@ -43,13 +44,14 @@ export default function Type({
   className,
   children,
   style,
+  role,
 }: TypeProps) {
   const Tag = (as ?? defaultTags[variant]) as AsProp;
   const variantClass = styles[variant];
   const combined = [variantClass, className].filter(Boolean).join(' ') || undefined;
 
   return (
-    <Tag className={combined} style={style}>
+    <Tag className={combined} style={style} role={role}>
       {children}
     </Tag>
   );

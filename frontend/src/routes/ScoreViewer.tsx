@@ -8,6 +8,7 @@ import { AnnotationSession, buildRepeatBarriers } from '../components/score/anno
 import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
+import FormPanel from '../components/score/FormPanel';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
@@ -846,9 +847,9 @@ export default function ScoreViewer() {
         </div>
       )}
 
-      {/* ── Score panel ─────────────────────────────────────────────────── */}
+      {/* ── Score panel + Form panel ─────────────────────────────────────── */}
       <div className={styles.scorePanelWrapper}>
-        {/* Status overlays: sit above the score panel during loading/error.
+        {/* Status overlays: sit above both panels during loading/error.
             The score panel itself stays in the DOM so scorePanelRef can
             measure the container width even before the first render. */}
         {status === 'loading' && (
@@ -896,7 +897,16 @@ export default function ScoreViewer() {
           </div>
         </div>
 
-        {/* Re-render overlay: sits above SVG pages while options change */}
+        {/* Form panel (Step 12 — concept picker + type refinement).
+            Steps 13–18 add further sections (property form, stage list, etc.).
+            Always rendered so the annotator can start classifying before or
+            after drawing a selection (concurrent-flag model, ADR-011 §2). */}
+        <FormPanel
+          session={annotationSessionRef.current}
+          flags={annotationFlags}
+        />
+
+        {/* Re-render overlay: sits above both panels while options change */}
         {isRerendering && (
           <div className={styles.rerenderOverlay} role="status" aria-live="polite">
             <Type variant="label-md" as="span">Re-rendering…</Type>
