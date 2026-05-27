@@ -1,0 +1,803 @@
+/**
+ * Ghost layer — invisible interactive overlay providing measure, beat, and
+ * sub-beat selection regions for the annotation tool.
+ *
+ * Ghost regions are absolutely-positioned HTML elements layered above the
+ * Verovio SVG container. They are never injected into Verovio's SVG output
+ * (CLAUDE.md §"Verovio SVG overlay rule").
+ *
+ * Three layers are always present in the DOM. The resolution toggle
+ * (Step 10) flips pointer-events between layers; ghost construction is
+ * not re-run on toggle.
+ *
+ * References: prototype-tagging-tool.md, ADR-005.
+ */
+
+// ---------------------------------------------------------------------------
+// Flat index encoding (ADR-005 §"Flat index encoding")
+// ---------------------------------------------------------------------------
+
+/** Max 99 sub-beats per beat. */
+export const BEAT_SCALE = 100;
+/** Max 99 beats per measure. */
+export const MEASURE_SCALE = 10_000;
+
+export const encodeBeat = (m: number, b: number): number =>
+  MEASURE_SCALE * m + BEAT_SCALE * b;
+
+export const encodeSubBeat = (m: number, b: number, sb: number): number =>
+  MEASURE_SCALE * m + BEAT_SCALE * b + sb;
+
+export const decodeMeasure = (n: number): number =>
+  Math.floor(n / MEASURE_SCALE);
+
+export const decodeBeat = (n: number): number =>
+  Math.floor((n % MEASURE_SCALE) / BEAT_SCALE);
+
+export const decodeSubBeat = (n: number): number => n % BEAT_SCALE;
+
+// ---------------------------------------------------------------------------
+// Measure ghost key (handles repeat-ending collision, ADR-005 §"Edge cases")
+// ---------------------------------------------------------------------------
+
+/**
+ * String key for the measureIndex map.
+ *
+ * Measures inside <ending> elements share the same @n across endings (Doppia
+ * convention, mei-ingest-normalization.md §6). Incorporating endingN prevents
+ * first-ending and second-ending measures from colliding in the index.
+ */
+export function measureGhostKey(barN: number, endingN: number | null): string {
+  return endingN !== null ? `m${barN}-e${endingN}` : `m${barN}`;
+}
+
+// ---------------------------------------------------------------------------
+// Compound-meter utilities
+// ---------------------------------------------------------------------------
+
+/** True when time signature indicates compound meter (6/8, 9/8, 12/8). */
+export function isCompoundMeter(beatCount: number, beatUnit: number): boolean {
+  return beatUnit === 8 && beatCount % 3 === 0;
+}
+
+/**
+ * Number of eighth-note sub-divisions per metric beat.
+ * Simple meters: 2 (binary subdivision).
+ * Compound meters: 3 (ternary subdivision — the beat is a dotted quarter).
+ */
+export function subdivisionsPerBeat(beatCount: number, beatUnit: number): number {
+  return isCompoundMeter(beatCount, beatUnit) ? 3 : 2;
+}
+
+/**
+ * Number of beat-level ghost slots to allocate for a measure.
+ * In compound meter the beat is the dotted quarter, so 6/8 → 2 beats,
+ * 9/8 → 3 beats, 12/8 → 4 beats.
+ */
+export function beatSlotCount(beatCount: number, beatUnit: number): number {
+  return isCompoundMeter(beatCount, beatUnit)
+    ? Math.floor(beatCount / 3)
+    : beatCount;
+}
+
+/**
+ * Convert a 0-indexed beat and 0-indexed sub-beat to the float encoding
+ * stored in fragment.beat_start / beat_end (ADR-005 §"Data model").
+ *
+ * Example (4/4, subDiv=2):
+ *   beat=0, subBeat=0 → 1.0   (first beat)
+ *   beat=0, subBeat=1 → 1.5   (first beat, second eighth)
+ *   beat=1, subBeat=0 → 2.0   (second beat)
+ *
+ * Example (6/8, subDiv=3):
+ *   beat=0, subBeat=1 → 1.333…
+ *   beat=1, subBeat=2 → 2.667…
+ */
+export function beatToFloat(
+  beat0: number,
+  subBeat0: number,
+  subDiv: number,
+): number {
+  // beat_start uses 1-indexed beat numbers (MEI convention).
+  return beat0 + 1 + subBeat0 / subDiv;
+}
+
+// ---------------------------------------------------------------------------
+// Per-measure meter reading (ADR-005 §"Per-measure meter reading")
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the time signature for one MEI measure element.
+ *
+ * Checks for a <meterSig count="…" unit="…"/> direct child before falling
+ * back to the global scoreDef values. The MEI normalizer inserts <meterSig>
+ * children at every meter change (mei-ingest-normalization.md §2), so this
+ * check is sufficient for all normalised corpus files.
+ *
+ * @param meiMeasure     The MEI <measure> DOM element.
+ * @param globalBeatCount Global beatCount from the active <scoreDef>.
+ * @param globalBeatUnit  Global beatUnit from the active <scoreDef>.
+ */
+export function getMeterForMeasure(
+  meiMeasure: Element,
+  globalBeatCount: number,
+  globalBeatUnit: number,
+): [beatCount: number, beatUnit: number] {
+  const localSig = meiMeasure.querySelector('meterSig');
+  if (localSig) {
+    const count = parseInt(localSig.getAttribute('count') ?? '', 10);
+    const unit = parseInt(localSig.getAttribute('unit') ?? '', 10);
+    if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
+      return [count, unit];
+    }
+  }
+  return [globalBeatCount, globalBeatUnit];
+}
+
+// ---------------------------------------------------------------------------
+// Beat boundary computation
+// ---------------------------------------------------------------------------
+
+/** Pixel margin subtracted from notehead x to give the ghost's left edge. */
+const NOTEHEAD_MARGIN = 4;
+
+/** Input per note for beat boundary inference. */
+export interface NotePositionInput {
+  /** Pixel x of the leftmost part of the notehead, relative to the container. */
+  xLeft: number;
+  /**
+   * Score-time onset in quarter-note units (absolute from piece start).
+   * Verovio's getTimesForElement() returns this value.
+   */
+  scoreTimeOnset: number;
+  /**
+   * Score-time duration in quarter-note units.
+   * 0 = grace note (these are skipped).
+   */
+  scoreTimeDuration: number;
+}
+
+export interface BeatBoundaryOutput {
+  /** Number of beat-level slots after compound correction. */
+  numBeats: number;
+  /** Pixel x of the left edge of each beat (0-indexed, length = numBeats). */
+  beatLefts: number[];
+  /** Pixel x of the right edge of each beat (0-indexed, length = numBeats). */
+  beatRights: number[];
+  /**
+   * Sub-beat left edges: beatRights[b][sb] is beat b, sub-beat sb.
+   * Dimensions: numBeats × subDiv.
+   */
+  subBeatLefts: number[][];
+  /** Sub-beat right edges. Same dimensions as subBeatLefts. */
+  subBeatRights: number[][];
+  /** 0-indexed set of beats that have at least one note onset. */
+  struckBeats: Set<number>;
+  /**
+   * 0-indexed set of (beat×100+subBeat) pairs that have at least one onset.
+   * Use encodedSubBeatKey(b, sb) = b * 100 + sb.
+   */
+  struckSubBeats: Set<number>;
+}
+
+/**
+ * Infer pixel beat boundaries for one measure from notehead positions.
+ *
+ * Algorithm (from prototype-tagging-tool.md §"Beat boundary computation"):
+ *  1. beatLefts[0] = mLeft (first beat begins at measure left edge, already
+ *     adjusted past system decorations by the caller).
+ *  2. For each note: convert score-time onset to a beat index; track the
+ *     leftmost notehead x in each beat (minus NOTEHEAD_MARGIN).
+ *  3. Beat N's right boundary = the left boundary of the next struck beat;
+ *     the last struck beat extends to mRight.
+ *  4. Grace notes (duration=0) and tied continuations (negative
+ *     measureLocalOnset → out-of-range beatIdx) are silently skipped.
+ *
+ * @param mLeft            Adjusted left edge of the measure (px, container-relative).
+ * @param mRight           Right edge of the measure (px, container-relative).
+ * @param measureStartTime Score-time onset of the measure (quarter-note units).
+ * @param beatCount        Raw MEI beatCount (e.g. 6 for 6/8).
+ * @param beatUnit         Raw MEI beatUnit (e.g. 8 for 6/8).
+ * @param notes            Notehead positions and Verovio timing info.
+ */
+export function computeBeatBoundaries(
+  mLeft: number,
+  mRight: number,
+  measureStartTime: number,
+  beatCount: number,
+  beatUnit: number,
+  notes: NotePositionInput[],
+): BeatBoundaryOutput {
+  const compound = isCompoundMeter(beatCount, beatUnit);
+  const subDiv = subdivisionsPerBeat(beatCount, beatUnit);
+  const numBeats = beatSlotCount(beatCount, beatUnit);
+
+  // Initialise all left-boundaries to mRight (sentinel) and right-boundaries
+  // to mRight; first beat unconditionally starts at mLeft.
+  const beatLefts: number[] = new Array(numBeats).fill(mRight);
+  const beatRights: number[] = new Array(numBeats).fill(mRight);
+  const subBeatLefts: number[][] = Array.from({ length: numBeats }, () =>
+    new Array(subDiv).fill(mRight),
+  );
+  const subBeatRights: number[][] = Array.from({ length: numBeats }, () =>
+    new Array(subDiv).fill(mRight),
+  );
+
+  beatLefts[0] = mLeft;
+  if (subBeatLefts[0]) subBeatLefts[0][0] = mLeft;
+
+  const struckBeats = new Set<number>();
+  const struckSubBeats = new Set<number>();
+
+  for (const note of notes) {
+    // Skip grace notes (duration == 0).
+    if (note.scoreTimeDuration === 0) continue;
+
+    const measureLocalOnset = note.scoreTimeOnset - measureStartTime;
+
+    // Convert to raw slot index (eighth-note grid for compound, denominator grid for simple).
+    const rawSlot = Math.floor(measureLocalOnset * beatUnit / 4.0);
+
+    // Beat-level index with compound-meter correction.
+    const beatIdx = compound ? Math.floor(rawSlot / subDiv) : rawSlot;
+
+    // Skip tied continuations (negative onset → beatIdx < 0) and
+    // any value outside the expected range.
+    if (beatIdx < 0 || beatIdx >= numBeats) continue;
+
+    // Sub-beat index within the beat (0-indexed).
+    const subBeatIdx = compound
+      ? rawSlot % subDiv
+      : Math.max(
+          0,
+          Math.min(
+            subDiv - 1,
+            Math.floor((measureLocalOnset * beatUnit / 4.0 - beatIdx) * subDiv),
+          ),
+        );
+
+    // Track leftmost notehead x per beat and per sub-beat.
+    const x = note.xLeft - NOTEHEAD_MARGIN;
+    if (beatIdx > 0 && x < beatLefts[beatIdx]) {
+      // beatLefts[0] is anchored to mLeft; only update for beats ≥ 1.
+      beatLefts[beatIdx] = x;
+    }
+    if (subBeatIdx > 0 || beatIdx > 0) {
+      const sbLefts = subBeatLefts[beatIdx];
+      if (sbLefts && x < sbLefts[subBeatIdx]) {
+        sbLefts[subBeatIdx] = x;
+      }
+    }
+
+    struckBeats.add(beatIdx);
+    struckSubBeats.add(beatIdx * 100 + subBeatIdx);
+  }
+
+  // Right boundaries: beat N's right = left of the next struck beat.
+  const struckList = [...struckBeats].sort((a, b) => a - b);
+  for (let i = 0; i < struckList.length; i++) {
+    const curr = struckList[i];
+    const next = struckList[i + 1];
+    beatRights[curr] = next !== undefined ? beatLefts[next] : mRight;
+  }
+
+  // Sub-beat right boundaries: next struck sub-beat within the same beat,
+  // or the beat's right edge if no subsequent sub-beat exists.
+  for (const b of struckBeats) {
+    for (let sb = 0; sb < subDiv; sb++) {
+      if (!struckSubBeats.has(b * 100 + sb)) continue;
+      let nextLeft = beatRights[b];
+      for (let nsb = sb + 1; nsb < subDiv; nsb++) {
+        if (struckSubBeats.has(b * 100 + nsb)) {
+          nextLeft = subBeatLefts[b]![nsb];
+          break;
+        }
+      }
+      subBeatRights[b]![sb] = nextLeft;
+    }
+  }
+
+  return {
+    numBeats,
+    beatLefts,
+    beatRights,
+    subBeatLefts,
+    subBeatRights,
+    struckBeats,
+    struckSubBeats,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Ghost element types
+// ---------------------------------------------------------------------------
+
+export interface GhostBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Entry stored in the measure index. */
+export interface MeasureGhostEntry {
+  el: HTMLElement;
+  barN: number;
+  endingN: number | null;
+  key: string;
+  bounds: GhostBounds;
+}
+
+/** Entry stored in the beat index. */
+export interface BeatGhostEntry {
+  el: HTMLElement;
+  barN: number;
+  endingN: number | null;
+  /** 0-indexed beat within the measure (after compound correction). */
+  beatIdx: number;
+  /** Encoded key: encodeBeat(barN, beatIdx). */
+  encodedKey: number;
+  /** Float encoding for fragment.beat_start / beat_end (1-indexed). */
+  beatFloat: number;
+  bounds: GhostBounds;
+}
+
+/** Entry stored in the sub-beat index. */
+export interface SubBeatGhostEntry {
+  el: HTMLElement;
+  barN: number;
+  endingN: number | null;
+  beatIdx: number;
+  subBeatIdx: number;
+  encodedKey: number;
+  beatFloat: number;
+  bounds: GhostBounds;
+}
+
+/** Which ghost layer receives pointer events (resolution toggle, ADR-005). */
+export type ResolutionMode = 'measure' | 'beat' | 'subbeat';
+
+// ---------------------------------------------------------------------------
+// Verovio toolkit subset needed by this module
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal Verovio toolkit interface for the ghost layer.
+ *
+ * getTimesForElement returns [scoreTimeOnset, scoreTimeDuration, ...] in
+ * quarter-note units (quarter note = 1.0), as stated in
+ * prototype-tagging-tool.md §"Onset values and measure-local conversion".
+ * A duration of 0 indicates a grace note.
+ */
+export interface GhostToolkitLike {
+  getTimesForElement(id: string): number[];
+}
+
+// ---------------------------------------------------------------------------
+// GhostLayer class
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages three ghost layers (measure, beat, sub-beat) and their spatial
+ * indexes. Created by buildGhosts() after a score page is rendered.
+ */
+export class GhostLayer {
+  /** Map from measureGhostKey() string to measure ghost entry. */
+  readonly measureIndex = new Map<string, MeasureGhostEntry>();
+  /** Map from encodeBeat(barN, beatIdx) to beat ghost entry. */
+  readonly beatIndex = new Map<number, BeatGhostEntry>();
+  /** Map from encodeSubBeat(barN, beatIdx, subBeatIdx) to sub-beat ghost entry. */
+  readonly subBeatIndex = new Map<number, SubBeatGhostEntry>();
+
+  private readonly _overlay: HTMLElement;
+  private readonly _measureLayer: HTMLElement;
+  private readonly _beatLayer: HTMLElement;
+  private readonly _subBeatLayer: HTMLElement;
+
+  constructor(container: HTMLElement) {
+    this._overlay = document.createElement('div');
+    this._overlay.className = 'ghost-overlay';
+    this._overlay.setAttribute('aria-hidden', 'true');
+    Object.assign(this._overlay.style, {
+      position: 'absolute',
+      inset: '0',
+      pointerEvents: 'none',
+      zIndex: '20',
+    });
+
+    this._measureLayer = this._createLayer('ghost-layer-measure');
+    this._beatLayer = this._createLayer('ghost-layer-beat');
+    this._subBeatLayer = this._createLayer('ghost-layer-subbeat');
+
+    this._overlay.appendChild(this._measureLayer);
+    this._overlay.appendChild(this._beatLayer);
+    this._overlay.appendChild(this._subBeatLayer);
+    container.appendChild(this._overlay);
+  }
+
+  private _createLayer(className: string): HTMLElement {
+    const layer = document.createElement('div');
+    layer.className = className;
+    Object.assign(layer.style, {
+      position: 'absolute',
+      inset: '0',
+      pointerEvents: 'none',
+    });
+    return layer;
+  }
+
+  /**
+   * Switch which ghost layer accepts pointer events.
+   * All layers remain in the DOM — only pointer-events changes (ADR-005
+   * §"Resolution toggle": "ghost construction is not re-run on toggle").
+   */
+  setResolution(mode: ResolutionMode): void {
+    const active = (layer: HTMLElement) => { layer.style.pointerEvents = 'auto'; };
+    const inactive = (layer: HTMLElement) => { layer.style.pointerEvents = 'none'; };
+
+    if (mode === 'measure') {
+      active(this._measureLayer);
+      inactive(this._beatLayer);
+      inactive(this._subBeatLayer);
+    } else if (mode === 'beat') {
+      inactive(this._measureLayer);
+      active(this._beatLayer);
+      inactive(this._subBeatLayer);
+    } else {
+      inactive(this._measureLayer);
+      inactive(this._beatLayer);
+      active(this._subBeatLayer);
+    }
+  }
+
+  /** Remove the overlay from the DOM and clear all indexes. */
+  destroy(): void {
+    this._overlay.remove();
+    this.measureIndex.clear();
+    this.beatIndex.clear();
+    this.subBeatIndex.clear();
+  }
+
+  /** Append a ghost element to the correct layer. */
+  _appendMeasureGhost(el: HTMLElement): void {
+    this._measureLayer.appendChild(el);
+  }
+
+  _appendBeatGhost(el: HTMLElement): void {
+    this._beatLayer.appendChild(el);
+  }
+
+  _appendSubBeatGhost(el: HTMLElement): void {
+    this._subBeatLayer.appendChild(el);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------------
+
+function applyGhostBounds(el: HTMLElement, bounds: GhostBounds): void {
+  Object.assign(el.style, {
+    position: 'absolute',
+    left: `${bounds.left}px`,
+    top: `${bounds.top}px`,
+    width: `${bounds.width}px`,
+    height: `${bounds.height}px`,
+    boxSizing: 'border-box',
+    cursor: 'pointer',
+  });
+}
+
+function createGhostEl(
+  className: string,
+  bounds: GhostBounds,
+  dataKey: string,
+): HTMLElement {
+  const el = document.createElement('div');
+  el.className = className;
+  el.dataset['key'] = dataKey;
+  applyGhostBounds(el, bounds);
+
+  // Edge and gradient zones for drag affordance (prototype-tagging-tool.md).
+  const edgeW = Math.min(12, Math.floor(bounds.width * 0.15));
+  for (const side of ['left', 'right'] as const) {
+    const edge = document.createElement('div');
+    edge.className = `ghost-edge ghost-edge-${side}`;
+    Object.assign(edge.style, {
+      position: 'absolute',
+      top: '0',
+      bottom: '0',
+      width: `${edgeW}px`,
+      [side]: '0',
+    });
+    el.appendChild(edge);
+
+    const grad = document.createElement('div');
+    grad.className = `ghost-gradient ghost-gradient-${side}`;
+    Object.assign(grad.style, {
+      position: 'absolute',
+      top: '0',
+      bottom: '0',
+      width: `${edgeW * 2}px`,
+      [side]: `${edgeW}px`,
+    });
+    el.appendChild(grad);
+  }
+
+  return el;
+}
+
+// ---------------------------------------------------------------------------
+// MEI XML helpers
+// ---------------------------------------------------------------------------
+
+const XML_NS = 'http://www.w3.org/XML/1998/namespace';
+
+function getMeiId(el: Element): string | null {
+  return el.getAttribute('xml:id') ?? el.getAttributeNS(XML_NS, 'id');
+}
+
+/**
+ * Walk up the MEI DOM to find the containing <ending @n>, if any.
+ * Returns the @n integer or null.
+ */
+function getEndingN(el: Element): number | null {
+  let cursor: Element | null = el.parentElement;
+  while (cursor) {
+    if (cursor.tagName === 'ending') {
+      const n = cursor.getAttribute('n');
+      if (n !== null) {
+        const v = parseInt(n, 10);
+        return isNaN(v) ? null : v;
+      }
+      return null;
+    }
+    cursor = cursor.parentElement;
+  }
+  return null;
+}
+
+/**
+ * Parse the global time signature from the first <scoreDef> in the MEI doc.
+ * Returns [4, 4] if not found.
+ */
+function parseGlobalMeter(meiDoc: Document): [number, number] {
+  // Check meter.count/meter.unit attributes on scoreDef or staffDef.
+  for (const tag of ['scoreDef', 'staffDef']) {
+    const els = meiDoc.getElementsByTagName(tag);
+    for (let i = 0; i < els.length; i++) {
+      const count = parseInt(els[i].getAttribute('meter.count') ?? '', 10);
+      const unit = parseInt(els[i].getAttribute('meter.unit') ?? '', 10);
+      if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
+        return [count, unit];
+      }
+    }
+  }
+  // Fall back to <meterSig> children.
+  const sigs = meiDoc.getElementsByTagName('meterSig');
+  for (let i = 0; i < sigs.length; i++) {
+    const count = parseInt(sigs[i].getAttribute('count') ?? '', 10);
+    const unit = parseInt(sigs[i].getAttribute('unit') ?? '', 10);
+    if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
+      return [count, unit];
+    }
+  }
+  return [4, 4];
+}
+
+// ---------------------------------------------------------------------------
+// Adjusted mLeft: skip system decorations
+// ---------------------------------------------------------------------------
+
+/**
+ * Move mLeft past any clef, key-signature, or meter-signature groups that
+ * appear at the start of a system (the first measure on each staff row).
+ * At system starts these decorations appear before the first note and would
+ * otherwise give a ghost that starts too far to the left.
+ */
+function adjustedMLeft(
+  measureSvgEl: Element,
+  rawMLeft: number,
+  containerLeft: number,
+): number {
+  let adjusted = rawMLeft;
+  for (const cls of ['clef', 'keySig', 'meterSig']) {
+    const decoEls = measureSvgEl.querySelectorAll(`:scope > g.${cls}, :scope > g[class*="${cls}"]`);
+    for (const deco of decoEls) {
+      const r = deco.getBoundingClientRect();
+      const decoRight = r.right - containerLeft;
+      if (decoRight > adjusted) adjusted = decoRight + 2;
+    }
+  }
+  return adjusted;
+}
+
+// ---------------------------------------------------------------------------
+// buildGhosts — main factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Build ghost regions over a rendered Verovio score and return a GhostLayer
+ * with fully-populated measure, beat, and sub-beat indexes.
+ *
+ * Must be called after the score SVG is mounted and laid out (requires a real
+ * browser layout — not testable with jsdom). For algorithmic correctness
+ * testing, the pure functions (computeBeatBoundaries, getMeterForMeasure, etc.)
+ * are tested directly.
+ *
+ * @param container The .scoreContent element (position: relative required).
+ * @param meiText   Normalised MEI content string for the loaded score.
+ * @param tk        Verovio toolkit instance with getTimesForElement available.
+ */
+export function buildGhosts(
+  container: HTMLElement,
+  meiText: string,
+  tk: GhostToolkitLike,
+): GhostLayer {
+  const layer = new GhostLayer(container);
+
+  // Parse MEI for structure (measures, endings, meters).
+  const meiDoc = new DOMParser().parseFromString(meiText, 'text/xml');
+  const [globalBeatCount, globalBeatUnit] = parseGlobalMeter(meiDoc);
+
+  const containerRect = container.getBoundingClientRect();
+
+  // Iterate every MEI <measure> element in document order.
+  const meiMeasures = meiDoc.getElementsByTagName('measure');
+
+  for (let mi = 0; mi < meiMeasures.length; mi++) {
+    const meiMeasure = meiMeasures[mi];
+    const measureId = getMeiId(meiMeasure);
+    if (!measureId) continue;
+
+    // Find the rendered SVG group for this measure.
+    const svgMeasure = container.querySelector(`[id="${measureId}"]`);
+    if (!svgMeasure) continue;
+
+    const measureRect = svgMeasure.getBoundingClientRect();
+    const mLeft0 = measureRect.left - containerRect.left;
+    const mRight = measureRect.right - containerRect.left;
+    const mTop = measureRect.top - containerRect.top;
+    const mBottom = measureRect.bottom - containerRect.top;
+    const mHeight = mBottom - mTop;
+
+    // Adjust mLeft past system decorations (clef/key/meter at system starts).
+    const mLeft = adjustedMLeft(svgMeasure, mLeft0, containerRect.left);
+
+    // MEI @n and ending context.
+    const barN = parseInt(meiMeasure.getAttribute('n') ?? `${mi + 1}`, 10);
+    const endingN = getEndingN(meiMeasure);
+    const mKey = measureGhostKey(barN, endingN);
+
+    // Measure ghost — covers the full measure height.
+    const msrBounds: GhostBounds = {
+      left: mLeft0,
+      top: mTop,
+      width: mRight - mLeft0,
+      height: mHeight,
+    };
+    const msrEl = createGhostEl('ghost ghost-measure', msrBounds, mKey);
+    layer._appendMeasureGhost(msrEl);
+    layer.measureIndex.set(mKey, {
+      el: msrEl,
+      barN,
+      endingN,
+      key: mKey,
+      bounds: msrBounds,
+    });
+
+    // Meter for this specific measure.
+    const [beatCount, beatUnit] = getMeterForMeasure(
+      meiMeasure,
+      globalBeatCount,
+      globalBeatUnit,
+    );
+
+    // Collect note positions and Verovio timing info for beat inference.
+    const noteInputs: NotePositionInput[] = [];
+    const meiNotes = meiMeasure.getElementsByTagName('note');
+
+    // Measure start time from Verovio.
+    const msrTimes = tk.getTimesForElement(measureId);
+    const measureStartTime = msrTimes[0] ?? 0;
+
+    for (let ni = 0; ni < meiNotes.length; ni++) {
+      const meiNote = meiNotes[ni];
+      const noteId = getMeiId(meiNote);
+      if (!noteId) continue;
+
+      const times = tk.getTimesForElement(noteId);
+      const scoreTimeOnset = times[0] ?? 0;
+      const scoreTimeDuration = times[1] ?? 0;
+
+      // Grace notes (duration == 0) are skipped inside computeBeatBoundaries.
+
+      // Get notehead x from the rendered SVG element.
+      const svgNote = container.querySelector(`[id="${noteId}"]`);
+      if (!svgNote) continue;
+
+      const noteRect = svgNote.getBoundingClientRect();
+      const xLeft = noteRect.left - containerRect.left;
+
+      noteInputs.push({ xLeft, scoreTimeOnset, scoreTimeDuration });
+    }
+
+    const subDiv = subdivisionsPerBeat(beatCount, beatUnit);
+    const bb = computeBeatBoundaries(
+      mLeft,
+      mRight,
+      measureStartTime,
+      beatCount,
+      beatUnit,
+      noteInputs,
+    );
+
+    // Beat height: upper portion of the measure (above the main staff body).
+    // Use 25% of measure height, minimum 16px.
+    const beatH = Math.max(16, Math.floor(mHeight * 0.25));
+    const beatTop = mTop;
+
+    // Sub-beat height: same region, slightly smaller.
+    const subH = Math.max(12, Math.floor(mHeight * 0.18));
+
+    for (const b of bb.struckBeats) {
+      const bLeft = bb.beatLefts[b];
+      const bRight = bb.beatRights[b];
+      if (bRight <= bLeft) continue;
+
+      const beatFloat = beatToFloat(b, 0, subDiv);
+      const encKey = encodeBeat(barN, b);
+
+      const beatBounds: GhostBounds = {
+        left: bLeft,
+        top: beatTop,
+        width: bRight - bLeft,
+        height: beatH,
+      };
+      const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
+      layer._appendBeatGhost(beatEl);
+      layer.beatIndex.set(encKey, {
+        el: beatEl,
+        barN,
+        endingN,
+        beatIdx: b,
+        encodedKey: encKey,
+        beatFloat,
+        bounds: beatBounds,
+      });
+
+      // Sub-beat ghosts for this beat.
+      for (let sb = 0; sb < subDiv; sb++) {
+        if (!bb.struckSubBeats.has(b * 100 + sb)) continue;
+
+        const sbLeft = bb.subBeatLefts[b]?.[sb] ?? bLeft;
+        const sbRight = bb.subBeatRights[b]?.[sb] ?? bRight;
+        if (sbRight <= sbLeft) continue;
+
+        const sbFloat = beatToFloat(b, sb, subDiv);
+        const sbEncKey = encodeSubBeat(barN, b, sb);
+
+        const sbBounds: GhostBounds = {
+          left: sbLeft,
+          top: beatTop,
+          width: sbRight - sbLeft,
+          height: subH,
+        };
+        const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
+        layer._appendSubBeatGhost(sbEl);
+        layer.subBeatIndex.set(sbEncKey, {
+          el: sbEl,
+          barN,
+          endingN,
+          beatIdx: b,
+          subBeatIdx: sb,
+          encodedKey: sbEncKey,
+          beatFloat: sbFloat,
+          bounds: sbBounds,
+        });
+      }
+    }
+  }
+
+  return layer;
+}
