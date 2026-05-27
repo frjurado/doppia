@@ -111,6 +111,12 @@ class FragmentNotFoundError(NotFoundError):
     code = ErrorCode.FRAGMENT_NOT_FOUND
 
 
+class HarmonyEventNotFoundError(NotFoundError):
+    """The specified harmony event does not exist in the movement's analysis."""
+
+    code = ErrorCode.HARMONY_EVENT_NOT_FOUND
+
+
 class ConceptNotFoundError(NotFoundError):
     """The requested concept does not exist in the knowledge graph."""
 

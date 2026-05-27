@@ -54,6 +54,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         FragmentNotFoundError,
         FragmentValidationError,
         GraphIntegrityError,
+        HarmonyEventNotFoundError,
         HarmonyNotReviewedError,
         IngestionError,
         MovementNotFoundError,
@@ -78,6 +79,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         ConceptNotFoundError: 404,
         CollectionNotFoundError: 404,
         UserNotFoundError: 404,
+        HarmonyEventNotFoundError: 404,
         # Conflict — 409
         FragmentAlreadyApprovedError: 409,
         # Unprocessable — 422

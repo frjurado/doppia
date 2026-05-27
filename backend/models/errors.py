@@ -77,6 +77,9 @@ class ErrorCode(StrEnum):
     # Fragment write validation
     FRAGMENT_VALIDATION_ERROR = "FRAGMENT_VALIDATION_ERROR"
 
+    # Harmony event operations
+    HARMONY_EVENT_NOT_FOUND = "HARMONY_EVENT_NOT_FOUND"
+
 
 class ErrorDetail(BaseModel):
     """Optional structured detail accompanying an error."""
