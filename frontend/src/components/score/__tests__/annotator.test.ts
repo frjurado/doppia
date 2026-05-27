@@ -224,6 +224,7 @@ function makeLayerWithMeasures(
       endingN,
       key,
       bounds: { left: (i * 100), top: 0, width: 100, height: 50 },
+      systemTop: 0,
     } satisfies MeasureGhostEntry);
     return el;
   });

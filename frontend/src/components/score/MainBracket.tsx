@@ -98,7 +98,7 @@ export default function MainBracket({ selection, layer, fragmentSet }: MainBrack
 
   const left  = first.bounds.left;
   const right = last.bounds.left + last.bounds.width;
-  const top   = first.bounds.top;
+  const top   = first.systemTop;
   const width = right - left;
 
   if (width <= 0) return null;

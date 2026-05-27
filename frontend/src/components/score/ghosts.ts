@@ -1,3 +1,8 @@
+// Side-effect import: includes ghost highlight CSS (.ghost.light / .ghost.dark)
+// in the Vite bundle. The ghost elements are created imperatively (not via JSX)
+// so the CSS file would otherwise never be bundled.
+import './ghosts.module.css';
+
 /**
  * Ghost layer — invisible interactive overlay providing measure, beat, and
  * sub-beat selection regions for the annotation tool.
@@ -325,7 +330,11 @@ export interface MeasureGhostEntry {
   barN: number;
   endingN: number | null;
   key: string;
+  /** Ghost bounds — top/height span the staff lines only (not note content). */
   bounds: GhostBounds;
+  /** Min rawTop across the system, including note content above the staff.
+   *  Used by MainBracket to anchor the bracket above the highest note. */
+  systemTop: number;
 }
 
 /** Entry stored in the beat index. */
@@ -622,6 +631,96 @@ function adjustedMLeft(
   return adjusted;
 }
 
+/**
+ * Clamp mRight to the left edge of the last barLine child element, preventing
+ * slurs / ties / beams that extend visually past the closing barline from
+ * bloating the ghost into the next measure's space.
+ *
+ * Verovio renders closing barlines as direct-child <g class="barLine"> of the
+ * measure group. Falls back to rawRight when no barLine element is found
+ * (final measure of a system, or unexpected Verovio class name).
+ */
+function rightEdgeFromBarline(
+  measureSvgEl: Element,
+  rawRight: number,
+  containerLeft: number,
+): number {
+  const barlines = measureSvgEl.querySelectorAll(
+    ':scope > g.barLine, :scope > g[class*="barLine"]',
+  );
+  if (barlines.length === 0) return rawRight;
+  const last = barlines[barlines.length - 1]!;
+  const barlineLeft = last.getBoundingClientRect().left - containerLeft;
+  return Math.min(rawRight, barlineLeft);
+}
+
+// ---------------------------------------------------------------------------
+// Per-measure data collected before system grouping
+// ---------------------------------------------------------------------------
+
+/** Gap threshold (px) between consecutive measure midpoints that signals a
+ *  new system row. Within a system midpoints vary by ~20 px; between systems
+ *  the jump is 200 px or more at any supported score scale. */
+const SYSTEM_GAP_PX = 80;
+
+interface MeasureInfo {
+  measureId:        string;
+  svgMeasure:       Element;
+  meiMeasure:       Element;
+  mLeft:            number;
+  mRight:           number;
+  rawTop:           number;
+  rawBottom:        number;
+  barN:             number;
+  endingN:          number | null;
+  noteInputs:       NotePositionInput[];
+  beatCount:        number;
+  beatUnit:         number;
+  measureStartTime: number;
+}
+
+/**
+ * Derive the system's staff-line bounds by querying the direct <path> children
+ * of <g class="staff"> elements within each measure SVG group.
+ *
+ * In Verovio's SVG, the five horizontal staff lines are direct <path> children
+ * of <g class="staff">. Noteheads, stems, beams, and slurs live inside nested
+ * <g> children and are therefore excluded by :scope > path — giving bounds
+ * that span exactly from the first staff line to the last, with no note bleed.
+ *
+ * Falls back to the union of raw measure bounding rects when no staff-line
+ * paths are found (e.g. testing fixtures or an unusual Verovio build).
+ */
+function staffLineBounds(
+  measures: MeasureInfo[],
+  containerRect: DOMRect,
+): { top: number; bottom: number } {
+  let top = Infinity;
+  let bottom = -Infinity;
+
+  for (const info of measures) {
+    const staffEls = info.svgMeasure.querySelectorAll(
+      ':scope > g.staff, :scope > g.staffGrp > g.staff',
+    );
+    for (const staffEl of staffEls) {
+      const linePaths = staffEl.querySelectorAll(':scope > path');
+      if (linePaths.length === 0) continue;
+      const firstRect = linePaths[0]!.getBoundingClientRect();
+      const lastRect  = linePaths[linePaths.length - 1]!.getBoundingClientRect();
+      top    = Math.min(top,    firstRect.top    - containerRect.top);
+      bottom = Math.max(bottom, lastRect.bottom  - containerRect.top);
+    }
+  }
+
+  if (!isFinite(top) || !isFinite(bottom)) {
+    return {
+      top:    measures.reduce((mn, m) => Math.min(mn, m.rawTop),    Infinity),
+      bottom: measures.reduce((mx, m) => Math.max(mx, m.rawBottom), -Infinity),
+    };
+  }
+  return { top, bottom };
+}
+
 // ---------------------------------------------------------------------------
 // buildGhosts — main factory
 // ---------------------------------------------------------------------------
@@ -646,165 +745,168 @@ export function buildGhosts(
 ): GhostLayer {
   const layer = new GhostLayer(container);
 
-  // Parse MEI for structure (measures, endings, meters).
   const meiDoc = new DOMParser().parseFromString(meiText, 'text/xml');
   const [globalBeatCount, globalBeatUnit] = parseGlobalMeter(meiDoc);
-
   const containerRect = container.getBoundingClientRect();
 
-  // Iterate every MEI <measure> element in document order.
+  // ── Phase 1: collect per-measure geometry and timing data ─────────────────
+
+  const measureInfos: MeasureInfo[] = [];
   const meiMeasures = meiDoc.getElementsByTagName('measure');
 
   for (let mi = 0; mi < meiMeasures.length; mi++) {
     const meiMeasure = meiMeasures[mi];
-    const measureId = getMeiId(meiMeasure);
+    const measureId  = getMeiId(meiMeasure);
     if (!measureId) continue;
 
-    // Find the rendered SVG group for this measure.
     const svgMeasure = container.querySelector(`[id="${measureId}"]`);
     if (!svgMeasure) continue;
 
     const measureRect = svgMeasure.getBoundingClientRect();
-    const mLeft0 = measureRect.left - containerRect.left;
-    const mRight = measureRect.right - containerRect.left;
-    const mTop = measureRect.top - containerRect.top;
-    const mBottom = measureRect.bottom - containerRect.top;
-    const mHeight = mBottom - mTop;
+    const mLeft0    = measureRect.left   - containerRect.left;
+    const mRightRaw = measureRect.right  - containerRect.left;
+    const rawTop    = measureRect.top    - containerRect.top;
+    const rawBottom = measureRect.bottom - containerRect.top;
 
-    // Adjust mLeft past system decorations (clef/key/meter at system starts).
-    const mLeft = adjustedMLeft(svgMeasure, mLeft0, containerRect.left);
+    // Adjust left past system decorations; clamp right to closing barline.
+    const mLeft  = adjustedMLeft(svgMeasure, mLeft0, containerRect.left);
+    const mRight = rightEdgeFromBarline(svgMeasure, mRightRaw, containerRect.left);
 
-    // MEI @n and ending context.
-    const barN = parseInt(meiMeasure.getAttribute('n') ?? `${mi + 1}`, 10);
+    const barN    = parseInt(meiMeasure.getAttribute('n') ?? `${mi + 1}`, 10);
     const endingN = getEndingN(meiMeasure);
-    const mKey = measureGhostKey(barN, endingN);
 
-    // Measure ghost — covers the full measure height.
-    const msrBounds: GhostBounds = {
-      left: mLeft0,
-      top: mTop,
-      width: mRight - mLeft0,
-      height: mHeight,
-    };
-    const msrEl = createGhostEl('ghost ghost-measure', msrBounds, mKey);
-    layer._appendMeasureGhost(msrEl);
-    layer.measureIndex.set(mKey, {
-      el: msrEl,
-      barN,
-      endingN,
-      key: mKey,
-      bounds: msrBounds,
-    });
-
-    // Meter for this specific measure.
     const [beatCount, beatUnit] = getMeterForMeasure(
-      meiMeasure,
-      globalBeatCount,
-      globalBeatUnit,
+      meiMeasure, globalBeatCount, globalBeatUnit,
     );
 
-    // Collect note positions and Verovio timing info for beat inference.
-    const noteInputs: NotePositionInput[] = [];
-    const meiNotes = meiMeasure.getElementsByTagName('note');
-
-    // Measure start time from Verovio.
-    const msrTimes = tk.getTimesForElement(measureId);
+    const msrTimes        = tk.getTimesForElement(measureId);
     const measureStartTime = msrTimes[0] ?? 0;
 
+    const noteInputs: NotePositionInput[] = [];
+    const meiNotes = meiMeasure.getElementsByTagName('note');
     for (let ni = 0; ni < meiNotes.length; ni++) {
       const meiNote = meiNotes[ni];
-      const noteId = getMeiId(meiNote);
+      const noteId  = getMeiId(meiNote);
       if (!noteId) continue;
-
-      const times = tk.getTimesForElement(noteId);
-      const scoreTimeOnset = times[0] ?? 0;
-      const scoreTimeDuration = times[1] ?? 0;
-
-      // Grace notes (duration == 0) are skipped inside computeBeatBoundaries.
-
-      // Get notehead x from the rendered SVG element.
+      const times   = tk.getTimesForElement(noteId);
       const svgNote = container.querySelector(`[id="${noteId}"]`);
       if (!svgNote) continue;
-
       const noteRect = svgNote.getBoundingClientRect();
-      const xLeft = noteRect.left - containerRect.left;
-
-      noteInputs.push({ xLeft, scoreTimeOnset, scoreTimeDuration });
+      noteInputs.push({
+        xLeft:             noteRect.left - containerRect.left,
+        scoreTimeOnset:    times[0] ?? 0,
+        scoreTimeDuration: times[1] ?? 0,
+      });
     }
 
-    const subDiv = subdivisionsPerBeat(beatCount, beatUnit);
-    const bb = computeBeatBoundaries(
-      mLeft,
-      mRight,
-      measureStartTime,
-      beatCount,
-      beatUnit,
-      noteInputs,
-    );
+    measureInfos.push({
+      measureId, svgMeasure, meiMeasure,
+      mLeft, mRight, rawTop, rawBottom,
+      barN, endingN,
+      noteInputs, beatCount, beatUnit, measureStartTime,
+    });
+  }
 
-    // Beat height: upper portion of the measure (above the main staff body).
-    // Use 25% of measure height, minimum 16px.
-    const beatH = Math.max(16, Math.floor(mHeight * 0.25));
-    const beatTop = mTop;
+  // ── Phase 2: group measures into system rows ───────────────────────────────
+  // Compare midpoint-Y of consecutive measures. A jump > SYSTEM_GAP_PX signals
+  // a new system row; within a system midpoints vary by at most ~20 px.
 
-    // Sub-beat height: same region, slightly smaller.
-    const subH = Math.max(12, Math.floor(mHeight * 0.18));
+  const systems: MeasureInfo[][] = [];
+  let currentSystem: MeasureInfo[] = [];
 
-    for (const b of bb.struckBeats) {
-      const bLeft = bb.beatLefts[b];
-      const bRight = bb.beatRights[b];
-      if (bRight <= bLeft) continue;
+  for (const info of measureInfos) {
+    const midY = (info.rawTop + info.rawBottom) / 2;
+    if (currentSystem.length > 0) {
+      const prev     = currentSystem[currentSystem.length - 1]!;
+      const prevMidY = (prev.rawTop + prev.rawBottom) / 2;
+      if (Math.abs(midY - prevMidY) > SYSTEM_GAP_PX) {
+        systems.push(currentSystem);
+        currentSystem = [];
+      }
+    }
+    currentSystem.push(info);
+  }
+  if (currentSystem.length > 0) systems.push(currentSystem);
 
-      const beatFloat = beatToFloat(b, 0, subDiv);
-      const encKey = encodeBeat(barN, b);
+  // ── Phase 3: emit ghost elements with per-system uniform bounds ────────────
 
-      const beatBounds: GhostBounds = {
-        left: bLeft,
-        top: beatTop,
-        width: bRight - bLeft,
-        height: beatH,
+  for (const system of systems) {
+    // systemTop: min rawTop including note content — anchor for the bracket.
+    const systemTop = system.reduce((mn, m) => Math.min(mn, m.rawTop), Infinity);
+
+    // Staff-line bounds: first staff line to last staff line, no note content.
+    const sBounds    = staffLineBounds(system, containerRect);
+    const ghostHeight = sBounds.bottom - sBounds.top;
+
+    const beatH = Math.max(16, Math.floor(ghostHeight * 0.25));
+    const subH  = Math.max(12, Math.floor(ghostHeight * 0.18));
+
+    for (const info of system) {
+      const { mLeft, mRight, barN, endingN,
+              noteInputs, beatCount, beatUnit, measureStartTime } = info;
+      const mKey = measureGhostKey(barN, endingN);
+
+      // Measure ghost spans staff lines only.
+      const msrBounds: GhostBounds = {
+        left:   mLeft,
+        top:    sBounds.top,
+        width:  mRight - mLeft,
+        height: ghostHeight,
       };
-      const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
-      layer._appendBeatGhost(beatEl);
-      layer.beatIndex.set(encKey, {
-        el: beatEl,
-        barN,
-        endingN,
-        beatIdx: b,
-        encodedKey: encKey,
-        beatFloat,
-        bounds: beatBounds,
+      const msrEl = createGhostEl('ghost ghost-measure', msrBounds, mKey);
+      layer._appendMeasureGhost(msrEl);
+      layer.measureIndex.set(mKey, {
+        el: msrEl, barN, endingN, key: mKey,
+        bounds: msrBounds,
+        systemTop,
       });
 
-      // Sub-beat ghosts for this beat.
-      for (let sb = 0; sb < subDiv; sb++) {
-        if (!bb.struckSubBeats.has(b * 100 + sb)) continue;
+      const subDiv = subdivisionsPerBeat(beatCount, beatUnit);
+      const bb = computeBeatBoundaries(
+        mLeft, mRight, measureStartTime, beatCount, beatUnit, noteInputs,
+      );
 
-        const sbLeft = bb.subBeatLefts[b]?.[sb] ?? bLeft;
-        const sbRight = bb.subBeatRights[b]?.[sb] ?? bRight;
-        if (sbRight <= sbLeft) continue;
+      for (const b of bb.struckBeats) {
+        const bLeft  = bb.beatLefts[b];
+        const bRight = bb.beatRights[b];
+        if (bRight <= bLeft) continue;
 
-        const sbFloat = beatToFloat(b, sb, subDiv);
-        const sbEncKey = encodeSubBeat(barN, b, sb);
+        const beatFloat = beatToFloat(b, 0, subDiv);
+        const encKey    = encodeBeat(barN, b);
 
-        const sbBounds: GhostBounds = {
-          left: sbLeft,
-          top: beatTop,
-          width: sbRight - sbLeft,
-          height: subH,
+        const beatBounds: GhostBounds = {
+          left: bLeft, top: sBounds.top, width: bRight - bLeft, height: beatH,
         };
-        const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
-        layer._appendSubBeatGhost(sbEl);
-        layer.subBeatIndex.set(sbEncKey, {
-          el: sbEl,
-          barN,
-          endingN,
-          beatIdx: b,
-          subBeatIdx: sb,
-          encodedKey: sbEncKey,
-          beatFloat: sbFloat,
-          bounds: sbBounds,
+        const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
+        layer._appendBeatGhost(beatEl);
+        layer.beatIndex.set(encKey, {
+          el: beatEl, barN, endingN,
+          beatIdx: b, encodedKey: encKey, beatFloat,
+          bounds: beatBounds,
         });
+
+        for (let sb = 0; sb < subDiv; sb++) {
+          if (!bb.struckSubBeats.has(b * 100 + sb)) continue;
+
+          const sbLeft  = bb.subBeatLefts[b]?.[sb] ?? bLeft;
+          const sbRight = bb.subBeatRights[b]?.[sb] ?? bRight;
+          if (sbRight <= sbLeft) continue;
+
+          const sbFloat  = beatToFloat(b, sb, subDiv);
+          const sbEncKey = encodeSubBeat(barN, b, sb);
+
+          const sbBounds: GhostBounds = {
+            left: sbLeft, top: sBounds.top, width: sbRight - sbLeft, height: subH,
+          };
+          const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
+          layer._appendSubBeatGhost(sbEl);
+          layer.subBeatIndex.set(sbEncKey, {
+            el: sbEl, barN, endingN,
+            beatIdx: b, subBeatIdx: sb,
+            encodedKey: sbEncKey, beatFloat: sbFloat,
+            bounds: sbBounds,
+          });
+        }
       }
     }
   }
