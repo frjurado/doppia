@@ -21,8 +21,8 @@ import {
   measureKeyRange,
   numericKeyRange,
 } from '../annotator';
-import { GhostLayer, encodeBeat, encodeSubBeat, measureGhostKey } from '../ghosts';
-import type { BeatGhostEntry, MeasureGhostEntry, SubBeatGhostEntry } from '../ghosts';
+import { GhostLayer, encodeBeat, measureGhostKey } from '../ghosts';
+import type { BeatGhostEntry, MeasureGhostEntry } from '../ghosts';
 
 // ---------------------------------------------------------------------------
 // buildRepeatBarriers

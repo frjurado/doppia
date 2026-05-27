@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import FragmentOverlay from '../components/score/FragmentOverlay';
+import MainBracket from '../components/score/MainBracket';
+import { buildGhosts } from '../components/score/ghosts';
+import type { GhostLayer } from '../components/score/ghosts';
+import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
+import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
+import { buildMcIndex, commitSelection } from '../components/score/selection';
+import type { CommittedSelection } from '../components/score/selection';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
@@ -272,6 +279,31 @@ export default function ScoreViewer() {
   // Reset to { barN: 1, startMs: 0 } when playback stops or returns to ready/idle.
   const currentBarRef = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
 
+  // ── Ghost layer + annotation session (Step 11) ───────────────────────────
+  // The ghost layer and annotation session are imperative objects managed
+  // outside React state (they interact with the DOM directly). Their lifecycle
+  // is tied to the SVG render cycle: rebuilt whenever svgPages changes so that
+  // ghost positions match the currently rendered score geometry.
+  const ghostLayerRef = useRef<GhostLayer | null>(null);
+  const annotationSessionRef = useRef<AnnotationSession | null>(null);
+  // Precomputed barN → mc mapping for the currently loaded MEI.
+  const mcIndexRef = useRef<Map<string, number> | null>(null);
+
+  // ── Annotation state (Step 11) ────────────────────────────────────────────
+  // Exposed to React render tree so MainBracket and future Part 4/5 panels
+  // can react to selection and flag changes.
+  const [ghostLayer, setGhostLayer] = useState<GhostLayer | null>(null);
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
+  // Populated at every commit; consumed by Part 4/5 form panels (Steps 12–18).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [committedSelection, setCommittedSelection] = useState<CommittedSelection | null>(null);
+  const [annotationFlags, setAnnotationFlags] = useState<AnnotationFlags>({
+    fragmentSet: false,
+    conceptSet: false,
+    stagesComplete: false,
+    propertiesComplete: false,
+  });
+
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
    * Called by useMidiPlayback on each animation frame. Binary-searches the
@@ -495,6 +527,89 @@ export default function ScoreViewer() {
       observer.disconnect();
     };
   }, [scheduleRerender]);
+
+  // ── Ghost layer + annotation session lifecycle (Step 11) ─────────────────
+  //
+  // Rebuilt on every svgPages change so ghost positions stay aligned with the
+  // rendered SVG geometry. On each rebuild the previous session and layer are
+  // destroyed first and the selection state is reset — the user starts a new
+  // annotation after any re-render (scale/font/transpose change). This is
+  // acceptable for Phase 1; Component 7 can add ghost-position persistence.
+  //
+  // The effect depends on `svgPages` (array reference changes on each update)
+  // rather than `svgPages.length` because the final page addition produces a
+  // new array instance that triggers the correct rebuild. Intermediate pages
+  // during progressive load produce wasted rebuilds (N−1 extra for N pages),
+  // but are correct and acceptable for Phase 1 Mozart scores (2–4 pages).
+  useEffect(() => {
+    // Require a fully rendered, ready score and all the data it needs.
+    if (
+      status !== 'ready' ||
+      svgPages.length === 0 ||
+      !scorePanelRef.current ||
+      !meiTextRef.current ||
+      !tkRef.current
+    ) {
+      return;
+    }
+
+    const mei       = meiTextRef.current;
+    const tk        = tkRef.current;
+    const container = scorePanelRef.current;
+
+    // Teardown: destroy the previous session and layer before building new
+    // ones. State resets are batched with the subsequent setGhostLayer call so
+    // MainBracket sees a single coherent update.
+    annotationSessionRef.current?.destroy();
+    ghostLayerRef.current?.destroy();
+    annotationSessionRef.current = null;
+    ghostLayerRef.current        = null;
+
+    setSelectionRange(null);
+    setCommittedSelection(null);
+    setAnnotationFlags({
+      fragmentSet: false, conceptSet: false,
+      stagesComplete: false, propertiesComplete: false,
+    });
+
+    // Build the new ghost layer over the currently rendered SVG.
+    const layer = buildGhosts(container, mei, tk);
+    ghostLayerRef.current = layer;
+    setGhostLayer(layer);
+
+    // Precompute the barN → mc index for the current MEI (used by
+    // commitSelection to derive mc_start / mc_end at commit time).
+    const mcIdx = buildMcIndex(mei);
+    mcIndexRef.current = mcIdx;
+
+    // Build the annotation session with repeat barriers so the drag cannot
+    // cross close-repeat barlines (prototype-tagging-tool.md §"Constraints").
+    const barriers = buildRepeatBarriers(mei);
+    const session  = new AnnotationSession(layer, { closeRepeatMeasures: barriers });
+    annotationSessionRef.current = session;
+
+    // Subscribe: resolve mc coordinates at commit time and surface to React.
+    session.onSelectionChange((sel) => {
+      setSelectionRange(sel);
+      setCommittedSelection(sel ? commitSelection(sel, mcIdx) : null);
+    });
+
+    session.onFlagsChange((flags) => {
+      setAnnotationFlags({ ...flags });
+    });
+
+    return () => {
+      // DOM cleanup only — setState calls on unmounted components are
+      // ignored by React 18 without warning, but avoiding them keeps
+      // intent clear. The refs are nulled to prevent stale-closure access.
+      annotationSessionRef.current?.destroy();
+      ghostLayerRef.current?.destroy();
+      annotationSessionRef.current = null;
+      ghostLayerRef.current        = null;
+    };
+  // svgPages reference changes on every page addition/replace — this is the
+  // intended trigger; status gates the effect from running during loading.
+  }, [status, svgPages]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -767,10 +882,17 @@ export default function ScoreViewer() {
                 dangerouslySetInnerHTML={{ __html: svg }}
               />
             ))}
-            {/* Step 13: fragment overlay slot — empty until Components 7/8.
+            {/* Fragment overlay: houses all annotation visuals (brackets, labels).
                 Overlays are always HTML elements above the SVG, never injected
-                into Verovio's SVG output (see CLAUDE.md §"Verovio SVG overlay rule"). */}
-            <FragmentOverlay />
+                into Verovio's SVG output (CLAUDE.md §"Verovio SVG overlay rule").
+                Step 11: MainBracket (Layer 3) renders once fragmentSet is true. */}
+            <FragmentOverlay>
+              <MainBracket
+                selection={selectionRange}
+                layer={ghostLayer}
+                fragmentSet={annotationFlags.fragmentSet}
+              />
+            </FragmentOverlay>
           </div>
         </div>
 
