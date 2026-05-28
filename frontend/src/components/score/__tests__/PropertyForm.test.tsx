@@ -249,12 +249,11 @@ describe('PropertyForm rendering', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(2);
   });
 
-  it('renders BOOL as Yes / No buttons', () => {
+  it('renders BOOL as an inline toggle button', () => {
     render(
       <PropertyForm schemas={[schemaBool]} values={{}} onChange={vi.fn()} />,
     );
-    expect(screen.getByTestId('bool-yes-ECP')).toBeInTheDocument();
-    expect(screen.getByTestId('bool-no-ECP')).toBeInTheDocument();
+    expect(screen.getByTestId('bool-toggle-ECP')).toBeInTheDocument();
   });
 
   it('renders a ⓘ button when a PropertyValue has referenced_concept', () => {
@@ -395,50 +394,76 @@ describe('MANY_OF (checkbox) field', () => {
 // ---------------------------------------------------------------------------
 
 describe('BOOL field', () => {
-  it('fires onChange with true when Yes is clicked (was null)', () => {
+  it('shows the unset indicator — when value is null', () => {
+    render(
+      <PropertyForm schemas={[schemaBool]} values={{}} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('bool-toggle-ECP')).toHaveTextContent('—');
+  });
+
+  it('shows ✓ indicator when value is true', () => {
+    render(
+      <PropertyForm schemas={[schemaBool]} values={{ ECP: true }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('bool-toggle-ECP')).toHaveTextContent('✓');
+  });
+
+  it('shows ✗ indicator when value is false', () => {
+    render(
+      <PropertyForm schemas={[schemaBool]} values={{ ECP: false }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('bool-toggle-ECP')).toHaveTextContent('✗');
+  });
+
+  it('fires onChange with true on first click (null → true)', () => {
     const onChange = vi.fn();
     render(
       <PropertyForm schemas={[schemaBool]} values={{}} onChange={onChange} />,
     );
-    fireEvent.click(screen.getByTestId('bool-yes-ECP'));
+    fireEvent.click(screen.getByTestId('bool-toggle-ECP'));
     expect(onChange).toHaveBeenCalledWith({ ECP: true });
   });
 
-  it('fires onChange with false when No is clicked (was null)', () => {
-    const onChange = vi.fn();
-    render(
-      <PropertyForm schemas={[schemaBool]} values={{}} onChange={onChange} />,
-    );
-    fireEvent.click(screen.getByTestId('bool-no-ECP'));
-    expect(onChange).toHaveBeenCalledWith({ ECP: false });
-  });
-
-  it('fires onChange with null when Yes is clicked while already true (deselect)', () => {
+  it('fires onChange with false on click from true (true → false)', () => {
     const onChange = vi.fn();
     render(
       <PropertyForm schemas={[schemaBool]} values={{ ECP: true }} onChange={onChange} />,
     );
-    fireEvent.click(screen.getByTestId('bool-yes-ECP'));
-    expect(onChange).toHaveBeenCalledWith({ ECP: null });
+    fireEvent.click(screen.getByTestId('bool-toggle-ECP'));
+    expect(onChange).toHaveBeenCalledWith({ ECP: false });
   });
 
-  it('fires onChange with null when No is clicked while already false (deselect)', () => {
+  it('fires onChange with null on click from false (false → null)', () => {
     const onChange = vi.fn();
     render(
       <PropertyForm schemas={[schemaBool]} values={{ ECP: false }} onChange={onChange} />,
     );
-    fireEvent.click(screen.getByTestId('bool-no-ECP'));
+    fireEvent.click(screen.getByTestId('bool-toggle-ECP'));
     expect(onChange).toHaveBeenCalledWith({ ECP: null });
   });
 
-  it('reflects the current value via aria-pressed', () => {
-    render(
+  it('reflects current state in aria-label', () => {
+    const { rerender } = render(
+      <PropertyForm schemas={[schemaBool]} values={{}} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('bool-toggle-ECP')).toHaveAttribute(
+      'aria-label',
+      'Expanded Cadential Progression: unset',
+    );
+    rerender(
       <PropertyForm schemas={[schemaBool]} values={{ ECP: true }} onChange={vi.fn()} />,
     );
-    const yesBtn = screen.getByTestId('bool-yes-ECP');
-    const noBtn = screen.getByTestId('bool-no-ECP');
-    expect(yesBtn).toHaveAttribute('aria-pressed', 'true');
-    expect(noBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('bool-toggle-ECP')).toHaveAttribute(
+      'aria-label',
+      'Expanded Cadential Progression: yes',
+    );
+    rerender(
+      <PropertyForm schemas={[schemaBool]} values={{ ECP: false }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('bool-toggle-ECP')).toHaveAttribute(
+      'aria-label',
+      'Expanded Cadential Progression: no',
+    );
   });
 });
 

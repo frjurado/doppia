@@ -341,8 +341,7 @@ describe('FormPanel Step 13 — PropertyForm', () => {
 
     // Both the required ONE_OF and the optional BOOL are rendered.
     expect(screen.getByTestId('field-SopranoScale')).toBeInTheDocument();
-    expect(screen.getByTestId('bool-yes-PACOnly')).toBeInTheDocument();
-    expect(screen.getByTestId('bool-no-PACOnly')).toBeInTheDocument();
+    expect(screen.getByTestId('bool-toggle-PACOnly')).toBeInTheDocument();
   });
 
   it('calls session.setPropertiesComplete(false) when a required field is unset', async () => {
@@ -430,14 +429,14 @@ describe('FormPanel Step 13 — PropertyForm', () => {
     // Select PAC and set the BOOL field.
     fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
     await flushAfterClick();
-    fireEvent.click(screen.getByTestId('bool-yes-PACOnly'));
+    fireEvent.click(screen.getByTestId('bool-toggle-PACOnly'));
 
     // Switch to IAC — IAC has no PACOnly schema.
     fireEvent.click(screen.getByTestId('concept-card-ImperfectAuthenticCadence'));
     await flushAfterClick();
 
     // The PACOnly BOOL toggle must not appear in the IAC property form.
-    expect(screen.queryByTestId('bool-yes-PACOnly')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bool-toggle-PACOnly')).not.toBeInTheDocument();
   });
 
   it('clears property values when the concept is deselected', async () => {

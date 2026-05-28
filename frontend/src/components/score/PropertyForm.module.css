@@ -159,33 +159,52 @@
   border-bottom-color: var(--color-primary);
 }
 
-/* ── BOOL Yes / No toggle ─────────────────────────────────────────────────── */
+/* ── BOOL inline toggle ───────────────────────────────────────────────────── */
 
-.boolRow {
+/* One-row layout: toggle button left, field meta (name + ⓘ) right. */
+.boolInlineField {
   display: flex;
+  flex-direction: row;
+  align-items: center;
   gap: var(--spacing-2);
 }
 
-/* Each button occupies equal width; no border per DESIGN.md. */
-.boolOption {
-  flex: 1;
-  padding: var(--spacing-2) var(--spacing-3);
+/* Square toggle cycling null → true → false → null. */
+.boolToggle {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background-color: var(--color-surface-container);
   border: 0;
   cursor: pointer;
-  text-align: center;
+  color: var(--color-on-surface-variant);
+  font-size: 0.875rem;
+  line-height: 1;
 }
 
-.boolOption:hover {
+.boolToggle:hover {
   background-color: var(--color-surface-container-high);
 }
 
-.boolOptionSelected {
+.boolToggleOn {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.boolToggleOn:hover {
   background-color: var(--color-primary);
 }
 
-.boolOptionSelected:hover {
-  background-color: var(--color-primary);
+.boolToggleOff {
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+.boolToggleOff:hover {
+  background-color: var(--color-surface-container-high);
 }
 
 /* ── VALUE_REFERENCES info panel ─────────────────────────────────────────── */

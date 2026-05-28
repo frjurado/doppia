@@ -328,56 +328,35 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
 }
 
 /**
- * BOOL: Yes / No toggle pair.
+ * BOOL: compact inline toggle cycling null → true → false → null.
  *
- * Neither pressed = null (unset). Clicking the active button returns to null,
- * matching the radio deselect pattern used in TypeRefinement and OneOfField.
- * Required BOOL schemas must be explicitly set to true or false; null blocks.
+ * The toggle sits on the same row as the field name. Three visual states:
+ *  null  → "—" (unset; required BOOL with this state blocks submission)
+ *  true  → "✓" (primary background)
+ *  false → "✗" (surface-container-high background)
  */
 function BoolField({ schema, value, onChange }: FieldProps) {
   const current = typeof value === 'boolean' ? value : null;
+  const nextValue: boolean | null =
+    current === null ? true : current === true ? false : null;
+  const indicator = current === null ? '—' : current ? '✓' : '✗';
 
   return (
-    <div className={styles.field} data-testid={`field-${schema.id}`}>
+    <div className={styles.boolInlineField} data-testid={`field-${schema.id}`}>
+      <button
+        type="button"
+        className={[
+          styles.boolToggle,
+          current === true ? styles.boolToggleOn : '',
+          current === false ? styles.boolToggleOff : '',
+        ].filter(Boolean).join(' ')}
+        onClick={() => onChange(schema.id, nextValue)}
+        aria-label={`${schema.name}: ${current === null ? 'unset' : current ? 'yes' : 'no'}`}
+        data-testid={`bool-toggle-${schema.id}`}
+      >
+        {indicator}
+      </button>
       <FieldMeta schema={schema} />
-      <div className={styles.boolRow}>
-        <button
-          type="button"
-          className={[
-            styles.boolOption,
-            current === true ? styles.boolOptionSelected : '',
-          ].filter(Boolean).join(' ')}
-          onClick={() => onChange(schema.id, current === true ? null : true)}
-          aria-pressed={current === true}
-          data-testid={`bool-yes-${schema.id}`}
-        >
-          <Type
-            variant="label-md"
-            as="span"
-            className={current === true ? styles.optionTextSelected : styles.optionText}
-          >
-            Yes
-          </Type>
-        </button>
-        <button
-          type="button"
-          className={[
-            styles.boolOption,
-            current === false ? styles.boolOptionSelected : '',
-          ].filter(Boolean).join(' ')}
-          onClick={() => onChange(schema.id, current === false ? null : false)}
-          aria-pressed={current === false}
-          data-testid={`bool-no-${schema.id}`}
-        >
-          <Type
-            variant="label-md"
-            as="span"
-            className={current === false ? styles.optionTextSelected : styles.optionText}
-          >
-            No
-          </Type>
-        </button>
-      </div>
     </div>
   );
 }
