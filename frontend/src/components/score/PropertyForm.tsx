@@ -96,6 +96,8 @@ export function carryOverValues(
 
 /** Field name label and optional description shown above each control. */
 function FieldMeta({ schema }: { schema: PropertySchema }) {
+  const [descOpen, setDescOpen] = useState(false);
+
   return (
     <div className={styles.fieldMeta}>
       <span className={styles.fieldLabel}>
@@ -103,11 +105,31 @@ function FieldMeta({ schema }: { schema: PropertySchema }) {
         {schema.required && (
           <span className={styles.required} aria-label="required">*</span>
         )}
+        {schema.description && (
+          <button
+            type="button"
+            className={styles.descButton}
+            aria-label={`About: ${schema.name}`}
+            aria-expanded={descOpen}
+            onMouseEnter={() => setDescOpen(true)}
+            onMouseLeave={() => setDescOpen(false)}
+            onClick={() => setDescOpen(o => !o)}
+            data-testid={`desc-btn-${schema.id}`}
+          >
+            ⓘ
+          </button>
+        )}
       </span>
-      {schema.description && (
-        <Type variant="label-sm" as="span" className={styles.fieldDesc}>
-          {schema.description}
-        </Type>
+      {schema.description && descOpen && (
+        <div
+          className={styles.descFloating}
+          role="tooltip"
+          data-testid={`desc-panel-${schema.id}`}
+        >
+          <Type variant="label-sm" as="span">
+            {schema.description}
+          </Type>
+        </div>
       )}
     </div>
   );

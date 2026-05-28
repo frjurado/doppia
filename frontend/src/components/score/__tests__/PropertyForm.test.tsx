@@ -443,8 +443,66 @@ describe('BOOL field', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7 — VALUE_REFERENCES info panel
+// 7 — Schema description tooltip (ⓘ on the field name)
 // ---------------------------------------------------------------------------
+
+const schemaWithDesc: PropertySchema = {
+  id: 'SopranoScale',
+  name: 'Soprano Scale Degree',
+  cardinality: 'ONE_OF',
+  required: true,
+  description: 'The scale degree sung by the soprano voice at the cadential arrival.',
+  values: [{ id: 'SD1', name: 'Scale Degree 1', referenced_concept: null }],
+};
+
+describe('Schema description tooltip', () => {
+  it('does not render a ⓘ desc button when description is null', () => {
+    render(
+      <PropertyForm schemas={[schemaOneOf]} values={{}} onChange={vi.fn()} />,
+    );
+    expect(screen.queryByTestId('desc-btn-SopranoScale')).not.toBeInTheDocument();
+  });
+
+  it('renders a ⓘ desc button when schema has a description', () => {
+    render(
+      <PropertyForm schemas={[schemaWithDesc]} values={{}} onChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('desc-btn-SopranoScale')).toBeInTheDocument();
+  });
+
+  it('shows the description panel when ⓘ is clicked', () => {
+    render(
+      <PropertyForm schemas={[schemaWithDesc]} values={{}} onChange={vi.fn()} />,
+    );
+    expect(screen.queryByTestId('desc-panel-SopranoScale')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('desc-btn-SopranoScale'));
+    expect(screen.getByTestId('desc-panel-SopranoScale')).toBeInTheDocument();
+    expect(
+      screen.getByText('The scale degree sung by the soprano voice at the cadential arrival.'),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the description panel when ⓘ is clicked a second time', () => {
+    render(
+      <PropertyForm schemas={[schemaWithDesc]} values={{}} onChange={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId('desc-btn-SopranoScale'));
+    expect(screen.getByTestId('desc-panel-SopranoScale')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('desc-btn-SopranoScale'));
+    expect(screen.queryByTestId('desc-panel-SopranoScale')).not.toBeInTheDocument();
+  });
+
+  it('shows the panel on mouseenter and hides on mouseleave', () => {
+    render(
+      <PropertyForm schemas={[schemaWithDesc]} values={{}} onChange={vi.fn()} />,
+    );
+    const btn = screen.getByTestId('desc-btn-SopranoScale');
+    fireEvent.mouseEnter(btn);
+    expect(screen.getByTestId('desc-panel-SopranoScale')).toBeInTheDocument();
+    fireEvent.mouseLeave(btn);
+    expect(screen.queryByTestId('desc-panel-SopranoScale')).not.toBeInTheDocument();
+  });
+});
 
 describe('VALUE_REFERENCES info panel', () => {
   it('shows the definition panel when ⓘ is clicked', () => {
