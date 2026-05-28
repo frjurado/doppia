@@ -9,7 +9,7 @@ import { AnnotationSession, buildRepeatBarriers } from '../components/score/anno
 import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
-import type { StageAssignment } from '../components/score/stages';
+import type { StageAssignment, SubPartTag } from '../components/score/stages';
 import {
   computeStagesComplete,
   prePopulateStages,
@@ -327,6 +327,13 @@ export default function ScoreViewer() {
   // Cached so reconcileWithNewConcept can compute brand-new default placements.
   const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
 
+  // ── Sub-part tags (Step 15) ───────────────────────────────────────────────
+  // Keyed by stageId; null means the stage has no sub-part tag yet.
+  // Cleared (and subPartResetKey incremented) when the main concept changes so
+  // sub-part forms reset to empty state automatically.
+  const [subPartTags, setSubPartTags] = useState<Record<string, SubPartTag | null>>({});
+  const [subPartResetKey, setSubPartResetKey] = useState(0);
+
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
    * Called by useMidiPlayback on each animation frame. Binary-searches the
@@ -562,6 +569,11 @@ export default function ScoreViewer() {
   const handleConceptChange = useCallback(
     (concept: ConceptSearchHit | null, schemaTree: ConceptSchemaTree | null) => {
       activeSchemaTreeRef.current = schemaTree;
+      // Clear sub-part tags and reset all SubPartForms whenever the parent
+      // concept changes — stage structure may be entirely different.
+      setSubPartTags({});
+      setSubPartResetKey(k => k + 1);
+
       if (!concept || !schemaTree || schemaTree.stages.length === 0) {
         setStageAssignments([]);
         setActiveStageId(null);
@@ -587,6 +599,11 @@ export default function ScoreViewer() {
    */
   const handleRefinementChange = useCallback(
     async (option: TypeRefinementChild | null) => {
+      // A refinement change can alter the stage structure, so clear sub-part
+      // tags and reset all SubPartForms to avoid stale concept/property data.
+      setSubPartTags({});
+      setSubPartResetKey(k => k + 1);
+
       if (!option) {
         // No refinement selected — fall back to the parent concept's stages.
         const parentTree = activeSchemaTreeRef.current;
@@ -635,6 +652,14 @@ export default function ScoreViewer() {
   const handleToggleAbsent = useCallback((stageId: string, absent: boolean) => {
     setStageAssignments(prev => toggleStageAbsent(prev, stageId, absent));
   }, []);
+
+  /** Called by SubPartForm when a stage's sub-part tag is created or updated. */
+  const handleSubPartTagUpdate = useCallback(
+    (stageId: string, tag: SubPartTag | null) => {
+      setSubPartTags(prev => ({ ...prev, [stageId]: tag }));
+    },
+    [],
+  );
 
   // Keep stagesComplete in sync with assignments and session.
   useEffect(() => {
@@ -706,6 +731,10 @@ export default function ScoreViewer() {
     // would be wrong after a scale/transpose/font change.
     setStageAssignments([]);
     setActiveStageId(null);
+    // Reset sub-part tags alongside stages — the stage IDs they reference may
+    // have changed, and any stored bounds are tied to the previous render.
+    setSubPartTags({});
+    setSubPartResetKey(k => k + 1);
 
     // Build the new ghost layer over the currently rendered SVG.
     const layer = buildGhosts(container, mei, tk);
@@ -1054,6 +1083,9 @@ export default function ScoreViewer() {
           activeStageId={activeStageId}
           onStageActivate={handleStageActivate}
           onToggleAbsent={handleToggleAbsent}
+          subPartTags={subPartTags}
+          onSubPartTagUpdate={handleSubPartTagUpdate}
+          subPartResetKey={subPartResetKey}
         />
 
         {/* Re-render overlay: sits above both panels while options change */}

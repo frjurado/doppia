@@ -10,6 +10,7 @@
  *  - Current spatial bounds (bar N – bar M), updated live from assignments.
  *  - For optional stages: an absent toggle (tagging-tool-design.md §4).
  *  - Orphaned / error states with inline warnings.
+ *  - An expandable "Tag analytically" section (Step 15) for sub-part tagging.
  *
  * Bidirectional linking (tagging-tool-design.md §6 §"Bidirectional linking"):
  *  - Clicking a card fires onStageActivate(stageId), which scrolls the score
@@ -17,12 +18,13 @@
  *  - When activeStageId changes (user clicked a bracket in the score), the
  *    corresponding card scrolls into view and highlights.
  *
- * References: tagging-tool-design.md §7.3, ADR-011 §1 §6.
+ * References: tagging-tool-design.md §7.3 §5.4, ADR-011 §1 §3 §6.
  */
 
-import { useEffect, useRef } from 'react';
-import type { StageAssignment } from './stages';
+import { useEffect, useRef, useState } from 'react';
+import type { StageAssignment, SubPartTag } from './stages';
 import { stageColor } from './stages';
+import SubPartForm from './SubPartForm';
 import Type from '../ui/Type';
 import styles from './StageList.module.css';
 
@@ -35,6 +37,15 @@ export interface StageListProps {
   activeStageId: string | null;
   onStageActivate: (stageId: string | null) => void;
   onToggleAbsent: (stageId: string, absent: boolean) => void;
+  /** Current sub-part tags keyed by stageId. Passed from ScoreViewer. */
+  subPartTags?: Record<string, SubPartTag | null>;
+  /** Called when a sub-part tag is created, updated, or removed. */
+  onSubPartTagUpdate?: (stageId: string, tag: SubPartTag | null) => void;
+  /**
+   * Incremented by ScoreViewer when all sub-part forms should reset (e.g.,
+   * the main concept changed). Each SubPartForm is keyed on stageId + resetKey.
+   */
+  subPartResetKey?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,9 +69,15 @@ export default function StageList({
   activeStageId,
   onStageActivate,
   onToggleAbsent,
+  subPartTags = {},
+  onSubPartTagUpdate,
+  subPartResetKey = 0,
 }: StageListProps) {
   // Ref map for auto-scroll when activeStageId changes.
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
+
+  // Which stage cards have their sub-part form expanded.
+  const [expandedSubParts, setExpandedSubParts] = useState<Set<string>>(new Set());
 
   const sorted = [...assignments].sort((a, b) => a.order - b.order);
 
@@ -176,6 +193,49 @@ export default function StageList({
                     Absent in this instance
                   </Type>
                 </label>
+              </div>
+            )}
+
+            {/* ── Sub-part tag toggle + form (Step 15) ─────────────────── */}
+            {/* Only shown for non-orphaned, non-absent stages where the
+                sub-part tagging feature is wired (onSubPartTagUpdate provided). */}
+            {onSubPartTagUpdate && !assignment.orphaned && !assignment.absent && (
+              <div
+                className={styles.subPartRow}
+                onClick={e => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className={styles.subPartToggle}
+                  onClick={() => setExpandedSubParts(prev => {
+                    const next = new Set(prev);
+                    if (next.has(assignment.stageId)) {
+                      next.delete(assignment.stageId);
+                    } else {
+                      next.add(assignment.stageId);
+                    }
+                    return next;
+                  })}
+                  aria-expanded={expandedSubParts.has(assignment.stageId)}
+                  aria-controls={`sub-part-form-${assignment.stageId}`}
+                  data-testid={`sub-part-toggle-${assignment.stageId}`}
+                >
+                  <Type variant="label-sm" as="span">
+                    {subPartTags[assignment.stageId]
+                      ? `✓ ${subPartTags[assignment.stageId]!.concept.name}`
+                      : 'Tag analytically'}
+                  </Type>
+                </button>
+                {expandedSubParts.has(assignment.stageId) && (
+                  <SubPartForm
+                    key={`${assignment.stageId}-${subPartResetKey}`}
+                    stageId={assignment.stageId}
+                    stageName={assignment.stageName}
+                    initialTag={subPartTags[assignment.stageId] ?? null}
+                    resetKey={subPartResetKey}
+                    onUpdate={onSubPartTagUpdate}
+                  />
+                )}
               </div>
             )}
           </div>

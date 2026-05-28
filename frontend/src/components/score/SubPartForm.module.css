@@ -1,0 +1,54 @@
+/* SubPartForm — inline sub-part tagging form inside a stage card.
+   Design system: DESIGN.md — tonal layering, no dividers, 0px radius. */
+
+/* Container: slightly elevated tonal background relative to the stage card. */
+.form {
+  margin-top: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-surface-container-highest, #e4e3da);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+/* ── Header: label + remove button on the same line ──────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.heading {
+  color: var(--color-on-surface-variant, #41484d);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Remove button: text-only, no background. */
+.removeBtn {
+  font-family: var(--font-label, 'Public Sans', sans-serif);
+  font-size: 0.75rem;
+  color: var(--color-error, #b3261e);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.removeBtn:hover {
+  opacity: 0.75;
+}
+
+/* ── Status / error lines ─────────────────────────────────────────────────── */
+
+.status {
+  color: var(--color-on-surface-variant, #41484d);
+  margin: 0;
+}
+
+.error {
+  color: var(--color-error, #b3261e);
+  margin: 0;
+}

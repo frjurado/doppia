@@ -146,3 +146,26 @@
 .absentLabelText {
   color: var(--color-on-surface-variant, #41484d);
 }
+
+/* ── Sub-part tagging (Step 15) ──────────────────────────────────────────── */
+
+.subPartRow {
+  margin-top: var(--spacing-2);
+}
+
+/* Toggle button: muted link-style, no background. */
+.subPartToggle {
+  font-family: var(--font-label, 'Public Sans', sans-serif);
+  font-size: 0.75rem;
+  color: var(--color-on-surface-variant, #41484d);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.subPartToggle:hover {
+  color: var(--color-on-surface, #1a1c1e);
+}

@@ -45,7 +45,7 @@ import type {
 } from '../../services/conceptApi';
 import type { AnnotationSession } from './annotator';
 import type { AnnotationFlags } from './annotator';
-import type { StageAssignment } from './stages';
+import type { StageAssignment, SubPartTag } from './stages';
 import ConceptPicker from './ConceptPicker';
 import TypeRefinement from './TypeRefinement';
 import StageList from './StageList';
@@ -94,6 +94,15 @@ export interface FormPanelProps {
   onStageActivate?: (stageId: string | null) => void;
   /** Called when the annotator toggles a stage's absent checkbox. */
   onToggleAbsent?: (stageId: string, absent: boolean) => void;
+
+  // ── Step 15: Sub-part tags passed down from ScoreViewer ────────────────────
+
+  /** Current sub-part tags keyed by stageId; owned by ScoreViewer. */
+  subPartTags?: Record<string, SubPartTag | null>;
+  /** Called when a stage's sub-part tag is created, updated, or removed. */
+  onSubPartTagUpdate?: (stageId: string, tag: SubPartTag | null) => void;
+  /** Incremented when all sub-part forms should reset (concept change). */
+  subPartResetKey?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +118,9 @@ export default function FormPanel({
   activeStageId = null,
   onStageActivate,
   onToggleAbsent,
+  subPartTags,
+  onSubPartTagUpdate,
+  subPartResetKey,
 }: FormPanelProps) {
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -233,6 +245,9 @@ export default function FormPanel({
             activeStageId={activeStageId}
             onStageActivate={onStageActivate ?? (() => {})}
             onToggleAbsent={onToggleAbsent ?? (() => {})}
+            subPartTags={subPartTags}
+            onSubPartTagUpdate={onSubPartTagUpdate}
+            subPartResetKey={subPartResetKey}
           />
         </section>
       )}
