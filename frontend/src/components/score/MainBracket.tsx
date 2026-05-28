@@ -1,29 +1,27 @@
 /**
  * Layer 3 — Main bracket track (tagging-tool-design.md §3).
  *
- * Renders a single coloured bracket above the staff once fragmentSet is true.
- * The bracket spans the pixel extent of the committed selection, from the left
- * edge of the first selected measure to the right edge of the last selected
- * measure, positioned at the top of the measure region.
+ * Renders one coloured bracket segment per SVG system row once fragmentSet is
+ * true. For single-system selections this is a single bar; for multi-system
+ * selections it emits one segment per system:
+ *   - First system: from barStart measure's left to end of that system.
+ *   - Intermediate systems: full system width.
+ *   - Last system: from start of system to barEnd measure's right.
  *
- * Gradient-zone handles at both endpoints reinforce the visual affordance that
- * the endpoints are draggable (tagging-tool-design.md §3 §"drag handles").
- * The actual drag interaction is owned by the ghost layer (AnnotationSession);
- * the bracket and its handles carry pointer-events: none so clicks pass
- * through to the ghost elements below.
+ * Gradient-zone handles appear only on the first segment's left edge (barStart
+ * endpoint) and the last segment's right edge (barEnd endpoint). Intermediate
+ * segments are visual connectors with no handles.
+ *
+ * All segments are positioned BRACKET_ABOVE_SYSTEM_PX above their system's
+ * systemTop so the bracket clears note content above the staff.
  *
  * Architecture note: this component is rendered inside FragmentOverlay, which
  * has z-index: 30. The ghost overlay has z-index: 20. The bracket therefore
- * visually stacks above ghost highlights while remaining non-interactive.
- *
- * Multi-system selections (where barStart and barEnd are on different SVG
- * rows) render as a single horizontal bar from the first measure's left to the
- * last measure's right — visually spanning across rows. Proper per-system
- * bracket segments are deferred to Component 7.
+ * visually stacks above ghost highlights while remaining non-interactive
+ * (pointer-events: none on the bracket and its handles).
  */
 
 import type { GhostLayer, MeasureGhostEntry } from './ghosts';
-import { measureGhostKey } from './ghosts';
 import type { SelectionRange } from './annotator';
 import styles from './MainBracket.module.css';
 
@@ -35,6 +33,8 @@ import styles from './MainBracket.module.css';
 const BRACKET_H = 5;
 /** Width of each gradient handle zone. Clamped to one-third of bracket width. */
 const HANDLE_W = 28;
+/** Distance the bracket sits above systemTop: bracket height + small gap. */
+const BRACKET_ABOVE_SYSTEM_PX = BRACKET_H + 4;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -50,38 +50,61 @@ export interface MainBracketProps {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Internal types and helpers
 // ---------------------------------------------------------------------------
 
-function endingNFromContext(ctx: SelectionRange['repeatContext']): number | null {
-  if (ctx === 'first_ending')  return 1;
-  if (ctx === 'second_ending') return 2;
-  return null;
+interface BracketSegment {
+  systemTop: number;
+  left: number;
+  right: number;
+  isFirst: boolean;
+  isLast: boolean;
 }
 
 /**
- * Resolve the first and last selected measure ghost entries from the
- * SelectionRange and the ghost layer's measureIndex.
+ * Derive one BracketSegment per SVG system row that the selection covers.
  *
- * When the repeatContext is set, the lookup uses the matching endingN so that
- * first-ending and second-ending measures are correctly distinguished (the
- * ghost keys already incorporate endingN, mirroring the pattern used by
- * buildMcIndex). Falls back to the no-ending key when the keyed lookup fails.
+ * All measureIndex entries with barN in [barStart, barEnd] are collected and
+ * grouped by systemTop. Because buildGhosts assigns a single systemTop value
+ * to every measure in the same system row, equality on systemTop is a reliable
+ * system-identity key. Measures in different repeat endings have different
+ * visual positions and therefore different systemTop values, so they form
+ * distinct groups without any special endingN handling here.
  */
-function resolveEntries(
+function resolveSegments(
   sel: SelectionRange,
   layer: GhostLayer,
-): { first: MeasureGhostEntry; last: MeasureGhostEntry } | null {
-  const endingN = endingNFromContext(sel.repeatContext);
+): BracketSegment[] | null {
+  const inRange: MeasureGhostEntry[] = [];
+  for (const entry of layer.measureIndex.values()) {
+    if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
+      inRange.push(entry);
+    }
+  }
+  if (inRange.length === 0) return null;
 
-  let first = layer.measureIndex.get(measureGhostKey(sel.barStart, endingN));
-  let last  = layer.measureIndex.get(measureGhostKey(sel.barEnd,   endingN));
+  const bySystem = new Map<number, MeasureGhostEntry[]>();
+  for (const entry of inRange) {
+    const grp = bySystem.get(entry.systemTop) ?? [];
+    grp.push(entry);
+    bySystem.set(entry.systemTop, grp);
+  }
 
-  if (!first) first = layer.measureIndex.get(measureGhostKey(sel.barStart, null));
-  if (!last)  last  = layer.measureIndex.get(measureGhostKey(sel.barEnd,   null));
+  const tops = [...bySystem.keys()].sort((a, b) => a - b);
+  const segments: BracketSegment[] = tops.map((sysTop, i) => {
+    const grp   = bySystem.get(sysTop)!;
+    const left  = Math.min(...grp.map(e => e.bounds.left));
+    const right = Math.max(...grp.map(e => e.bounds.left + e.bounds.width));
+    return {
+      systemTop: sysTop,
+      left,
+      right,
+      isFirst: i === 0,
+      isLast:  i === tops.length - 1,
+    };
+  });
 
-  if (!first || !last) return null;
-  return { first, last };
+  return segments;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,35 +114,33 @@ function resolveEntries(
 export default function MainBracket({ selection, layer, fragmentSet }: MainBracketProps) {
   if (!fragmentSet || !selection || !layer) return null;
 
-  const resolved = resolveEntries(selection, layer);
-  if (!resolved) return null;
-
-  const { first, last } = resolved;
-
-  const left  = first.bounds.left;
-  const right = last.bounds.left + last.bounds.width;
-  const top   = first.systemTop;
-  const width = right - left;
-
-  if (width <= 0) return null;
-
-  const handleW = Math.min(HANDLE_W, Math.floor(width / 3));
+  const segments = resolveSegments(selection, layer);
+  if (!segments) return null;
 
   return (
-    <div
-      className={styles.bracket}
-      style={{ left, top, width, height: BRACKET_H }}
-      aria-hidden="true"
-      data-testid="main-bracket"
-    >
-      <div
-        className={styles.handleLeft}
-        style={{ width: handleW }}
-      />
-      <div
-        className={styles.handleRight}
-        style={{ width: handleW }}
-      />
-    </div>
+    <>
+      {segments.map((seg, i) => {
+        const top    = seg.systemTop - BRACKET_ABOVE_SYSTEM_PX;
+        const width  = seg.right - seg.left;
+        if (width <= 0) return null;
+        const handleW = Math.min(HANDLE_W, Math.floor(width / 3));
+        return (
+          <div
+            key={i}
+            className={styles.bracket}
+            style={{ left: seg.left, top, width, height: BRACKET_H }}
+            aria-hidden="true"
+            data-testid={i === 0 ? 'main-bracket' : `main-bracket-${i}`}
+          >
+            {seg.isFirst && (
+              <div className={styles.handleLeft} style={{ width: handleW }} />
+            )}
+            {seg.isLast && (
+              <div className={styles.handleRight} style={{ width: handleW }} />
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
