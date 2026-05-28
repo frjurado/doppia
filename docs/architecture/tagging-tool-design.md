@@ -185,7 +185,7 @@ The picker only surfaces concepts where `stub: false` and `top_level_taggable: t
 
 Shown **only** when the selected concept has direct `IS_SUBTYPE_OF` children whose `CONTAINS` structures differ from one another (i.e. choosing among the children changes which stage brackets appear). Shown at the top of the form, before properties, because the choice reshapes everything below it.
 
-Rendered as a compact radio group or segmented button labelled with the child concept names (e.g. "Simple / Compound" for `PreDominant`). Selecting a child:
+Rendered as a compact radio group or segmented button labelled with the child concept names. Selecting a child:
 
 - Updates the active concept for stage-panel purposes (the selected concept in the picker stays as the parent; the refinement is a display-layer decision).
 - Re-evaluates which stage brackets are shown (§6, "Concept change after stages are committed").
@@ -206,6 +206,14 @@ Each card shows:
 - For **compound stages**: the card expands to show the sub-stage segment labels and their individual bounds.
 
 Clicking anywhere on a stage card highlights and centres the corresponding bracket in the score.
+
+#### Stage-level property form
+
+Each stage concept may carry `HAS_PROPERTY_SCHEMA` edges of its own. When a stage card is active (selected in the form panel or clicked in the score), it expands to show an inline property form generated from those schemas — using the same control types as the main property form (§7.4): radio groups or selects for `ONE_OF`, checkboxes or multiselects for `MANY_OF`, toggles for `BOOL`.
+
+Every stage confirmed as present (required, or optional and not toggled absent) becomes a **child fragment** on submission, whether or not its property form was filled. Stage schemas are `required: false`; property completion is not a prerequisite for the child fragment to be created. A child fragment's `summary.properties` will be an empty object if no stage properties were recorded — the fragment's existence is the assertion of presence and location; the properties are optional enrichment.
+
+No concept picker is shown. The child fragment's `concept_id` is the stage concept's own id (e.g. `CadentialPreDominant`), implicit from the stage bracket's graph metadata. The atomic write described in §9 covers the parent cadence fragment and all stage child fragments in one transaction.
 
 ### 7.4 Property form
 

@@ -362,13 +362,19 @@ The richest interaction. Render Layer 4 (stage brackets below the staff) once `c
 
 ---
 
-### Step 15 — Sub-part tagging
+### Step 15 — Stage child fragments and inline property forms
 
-Sub-parts are themselves fragment rows linked by `parent_fragment_id` (`phase-1.md` §5.4, `fragment-schema.md`). A stage the annotator wants to tag analytically — give its own concept and properties — becomes a child fragment whose bounds fall within the parent's range. The data model allows arbitrary depth, but the UI renders **one visible level** of nesting in Phase 1 (the two-level display limit; deeper nesting is visually flattened). Each child carries its own concept tag list, property values, and (optional) sub-measure bounds.
+Every stage confirmed as present — required, dragged from its default position, or not explicitly toggled absent — becomes a child fragment linked by `parent_fragment_id` (`fragment-schema.md`). No concept picker is involved: the concept is implicit from the stage bracket's graph metadata (`CadentialInitialTonic`, `CadentialPreDominant`, `CadentialDominant`, `CadentialFinalTonic`). Child fragments are created for all confirmed stages on submission, regardless of whether stage properties were filled.
 
-On submission this feeds the atomic parent+child write (Step 6): the parent and all children go in one transaction, with the service-layer containment check ensuring every child sits inside the parent.
+**Inline stage property form.** When a stage card is active in the form panel, it expands to show an inline property form generated from the stage concept's `HAS_PROPERTY_SCHEMA` edges — same control types as Step 13. All stage schemas are `required: false`. The submission checklist does not gate on stage properties being filled. Values are stored in the child fragment's `summary.properties`; an unfilled stage produces a child fragment with `summary.properties: {}`.
 
-**Verification.** Tagging a cadence with a sub-tagged Dominant stage produces a parent fragment and one child with `parent_fragment_id` set and bounds within the parent; submitting writes both atomically; a child pushed outside the parent's range is rejected.
+The atomic parent+child write (Step 6) covers the parent cadence fragment and all stage child fragments in one transaction. The service-layer containment check confirms that every child's spatial bounds fall within the parent's range.
+
+**Verification.** Tagging a PAC with no stage properties filled produces four child fragments (one per confirmed stage) each with `parent_fragment_id` set, the correct stage `concept_id`, and `summary.properties: {}`; submitting writes all atomically. Filling in `Stage2Components` on the Pre-Dominant card stores the selected values in that child's `summary.properties`. A stage bracket pushed outside the parent's range is rejected at submission.
+
+---
+
+> **Implementation note — Step 15 revision.** Steps 1–15 were implemented before the stage storage model was finalised. The original Step 15 included a concept selector opened by a "tag analytically" toggle on each stage card. That selector should be removed. The backend — child fragment creation via `parent_fragment_id`, atomic write in the Step 6 service, containment check — can stay unchanged; the child fragment's `concept_id` should be the stage's own concept id, implicit from the graph, not a user selection. The frontend change is: remove the concept picker from the stage interaction entirely and replace it with the inline stage property form described above. Child fragments already written with a `concept_id` matching the correct stage concept id are valid as-is; those written with an annotator-selected id should be reviewed.
 
 ---
 

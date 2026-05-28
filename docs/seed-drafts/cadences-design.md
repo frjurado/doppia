@@ -1,6 +1,6 @@
 # Cadence Domain — Design Draft
 
-**Status:** Draft. To be converted to `backend/seed/domains/cadences.yaml` once peer-reviewed.
+**Status:** Implemented — `backend/seed/domains/cadences.yaml`.
 
 **Date:** 2026-05-16
 
@@ -426,3 +426,4 @@ For future reference, when this design is questioned:
 8. **Ambiguity captured by a `confidence` field plus prose, not by double-tagging.**
 9. **Cross-fragment relationships modelled only where they fit the `FOLLOWS` + backward-pointer pattern.** The Reopened HC case becomes the `ReopeningHalfCadence` concept (FOLLOWS `AuthenticCadenceRealised` + `prior_ac_pointer`). Relationships that don't fit — a WayStation's eventual terminal cadence — remain unmodelled (a WayStation may be unfulfilled, any cadence can be a terminal). The single-event Reinterpreted HC case is a property, not a cross-fragment link.
 10. **Pedagogical sequencing anchored on realised forms.** Six `PREREQUISITE_FOR` edges, all pointing from/to the *realised* cadence concepts so each is non-derivable from `IS_SUBTYPE_OF` / `FOLLOWS`; the post-cadential and cross-fragment concepts carry none, and the normalise/denormalise policy is deferred. This pass also corrected `ClosingSection`'s `FOLLOWS` target to `AuthenticCadenceRealised`. See ADR-020.
+11. **Stage properties stored as child fragments, not as JSON keys.** All confirmed cadence stages (required or confirmed-present optional) become child fragment rows using `parent_fragment_id`, with `concept_id` set to the stage concept's id and `summary.properties` holding any stage property values filled in. There is no `stages` key in the parent fragment's `summary`. Stage schemas are all `required: false`; a child fragment's existence asserts stage presence and location, and property values are optional enrichment. See `docs/architecture/fragment-schema.md` § "Stage sub-fragments."

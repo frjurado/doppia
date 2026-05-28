@@ -85,6 +85,8 @@ CREATE INDEX fragment_movement_idx ON fragment (movement_id);
 
 **`parent_fragment_id`** records sub-part nesting. The database imposes no depth limit: nesting may be arbitrarily deep when it is conceptually valid (a composite concept whose stages themselves have stages). The tagging UI performs visual flattening beyond two visible levels so the score does not become unreadable, but the data model preserves the true hierarchy. A sub-part's `bar_start`/`bar_end` must fall within its parent's range; this constraint is enforced by the service layer, not the database.
 
+**Stage sub-fragments.** Cadence stage data is stored as child fragments using this mechanism — not as a `stages` key inside the parent's `summary`. Every confirmed stage (required, or optional and not toggled absent) produces one child fragment: `concept_id` is the stage concept's id (`CadentialInitialTonic`, `CadentialPreDominant`, `CadentialDominant`, `CadentialFinalTonic`), spatial bounds match the stage bracket, and `summary.properties` carries whichever stage property values were recorded (`Stage1Components`, `Stage2Components`, `Cadential64` — all optional). A child fragment with an empty `summary.properties` object is valid; the fragment's existence asserts that the stage is present and where it falls.
+
 **`status`** drives the peer review state machine: `draft → submitted → approved` (or `rejected → draft`). Only `approved` fragments are visible in the public fragment browser. The status filter is enforced at the service layer on every query; it is not a UI-only concern. The decisions recorded by individual reviewers live in the `fragment_review` table (below); `status` on the fragment is the aggregate outcome.
 
 ---

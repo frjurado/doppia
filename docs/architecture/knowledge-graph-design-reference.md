@@ -89,7 +89,7 @@ Not all concept nodes have the same shape. A chord type, a cadence type, and a f
 | Concept type | Typed structured fields | Leave to prose definition |
 |---|---|---|
 | `Chord` | root, quality, inversion, figures | Voice-leading tendencies, stylistic context |
-| `CadenceType` | approach function, resolution function | Expressive character, elaboration norms |
+| `CadenceType` | *(none beyond base concept fields — cadence-type morphology is captured by PropertySchemas and stage `CONTAINS` edges, not typed concept-node fields)* | Definition, expressive character, elaboration norms |
 | `SequenceType` | interval, direction | Rhetorical effect, period conventions |
 | `FormalUnit` | scope (phrase / theme / section) | Relationship to form type |
 
@@ -310,24 +310,11 @@ The most consequential structural decision when modelling a concept with variabl
 
 **The `PreDominant` case:**
 
-The Pre-Dominant stage can be:
-- A **simple** predominant: a single chord slot, varying in which chord family fills it
-- A **compound** predominant: two ordered substages (2a then 2b), each structurally fixed
+A Pre-Dominant stage can include an SD4 predominant only, an SD#4 predominant only, or both in succession. This was considered as a candidate for the subtype split: a `SimplePredominant` leaf with a `ChordFamily` property, and a `CompoundPredominant` with two ordered `CONTAINS` substages. The cadence domain design chose the simpler model instead: a single `CadentialPreDominant` leaf concept with a `MANY_OF` schema (`Stage2Components`) recording which components are present. The temporal ordering of those components is recoverable from `movement_analysis` harmony events within the stage bracket's range, so the assertion of order does not need to live in the graph structure. The simpler model also travels better across repertoires where stage decomposition differs. See `docs/seed-drafts/cadences-design.md` § "Notes on departures."
 
-These are not the same structure with different values. They are structurally different things. The model is:
+The subtype split remains the right tool when the structural difference between cases is substantive enough that it cannot be recovered from other data and carries independent analytical significance — for example, when subtype membership determines which properties or edges apply.
 
-```
-PreDominant
-├── SimplePredominant
-│     PropertySchema: ChordFamily (ONE_OF: SD4Family, SD4SharpFamily)
-└── CompoundPredominant
-      CONTAINS {order: 1, required: true} → Substage2a  (SD4 chord)
-      CONTAINS {order: 2, required: true} → Substage2b  (SD#4 chord)
-```
-
-`SimplePredominant` gets a `PropertySchema` because it has a single slot with enumerable content variation. `CompoundPredominant` gets `CONTAINS` edges because it has internal ordered structure.
-
-**The signal for a subtype split:** a concept slot can be either a leaf (atomic) or a branch (internally composed). When the same slot can be either, that is not a property — it is a structural difference. Model it as a pair of subtypes.
+**The signal for a subtype split:** if recognising which subtype you have is itself an analytical act that carries meaning beyond the enumeration of values, use a subtype split. If the variation is enumerable and the full structure is recoverable from the values alone, a `MANY_OF` `PropertySchema` is usually sufficient.
 
 ---
 
