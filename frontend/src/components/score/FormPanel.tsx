@@ -4,18 +4,21 @@
  * The right-hand panel of the tagging interface. Hosts:
  *   §7.1 ConceptPicker  — search, domain facets, hierarchy-path display
  *   §7.2 TypeRefinement — radio group when children differ structurally
- *   (Steps 13–18 add Stage list, Property form, Harmony panel, Prose field,
- *    Submission checklist in subsequent steps.)
+ *   §7.4 PropertyForm   — dynamic property form driven by schema tree (Step 13)
+ *   (Steps 14–18 add Stage list, Harmony panel, Prose field, Submission
+ *    checklist in subsequent steps.)
  *
  * State ownership:
- *   selectedConcept  — this component; clears on concept deselect
- *   schemaTree       — fetched after concept selection; null while loading
+ *   selectedConcept    — this component; clears on concept deselect
+ *   schemaTree         — fetched after concept selection; null while loading
  *   selectedRefinement — clears whenever the selected concept changes
+ *   propertyValues     — this component; carries over shared values on concept
+ *                        change; cleared on concept deselect (Step 13)
  *
  * Session wiring:
- *   session.setConceptSet(true/false) is called immediately on concept
- *   selection/deselection. For Step 12 this is the only session flag managed
- *   here; stagesComplete and propertiesComplete are wired in Steps 14 and 13.
+ *   session.setConceptSet(true/false) — on concept selection/deselection
+ *   session.setPropertiesComplete(bool) — whenever propertyValues or
+ *     schemaTree changes; computed by computeIsComplete (Step 13)
  *
  * Callbacks to parent (ScoreViewer):
  *   onConceptChange — fires after schema tree is fetched; receives the
@@ -37,6 +40,11 @@ import type { AnnotationSession } from './annotator';
 import type { AnnotationFlags } from './annotator';
 import ConceptPicker from './ConceptPicker';
 import TypeRefinement from './TypeRefinement';
+import PropertyForm, {
+  carryOverValues,
+  computeIsComplete,
+} from './PropertyForm';
+import type { PropertyFormValues } from './PropertyForm';
 import Type from '../ui/Type';
 import styles from './FormPanel.module.css';
 
@@ -83,14 +91,24 @@ export default function FormPanel({
   const [isLoadingSchema, setIsLoadingSchema] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [selectedRefinement, setSelectedRefinement] = useState<TypeRefinementChild | null>(null);
+  const [propertyValues, setPropertyValues] = useState<PropertyFormValues>({});
 
-  // When the session rebuilds (ghost layer re-render), any previously-set
-  // conceptSet flag on the old session is already gone. Re-apply it to the new
-  // session so the checklist stays coherent.
+  // When the session rebuilds (ghost layer re-render), re-apply conceptSet so
+  // the checklist stays coherent.
   useEffect(() => {
     if (!session) return;
     session.setConceptSet(selectedConcept !== null);
   }, [session, selectedConcept]);
+
+  // Keep propertiesComplete in sync whenever the schema tree or values change.
+  // Trivially true when schemaTree has no required schemas (§8 stageless concepts).
+  useEffect(() => {
+    if (!session) return;
+    const isComplete = schemaTree
+      ? computeIsComplete(schemaTree.schemas, propertyValues)
+      : false;
+    session.setPropertiesComplete(isComplete);
+  }, [session, schemaTree, propertyValues]);
 
   const handleConceptSelect = useCallback(
     async (concept: ConceptSearchHit | null) => {
@@ -102,13 +120,12 @@ export default function FormPanel({
         session?.setConceptSet(false);
         setSchemaTree(null);
         setSchemaError(null);
+        setPropertyValues({});
         onConceptChange?.(null, null);
         return;
       }
 
-      // Optimistically set conceptSet so the checklist updates immediately;
-      // if the schema fetch fails we will leave conceptSet true (the concept
-      // is still selected, just without a schema tree yet).
+      // Optimistically set conceptSet so the checklist updates immediately.
       session?.setConceptSet(true);
 
       setIsLoadingSchema(true);
@@ -116,10 +133,14 @@ export default function FormPanel({
       try {
         const tree = await getConceptSchemas(concept.id);
         setSchemaTree(tree);
+        // Carry over values for schemas shared with the previous concept;
+        // discard values for schemas that no longer apply (Step 13).
+        setPropertyValues(prev => carryOverValues(prev, tree.schemas));
         onConceptChange?.(concept, tree);
       } catch {
         setSchemaError('Could not load concept schema. Try again.');
         setSchemaTree(null);
+        setPropertyValues({});
         onConceptChange?.(concept, null);
       } finally {
         setIsLoadingSchema(false);
@@ -175,12 +196,27 @@ export default function FormPanel({
         </section>
       )}
 
-      {/* ── Placeholder for Steps 13–18 ──────────────────────────────── */}
-      {/* Stage list (Step 14), property form (Step 13), harmony panel (Step 16),
-          prose field (Step 17), and submission checklist (Step 18) are added in
-          their respective steps. The fragmentSet check below keeps the panel
-          quiet until a main bracket exists, matching the design's intent that
-          classification is anchored to a committed selection. */}
+      {/* ── Section: Properties ──────────────────────────────────────── */}
+      {/* Rendered when the selected concept has applicable property schemas.
+          The form is entirely schema-driven — no concept-specific logic here.
+          propertiesComplete is trivially true for concepts with no required
+          schemas (§8 stageless concepts). */}
+      {schemaTree && schemaTree.schemas.length > 0 && (
+        <section className={styles.section}>
+          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+            Properties
+          </Type>
+          <PropertyForm
+            schemas={schemaTree.schemas}
+            values={propertyValues}
+            onChange={setPropertyValues}
+          />
+        </section>
+      )}
+
+      {/* ── Placeholder for Steps 14–18 ──────────────────────────────── */}
+      {/* Stage list (Step 14), harmony panel (Step 16), prose field (Step 17),
+          and submission checklist (Step 18) are added in their respective steps. */}
       {!flags.fragmentSet && (
         <div className={styles.noSelectionHint}>
           <Type variant="label-sm" as="p" className={styles.hintText}>

@@ -1,10 +1,15 @@
 /**
- * Tests for FormPanel — Component 5 Step 12.
+ * Tests for FormPanel — Component 5 Steps 12 and 13.
  *
- * Verification targets from the roadmap (Step 12):
+ * Step 12 verification targets:
  *   "Selecting a concept with structurally-divergent children shows the
  *    refinement radio group."
  *   "Selecting one whose children differ only in properties does not."
+ *
+ * Step 13 verification targets:
+ *   "A PAC renders its inherited cadence schemas including the BOOL toggles."
+ *   "Switching from PAC to IAC keeps shared values and drops inapplicable ones."
+ *   "Submission is blocked while a required property is empty."
  *
  * Timer strategy: real timers throughout. The ConceptPicker has a 300 ms
  * debounce; waitFor with its 2 000 ms timeout accommodates it comfortably
@@ -59,6 +64,47 @@ const treeWithRefinements: ConceptSchemaTree = {
 const treeNoRefinements: ConceptSchemaTree = {
   concept_id: 'PerfectAuthenticCadence',
   schemas: [],
+  stages: [],
+  type_refinement: { show: false, children: [] },
+};
+
+// ── Step 13 fixtures ─────────────────────────────────────────────────────────
+
+/** Schema shared by PAC and IAC via inheritance (SopranoScaleDegree). */
+const sharedSchema = {
+  id: 'SopranoScale',
+  name: 'Soprano Scale Degree',
+  cardinality: 'ONE_OF' as const,
+  required: true,
+  description: null,
+  values: [
+    { id: 'SD1', name: 'Scale Degree 1', referenced_concept: null },
+    { id: 'SD3', name: 'Scale Degree 3', referenced_concept: null },
+  ],
+};
+
+/** Schema only on PAC (not on IAC). */
+const pacOnlySchema = {
+  id: 'PACOnly',
+  name: 'PAC-only Flag',
+  cardinality: 'BOOL' as const,
+  required: false,
+  description: null,
+  values: [],
+};
+
+/** PAC schema tree: one required ONE_OF + one optional BOOL. */
+const treePACWithSchemas: ConceptSchemaTree = {
+  concept_id: 'PerfectAuthenticCadence',
+  schemas: [sharedSchema, pacOnlySchema],
+  stages: [],
+  type_refinement: { show: false, children: [] },
+};
+
+/** IAC schema tree: only the shared ONE_OF (no BOOL). */
+const treeIACWithSchemas: ConceptSchemaTree = {
+  concept_id: 'ImperfectAuthenticCadence',
+  schemas: [sharedSchema],
   stages: [],
   type_refinement: { show: false, children: [] },
 };
@@ -247,5 +293,172 @@ describe('FormPanel', () => {
 
     const calls = vi.mocked(onRefinementChange).mock.calls;
     expect(calls[calls.length - 1][0]).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 13 — PropertyForm integration
+// ---------------------------------------------------------------------------
+
+describe('FormPanel Step 13 — PropertyForm', () => {
+  beforeEach(() => {
+    vi.mocked(conceptApi.searchConcepts).mockResolvedValue(makePage([pac, iac]));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the Properties section when the concept has schemas', async () => {
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treePACWithSchemas);
+
+    render(<FormPanel session={null} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+
+    expect(screen.getByTestId('property-form')).toBeInTheDocument();
+  });
+
+  it('does NOT render the Properties section when the concept has no schemas', async () => {
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treeNoRefinements);
+
+    render(<FormPanel session={null} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+
+    expect(screen.queryByTestId('property-form')).not.toBeInTheDocument();
+  });
+
+  it('renders the BOOL toggle schemas among the property fields', async () => {
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treePACWithSchemas);
+
+    render(<FormPanel session={null} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+
+    // Both the required ONE_OF and the optional BOOL are rendered.
+    expect(screen.getByTestId('field-SopranoScale')).toBeInTheDocument();
+    expect(screen.getByTestId('bool-yes-PACOnly')).toBeInTheDocument();
+    expect(screen.getByTestId('bool-no-PACOnly')).toBeInTheDocument();
+  });
+
+  it('calls session.setPropertiesComplete(false) when a required field is unset', async () => {
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treePACWithSchemas);
+    const session = makeSession();
+
+    render(<FormPanel session={session} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+
+    // SopranoScale is required and not yet filled → false.
+    await waitFor(() => {
+      const calls = vi.mocked(session.setPropertiesComplete).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(false);
+    }, WAIT_OPTS);
+  });
+
+  it('calls session.setPropertiesComplete(true) once all required fields are filled', async () => {
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treePACWithSchemas);
+    const session = makeSession();
+
+    render(<FormPanel session={session} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+
+    // Fill the required SopranoScale field.
+    fireEvent.click(screen.getByTestId('radio-SopranoScale-SD1'));
+
+    await waitFor(() => {
+      const calls = vi.mocked(session.setPropertiesComplete).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(true);
+    }, WAIT_OPTS);
+  });
+
+  it('calls session.setPropertiesComplete(true) for concepts with no required schemas', async () => {
+    // treeNoRefinements has schemas: [] — no required schemas → trivially complete.
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treeNoRefinements);
+    const session = makeSession();
+
+    render(<FormPanel session={session} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+
+    await waitFor(() => {
+      const calls = vi.mocked(session.setPropertiesComplete).mock.calls;
+      expect(calls[calls.length - 1][0]).toBe(true);
+    }, WAIT_OPTS);
+  });
+
+  it('carries over shared property values when switching concepts', async () => {
+    // PAC → fill SopranoScale → switch to IAC → SopranoScale value should persist.
+    vi.mocked(conceptApi.getConceptSchemas)
+      .mockResolvedValueOnce(treePACWithSchemas)   // PAC
+      .mockResolvedValueOnce(treeIACWithSchemas);  // IAC
+
+    render(<FormPanel session={null} flags={defaultFlags} />);
+    await searchAndWait('authentic');
+
+    // Select PAC and fill the required field.
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+    fireEvent.click(screen.getByTestId('radio-SopranoScale-SD1'));
+
+    // Switch to IAC.
+    fireEvent.click(screen.getByTestId('concept-card-ImperfectAuthenticCadence'));
+    await flushAfterClick();
+
+    // SopranoScale is shared → its radio should still be checked.
+    const radio = screen.getByLabelText('Scale Degree 1') as HTMLInputElement;
+    expect(radio.checked).toBe(true);
+  });
+
+  it('discards non-shared property values when switching concepts', async () => {
+    // PAC → toggle PACOnly BOOL → switch to IAC → PACOnly should be gone.
+    vi.mocked(conceptApi.getConceptSchemas)
+      .mockResolvedValueOnce(treePACWithSchemas)
+      .mockResolvedValueOnce(treeIACWithSchemas);
+
+    render(<FormPanel session={null} flags={defaultFlags} />);
+    await searchAndWait('authentic');
+
+    // Select PAC and set the BOOL field.
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+    fireEvent.click(screen.getByTestId('bool-yes-PACOnly'));
+
+    // Switch to IAC — IAC has no PACOnly schema.
+    fireEvent.click(screen.getByTestId('concept-card-ImperfectAuthenticCadence'));
+    await flushAfterClick();
+
+    // The PACOnly BOOL toggle must not appear in the IAC property form.
+    expect(screen.queryByTestId('bool-yes-PACOnly')).not.toBeInTheDocument();
+  });
+
+  it('clears property values when the concept is deselected', async () => {
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(treePACWithSchemas);
+    const session = makeSession();
+
+    render(<FormPanel session={session} flags={defaultFlags} />);
+    await searchAndWait('perfect');
+
+    // Select PAC and fill a field.
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+    await flushAfterClick();
+    fireEvent.click(screen.getByTestId('radio-SopranoScale-SD1'));
+
+    // Clear the concept via the ✕ button.
+    fireEvent.click(screen.getByLabelText('Clear selection'));
+    await waitFor(() => {
+      expect(session.setPropertiesComplete).toHaveBeenCalledWith(false);
+    }, WAIT_OPTS);
+
+    // The property form must not be visible after clearing.
+    expect(screen.queryByTestId('property-form')).not.toBeInTheDocument();
   });
 });
