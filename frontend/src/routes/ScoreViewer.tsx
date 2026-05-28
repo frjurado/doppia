@@ -2,12 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
+import StageBrackets from '../components/score/StageBrackets';
 import { buildGhosts } from '../components/score/ghosts';
 import type { GhostLayer } from '../components/score/ghosts';
 import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
 import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
+import type { StageAssignment } from '../components/score/stages';
+import {
+  computeStagesComplete,
+  prePopulateStages,
+  reconcileWithNewConcept,
+  reconcileWithSelection,
+  toggleStageAbsent,
+} from '../components/score/stages';
 import FormPanel from '../components/score/FormPanel';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
@@ -18,6 +27,8 @@ import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioTo
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 import { transposeKey } from '../utils/transposeKey';
+import type { ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
+import { getConceptSchemas } from '../services/conceptApi';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -305,6 +316,17 @@ export default function ScoreViewer() {
     propertiesComplete: false,
   });
 
+  // ── Stage state (Step 14) ─────────────────────────────────────────────────
+  // Stage assignments are owned here (not in FormPanel) because they must be
+  // shared between the StageBrackets overlay (Layer 4) and the FormPanel stage
+  // list. The schema tree for the currently-active concept/refinement is cached
+  // so it can be re-applied when the main bracket changes.
+  const [stageAssignments, setStageAssignments] = useState<StageAssignment[]>([]);
+  const [activeStageId, setActiveStageId] = useState<string | null>(null);
+  // The schema tree for the currently active concept (or its refinement child).
+  // Cached so reconcileWithNewConcept can compute brand-new default placements.
+  const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
+
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
    * Called by useMidiPlayback on each animation frame. Binary-searches the
@@ -529,6 +551,113 @@ export default function ScoreViewer() {
     };
   }, [scheduleRerender]);
 
+  // ── Stage handlers (Step 14) ─────────────────────────────────────────────
+
+  /**
+   * Called from FormPanel when the concept (or refinement) changes.
+   * Reconciles existing stage assignments with the new concept's stage list,
+   * or pre-populates fresh assignments if none exist.
+   * When schemaTree.stages is empty the stage track does not render (§8).
+   */
+  const handleConceptChange = useCallback(
+    (concept: ConceptSearchHit | null, schemaTree: ConceptSchemaTree | null) => {
+      activeSchemaTreeRef.current = schemaTree;
+      if (!concept || !schemaTree || schemaTree.stages.length === 0) {
+        setStageAssignments([]);
+        setActiveStageId(null);
+        return;
+      }
+      setStageAssignments(prev => {
+        if (prev.length === 0) {
+          return selectionRange
+            ? prePopulateStages(schemaTree.stages, selectionRange)
+            : [];
+        }
+        return reconcileWithNewConcept(prev, schemaTree.stages, selectionRange);
+      });
+    },
+    [selectionRange],
+  );
+
+  /**
+   * Called from FormPanel when a Type Refinement option is selected or cleared.
+   * Fetches the child concept's schema tree and reconciles stage assignments
+   * with the child's CONTAINS structure (ADR-011 §7).
+   * Passing null clears refinement and re-applies the parent concept's stages.
+   */
+  const handleRefinementChange = useCallback(
+    async (option: TypeRefinementChild | null) => {
+      if (!option) {
+        // No refinement selected — fall back to the parent concept's stages.
+        const parentTree = activeSchemaTreeRef.current;
+        if (!parentTree || parentTree.stages.length === 0) {
+          setStageAssignments([]);
+          return;
+        }
+        setStageAssignments(prev =>
+          reconcileWithNewConcept(prev, parentTree.stages, selectionRange),
+        );
+        return;
+      }
+      try {
+        const childTree = await getConceptSchemas(option.id);
+        activeSchemaTreeRef.current = childTree;
+        if (childTree.stages.length === 0) {
+          setStageAssignments([]);
+          return;
+        }
+        setStageAssignments(prev => {
+          if (prev.length === 0) {
+            return selectionRange
+              ? prePopulateStages(childTree.stages, selectionRange)
+              : [];
+          }
+          return reconcileWithNewConcept(prev, childTree.stages, selectionRange);
+        });
+      } catch {
+        // Schema fetch failure: keep existing assignments unchanged.
+      }
+    },
+    [selectionRange],
+  );
+
+  /** Called by StageBrackets when a split handle drag completes. */
+  const handleSplitHandleMove = useCallback((updated: StageAssignment[]) => {
+    setStageAssignments(updated);
+  }, []);
+
+  /** Called by StageList and StageBrackets for bidirectional linking. */
+  const handleStageActivate = useCallback((stageId: string | null) => {
+    setActiveStageId(stageId);
+  }, []);
+
+  /** Called by StageList absent toggle. */
+  const handleToggleAbsent = useCallback((stageId: string, absent: boolean) => {
+    setStageAssignments(prev => toggleStageAbsent(prev, stageId, absent));
+  }, []);
+
+  // Keep stagesComplete in sync with assignments and session.
+  useEffect(() => {
+    const session = annotationSessionRef.current;
+    if (!session) return;
+    const complete = computeStagesComplete(stageAssignments);
+    session.setStagesComplete(complete);
+  }, [stageAssignments]);
+
+  // When the committed selection changes, reconcile stage assignments with
+  // the new main bracket bounds.
+  useEffect(() => {
+    if (!selectionRange) return;
+    setStageAssignments(prev => {
+      if (prev.length === 0 && activeSchemaTreeRef.current?.stages.length) {
+        // First selection after concept was already chosen: pre-populate now.
+        return prePopulateStages(activeSchemaTreeRef.current.stages, selectionRange);
+      }
+      if (prev.length === 0) return prev;
+      return reconcileWithSelection(prev, selectionRange);
+    });
+  }, [selectionRange]);
+
   // ── Ghost layer + annotation session lifecycle (Step 11) ─────────────────
   //
   // Rebuilt on every svgPages change so ghost positions stay aligned with the
@@ -572,6 +701,11 @@ export default function ScoreViewer() {
       fragmentSet: false, conceptSet: false,
       stagesComplete: false, propertiesComplete: false,
     });
+    // Reset stage state so the ghost layer rebuild starts clean.
+    // Stage positions are pixel-anchored to the current render; stale positions
+    // would be wrong after a scale/transpose/font change.
+    setStageAssignments([]);
+    setActiveStageId(null);
 
     // Build the new ghost layer over the currently rendered SVG.
     const layer = buildGhosts(container, mei, tk);
@@ -886,24 +1020,40 @@ export default function ScoreViewer() {
             {/* Fragment overlay: houses all annotation visuals (brackets, labels).
                 Overlays are always HTML elements above the SVG, never injected
                 into Verovio's SVG output (CLAUDE.md §"Verovio SVG overlay rule").
-                Step 11: MainBracket (Layer 3) renders once fragmentSet is true. */}
+                Step 11: MainBracket (Layer 3) renders once fragmentSet is true.
+                Step 14: StageBrackets (Layer 4) renders once conceptSet is true
+                         and the concept has CONTAINS edges. */}
             <FragmentOverlay>
               <MainBracket
                 selection={selectionRange}
                 layer={ghostLayer}
                 fragmentSet={annotationFlags.fragmentSet}
               />
+              <StageBrackets
+                assignments={stageAssignments}
+                selection={selectionRange}
+                layer={ghostLayer}
+                visible={annotationFlags.conceptSet && stageAssignments.length > 0}
+                activeStageId={activeStageId}
+                onStageActivate={handleStageActivate}
+                onSplitHandleMove={handleSplitHandleMove}
+              />
             </FragmentOverlay>
           </div>
         </div>
 
-        {/* Form panel (Step 12 — concept picker + type refinement).
-            Steps 13–18 add further sections (property form, stage list, etc.).
-            Always rendered so the annotator can start classifying before or
-            after drawing a selection (concurrent-flag model, ADR-011 §2). */}
+        {/* Form panel (Steps 12–14: concept picker, type refinement, stage list,
+            property form). Steps 16–18 add harmony panel, prose field, and
+            submission checklist. Always rendered — concurrent-flag model. */}
         <FormPanel
           session={annotationSessionRef.current}
           flags={annotationFlags}
+          onConceptChange={handleConceptChange}
+          onRefinementChange={handleRefinementChange}
+          assignments={stageAssignments}
+          activeStageId={activeStageId}
+          onStageActivate={handleStageActivate}
+          onToggleAbsent={handleToggleAbsent}
         />
 
         {/* Re-render overlay: sits above both panels while options change */}

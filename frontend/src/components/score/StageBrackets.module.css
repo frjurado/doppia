@@ -1,0 +1,126 @@
+/* Layer 4 — Stage bracket track (tagging-tool-design.md §4).
+   All elements are absolutely positioned within FragmentOverlay.
+   Design system: DESIGN.md — 0px radius, tonal depth, no borders. */
+
+/* Container layer: same inset as MainBracket (fills .scoreContent). */
+.layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ── Stage bracket ────────────────────────────────────────────────────────── */
+
+.bracket {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  /* No border-radius: project design system uses 0px everywhere. */
+  transition: opacity 0.1s;
+}
+
+/* Required stages: solid fill using the stage colour. */
+.required {
+  background-color: var(--stage-color);
+}
+
+/* Optional stages: dashed outline at default; same colour but 40% opacity fill. */
+.optional {
+  background-color: color-mix(in srgb, var(--stage-color) 35%, transparent);
+  outline: 1.5px dashed var(--stage-color);
+  outline-offset: -1px;
+}
+
+/* Active (selected) stage: slightly raised opacity + subtle ring. */
+.active {
+  opacity: 1;
+  outline: 2px solid var(--stage-color);
+  outline-offset: 1px;
+}
+
+/* Orphaned stage: grey, reduced opacity, not interactive. */
+.orphaned {
+  background-color: #aaaaaa55;
+  outline: 1.5px dashed #aaaaaa;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* Error state: red tint — bounds outside main bracket. */
+.error {
+  background-color: color-mix(in srgb, var(--color-error, #b3261e) 40%, transparent);
+  outline: 1.5px solid var(--color-error, #b3261e);
+}
+
+/* ── Stage label ──────────────────────────────────────────────────────────── */
+
+/* Stage name text floated below the bracket bar. Uses Public Sans (label-sm). */
+.label {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  font-family: var(--font-label, 'Public Sans', sans-serif);
+  font-size: 0.6875rem; /* 11px — label-sm */
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.orphanBadge,
+.errorBadge {
+  margin-left: 3px;
+  font-size: 0.625rem;
+}
+
+/* ── Endpoint gradient handles ───────────────────────────────────────────── */
+
+/* Left gradient: transparent → stage colour. Decorative; interaction is via
+   the ghost layer's gradient zones which are positioned at the same x range. */
+.handleLeft {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--stage-color) 0%, transparent),
+    var(--stage-color)
+  );
+  pointer-events: none;
+}
+
+/* Right gradient: mirror of handleLeft. */
+.handleRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--stage-color) 0%, transparent),
+    var(--stage-color)
+  );
+  pointer-events: none;
+}
+
+/* ── Split handle ─────────────────────────────────────────────────────────── */
+
+/* The shared boundary between two adjacent contiguous stages.
+   Positioned at the right edge of the left stage / left edge of the right
+   stage. Has pointer-events auto and a drag cursor. */
+.splitHandle {
+  position: absolute;
+  cursor: col-resize;
+  pointer-events: auto;
+  /* Visually: a thin vertical line centred on the boundary pixel. */
+  border-left: 2px solid var(--color-on-surface-variant, #72787d);
+  opacity: 0.5;
+  transition: opacity 0.1s;
+  z-index: 1;
+}
+
+.splitHandle:hover {
+  opacity: 1;
+}

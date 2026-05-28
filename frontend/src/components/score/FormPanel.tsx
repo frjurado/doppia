@@ -4,9 +4,9 @@
  * The right-hand panel of the tagging interface. Hosts:
  *   §7.1 ConceptPicker  — search, domain facets, hierarchy-path display
  *   §7.2 TypeRefinement — radio group when children differ structurally
+ *   §7.3 StageList      — stage cards with bounds display and absent toggle
  *   §7.4 PropertyForm   — dynamic property form driven by schema tree (Step 13)
- *   (Steps 14–18 add Stage list, Harmony panel, Prose field, Submission
- *    checklist in subsequent steps.)
+ *   (Steps 16–18 add Harmony panel, Prose field, Submission checklist.)
  *
  * State ownership:
  *   selectedConcept    — this component; clears on concept deselect
@@ -26,6 +26,13 @@
  *     stage brackets without a second API call.
  *   onRefinementChange — fires when a refinement option is selected/cleared.
  *
+ * Stage props (Step 14):
+ *   assignments       — stage assignments owned by ScoreViewer; passed through
+ *                       for display in StageList.
+ *   activeStageId     — which stage is currently active (score ↔ form sync).
+ *   onStageActivate   — fires when user clicks a stage card.
+ *   onToggleAbsent    — fires when user toggles a stage's absent checkbox.
+ *
  * References: tagging-tool-design.md §2 §7, ADR-011 §2 §7.
  */
 
@@ -38,8 +45,10 @@ import type {
 } from '../../services/conceptApi';
 import type { AnnotationSession } from './annotator';
 import type { AnnotationFlags } from './annotator';
+import type { StageAssignment } from './stages';
 import ConceptPicker from './ConceptPicker';
 import TypeRefinement from './TypeRefinement';
+import StageList from './StageList';
 import PropertyForm, {
   carryOverValues,
   computeIsComplete,
@@ -63,7 +72,7 @@ export interface FormPanelProps {
   /**
    * Called after the schema tree for the selected concept is fetched.
    * Receives null for both arguments when the concept is cleared.
-   * Step 14 consumes schemaTree.stage_structure for bracket pre-population.
+   * Step 14 consumes schemaTree.stages for bracket pre-population.
    */
   onConceptChange?: (
     concept: ConceptSearchHit | null,
@@ -74,6 +83,17 @@ export interface FormPanelProps {
    * Step 14 fetches the child's stage structure via getConceptSchemas(child.id).
    */
   onRefinementChange?: (option: TypeRefinementChild | null) => void;
+
+  // ── Step 14: Stage bracket state passed down from ScoreViewer ─────────────
+
+  /** Stage assignments owned by ScoreViewer; displayed in the stage list. */
+  assignments?: StageAssignment[];
+  /** Currently active stage (bidirectional score ↔ form highlighting). */
+  activeStageId?: string | null;
+  /** Called when the annotator clicks a stage card to activate it. */
+  onStageActivate?: (stageId: string | null) => void;
+  /** Called when the annotator toggles a stage's absent checkbox. */
+  onToggleAbsent?: (stageId: string, absent: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +105,10 @@ export default function FormPanel({
   flags,
   onConceptChange,
   onRefinementChange,
+  assignments = [],
+  activeStageId = null,
+  onStageActivate,
+  onToggleAbsent,
 }: FormPanelProps) {
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -196,6 +220,23 @@ export default function FormPanel({
         </section>
       )}
 
+      {/* ── Section: Stages ──────────────────────────────────────────── */}
+      {/* Rendered when the selected concept has CONTAINS edges (stage structure).
+          Stageless concepts skip this section entirely (tagging-tool-design.md §8). */}
+      {schemaTree && schemaTree.stages.length > 0 && (
+        <section className={styles.section}>
+          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+            Stages
+          </Type>
+          <StageList
+            assignments={assignments}
+            activeStageId={activeStageId}
+            onStageActivate={onStageActivate ?? (() => {})}
+            onToggleAbsent={onToggleAbsent ?? (() => {})}
+          />
+        </section>
+      )}
+
       {/* ── Section: Properties ──────────────────────────────────────── */}
       {/* Rendered when the selected concept has applicable property schemas.
           The form is entirely schema-driven — no concept-specific logic here.
@@ -214,9 +255,9 @@ export default function FormPanel({
         </section>
       )}
 
-      {/* ── Placeholder for Steps 14–18 ──────────────────────────────── */}
-      {/* Stage list (Step 14), harmony panel (Step 16), prose field (Step 17),
-          and submission checklist (Step 18) are added in their respective steps. */}
+      {/* ── Placeholder for Steps 16–18 ──────────────────────────────── */}
+      {/* Harmony panel (Step 16), prose field (Step 17), and submission
+          checklist (Step 18) are added in their respective steps. */}
       {!flags.fragmentSet && (
         <div className={styles.noSelectionHint}>
           <Type variant="label-sm" as="p" className={styles.hintText}>
