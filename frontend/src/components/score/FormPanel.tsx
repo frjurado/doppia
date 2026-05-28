@@ -240,6 +240,13 @@ export default function FormPanel({
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
             Stages
           </Type>
+          {assignments.some(
+            a => !a.required && !a.absent && !a.confirmed && !a.orphaned,
+          ) && (
+            <Type variant="label-sm" as="p" className={styles.stagesHint}>
+              Drag brackets to confirm bounds, or toggle to mark absent.
+            </Type>
+          )}
           <StageList
             assignments={assignments}
             activeStageId={activeStageId}

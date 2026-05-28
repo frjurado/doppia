@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { StageAssignment, SubPartTag } from './stages';
 import { stageColor } from './stages';
 import SubPartForm from './SubPartForm';
@@ -125,23 +126,37 @@ export default function StageList({
             }}
             data-testid={`stage-card-${assignment.stageId}`}
           >
-            {/* ── Top row: colour swatch + name + required badge ──────── */}
+            {/* ── Top row: swatch/toggle + name + required badge ───────── */}
             <div className={styles.cardHeader}>
-              <span
-                className={styles.colorSwatch}
-                style={{ backgroundColor: color }}
-                aria-hidden="true"
-              />
+              {!assignment.required && !assignment.orphaned ? (
+                <button
+                  type="button"
+                  className={[
+                    styles.colorSwatch,
+                    styles.swatchToggle,
+                    assignment.absent ? styles.swatchAbsent : styles.swatchPresent,
+                  ].join(' ')}
+                  style={{ '--swatch-color': color } as CSSProperties}
+                  onClick={e => {
+                    e.stopPropagation();
+                    onToggleAbsent(assignment.stageId, !assignment.absent);
+                  }}
+                  aria-label={`${assignment.stageName}: ${assignment.absent ? 'absent' : 'present'}`}
+                  data-testid={`absent-toggle-${assignment.stageId}`}
+                />
+              ) : (
+                <span
+                  className={styles.colorSwatch}
+                  style={{ backgroundColor: color }}
+                  aria-hidden="true"
+                />
+              )}
               <Type variant="label-md" as="span" className={styles.stageName}>
                 {assignment.stageName}
               </Type>
-              {assignment.required ? (
+              {assignment.required && (
                 <span className={styles.badgeRequired} title="Required stage">
                   required
-                </span>
-              ) : (
-                <span className={styles.badgeOptional} title="Optional stage">
-                  optional
                 </span>
               )}
             </div>
@@ -163,38 +178,7 @@ export default function StageList({
                   ! outside main bracket
                 </Type>
               )}
-              {/* Limbo hint: optional, not absent, not confirmed */}
-              {!assignment.required &&
-                !assignment.absent &&
-                !assignment.confirmed &&
-                !assignment.orphaned && (
-                  <Type variant="label-sm" as="span" className={styles.limboText}>
-                    drag to confirm or mark absent
-                  </Type>
-                )}
             </div>
-
-            {/* ── Absent toggle (optional stages only) ─────────────────── */}
-            {!assignment.required && !assignment.orphaned && (
-              <div
-                className={styles.absentRow}
-                onClick={e => e.stopPropagation()}
-              >
-                <label className={styles.absentLabel}>
-                  <input
-                    type="checkbox"
-                    className={styles.absentCheckbox}
-                    checked={assignment.absent}
-                    onChange={e => onToggleAbsent(assignment.stageId, e.target.checked)}
-                    aria-label={`Mark ${assignment.stageName} absent`}
-                    data-testid={`absent-toggle-${assignment.stageId}`}
-                  />
-                  <Type variant="label-sm" as="span" className={styles.absentLabelText}>
-                    Absent in this instance
-                  </Type>
-                </label>
-              </div>
-            )}
 
             {/* ── Sub-part tag toggle + form (Step 15) ─────────────────── */}
             {/* Only shown for non-orphaned, non-absent stages where the

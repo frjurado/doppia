@@ -46,6 +46,14 @@
   margin: 0;
 }
 
+/* ── Stages section hint ─────────────────────────────────────────────────── */
+
+/* Shown once below the Stages heading when optional stages are unconfirmed. */
+.stagesHint {
+  color: var(--color-on-surface-variant, #41484d);
+  margin: 0;
+}
+
 /* ── No-selection hint ────────────────────────────────────────────────────── */
 
 .noSelectionHint {

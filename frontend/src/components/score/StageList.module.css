@@ -61,12 +61,41 @@
   margin-bottom: var(--spacing-1);
 }
 
-/* 10×10 colour swatch matching the bracket track colour. */
+/* 14×14 swatch — doubles as a present/absent toggle for optional stages.
+   Uses --swatch-color CSS custom property set via inline style. */
 .colorSwatch {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   /* 0px radius — project design system. */
+}
+
+/* Reset for the interactive button variant (optional non-orphaned stages). */
+.swatchToggle {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Present state: filled with the stage colour, white tick via pseudo-element. */
+.swatchPresent {
+  background-color: var(--swatch-color);
+}
+
+.swatchPresent::after {
+  content: '✓';
+  color: #fff;
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Absent state: hollow outline in the stage colour, no fill. */
+.swatchAbsent {
+  background: transparent;
+  border: 1.5px solid var(--swatch-color);
 }
 
 .stageName {
@@ -75,25 +104,16 @@
   font-weight: 600;
 }
 
-/* Required / optional badges: muted label-sm chips. */
-.badgeRequired,
-.badgeOptional {
+/* Required badge: muted label-sm chip — only shown for required stages. */
+.badgeRequired {
   font-family: var(--font-label, 'Public Sans', sans-serif);
   font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 1px 4px;
   white-space: nowrap;
-}
-
-.badgeRequired {
   color: var(--color-primary, #3f5f77);
   background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 12%, transparent);
-}
-
-.badgeOptional {
-  color: var(--color-on-surface-variant, #41484d);
-  background-color: var(--color-surface-container-highest, #e4e3da);
 }
 
 /* ── Bounds row ──────────────────────────────────────────────────────────── */
@@ -115,36 +135,6 @@
 
 .errorText {
   color: var(--color-error, #b3261e);
-}
-
-.limboText {
-  color: var(--color-on-surface-variant, #41484d);
-  font-style: italic;
-}
-
-/* ── Absent toggle ───────────────────────────────────────────────────────── */
-
-.absentRow {
-  margin-top: var(--spacing-1);
-}
-
-.absentLabel {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  cursor: pointer;
-}
-
-/* Native checkbox hidden; interaction through label click. */
-.absentCheckbox {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--color-primary, #3f5f77);
-  cursor: pointer;
-}
-
-.absentLabelText {
-  color: var(--color-on-surface-variant, #41484d);
 }
 
 /* ── Sub-part tagging (Step 15) ──────────────────────────────────────────── */
