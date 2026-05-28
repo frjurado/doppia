@@ -179,7 +179,7 @@ async def seeded_analysis(
     await db_session.execute(
         text(
             "INSERT INTO movement_analysis (movement_id, events, music21_version) "
-            "VALUES (:mid, :events::jsonb, :ver)"
+            "VALUES (:mid, CAST(:events AS jsonb), :ver)"
         ),
         {
             "mid": seeded_movement,

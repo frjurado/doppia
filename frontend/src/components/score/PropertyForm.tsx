@@ -48,48 +48,6 @@ export interface PropertyFormProps {
   onChange: (values: PropertyFormValues) => void;
 }
 
-/**
- * Returns true when every required schema has a non-null, non-empty value.
- * Trivially true when there are no required schemas (§8 stageless concepts).
- *
- * BOOL: null = unset → blocks; true/false = explicitly set → passes.
- * ONE_OF: null = unset → blocks; non-null string → passes.
- * MANY_OF: null or empty array → blocks; ≥1 item → passes.
- */
-export function computeIsComplete(
-  schemas: PropertySchema[],
-  values: PropertyFormValues,
-): boolean {
-  return schemas
-    .filter(s => s.required)
-    .every(s => {
-      const v = values[s.id];
-      if (v === null || v === undefined) return false;
-      if (s.cardinality === 'MANY_OF') return Array.isArray(v) && v.length > 0;
-      // ONE_OF: any non-null string; BOOL: any explicit boolean (covered above)
-      return true;
-    });
-}
-
-/**
- * Builds a new values map carrying over only entries whose schema id appears
- * in nextSchemas. Values for schemas that no longer apply are discarded.
- * Call this in FormPanel whenever the selected concept changes.
- */
-export function carryOverValues(
-  prevValues: PropertyFormValues,
-  nextSchemas: PropertySchema[],
-): PropertyFormValues {
-  const nextIds = new Set(nextSchemas.map(s => s.id));
-  const carried: PropertyFormValues = {};
-  for (const [id, val] of Object.entries(prevValues)) {
-    if (nextIds.has(id)) {
-      carried[id] = val;
-    }
-  }
-  return carried;
-}
-
 // ---------------------------------------------------------------------------
 // Internal sub-components
 // ---------------------------------------------------------------------------

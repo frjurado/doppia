@@ -49,11 +49,9 @@ import type { StageAssignment, SubPartTag } from './stages';
 import ConceptPicker from './ConceptPicker';
 import TypeRefinement from './TypeRefinement';
 import StageList from './StageList';
-import PropertyForm, {
-  carryOverValues,
-  computeIsComplete,
-} from './PropertyForm';
+import PropertyForm from './PropertyForm';
 import type { PropertyFormValues } from './PropertyForm';
+import { carryOverValues, computeIsComplete } from './propertyFormHelpers';
 import Type from '../ui/Type';
 import styles from './FormPanel.module.css';
 

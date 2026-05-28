@@ -316,7 +316,7 @@ async def _seed_movement_analysis(
     await db_session.execute(
         text(
             "INSERT INTO movement_analysis (id, movement_id, events, music21_version) "
-            "VALUES (:id, :mid, :events::jsonb, :ver)"
+            "VALUES (:id, :mid, CAST(:events AS jsonb), :ver)"
         ),
         {
             "id": str(uuid.uuid4()),
@@ -376,7 +376,7 @@ class TestApproveFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, :summary::jsonb, 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
             ),
             {
                 "id": fragment_id,
@@ -431,7 +431,7 @@ class TestApproveFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, :summary::jsonb, 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
             ),
             {
                 "id": fragment_id,
@@ -498,7 +498,7 @@ class TestApproveFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, :summary::jsonb, 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
             ),
             {
                 "id": fragment_id,
@@ -569,7 +569,7 @@ class TestApproveFragment:
                     "INSERT INTO fragment "
                     "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
                     "summary, status, created_by) "
-                    "VALUES (:id, :mid, :bs, :be, :bs, :be, :summary::jsonb, 'submitted', :creator)"
+                    "VALUES (:id, :mid, :bs, :be, :bs, :be, CAST(:summary AS jsonb), 'submitted', :creator)"
                 ),
                 {
                     "id": fid,
@@ -660,7 +660,7 @@ class TestApproveFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, :summary::jsonb, 'draft', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'draft', :creator)"
             ),
             {
                 "id": fragment_id,
@@ -705,7 +705,7 @@ class TestApproveFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, :summary::jsonb, 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
             ),
             {
                 "id": fragment_id,
@@ -801,7 +801,7 @@ class TestRejectFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, :summary::jsonb, 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
             ),
             {
                 "id": fragment_id,

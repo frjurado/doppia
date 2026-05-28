@@ -15,11 +15,9 @@
 
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import PropertyForm, {
-  computeIsComplete,
-  carryOverValues,
-} from '../PropertyForm';
+import PropertyForm from '../PropertyForm';
 import type { PropertyFormValues } from '../PropertyForm';
+import { computeIsComplete, carryOverValues } from '../propertyFormHelpers';
 import type { PropertySchema } from '../../../services/conceptApi';
 
 // ---------------------------------------------------------------------------
