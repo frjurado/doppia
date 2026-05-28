@@ -14,6 +14,7 @@
       "border-radius": ["/^var\\(--border-radius\\)$/", "0", "0px"]
     },
 
+    "selector-pseudo-class-no-unknown": [true, {"ignorePseudoClasses": ["global", "local"]}],
     "selector-class-pattern": null,
     "import-notation": "string",
     "color-function-notation": null,

@@ -370,19 +370,17 @@ class TestApproveFragment:
         then approving from the standard dev-token user.
         """
         # Insert a submitted fragment whose creator is a different user.
-        other_user_id = str(uuid.uuid4())
         fragment_id = str(uuid.uuid4())
         await db_session.execute(
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', NULL)"
             ),
             {
                 "id": fragment_id,
                 "mid": seeded_movement,
                 "summary": json.dumps(_min_summary()),
-                "creator": other_user_id,
             },
         )
         # Insert the concept tag so approve can load concept_ids for the gate.
@@ -425,19 +423,17 @@ class TestApproveFragment:
         Seeds a movement_analysis row with one unreviewed event in the bar range.
         """
         # Create a fragment with a different creator so dev-token can review.
-        other_user_id = str(uuid.uuid4())
         fragment_id = str(uuid.uuid4())
         await db_session.execute(
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', NULL)"
             ),
             {
                 "id": fragment_id,
                 "mid": seeded_movement,
                 "summary": json.dumps(_min_summary()),
-                "creator": other_user_id,
             },
         )
         await db_session.execute(
@@ -492,19 +488,17 @@ class TestApproveFragment:
         db_session: AsyncSession,
     ) -> None:
         """Case 3 (cont.): after marking events reviewed, approval passes the gate."""
-        other_user_id = str(uuid.uuid4())
         fragment_id = str(uuid.uuid4())
         await db_session.execute(
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', NULL)"
             ),
             {
                 "id": fragment_id,
                 "mid": seeded_movement,
                 "summary": json.dumps(_min_summary()),
-                "creator": other_user_id,
             },
         )
         await db_session.execute(
@@ -559,7 +553,6 @@ class TestApproveFragment:
         Both fragment A (bars 1–4) and fragment B (bars 2–3) cover the event
         at mn=2.  After the event is reviewed once, both fragments' gates pass.
         """
-        other_user_id = str(uuid.uuid4())
         frag_a_id = str(uuid.uuid4())
         frag_b_id = str(uuid.uuid4())
 
@@ -569,7 +562,7 @@ class TestApproveFragment:
                     "INSERT INTO fragment "
                     "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
                     "summary, status, created_by) "
-                    "VALUES (:id, :mid, :bs, :be, :bs, :be, CAST(:summary AS jsonb), 'submitted', :creator)"
+                    "VALUES (:id, :mid, :bs, :be, :bs, :be, CAST(:summary AS jsonb), 'submitted', NULL)"
                 ),
                 {
                     "id": fid,
@@ -577,7 +570,6 @@ class TestApproveFragment:
                     "bs": bar_s,
                     "be": bar_e,
                     "summary": json.dumps(_min_summary()),
-                    "creator": other_user_id,
                 },
             )
             await db_session.execute(
@@ -654,19 +646,17 @@ class TestApproveFragment:
     ) -> None:
         """Approving a draft fragment (not submitted) returns 422."""
         # Create a draft fragment (not submitted) with a different creator.
-        other_user_id = str(uuid.uuid4())
         fragment_id = str(uuid.uuid4())
         await db_session.execute(
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'draft', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'draft', NULL)"
             ),
             {
                 "id": fragment_id,
                 "mid": seeded_movement,
                 "summary": json.dumps(_min_summary()),
-                "creator": other_user_id,
             },
         )
         await db_session.commit()
@@ -691,7 +681,6 @@ class TestApproveFragment:
         db_session: AsyncSession,
     ) -> None:
         """Gate blocks when actual_key has auto=true and reviewed=false."""
-        other_user_id = str(uuid.uuid4())
         fragment_id = str(uuid.uuid4())
         unreviewed_summary = _min_summary(
             actual_key={
@@ -705,13 +694,12 @@ class TestApproveFragment:
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', NULL)"
             ),
             {
                 "id": fragment_id,
                 "mid": seeded_movement,
                 "summary": json.dumps(unreviewed_summary),
-                "creator": other_user_id,
             },
         )
         await db_session.execute(
@@ -795,19 +783,17 @@ class TestRejectFragment:
     ) -> None:
         """Case 5: rejection immediately flips submitted → rejected."""
         # Manually create a submitted fragment with a different creator.
-        other_user_id = str(uuid.uuid4())
         fragment_id = str(uuid.uuid4())
         await db_session.execute(
             text(
                 "INSERT INTO fragment "
                 "(id, movement_id, bar_start, bar_end, mc_start, mc_end, summary, status, created_by) "
-                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', :creator)"
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), 'submitted', NULL)"
             ),
             {
                 "id": fragment_id,
                 "mid": seeded_movement,
                 "summary": json.dumps(_min_summary()),
-                "creator": other_user_id,
             },
         )
         await db_session.commit()

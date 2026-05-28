@@ -22,7 +22,34 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from starlette.exceptions import HTTPException
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _seed_dev_users(_db_engine: AsyncEngine) -> AsyncGenerator[None, None]:
+    """Seed synthetic dev user rows so fragment.created_by and
+    fragment_review.reviewer_id FK constraints pass in integration tests.
+
+    The dev auth bypass uses hardcoded UUIDs that don't exist in app_user.
+    Both fragment.created_by and fragment_review.reviewer_id have FK → app_user.id,
+    so real rows are required for the dev tokens' UUIDs.
+    """
+    factory = async_sessionmaker(
+        _db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO app_user (id, email, role) VALUES "
+                "('00000000-0000-0000-0000-000000000001', 'dev@local', 'editor'), "
+                "('00000000-0000-0000-0000-000000000002', 'admin@local', 'admin') "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        await session.commit()
+    yield
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -68,7 +95,8 @@ async def integration_test_client(
     """Async HTTP client wired to a real FastAPI app with DB + storage.
 
     Sets ``ENVIRONMENT=local`` and ``AUTH_MODE=local`` so that requests with
-    ``Authorization: Bearer dev-token`` are accepted as the built-in admin user.
+    ``Authorization: Bearer dev-token`` are accepted as the built-in editor user.
+    Use ``admin-token`` for endpoints that require admin role.
     MinIO environment variables are set to the local Docker defaults if not
     already present in the environment.
 

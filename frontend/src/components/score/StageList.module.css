@@ -70,6 +70,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+
   /* 0px radius — project design system. */
 }
 
@@ -87,7 +88,7 @@
 
 .swatchPresent::after {
   content: '✓';
-  color: #fff;
+  color: var(--color-on-primary);
   font-size: 9px;
   line-height: 1;
 }

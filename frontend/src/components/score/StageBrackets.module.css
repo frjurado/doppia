@@ -15,6 +15,7 @@
   position: absolute;
   pointer-events: auto;
   cursor: pointer;
+
   /* No border-radius: project design system uses 0px everywhere. */
   transition: opacity 0.1s;
 }
@@ -114,6 +115,7 @@
   position: absolute;
   cursor: col-resize;
   pointer-events: auto;
+
   /* Visually: a thin vertical line centred on the boundary pixel. */
   border-left: 2px solid var(--color-on-surface-variant, #72787d);
   opacity: 0.5;

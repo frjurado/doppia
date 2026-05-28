@@ -264,6 +264,7 @@
   justify-content: center;
   gap: var(--spacing-3);
   padding: 0 var(--spacing-6);
+
   /* z-index ladder: ghost overlay = 20, fragment overlay = 30, transport = 40.
      All three are in the root stacking context (no positioned ancestor with an
      explicit z-index between them and the root), so this value must exceed 30

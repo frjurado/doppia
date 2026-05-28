@@ -219,7 +219,7 @@ class TestCorpusIngestion:
             response = await integration_test_client.post(
                 f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
-                headers={"Authorization": "Bearer dev-token"},
+                headers={"Authorization": "Bearer admin-token"},
             )
 
         # ── Assert 201 report ─────────────────────────────────────────
@@ -466,7 +466,7 @@ class TestCorpusIngestion:
                 resp = await integration_test_client.post(
                     f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                     files={"archive": ("corpus.zip", archive, "application/zip")},
-                    headers={"Authorization": "Bearer dev-token"},
+                    headers={"Authorization": "Bearer admin-token"},
                 )
             assert resp.status_code == 201, resp.text
             call = dispatch_calls[0]
@@ -611,7 +611,7 @@ class TestCorpusIngestion:
             response = await integration_test_client.post(
                 f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
-                headers={"Authorization": "Bearer dev-token"},
+                headers={"Authorization": "Bearer admin-token"},
             )
 
         assert response.status_code == 201, response.text

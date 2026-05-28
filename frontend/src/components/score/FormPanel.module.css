@@ -8,6 +8,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+
   /* Leave room for the fixed playback bar (80px) at the bottom. */
   padding-bottom: 88px;
 }
