@@ -325,21 +325,23 @@ class FragmentService:
             )
 
         # Phase 3: flip the fragment to approved.
-        async with self._db.begin():
-            result = await self._db.execute(
-                select(Fragment).where(Fragment.id == fragment_id)
+        # The Phase 2 reads auto-started a transaction (autobegin=True); add
+        # Phase 3 writes to that same transaction and commit explicitly.
+        result = await self._db.execute(
+            select(Fragment).where(Fragment.id == fragment_id)
+        )
+        fragment = result.scalar_one_or_none()
+        if fragment is None:
+            raise FragmentNotFoundError(
+                f"No fragment with id '{fragment_id}' exists.",
+                detail={"fragment_id": str(fragment_id)},
             )
-            fragment = result.scalar_one_or_none()
-            if fragment is None:
-                raise FragmentNotFoundError(
-                    f"No fragment with id '{fragment_id}' exists.",
-                    detail={"fragment_id": str(fragment_id)},
-                )
-            # Guard: concurrent approver may have already flipped the status.
-            if fragment.status == "submitted":
-                fragment.status = "approved"
-                fragment.updated_at = datetime.now(tz=timezone.utc)
-                self._db.add(fragment)
+        # Guard: concurrent approver may have already flipped the status.
+        if fragment.status == "submitted":
+            fragment.status = "approved"
+            fragment.updated_at = datetime.now(tz=timezone.utc)
+            self._db.add(fragment)
+        await self._db.commit()
 
         return fragment
 
