@@ -11,7 +11,7 @@
  * References: tagging-tool-design.md §4 §6 §7.3, ADR-011 §1 §3 §6.
  */
 
-import type { ContainsStage, ConceptSearchHit, ConceptSchemaTree } from '../../services/conceptApi';
+import type { ContainsStage, ConceptSchemaTree } from '../../services/conceptApi';
 import type { SelectionRange } from './annotator';
 import type { PropertyFormValues } from './PropertyForm';
 
@@ -20,20 +20,18 @@ import type { PropertyFormValues } from './PropertyForm';
 // ---------------------------------------------------------------------------
 
 /**
- * An analytical sub-part tag applied to a single stage.
+ * Property state for a single stage's inline form.
  *
- * The annotator can optionally assign a concept + properties to any non-absent,
- * non-orphaned stage bracket. At submission time this becomes a child Fragment
- * row linked to the parent by parent_fragment_id, with bounds derived from the
- * StageAssignment's barStart/barEnd (tagging-tool-design.md §5.4, ADR-011 §1).
+ * The concept is implicit from the stage bracket's graph metadata (stageId =
+ * target_id from the CONTAINS edge). At submission time this becomes a child
+ * Fragment row linked by parent_fragment_id, with concept_id = stageId and
+ * bounds from StageAssignment (tagging-tool-design.md §5.4, ADR-011 §1).
  *
- * Phase 1 renders one visible level of nesting only; the data model supports
- * deeper nesting but the UI does not (two-level display limit, ADR-011 §3).
+ * Phase 1 renders one visible level of nesting only (two-level display limit,
+ * ADR-011 §3).
  */
 export interface SubPartTag {
-  /** The concept the annotator identified for this stage. */
-  concept: ConceptSearchHit;
-  /** Full schema tree fetched after concept selection; null while loading. */
+  /** Full schema tree for the stage concept; null while loading. */
   schemaTree: ConceptSchemaTree | null;
   /** Form values keyed by PropertySchema.id, matching PropertyFormValues. */
   propertyValues: PropertyFormValues;

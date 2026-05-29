@@ -1,26 +1,29 @@
 /**
- * SubPartForm — inline concept + property form for a single stage sub-part tag.
+ * SubPartForm — inline property form for a single stage's sub-part tag.
  *
- * Rendered inside each stage card in StageList when the annotator expands the
- * "Tag analytically" section. The form is self-contained: it manages schema
- * loading state internally and notifies the parent (via onUpdate) whenever the
- * concept or properties change.
+ * Rendered inside each active stage card in StageList. The concept is implicit
+ * from the stage bracket's graph metadata (stageConceptId = target_id from the
+ * CONTAINS edge); there is no concept picker. The schema for stageConceptId is
+ * fetched automatically on mount and renders a PropertyForm for optional
+ * stage-level properties.
  *
- * The parent (ScoreViewer) owns the canonical SubPartTag state and clears it on
- * concept/refinement changes via the resetKey prop — when resetKey changes the
- * form resets to an empty state.
+ * If the stage concept has no applicable PropertySchemas, the form renders
+ * nothing (zero schemas → no visible content). An unfilled or schema-less stage
+ * still produces a child fragment with summary.properties: {} at submission.
  *
- * Phase 1 scope: one visible level of nesting. Sub-sub-part forms are not
- * rendered (two-level display limit; ADR-011 §3).
+ * The parent (ScoreViewer) owns the canonical SubPartTag state. resetKey
+ * increments clear the property values when the main concept changes.
+ *
+ * Phase 1 scope: one visible level of nesting (two-level display limit,
+ * ADR-011 §3).
  *
  * References: tagging-tool-design.md §5.4, ADR-011 §1 §3.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getConceptSchemas } from '../../services/conceptApi';
-import type { ConceptSearchHit, ConceptSchemaTree } from '../../services/conceptApi';
+import type { ConceptSchemaTree } from '../../services/conceptApi';
 import type { SubPartTag } from './stages';
-import ConceptPicker from './ConceptPicker';
 import PropertyForm from './PropertyForm';
 import type { PropertyFormValues } from './PropertyForm';
 import Type from '../ui/Type';
@@ -31,24 +34,28 @@ import styles from './SubPartForm.module.css';
 // ---------------------------------------------------------------------------
 
 export interface SubPartFormProps {
-  /** Stable identity for the stage this form tags. */
+  /** Stable identity for the stage this form tags; also the concept id. */
   stageId: string;
-  /** Human-readable stage name shown in the remove-button aria-label. */
+  /** Human-readable stage name for accessibility labels. */
   stageName: string;
   /**
-   * Initial tag when the form mounts (null = no tag yet). The form is
+   * The stage's implicit concept id (= stageId / target_id from CONTAINS edge).
+   * Used to fetch the schema on mount. Never changes for a given stage.
+   */
+  stageConceptId: string;
+  /**
+   * Initial tag when the form mounts (null = no stored values). The form is
    * uncontrolled after mount; the parent clears by changing resetKey.
    */
   initialTag: SubPartTag | null;
   /**
-   * Incremented by the parent to reset the form to empty state. Typical
-   * trigger: the main concept or Type Refinement changes, making any
-   * existing sub-part tags obsolete.
+   * Incremented by the parent to reset property values. Typical trigger: the
+   * main concept or Type Refinement changes.
    */
   resetKey: number;
   /**
-   * Called whenever the concept or properties change. Passes null when the
-   * tag is cleared (concept deselected or Remove button clicked).
+   * Called whenever property values change. Passes null only when resetKey
+   * clears the form while the schema has not yet loaded.
    */
   onUpdate: (stageId: string, tag: SubPartTag | null) => void;
 }
@@ -60,156 +67,108 @@ export interface SubPartFormProps {
 export default function SubPartForm({
   stageId,
   stageName,
+  stageConceptId,
   initialTag,
   resetKey,
   onUpdate,
 }: SubPartFormProps) {
-  const [concept, setConcept] = useState<ConceptSearchHit | null>(initialTag?.concept ?? null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(
     initialTag?.schemaTree ?? null,
   );
   const [propertyValues, setPropertyValues] = useState<PropertyFormValues>(
     initialTag?.propertyValues ?? {},
   );
-  const [isLoadingSchema, setIsLoadingSchema] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
 
-  // Stable refs so callbacks built during the async schema fetch read the
-  // latest concept without stale closures.
-  const conceptRef = useRef<ConceptSearchHit | null>(concept);
-  const schemaTreeRef = useRef<ConceptSchemaTree | null>(schemaTree);
+  // Track whether the schema fetch is still relevant (guards stale async results).
+  const fetchIdRef = useRef(0);
 
-  // Reset all local state when the parent increments resetKey.
+  // Fetch schema on mount (or if stageConceptId ever changes, which it won't in
+  // Phase 1 since stages are fixed after concept selection).
+  useEffect(() => {
+    // If initialTag already carries a fully loaded schema, skip the fetch.
+    if (initialTag?.schemaTree) return;
+
+    const fetchId = ++fetchIdRef.current;
+    setIsLoading(true);
+    setSchemaError(null);
+
+    getConceptSchemas(stageConceptId)
+      .then(tree => {
+        if (fetchId !== fetchIdRef.current) return; // stale
+        setSchemaTree(tree);
+        // Notify parent with the loaded schema; property values stay as-is.
+        onUpdate(stageId, { schemaTree: tree, propertyValues });
+      })
+      .catch(() => {
+        if (fetchId !== fetchIdRef.current) return;
+        setSchemaError('Could not load stage schema.');
+      })
+      .finally(() => {
+        if (fetchId !== fetchIdRef.current) return;
+        setIsLoading(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageConceptId]);
+
+  // Reset property values when the parent increments resetKey.
   const prevResetKeyRef = useRef(resetKey);
   if (prevResetKeyRef.current !== resetKey) {
     prevResetKeyRef.current = resetKey;
-    // Synchronous state reset during render (avoids extra render round-trip
-    // and prevents stale concept refs from firing onUpdate after reset).
-    setConcept(null);
-    setSchemaTree(null);
     setPropertyValues({});
-    setSchemaError(null);
-    setIsLoadingSchema(false);
-    conceptRef.current = null;
-    schemaTreeRef.current = null;
+    // Signal the parent that this stage's tag is now empty (schema stays if
+    // already loaded — the stage concept hasn't changed, only the main concept
+    // that triggered the reset).
+    onUpdate(stageId, schemaTree ? { schemaTree, propertyValues: {} } : null);
   }
 
-  const handleConceptSelect = useCallback(
-    async (selected: ConceptSearchHit | null) => {
-      if (!selected) {
-        setConcept(null);
-        setSchemaTree(null);
-        setPropertyValues({});
-        setSchemaError(null);
-        conceptRef.current = null;
-        schemaTreeRef.current = null;
-        onUpdate(stageId, null);
-        return;
-      }
+  const handlePropertyChange = (vals: PropertyFormValues) => {
+    setPropertyValues(vals);
+    if (schemaTree) {
+      onUpdate(stageId, { schemaTree, propertyValues: vals });
+    }
+  };
 
-      setConcept(selected);
-      conceptRef.current = selected;
-      setPropertyValues({});
-      setSchemaError(null);
-
-      setIsLoadingSchema(true);
-      try {
-        const tree = await getConceptSchemas(selected.id);
-        // Guard: user may have already cleared the concept before the fetch
-        // resolved. If so, conceptRef was set to null — discard this result.
-        if (!conceptRef.current) return;
-        setSchemaTree(tree);
-        schemaTreeRef.current = tree;
-        onUpdate(stageId, { concept: selected, schemaTree: tree, propertyValues: {} });
-      } catch {
-        if (!conceptRef.current) return;
-        setSchemaError('Could not load schema. Try again.');
-        schemaTreeRef.current = null;
-        onUpdate(stageId, { concept: selected, schemaTree: null, propertyValues: {} });
-      } finally {
-        setIsLoadingSchema(false);
-      }
-    },
-    [stageId, onUpdate],
-  );
-
-  const handlePropertyChange = useCallback(
-    (vals: PropertyFormValues) => {
-      setPropertyValues(vals);
-      if (conceptRef.current) {
-        onUpdate(stageId, {
-          concept: conceptRef.current,
-          schemaTree: schemaTreeRef.current,
-          propertyValues: vals,
-        });
-      }
-    },
-    [stageId, onUpdate],
-  );
-
-  const handleRemove = useCallback(() => {
-    setConcept(null);
-    setSchemaTree(null);
-    setPropertyValues({});
-    setSchemaError(null);
-    conceptRef.current = null;
-    schemaTreeRef.current = null;
-    onUpdate(stageId, null);
-  }, [stageId, onUpdate]);
-
-  // Keep refs in sync with state after external resets (resetKey path updates
-  // refs synchronously above, but keep this as a fallback guard).
-  useEffect(() => {
-    conceptRef.current = concept;
-    schemaTreeRef.current = schemaTree;
-  }, [concept, schemaTree]);
-
-  return (
-    <div className={styles.form} data-testid={`sub-part-form-${stageId}`}>
-      {/* Header row: "Sub-part tag" label + Remove button */}
-      <div className={styles.header}>
-        <Type variant="label-sm" as="span" className={styles.heading}>
-          Sub-part tag
-        </Type>
-        {concept && (
-          <button
-            type="button"
-            className={styles.removeBtn}
-            onClick={handleRemove}
-            aria-label={`Remove sub-part tag from ${stageName}`}
-            data-testid={`sub-part-remove-${stageId}`}
-          >
-            Remove
-          </button>
-        )}
-      </div>
-
-      {/* Concept picker */}
-      <ConceptPicker
-        selectedConceptId={concept?.id ?? null}
-        onSelect={handleConceptSelect}
-      />
-
-      {/* Schema loading / error status */}
-      {isLoadingSchema && (
+  // Nothing to show while loading or if there are no schemas.
+  if (isLoading) {
+    return (
+      <div className={styles.form} data-testid={`sub-part-form-${stageId}`}>
         <Type variant="label-sm" as="p" className={styles.status}>
-          Loading schema…
+          Loading…
         </Type>
-      )}
-      {schemaError && (
+      </div>
+    );
+  }
+
+  if (schemaError) {
+    return (
+      <div className={styles.form} data-testid={`sub-part-form-${stageId}`}>
         <Type variant="label-sm" as="p" className={styles.error} role="alert">
           {schemaError}
         </Type>
-      )}
+      </div>
+    );
+  }
 
-      {/* Property form — rendered only when the concept has applicable schemas */}
-      {schemaTree && schemaTree.schemas.length > 0 && (
-        <PropertyForm
-          schemas={schemaTree.schemas}
-          values={propertyValues}
-          onChange={handlePropertyChange}
-        />
-      )}
+  if (!schemaTree || schemaTree.schemas.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      className={styles.form}
+      data-testid={`sub-part-form-${stageId}`}
+      aria-label={`Stage properties for ${stageName}`}
+    >
+      <Type variant="label-sm" as="span" className={styles.heading}>
+        Stage properties
+      </Type>
+      <PropertyForm
+        schemas={schemaTree.schemas}
+        values={propertyValues}
+        onChange={handlePropertyChange}
+      />
     </div>
   );
 }
