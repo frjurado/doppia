@@ -225,9 +225,7 @@ async def validation_exception_handler(
     """
     # Pydantic v2 puts the raw exception object in ctx["error"]; strip it to
     # strings so JSONResponse can serialize the error list.
-    serializable_errors = json.loads(
-        json.dumps(exc.errors(include_url=False), default=str)
-    )
+    serializable_errors = json.loads(json.dumps(exc.errors(), default=str))
     body = ErrorResponse.make(
         code=ErrorCode.VALIDATION_ERROR,
         message="Request validation failed.",
