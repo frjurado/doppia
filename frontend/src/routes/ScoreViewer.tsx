@@ -1086,6 +1086,8 @@ export default function ScoreViewer() {
           subPartTags={subPartTags}
           onSubPartTagUpdate={handleSubPartTagUpdate}
           subPartResetKey={subPartResetKey}
+          movementId={movementId}
+          selectionRange={selectionRange}
         />
 
         {/* Re-render overlay: sits above both panels while options change */}

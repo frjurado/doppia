@@ -43,13 +43,14 @@ import type {
   ConceptSearchHit,
   TypeRefinementChild,
 } from '../../services/conceptApi';
-import type { AnnotationSession } from './annotator';
+import type { AnnotationSession, SelectionRange } from './annotator';
 import type { AnnotationFlags } from './annotator';
 import type { StageAssignment, SubPartTag } from './stages';
 import ConceptPicker from './ConceptPicker';
 import TypeRefinement from './TypeRefinement';
 import StageList from './StageList';
 import PropertyForm from './PropertyForm';
+import HarmonyPanel from './HarmonyPanel';
 import type { PropertyFormValues } from './PropertyForm';
 import { carryOverValues, computeIsComplete } from './propertyFormHelpers';
 import Type from '../ui/Type';
@@ -101,6 +102,13 @@ export interface FormPanelProps {
   onSubPartTagUpdate?: (stageId: string, tag: SubPartTag | null) => void;
   /** Incremented when all sub-part forms should reset (concept change). */
   subPartResetKey?: number;
+
+  // ── Step 16: Harmony panel ──────────────────────────────────────────────
+
+  /** UUID of the movement currently displayed. Needed to fetch harmony events. */
+  movementId?: string | null;
+  /** Committed selection range; used to slice harmony events by bar range. */
+  selectionRange?: SelectionRange | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +127,8 @@ export default function FormPanel({
   subPartTags,
   onSubPartTagUpdate,
   subPartResetKey,
+  movementId,
+  selectionRange,
 }: FormPanelProps) {
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -275,9 +285,26 @@ export default function FormPanel({
         </section>
       )}
 
-      {/* ── Placeholder for Steps 16–18 ──────────────────────────────── */}
-      {/* Harmony panel (Step 16), prose field (Step 17), and submission
-          checklist (Step 18) are added in their respective steps. */}
+      {/* ── Section: Harmony ─────────────────────────────────────────── */}
+      {/* Rendered when a selection is committed and a movement is loaded.
+          Reads movement_analysis events sliced by the selection bar range;
+          lets the annotator confirm, edit, insert, and delete events so the
+          approval gate can pass (Step 16). */}
+      {flags.fragmentSet && movementId && (
+        <section className={styles.section}>
+          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+            Harmony
+          </Type>
+          <HarmonyPanel
+            movementId={movementId}
+            selectionRange={selectionRange ?? null}
+          />
+        </section>
+      )}
+
+      {/* ── Placeholder for Steps 17–18 ──────────────────────────────── */}
+      {/* Prose field (Step 17) and submission checklist (Step 18) are
+          added in their respective steps. */}
       {!flags.fragmentSet && (
         <div className={styles.noSelectionHint}>
           <Type variant="label-sm" as="p" className={styles.hintText}>
