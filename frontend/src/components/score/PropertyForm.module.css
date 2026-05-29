@@ -41,11 +41,9 @@
   position: relative;
 }
 
-/* Schema name line — bold label with optional required marker. */
+/* Schema name line — bold label with optional required marker and inline ⓘ.
+   Inline (not flex) so the ⓘ trails after the last word when the name wraps. */
 .fieldLabel {
-  display: flex;
-  align-items: baseline;
-  gap: var(--spacing-1);
   color: var(--color-on-surface);
   font-weight: 600;
 }
@@ -54,18 +52,21 @@
 .required {
   color: var(--color-error, #b3261e);
   font-size: 0.875em;
+  margin-left: 0.15em;
 }
 
-/* ⓘ button that reveals the schema description on hover / click. */
+/* ⓘ button that reveals the schema description on hover / click.
+   Inline after the name text, muted so it doesn't compete for attention. */
 .descButton {
   background: transparent;
   border: 0;
   cursor: pointer;
-  color: var(--color-primary);
+  color: var(--color-on-surface-variant);
   font-size: 0.75rem;
-  padding: 0 var(--spacing-1);
+  padding: 0;
+  margin-left: 0.3em;
   line-height: 1;
-  flex-shrink: 0;
+  vertical-align: middle;
 }
 
 .descButton:hover {
@@ -216,13 +217,11 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  color: var(--color-primary);
+  color: var(--color-on-surface-variant);
   font-size: 0.75rem;
   padding: 0 var(--spacing-1);
   line-height: 1;
   flex-shrink: 0;
-
-  /* Ensure it is within the label's tap target but visually distinct. */
 }
 
 .infoButton:hover {
