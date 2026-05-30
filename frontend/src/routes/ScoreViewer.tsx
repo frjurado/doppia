@@ -4,7 +4,7 @@ import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
 import { buildGhosts } from '../components/score/ghosts';
-import type { GhostLayer } from '../components/score/ghosts';
+import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
 import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
 import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
@@ -315,6 +315,9 @@ export default function ScoreViewer() {
     stagesComplete: false,
     propertiesComplete: false,
   });
+
+  // ── Ghost resolution toggle (Step 10) ────────────────────────────────────
+  const [resolution, setResolution] = useState<ResolutionMode>('measure');
 
   // ── Stage state (Step 14) ─────────────────────────────────────────────────
   // Stage assignments are owned here (not in FormPanel) because they must be
@@ -709,7 +712,6 @@ export default function ScoreViewer() {
     }
 
     const mei       = meiTextRef.current;
-    const tk        = tkRef.current;
     const container = scorePanelRef.current;
 
     // Teardown: destroy the previous session and layer before building new
@@ -737,7 +739,7 @@ export default function ScoreViewer() {
     setSubPartResetKey(k => k + 1);
 
     // Build the new ghost layer over the currently rendered SVG.
-    const layer = buildGhosts(container, mei, tk);
+    const layer = buildGhosts(container, mei);
     ghostLayerRef.current = layer;
     setGhostLayer(layer);
 
@@ -774,6 +776,13 @@ export default function ScoreViewer() {
   // svgPages reference changes on every page addition/replace — this is the
   // intended trigger; status gates the effect from running during loading.
   }, [status, svgPages]);
+
+  // Forward resolution changes to the active annotation session (Step 10).
+  // The session handles the no-op case when the mode is unchanged, and cancels
+  // any in-progress drag so a mid-drag toggle does not leave highlight state.
+  useEffect(() => {
+    annotationSessionRef.current?.setResolution(resolution);
+  }, [resolution]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -992,6 +1001,43 @@ export default function ScoreViewer() {
                 </option>
               ))}
             </select>
+          </div>
+          {/* Resolution toggle — Measure / Beat / Sub-beat */}
+          <div
+            className={styles.resolutionControl}
+            role="group"
+            aria-label="Selection resolution"
+          >
+            <Type
+              variant="label-md"
+              as="span"
+              style={{ color: 'var(--color-on-surface-variant)' }}
+            >
+              Select
+            </Type>
+            {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((mode) => {
+              const LABELS: Record<ResolutionMode, string> = {
+                measure: 'Measure',
+                beat: 'Beat',
+                subbeat: 'Sub-beat',
+              };
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  className={[
+                    styles.resolutionButton,
+                    resolution === mode ? styles.resolutionButtonActive : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  onClick={() => setResolution(mode)}
+                  aria-pressed={resolution === mode}
+                >
+                  <Type variant="label-sm" as="span">{LABELS[mode]}</Type>
+                </button>
+              );
+            })}
           </div>
         </div>
 

@@ -151,8 +151,8 @@ export interface NotePositionInput {
   /** Pixel x of the leftmost part of the notehead, relative to the container. */
   xLeft: number;
   /**
-   * Score-time onset in quarter-note units (absolute from piece start).
-   * Verovio's getTimesForElement() returns this value.
+   * Score-time onset in quarter-note units, relative to the measure start.
+   * 0 = first beat of the measure; 1 = one quarter note in, etc.
    */
   scoreTimeOnset: number;
   /**
@@ -366,21 +366,6 @@ export interface SubBeatGhostEntry {
 /** Which ghost layer receives pointer events (resolution toggle, ADR-005). */
 export type ResolutionMode = 'measure' | 'beat' | 'subbeat';
 
-// ---------------------------------------------------------------------------
-// Verovio toolkit subset needed by this module
-// ---------------------------------------------------------------------------
-
-/**
- * Minimal Verovio toolkit interface for the ghost layer.
- *
- * getTimesForElement returns [scoreTimeOnset, scoreTimeDuration, ...] in
- * quarter-note units (quarter note = 1.0), as stated in
- * prototype-tagging-tool.md §"Onset values and measure-local conversion".
- * A duration of 0 indicates a grace note.
- */
-export interface GhostToolkitLike {
-  getTimesForElement(id: string): number[];
-}
 
 // ---------------------------------------------------------------------------
 // GhostLayer class
@@ -604,6 +589,35 @@ function parseGlobalMeter(meiDoc: Document): [number, number] {
   return [4, 4];
 }
 
+/**
+ * Extract the PPQ-per-quarter-note resolution from the MEI document.
+ *
+ * MuseScore's MEI export sets @ppq on every <staffDef>. The ghost layer reads
+ * this once and uses it to convert accumulated @dur.ppq values into
+ * quarter-note onset positions — no Verovio API calls required.
+ *
+ * Fallback: infer from the first rhythmic element that carries both @dur and
+ * @dur.ppq (ppqPerQn = dur.ppq × dur / 4).
+ */
+function parsePpqPerQn(meiDoc: Document): number {
+  const staffDefs = meiDoc.getElementsByTagName('staffDef');
+  for (let i = 0; i < staffDefs.length; i++) {
+    const ppq = parseInt(staffDefs[i].getAttribute('ppq') ?? '', 10);
+    if (!isNaN(ppq) && ppq > 0) return ppq;
+  }
+  for (const tag of ['note', 'chord', 'rest']) {
+    const els = meiDoc.getElementsByTagName(tag);
+    for (let i = 0; i < els.length; i++) {
+      const dur    = parseInt(els[i].getAttribute('dur')     ?? '', 10);
+      const durPpq = parseInt(els[i].getAttribute('dur.ppq') ?? '', 10);
+      if (!isNaN(dur) && dur > 0 && !isNaN(durPpq) && durPpq > 0) {
+        return Math.round(durPpq * dur / 4);
+      }
+    }
+  }
+  return 8; // conservative fallback
+}
+
 // ---------------------------------------------------------------------------
 // Adjusted mLeft: skip system decorations
 // ---------------------------------------------------------------------------
@@ -725,6 +739,96 @@ function staffLineBounds(
 }
 
 // ---------------------------------------------------------------------------
+// Per-layer note collection (PPQ accumulation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk the direct children of one MEI <layer> element and collect a
+ * NotePositionInput for every real note (grace notes excluded).
+ *
+ * Uses @dur.ppq on each rhythmic event to accumulate the measure-local onset
+ * in PPQ units, then converts to quarter-note units with ppqPerQn. This avoids
+ * Verovio toolkit API calls and works with any MEI file that carries @dur.ppq
+ * (MuseScore exports always do — @ppq on <staffDef> sets the resolution).
+ *
+ * Handled containers:
+ *   note, chord   — advance accumulator by @dur.ppq; emit NotePositionInput
+ *   rest, mRest, space — advance accumulator, emit nothing
+ *   beam, tuplet, and all other elements — transparent: recurse into children
+ */
+function collectLayerNotes(
+  layerEl: Element,
+  ppqPerQn: number,
+  container: HTMLElement,
+  containerRect: DOMRect,
+  out: NotePositionInput[],
+): void {
+  function processEl(el: Element, ppq: number): number {
+    const tag = el.tagName.toLowerCase();
+
+    if (tag === 'note') {
+      const durPpq = parseInt(el.getAttribute('dur.ppq') ?? '0', 10);
+      if (durPpq > 0) {
+        const noteId = getMeiId(el);
+        if (noteId) {
+          const svgNote = container.querySelector(`[id="${noteId}"]`);
+          if (svgNote) {
+            const r = svgNote.getBoundingClientRect();
+            out.push({
+              xLeft:             r.left - containerRect.left,
+              scoreTimeOnset:    ppq / ppqPerQn,
+              scoreTimeDuration: durPpq / ppqPerQn,
+            });
+          }
+        }
+        return ppq + durPpq;
+      }
+      return ppq; // grace note (dur.ppq = 0 or absent)
+    }
+
+    if (tag === 'chord') {
+      const durPpq = parseInt(el.getAttribute('dur.ppq') ?? '0', 10);
+      if (durPpq > 0) {
+        // All notes in the chord share the same onset.
+        const childNotes = el.getElementsByTagName('note');
+        for (let i = 0; i < childNotes.length; i++) {
+          const noteId = getMeiId(childNotes[i]!);
+          if (noteId) {
+            const svgNote = container.querySelector(`[id="${noteId}"]`);
+            if (svgNote) {
+              const r = svgNote.getBoundingClientRect();
+              out.push({
+                xLeft:             r.left - containerRect.left,
+                scoreTimeOnset:    ppq / ppqPerQn,
+                scoreTimeDuration: durPpq / ppqPerQn,
+              });
+            }
+          }
+        }
+        return ppq + durPpq;
+      }
+      return ppq;
+    }
+
+    if (tag === 'rest' || tag === 'mrest' || tag === 'space') {
+      return ppq + parseInt(el.getAttribute('dur.ppq') ?? '0', 10);
+    }
+
+    // Transparent grouping containers (beam, tuplet, etc.): recurse into children.
+    let p = ppq;
+    for (let i = 0; i < el.children.length; i++) {
+      p = processEl(el.children[i]!, p);
+    }
+    return p;
+  }
+
+  let ppq = 0;
+  for (let i = 0; i < layerEl.children.length; i++) {
+    ppq = processEl(layerEl.children[i]!, ppq);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // buildGhosts — main factory
 // ---------------------------------------------------------------------------
 
@@ -739,17 +843,17 @@ function staffLineBounds(
  *
  * @param container The .scoreContent element (position: relative required).
  * @param meiText   Normalised MEI content string for the loaded score.
- * @param tk        Verovio toolkit instance with getTimesForElement available.
+ * @param tk        Verovio toolkit instance; getTimesForElement is called per note.
  */
 export function buildGhosts(
   container: HTMLElement,
   meiText: string,
-  tk: GhostToolkitLike,
 ): GhostLayer {
   const layer = new GhostLayer(container);
 
   const meiDoc = new DOMParser().parseFromString(meiText, 'text/xml');
   const [globalBeatCount, globalBeatUnit] = parseGlobalMeter(meiDoc);
+  const ppqPerQn = parsePpqPerQn(meiDoc);
   const containerRect = container.getBoundingClientRect();
 
   // ── Phase 1: collect per-measure geometry and timing data ─────────────────
@@ -782,24 +886,19 @@ export function buildGhosts(
       meiMeasure, globalBeatCount, globalBeatUnit,
     );
 
-    const msrTimes        = tk.getTimesForElement(measureId);
-    const measureStartTime = msrTimes[0] ?? 0;
+    // scoreTimeOnset from PPQ accumulation is 0-indexed from measure start, so
+    // measureStartTime = 0 (computeBeatBoundaries subtracts it for localOnset).
+    const measureStartTime = 0;
 
+    // Collect note positions from all staves/layers via PPQ accumulation.
+    // This reads @dur.ppq on each rhythmic event — no Verovio API call per note.
     const noteInputs: NotePositionInput[] = [];
-    const meiNotes = meiMeasure.getElementsByTagName('note');
-    for (let ni = 0; ni < meiNotes.length; ni++) {
-      const meiNote = meiNotes[ni];
-      const noteId  = getMeiId(meiNote);
-      if (!noteId) continue;
-      const times   = tk.getTimesForElement(noteId);
-      const svgNote = container.querySelector(`[id="${noteId}"]`);
-      if (!svgNote) continue;
-      const noteRect = svgNote.getBoundingClientRect();
-      noteInputs.push({
-        xLeft:             noteRect.left - containerRect.left,
-        scoreTimeOnset:    times[0] ?? 0,
-        scoreTimeDuration: times[1] ?? 0,
-      });
+    const staffEls = meiMeasure.getElementsByTagName('staff');
+    for (let si = 0; si < staffEls.length; si++) {
+      const layerEls = staffEls[si]!.getElementsByTagName('layer');
+      for (let li = 0; li < layerEls.length; li++) {
+        collectLayerNotes(layerEls[li]!, ppqPerQn, container, containerRect, noteInputs);
+      }
     }
 
     measureInfos.push({

@@ -161,6 +161,38 @@
   color: var(--color-on-surface-variant);
 }
 
+/* ── Resolution toggle (Measure / Beat / Sub-beat) ──────────────────────── */
+
+.resolutionControl {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+/* Inactive segment: low-surface tonal band, no border. */
+.resolutionButton {
+  background-color: var(--color-surface-container-low);
+  border: 0;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.resolutionButton:hover {
+  color: var(--color-on-surface);
+}
+
+/* Active segment: one step up the tonal ladder to signal selection. */
+.resolutionButtonActive {
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
 /* ── Narrow-screen notice ─────────────────────────────────────────────────── */
 
 /* Shown when the score panel is narrower than 480px. */
