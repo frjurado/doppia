@@ -303,6 +303,7 @@ export class AnnotationSession {
   // Highlighted ghost tracking — Set-based, never a full-DOM scan.
   private readonly _litGhosts = new Set<HTMLElement>();
   private readonly _darkGhosts = new Set<HTMLElement>();
+  private _hoverGhost: HTMLElement | null = null;
 
   // Current committed selection (updated on mouseup).
   private _selection: SelectionRange | null = null;
@@ -390,6 +391,10 @@ export class AnnotationSession {
   destroy(): void {
     for (const remove of this._cleanup) remove();
     this._cleanup.length = 0;
+    if (this._hoverGhost) {
+      removeClass(this._hoverGhost, 'light');
+      this._hoverGhost = null;
+    }
     this._clearAllHighlights();
   }
 
@@ -408,16 +413,19 @@ export class AnnotationSession {
 
     const onMouseDown = (e: MouseEvent) => this._handleMouseDown(e);
     const onMouseOver = (e: MouseEvent) => this._handleMouseOver(e);
+    const onMouseLeave = () => this._handleMouseLeave();
     const onMouseUp = () => this._handleMouseUp();
 
     overlay.addEventListener('mousedown', onMouseDown);
     overlay.addEventListener('mouseover', onMouseOver);
+    overlay.addEventListener('mouseleave', onMouseLeave);
     // mouseup on document catches pointer releases outside the overlay.
     document.addEventListener('mouseup', onMouseUp);
 
     this._cleanup.push(
       () => overlay.removeEventListener('mousedown', onMouseDown),
       () => overlay.removeEventListener('mouseover', onMouseOver),
+      () => overlay.removeEventListener('mouseleave', onMouseLeave),
       () => document.removeEventListener('mouseup', onMouseUp),
     );
   }
@@ -425,6 +433,10 @@ export class AnnotationSession {
   // ── Private: event handlers ────────────────────────────────────────────────
 
   private _handleMouseDown(e: MouseEvent): void {
+    if (this._hoverGhost) {
+      removeClass(this._hoverGhost, 'light');
+      this._hoverGhost = null;
+    }
     const ghost = ghostFromTarget(e.target);
     if (!ghost) return;
     const key = ghostDataKey(ghost);
@@ -447,8 +459,17 @@ export class AnnotationSession {
   }
 
   private _handleMouseOver(e: MouseEvent): void {
-    if (!this._dragging) return;
     const ghost = ghostFromTarget(e.target);
+
+    if (!this._dragging) {
+      if (ghost !== this._hoverGhost) {
+        if (this._hoverGhost) removeClass(this._hoverGhost, 'light');
+        this._hoverGhost = ghost;
+        if (ghost) addClass(ghost, 'light');
+      }
+      return;
+    }
+
     if (!ghost) return;
     const key = ghostDataKey(ghost);
     if (key === null) return;
@@ -464,6 +485,13 @@ export class AnnotationSession {
       if (!ghost.classList.contains('ghost-subbeat')) return;
       const numKey = parseInt(key, 10);
       if (!isNaN(numKey)) this._updateSubBeatDrag(numKey);
+    }
+  }
+
+  private _handleMouseLeave(): void {
+    if (this._hoverGhost) {
+      removeClass(this._hoverGhost, 'light');
+      this._hoverGhost = null;
     }
   }
 
@@ -489,14 +517,12 @@ export class AnnotationSession {
         if (key === lastKey) {
           this._dragging = true;
           this._anchorMeasureKey = firstKey;
-          this._clearLight();
           this._updateMeasureDrag(key);
           return;
         }
         if (key === firstKey) {
           this._dragging = true;
           this._anchorMeasureKey = lastKey;
-          this._clearLight();
           this._updateMeasureDrag(key);
           return;
         }
@@ -519,12 +545,12 @@ export class AnnotationSession {
       this._barriers,
     );
 
-    this._clearLight();
+    this._clearDark();
     for (const k of range) {
       const entry = this._layer.measureIndex.get(k);
       if (entry) {
-        addClass(entry.el, 'light');
-        this._litGhosts.add(entry.el);
+        addClass(entry.el, 'dark');
+        this._darkGhosts.add(entry.el);
       }
     }
   }
@@ -532,9 +558,9 @@ export class AnnotationSession {
   private _commitMeasureDrag(): void {
     if (!this._anchorMeasureKey) return;
 
-    // Collect the currently lit measure ghosts in document order.
+    // Collect the currently dark measure ghosts in document order.
     const entries: MeasureGhostEntry[] = [];
-    for (const el of this._litGhosts) {
+    for (const el of this._darkGhosts) {
       const key = ghostDataKey(el);
       if (key !== null) {
         const entry = this._layer.measureIndex.get(key);
@@ -552,7 +578,6 @@ export class AnnotationSession {
     const first = entries[0]!;
     const last = entries[entries.length - 1]!;
 
-    this._clearLight();
     this._clearDark();
     for (const entry of entries) {
       addClass(entry.el, 'dark');
@@ -590,14 +615,12 @@ export class AnnotationSession {
         if (key === lastKey) {
           this._dragging = true;
           this._anchorBeatKey = firstKey;
-          this._clearLight();
           this._updateBeatDrag(key);
           return;
         }
         if (key === firstKey) {
           this._dragging = true;
           this._anchorBeatKey = lastKey;
-          this._clearLight();
           this._updateBeatDrag(key);
           return;
         }
@@ -618,12 +641,12 @@ export class AnnotationSession {
       this._orderedBeatKeys,
     );
 
-    this._clearLight();
+    this._clearDark();
     for (const k of range) {
       const entry = this._layer.beatIndex.get(k);
       if (entry) {
-        addClass(entry.el, 'light');
-        this._litGhosts.add(entry.el);
+        addClass(entry.el, 'dark');
+        this._darkGhosts.add(entry.el);
       }
     }
   }
@@ -632,7 +655,7 @@ export class AnnotationSession {
     if (this._anchorBeatKey === null) return;
 
     const entries: BeatGhostEntry[] = [];
-    for (const el of this._litGhosts) {
+    for (const el of this._darkGhosts) {
       const key = ghostDataKey(el);
       if (key !== null) {
         const numKey = parseInt(key, 10);
@@ -656,7 +679,6 @@ export class AnnotationSession {
     // the next beat float after the last selected beat (+1 step).
     const beatEnd = last.beatFloat + 1.0;
 
-    this._clearLight();
     this._clearDark();
     for (const entry of entries) {
       addClass(entry.el, 'dark');
@@ -694,14 +716,12 @@ export class AnnotationSession {
         if (key === lastKey) {
           this._dragging = true;
           this._anchorSubBeatKey = firstKey;
-          this._clearLight();
           this._updateSubBeatDrag(key);
           return;
         }
         if (key === firstKey) {
           this._dragging = true;
           this._anchorSubBeatKey = lastKey;
-          this._clearLight();
           this._updateSubBeatDrag(key);
           return;
         }
@@ -722,12 +742,12 @@ export class AnnotationSession {
       this._orderedSubBeatKeys,
     );
 
-    this._clearLight();
+    this._clearDark();
     for (const k of range) {
       const entry = this._layer.subBeatIndex.get(k);
       if (entry) {
-        addClass(entry.el, 'light');
-        this._litGhosts.add(entry.el);
+        addClass(entry.el, 'dark');
+        this._darkGhosts.add(entry.el);
       }
     }
   }
@@ -736,7 +756,7 @@ export class AnnotationSession {
     if (this._anchorSubBeatKey === null) return;
 
     const entries: SubBeatGhostEntry[] = [];
-    for (const el of this._litGhosts) {
+    for (const el of this._darkGhosts) {
       const key = ghostDataKey(el);
       if (key !== null) {
         const numKey = parseInt(key, 10);
@@ -763,7 +783,6 @@ export class AnnotationSession {
     }
     const beatEnd = last.beatFloat + subBeatStep;
 
-    this._clearLight();
     this._clearDark();
     for (const entry of entries) {
       addClass(entry.el, 'dark');
@@ -809,11 +828,12 @@ export class AnnotationSession {
   }
 
   private _cancelDrag(): void {
+    const wasDragging = this._dragging;
     this._dragging = false;
     this._anchorMeasureKey = null;
     this._anchorBeatKey = null;
     this._anchorSubBeatKey = null;
-    this._clearLight();
+    if (wasDragging) this._clearDark();
   }
 
   // ── Private: highlight management ─────────────────────────────────────────

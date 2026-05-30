@@ -327,12 +327,12 @@ describe('AnnotationSession — measure drag', () => {
     expect(session.selection?.barEnd).toBe(3);
   });
 
-  it('lights ghosts during drag', () => {
+  it('darks ghosts during drag', () => {
     els[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     els[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-    expect(els[0]!.classList.contains('light')).toBe(true);
-    expect(els[1]!.classList.contains('light')).toBe(true);
-    expect(els[2]!.classList.contains('light')).toBe(false);
+    expect(els[0]!.classList.contains('dark')).toBe(true);
+    expect(els[1]!.classList.contains('dark')).toBe(true);
+    expect(els[2]!.classList.contains('dark')).toBe(false);
     // Release without committing to any ghost.
     document.dispatchEvent(new MouseEvent('mouseup'));
   });
