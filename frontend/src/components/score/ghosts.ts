@@ -940,9 +940,6 @@ export function buildGhosts(
     const sBounds    = staffLineBounds(system, containerRect);
     const ghostHeight = sBounds.bottom - sBounds.top;
 
-    const beatH = Math.max(16, Math.floor(ghostHeight * 0.25));
-    const subH  = Math.max(12, Math.floor(ghostHeight * 0.18));
-
     for (const info of system) {
       const { mLeft, mRight, barN, endingN,
               noteInputs, beatCount, beatUnit, measureStartTime } = info;
@@ -977,7 +974,7 @@ export function buildGhosts(
         const encKey    = encodeBeat(barN, b);
 
         const beatBounds: GhostBounds = {
-          left: bLeft, top: sBounds.top, width: bRight - bLeft, height: beatH,
+          left: bLeft, top: sBounds.top, width: bRight - bLeft, height: ghostHeight,
         };
         const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
         layer._appendBeatGhost(beatEl);
@@ -998,7 +995,7 @@ export function buildGhosts(
           const sbEncKey = encodeSubBeat(barN, b, sb);
 
           const sbBounds: GhostBounds = {
-            left: sbLeft, top: sBounds.top, width: sbRight - sbLeft, height: subH,
+            left: sbLeft, top: sBounds.top, width: sbRight - sbLeft, height: ghostHeight,
           };
           const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
           layer._appendSubBeatGhost(sbEl);
