@@ -337,6 +337,11 @@ export default function ScoreViewer() {
   const [subPartTags, setSubPartTags] = useState<Record<string, SubPartTag | null>>({});
   const [subPartResetKey, setSubPartResetKey] = useState(0);
 
+  // ── Prose annotation (Step 17) ────────────────────────────────────────────
+  // Owned here so the submission payload (Step 18) can read it alongside the
+  // selection, concept, and stage data.
+  const [proseAnnotation, setProseAnnotation] = useState<string>('');
+
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
    * Called by useMidiPlayback on each animation frame. Binary-searches the
@@ -1134,6 +1139,8 @@ export default function ScoreViewer() {
           subPartResetKey={subPartResetKey}
           movementId={movementId}
           selectionRange={selectionRange}
+          proseAnnotation={proseAnnotation}
+          onProseChange={setProseAnnotation}
         />
 
         {/* Re-render overlay: sits above both panels while options change */}

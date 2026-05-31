@@ -6,7 +6,9 @@
  *   §7.2 TypeRefinement — radio group when children differ structurally
  *   §7.3 StageList      — stage cards with bounds display and absent toggle
  *   §7.4 PropertyForm   — dynamic property form driven by schema tree (Step 13)
- *   (Steps 16–18 add Harmony panel, Prose field, Submission checklist.)
+ *   Step 16 HarmonyPanel — harmony event review and edit
+ *   Step 17 Prose field   — free-text commentary (prose_annotation)
+ *   (Step 18 adds Submission checklist.)
  *
  * State ownership:
  *   selectedConcept    — this component; clears on concept deselect
@@ -109,6 +111,13 @@ export interface FormPanelProps {
   movementId?: string | null;
   /** Committed selection range; used to slice harmony events by bar range. */
   selectionRange?: SelectionRange | null;
+
+  // ── Step 17: Prose annotation ────────────────────────────────────────────
+
+  /** Current prose annotation text; owned by ScoreViewer. */
+  proseAnnotation?: string;
+  /** Called on every keystroke in the prose textarea. */
+  onProseChange?: (value: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +138,8 @@ export default function FormPanel({
   subPartResetKey,
   movementId,
   selectionRange,
+  proseAnnotation = '',
+  onProseChange,
 }: FormPanelProps) {
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -302,9 +313,36 @@ export default function FormPanel({
         </section>
       )}
 
-      {/* ── Placeholder for Steps 17–18 ──────────────────────────────── */}
-      {/* Prose field (Step 17) and submission checklist (Step 18) are
-          added in their respective steps. */}
+      {/* ── Section: Commentary ──────────────────────────────────────── */}
+      {/* Free-text prose annotation (fragment.prose_annotation). Rendered
+          once a selection is committed. Embeddings are generated in Phase 3;
+          Phase 1 persists the raw text only (Step 17). */}
+      {flags.fragmentSet && (
+        <section className={styles.section}>
+          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+            Commentary
+          </Type>
+          <label htmlFor="prose-annotation" className={styles.proseLabel}>
+            <Type variant="label-sm" as="span" className={styles.proseDescription}>
+              Expert commentary on this fragment. Stored verbatim; becomes the
+              searchable annotation corpus in Phase 3.
+            </Type>
+          </label>
+          <textarea
+            id="prose-annotation"
+            className={styles.proseTextarea}
+            value={proseAnnotation}
+            onChange={e => onProseChange?.(e.target.value)}
+            placeholder="Add analytical commentary…"
+            rows={5}
+            aria-label="Prose annotation"
+          />
+        </section>
+      )}
+
+      {/* ── Step 18: Submission checklist ────────────────────────────── */}
+      {/* Added in Step 18. */}
+
       {!flags.fragmentSet && (
         <div className={styles.noSelectionHint}>
           <Type variant="label-sm" as="p" className={styles.hintText}>
