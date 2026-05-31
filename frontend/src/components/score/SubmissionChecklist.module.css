@@ -101,14 +101,14 @@
   color: var(--color-on-background);
 }
 
-.saveDraftButton:hover:not(:disabled) {
-  background-color: var(--color-surface-container-highest);
-}
-
 .saveDraftButton:disabled {
   background-color: var(--color-surface-container);
   color: var(--color-on-surface-variant);
   cursor: not-allowed;
+}
+
+.saveDraftButton:hover:not(:disabled) {
+  background-color: var(--color-surface-container-highest);
 }
 
 /* Submit for Review: muted when not ready, primary-blue when all items clear */

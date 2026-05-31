@@ -33,13 +33,13 @@
   white-space: nowrap;
 }
 
-.confirmAllButton:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 10%, transparent);
-}
-
 .confirmAllButton:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.confirmAllButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 10%, transparent);
 }
 
 /* ── Status text ─────────────────────────────────────────────────────────── */
@@ -148,6 +148,13 @@
   color: var(--color-on-surface-variant, #41484d);
 }
 
+.actionConfirm:disabled,
+.actionEdit:disabled,
+.actionDelete:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .actionConfirm:hover:not(:disabled) {
   background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 12%, transparent);
   color: var(--color-primary, #3f5f77);
@@ -166,13 +173,6 @@
 .actionDelete:hover:not(:disabled) {
   background-color: color-mix(in srgb, var(--color-error, #b3261e) 10%, transparent);
   color: var(--color-error, #b3261e);
-}
-
-.actionConfirm:disabled,
-.actionEdit:disabled,
-.actionDelete:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 /* ── Inline edit form ────────────────────────────────────────────────────── */
@@ -280,13 +280,13 @@
   padding: var(--spacing-2) var(--spacing-4);
 }
 
-.saveButton:hover:not(:disabled) {
-  background-color: var(--color-primary-container, #587891);
-}
-
 .saveButton:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.saveButton:hover:not(:disabled) {
+  background-color: var(--color-primary-container, #587891);
 }
 
 .cancelButton {
@@ -297,13 +297,13 @@
   padding: var(--spacing-2) var(--spacing-3);
 }
 
-.cancelButton:hover:not(:disabled) {
-  background-color: var(--color-surface-container-highest, #e4e3da);
-}
-
 .cancelButton:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.cancelButton:hover:not(:disabled) {
+  background-color: var(--color-surface-container-highest, #e4e3da);
 }
 
 /* ── Add event button ────────────────────────────────────────────────────── */
