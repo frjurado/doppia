@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
-import { buildGhosts } from '../components/score/ghosts';
+import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
 import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
 import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
 import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
@@ -18,6 +18,7 @@ import {
   toggleStageAbsent,
 } from '../components/score/stages';
 import FormPanel from '../components/score/FormPanel';
+import type { FormSubmitData } from '../components/score/FormPanel';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
@@ -29,6 +30,14 @@ import styles from './ScoreViewer.module.css';
 import { transposeKey } from '../utils/transposeKey';
 import type { ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
 import { getConceptSchemas } from '../services/conceptApi';
+import {
+  createFragment,
+  updateFragment,
+  submitFragment,
+} from '../services/fragmentApi';
+import type { FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
+import { parseMeiKey, parseMeiMeter } from '../utils/meiParsing';
+import { ApiError } from '../services/api';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -306,8 +315,7 @@ export default function ScoreViewer() {
   // can react to selection and flag changes.
   const [ghostLayer, setGhostLayer] = useState<GhostLayer | null>(null);
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
-  // Populated at every commit; consumed by Part 4/5 form panels (Steps 12–18).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Populated at every commit; consumed by Part 5 submission handlers (Step 18).
   const [committedSelection, setCommittedSelection] = useState<CommittedSelection | null>(null);
   const [annotationFlags, setAnnotationFlags] = useState<AnnotationFlags>({
     fragmentSet: false,
@@ -341,6 +349,14 @@ export default function ScoreViewer() {
   // Owned here so the submission payload (Step 18) can read it alongside the
   // selection, concept, and stage data.
   const [proseAnnotation, setProseAnnotation] = useState<string>('');
+
+  // ── Submission state (Step 18) ────────────────────────────────────────────
+  // fragmentDraftId: UUID of the in-progress draft, set after the first
+  // successful create. Subsequent saves use PATCH; null = not yet saved.
+  const [fragmentDraftId, setFragmentDraftId] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
@@ -667,6 +683,184 @@ export default function ScoreViewer() {
       setSubPartTags(prev => ({ ...prev, [stageId]: tag }));
     },
     [],
+  );
+
+  // ── Submission handlers (Step 18) ────────────────────────────────────────
+
+  /**
+   * Resolve a bar number (MEI @n) to its 1-based document-order mc position.
+   * Falls back to the plain barN key when no ending context is needed, which
+   * covers the vast majority of sub-part bounds (within the main selection).
+   */
+  const resolveBarToMc = useCallback(
+    (barN: number): number | null => {
+      const idx = mcIndexRef.current;
+      if (!idx) return null;
+      // Try with no ending context first; sub-parts inherit the parent's
+      // ending context indirectly through their bar range.
+      const mc = idx.get(measureGhostKey(barN, null));
+      return mc ?? null;
+    },
+    [],
+  );
+
+  /**
+   * Build the mutable fragment fields from the current UI state.
+   *
+   * Returns a FragmentUpdatePayload (no movement_id) so it can be used
+   * directly for PATCH requests. The create handler spreads movement_id
+   * in when constructing the FragmentCreatePayload.
+   *
+   * Returns null when required coordinates or concept data are missing.
+   */
+  const buildPayload = useCallback(
+    (formData: FormSubmitData, meiText: string): FragmentUpdatePayload | null => {
+      if (!committedSelection) return null;
+
+      const key   = parseMeiKey(meiText);
+      const meter = parseMeiMeter(meiText);
+
+      // Serialize property values: omit nulls, booleans become "true"/"false".
+      const properties: Record<string, string | string[]> = {};
+      for (const [schemaId, val] of Object.entries(formData.propertyValues)) {
+        if (val === null || val === undefined) continue;
+        if (typeof val === 'boolean') {
+          properties[schemaId] = val ? 'true' : 'false';
+        } else {
+          properties[schemaId] = val;
+        }
+      }
+
+      // Build sub-parts from non-absent, non-orphaned, non-error stages that
+      // have committed bounds (Step 15, atomic parent+child write).
+      const subParts: SubPartPayload[] = [];
+      for (const a of stageAssignments) {
+        if (a.absent || a.orphaned || a.error || !a.bounds) continue;
+
+        const mcStart = resolveBarToMc(a.bounds.barStart);
+        const mcEnd   = resolveBarToMc(a.bounds.barEnd);
+        if (mcStart === null || mcEnd === null) continue;
+
+        const stageProps: Record<string, string | string[]> = {};
+        const tag = subPartTags[a.stageId];
+        if (tag) {
+          for (const [sid, val] of Object.entries(tag.propertyValues)) {
+            if (val === null || val === undefined) continue;
+            stageProps[sid] = typeof val === 'boolean' ? (val ? 'true' : 'false') : val;
+          }
+        }
+
+        subParts.push({
+          bar_start:      a.bounds.barStart,
+          bar_end:        a.bounds.barEnd,
+          mc_start:       mcStart,
+          mc_end:         mcEnd,
+          beat_start:     a.bounds.beatStart ?? null,
+          beat_end:       a.bounds.beatEnd   ?? null,
+          repeat_context: committedSelection.repeat_context,
+          summary: {
+            version:            1,
+            key,
+            meter,
+            music21_version:    null,
+            concepts:           [a.stageId],
+            properties:         stageProps,
+            concept_extensions: {},
+          },
+          concept_tags: [{ concept_id: a.stageId, is_primary: true }],
+        });
+      }
+
+      return {
+        bar_start:       committedSelection.bar_start,
+        bar_end:         committedSelection.bar_end,
+        mc_start:        committedSelection.mc_start,
+        mc_end:          committedSelection.mc_end,
+        beat_start:      committedSelection.beat_start,
+        beat_end:        committedSelection.beat_end,
+        repeat_context:  committedSelection.repeat_context,
+        summary: {
+          version:            1,
+          key,
+          meter,
+          music21_version:    null,
+          concepts:           [formData.conceptId],
+          properties,
+          concept_extensions: {},
+        },
+        prose_annotation: proseAnnotation || null,
+        concept_tags: [{ concept_id: formData.conceptId, is_primary: true }],
+        sub_parts:       subParts,
+      };
+    },
+    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc],
+  );
+
+  /** Save the current annotation as a draft (incompleteness allowed). */
+  const handleSaveDraft = useCallback(
+    async (formData: FormSubmitData) => {
+      const mei = meiTextRef.current;
+      if (!mei || !committedSelection || !movementId) return;
+
+      setIsSavingDraft(true);
+      setSubmitError(null);
+
+      try {
+        const fields = buildPayload(formData, mei);
+        if (!fields) throw new Error('Incomplete annotation — cannot save yet.');
+
+        if (fragmentDraftId) {
+          await updateFragment(fragmentDraftId, fields);
+        } else {
+          const response = await createFragment({ ...fields, movement_id: movementId });
+          setFragmentDraftId(response.id);
+        }
+      } catch (err) {
+        setSubmitError(err instanceof ApiError ? err.message : 'Failed to save draft.');
+      } finally {
+        setIsSavingDraft(false);
+      }
+    },
+    [committedSelection, movementId, fragmentDraftId, buildPayload],
+  );
+
+  /**
+   * Save the annotation and transition it to submitted status.
+   * Creates or updates the draft first, then calls POST .../submit.
+   * The server re-validates before accepting (never trust the client).
+   */
+  const handleSubmitFragment = useCallback(
+    async (formData: FormSubmitData) => {
+      const mei = meiTextRef.current;
+      if (!mei || !committedSelection || !movementId) return;
+
+      setIsSubmitting(true);
+      setSubmitError(null);
+
+      try {
+        const fields = buildPayload(formData, mei);
+        if (!fields) throw new Error('Incomplete annotation — cannot submit.');
+
+        let draftId = fragmentDraftId;
+        if (draftId) {
+          await updateFragment(draftId, fields);
+        } else {
+          const response = await createFragment({ ...fields, movement_id: movementId });
+          draftId = response.id;
+          setFragmentDraftId(response.id);
+        }
+
+        await submitFragment(draftId);
+        // Reset draft ID on success — the submitted fragment is immutable
+        // until a reviewer rejects it; a new annotation starts clean.
+        setFragmentDraftId(null);
+      } catch (err) {
+        setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [committedSelection, movementId, fragmentDraftId, buildPayload],
   );
 
   // Keep stagesComplete in sync with assignments and session.
@@ -1141,6 +1335,12 @@ export default function ScoreViewer() {
           selectionRange={selectionRange}
           proseAnnotation={proseAnnotation}
           onProseChange={setProseAnnotation}
+          onSaveDraft={handleSaveDraft}
+          onSubmitFragment={handleSubmitFragment}
+          isSavingDraft={isSavingDraft}
+          isSubmitting={isSubmitting}
+          submitError={submitError}
+          draftId={fragmentDraftId}
         />
 
         {/* Re-render overlay: sits above both panels while options change */}

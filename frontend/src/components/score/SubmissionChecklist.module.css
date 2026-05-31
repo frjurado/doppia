@@ -1,0 +1,133 @@
+/* SubmissionChecklist — tagging-tool-design.md §7.5
+   Design system: DESIGN.md — 0px radius, tonal depth, no dividers. */
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-4);
+}
+
+/* ── Heading ────────────────────────────────────────────────────────────── */
+
+.heading {
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+/* ── Checklist items ─────────────────────────────────────────────────────── */
+
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.checkIndicator {
+  font-size: 0.75rem;
+  line-height: 1;
+  width: 1rem;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.checkRowDone .checkIndicator {
+  color: #4a7c5e;
+}
+
+.checkRowPending .checkIndicator {
+  color: var(--color-on-surface-variant);
+}
+
+.checkLabel {
+  margin: 0;
+}
+
+.checkRowDone .checkLabel {
+  color: var(--color-on-background);
+}
+
+.checkRowPending .checkLabel {
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Status notes ─────────────────────────────────────────────────────────── */
+
+.draftSavedNote {
+  color: #4a7c5e;
+  margin: 0;
+}
+
+.errorNote {
+  color: var(--color-error, #b3261e);
+  margin: 0;
+}
+
+/* ── Actions ─────────────────────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-1);
+}
+
+/* Base button — text-button style, full width, 0px radius */
+.saveDraftButton,
+.submitButton {
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: none;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.1s ease;
+}
+
+/* Save Draft: subtle tonal fill */
+.saveDraftButton {
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-background);
+}
+
+.saveDraftButton:hover:not(:disabled) {
+  background-color: var(--color-surface-container-highest);
+}
+
+.saveDraftButton:disabled {
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+  cursor: not-allowed;
+}
+
+/* Submit for Review: muted when not ready, primary-blue when all items clear */
+.submitButton {
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface-variant);
+  cursor: not-allowed;
+}
+
+.submitButtonReady {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  cursor: pointer;
+}
+
+.submitButtonReady:hover:not(:disabled) {
+  background-color: var(--color-primary-container);
+}
+
+.submitButton:disabled {
+  opacity: 0.6;
+}

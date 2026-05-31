@@ -53,6 +53,7 @@ import TypeRefinement from './TypeRefinement';
 import StageList from './StageList';
 import PropertyForm from './PropertyForm';
 import HarmonyPanel from './HarmonyPanel';
+import SubmissionChecklist from './SubmissionChecklist';
 import type { PropertyFormValues } from './PropertyForm';
 import { carryOverValues, computeIsComplete } from './propertyFormHelpers';
 import Type from '../ui/Type';
@@ -61,6 +62,20 @@ import styles from './FormPanel.module.css';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * Form state that FormPanel passes to ScoreViewer via the onSaveDraft /
+ * onSubmitFragment callbacks. ScoreViewer combines it with the selection,
+ * stage, and prose data it owns to assemble the full fragment payload.
+ */
+export interface FormSubmitData {
+  /** Neo4j Concept.id of the selected concept. */
+  conceptId: string;
+  /** Neo4j Concept.id of the selected Type Refinement, or null if none. */
+  refinementId: string | null;
+  /** Current property values keyed by PropertySchema.id. */
+  propertyValues: PropertyFormValues;
+}
 
 export interface FormPanelProps {
   /**
@@ -118,6 +133,27 @@ export interface FormPanelProps {
   proseAnnotation?: string;
   /** Called on every keystroke in the prose textarea. */
   onProseChange?: (value: string) => void;
+
+  // ── Step 18: Submission checklist ────────────────────────────────────────
+
+  /**
+   * Called when the annotator clicks Save Draft. Receives the FormPanel's
+   * local concept/property state; ScoreViewer assembles the full payload.
+   */
+  onSaveDraft?: (data: FormSubmitData) => void;
+  /**
+   * Called when the annotator clicks Submit for Review. Receives the same
+   * local state; ScoreViewer assembles, saves, and then submits.
+   */
+  onSubmitFragment?: (data: FormSubmitData) => void;
+  /** True while a Save Draft request is in flight. */
+  isSavingDraft?: boolean;
+  /** True while a Submit request is in flight. */
+  isSubmitting?: boolean;
+  /** Error from the most recent save or submit attempt. */
+  submitError?: string | null;
+  /** UUID of the previously saved draft; null = unsaved. */
+  draftId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +176,12 @@ export default function FormPanel({
   selectionRange,
   proseAnnotation = '',
   onProseChange,
+  onSaveDraft,
+  onSubmitFragment,
+  isSavingDraft = false,
+  isSubmitting = false,
+  submitError = null,
+  draftId = null,
 }: FormPanelProps) {
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -341,15 +383,36 @@ export default function FormPanel({
       )}
 
       {/* ── Step 18: Submission checklist ────────────────────────────── */}
-      {/* Added in Step 18. */}
-
-      {!flags.fragmentSet && (
-        <div className={styles.noSelectionHint}>
-          <Type variant="label-sm" as="p" className={styles.hintText}>
-            Draw a selection on the score to begin tagging.
-          </Type>
-        </div>
-      )}
+      {/* Always visible. Shows the annotator which blocking items remain and
+          provides Save Draft / Submit for Review actions. Replaces the
+          "no selection" hint — the checklist itself signals missing items. */}
+      <section className={styles.section}>
+        <SubmissionChecklist
+          flags={flags}
+          typeRefinementRequired={typeRefinements.length > 0}
+          typeRefinementSet={selectedRefinement !== null}
+          isSavingDraft={isSavingDraft}
+          isSubmitting={isSubmitting}
+          submitError={submitError}
+          draftId={draftId}
+          onSaveDraft={() => {
+            if (!selectedConcept) return;
+            onSaveDraft?.({
+              conceptId: selectedConcept.id,
+              refinementId: selectedRefinement?.id ?? null,
+              propertyValues,
+            });
+          }}
+          onSubmit={() => {
+            if (!selectedConcept) return;
+            onSubmitFragment?.({
+              conceptId: selectedConcept.id,
+              refinementId: selectedRefinement?.id ?? null,
+              propertyValues,
+            });
+          }}
+        />
+      </section>
     </aside>
   );
 }
