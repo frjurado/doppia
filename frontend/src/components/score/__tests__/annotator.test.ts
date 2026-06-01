@@ -260,9 +260,17 @@ function makeLayerWithMeasures(
   return { container, layer, els };
 }
 
-/** Build a GhostLayer with beat ghosts. Beats are in measures barN[], beatIdx 0..numBeats-1. */
+/**
+ * Build a GhostLayer with beat ghosts. Beats are in measures barN[], beatIdx 0..numBeats-1.
+ *
+ * renderOrder is assigned sequentially (0, 1, 2, …) in the order measures appear in the
+ * array; each beat's encodedKey is encodeBeat(renderOrder, beatIdx) to mirror the
+ * production buildGhosts behaviour (G2.3: renderOrder avoids barN collisions).
+ *
+ * measureKey defaults to measureGhostKey(barN, null) but can be overridden per-measure.
+ */
 function makeLayerWithBeats(
-  measures: Array<{ barN: number; numBeats: number; subDiv?: number }>,
+  measures: Array<{ barN: number; numBeats: number; subDiv?: number; measureKey?: string }>,
 ): {
   container: HTMLDivElement;
   layer: GhostLayer;
@@ -273,9 +281,10 @@ function makeLayerWithBeats(
   const layer = new GhostLayer(container);
   const beatEls = new Map<number, HTMLDivElement>();
 
-  for (const { barN, numBeats, subDiv = 2 } of measures) {
+  measures.forEach(({ barN, numBeats, subDiv = 2, measureKey }, renderOrder) => {
+    const mKey = measureKey ?? measureGhostKey(barN, null);
     for (let b = 0; b < numBeats; b++) {
-      const encKey = encodeBeat(barN, b);
+      const encKey = encodeBeat(renderOrder, b);
       const beatFloat = b + 1; // 1-indexed
       const el = document.createElement('div');
       el.className = 'ghost ghost-beat';
@@ -285,6 +294,7 @@ function makeLayerWithBeats(
         el,
         barN,
         endingN: null,
+        measureKey: mKey,
         beatIdx: b,
         encodedKey: encKey,
         beatFloat,
@@ -293,7 +303,7 @@ function makeLayerWithBeats(
       beatEls.set(encKey, el);
       void subDiv; // used only for sub-beat layer, not needed here
     }
-  }
+  });
 
   return { container, layer, beatEls };
 }
@@ -619,12 +629,14 @@ describe('AnnotationSession — beat drag', () => {
   });
 
   it('beat drag within one measure commits barStart, barEnd, and beatStart', () => {
-    const beat1Key = encodeBeat(1, 0); // m1 beat 0 (float 1.0)
-    const beat3Key = encodeBeat(1, 2); // m1 beat 2 (float 3.0)
-    beatEls.get(beat1Key)!.dispatchEvent(
+    // makeLayerWithBeats uses encodeBeat(renderOrder, beatIdx).
+    // renderOrder 0 = first measure in the array (barN=1).
+    const r0b0 = encodeBeat(0, 0); // renderOrder=0, beat 0 (float 1.0)
+    const r0b2 = encodeBeat(0, 2); // renderOrder=0, beat 2 (float 3.0)
+    beatEls.get(r0b0)!.dispatchEvent(
       new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
     );
-    beatEls.get(beat3Key)!.dispatchEvent(
+    beatEls.get(r0b2)!.dispatchEvent(
       new MouseEvent('mouseover', { bubbles: true, cancelable: true }),
     );
     document.dispatchEvent(new MouseEvent('mouseup'));
@@ -637,12 +649,12 @@ describe('AnnotationSession — beat drag', () => {
   });
 
   it('beat drag spanning two measures sets correct barStart and barEnd', () => {
-    const m1b1 = encodeBeat(1, 0);
-    const m2b2 = encodeBeat(2, 1);
-    beatEls.get(m1b1)!.dispatchEvent(
+    const r0b0 = encodeBeat(0, 0); // renderOrder=0 (barN=1), beat 0
+    const r1b1 = encodeBeat(1, 1); // renderOrder=1 (barN=2), beat 1
+    beatEls.get(r0b0)!.dispatchEvent(
       new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
     );
-    beatEls.get(m2b2)!.dispatchEvent(
+    beatEls.get(r1b1)!.dispatchEvent(
       new MouseEvent('mouseover', { bubbles: true, cancelable: true }),
     );
     document.dispatchEvent(new MouseEvent('mouseup'));
@@ -652,22 +664,22 @@ describe('AnnotationSession — beat drag', () => {
   });
 
   it('dragging the left endpoint in beat mode re-anchors from the right', () => {
-    // Commit beats m1b0..m1b2 (beatFloats 1.0, 2.0, 3.0).
-    const m1b0 = encodeBeat(1, 0);
-    const m1b2 = encodeBeat(1, 2);
-    beatEls.get(m1b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    beatEls.get(m1b2)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    // Commit beats r0b0..r0b2 (beatFloats 1.0, 2.0, 3.0).
+    const r0b0 = encodeBeat(0, 0); // renderOrder=0, beat 0
+    const r0b2 = encodeBeat(0, 2); // renderOrder=0, beat 2
+    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    beatEls.get(r0b2)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
-    // Click on the leftmost dark beat (m1b0) — anchor should re-set to m1b2
-    // (the rightmost dark beat). Then drag to m2b0 → range is [m1b2, m1b3, m2b0].
-    const m2b0 = encodeBeat(2, 0);
-    beatEls.get(m1b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    beatEls.get(m2b0)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    // Click on the leftmost dark beat (r0b0) — anchor should re-set to r0b2
+    // (the rightmost dark beat). Then drag to r1b0 → range is [r0b2, r0b3, r1b0].
+    const r1b0 = encodeBeat(1, 0); // renderOrder=1, beat 0
+    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    beatEls.get(r1b0)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
-    // The anchor is now m1b2 (float 3.0); range runs m1b2→m2b0.
-    expect(session.selection?.beatStart).toBe(3.0); // m1b2's beatFloat
+    // The anchor is now r0b2 (float 3.0); range runs r0b2→r1b0.
+    expect(session.selection?.beatStart).toBe(3.0); // r0b2's beatFloat
     expect(session.selection?.barEnd).toBe(2);
   });
 });
@@ -873,6 +885,213 @@ describe('AnnotationSession — ending-boundary barrier', () => {
     expect(s2.selection?.barEnd).toBe(2); // m2-e1.barN = 2 (clamped at ending barrier)
     expect(s2.selection?.repeatContext).toBe('first_ending');
     s2.destroy(); c2.remove();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildRepeatBarriers — section-reset @n deduplication (G2.3)
+// ---------------------------------------------------------------------------
+
+describe('buildRepeatBarriers — section-reset @n deduplication', () => {
+  it('uses deduplicated key for a barrier measure whose @n was seen before', () => {
+    // m1 (normal) then m2 (@right=rptend) then m1 again (section-reset).
+    // buildRepeatBarriers should NOT mark the second m1 as a barrier, and the
+    // barrier key for m2 should be the plain "m2" (first occurrence, no suffix).
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/>
+      <measure n="2" right="rptend"/>
+      <measure n="1"/>
+    </score></mdiv></body></music></mei>`;
+    const barriers = buildRepeatBarriers(mei);
+    // m2 is a barrier — first occurrence, so key is "m2".
+    expect(barriers.has(measureGhostKey(2, null))).toBe(true);
+    // The second m1 is NOT a barrier (no @right=rptend).
+    expect(barriers.size).toBe(1);
+  });
+
+  it('correctly keys a barrier on the second occurrence of a repeated @n', () => {
+    // m1 (no barrier), m1 again (@right=rptend, section-reset).
+    // The barrier key must be "m1#1" (second occurrence, not plain "m1").
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/>
+      <measure n="1" right="rptend"/>
+    </score></mdiv></body></music></mei>`;
+    const barriers = buildRepeatBarriers(mei);
+    expect(barriers.has('m1#1')).toBe(true);
+    expect(barriers.has(measureGhostKey(1, null))).toBe(false);
+    expect(barriers.size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AnnotationSession — beat barrier enforcement (G2.3)
+// ---------------------------------------------------------------------------
+
+describe('AnnotationSession — beat barrier enforcement', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /**
+   * Helper: build a minimal GhostLayer that has BOTH a measure index (for
+   * measureKeyRange to walk) and a beat index (for the beat drag handlers).
+   * barNs/endingNs define the measure layer; beatsPerMeasure defines how many
+   * beat ghosts each measure gets.
+   *
+   * The beat entries carry measureKey = measureGhostKey(barN, endingN) (plain,
+   * no suffix) since the test fixtures do not have @n collisions.
+   */
+  function makeLayerWithMeasuresAndBeats(
+    barNs: number[],
+    beatsPerMeasure: number[],
+    endingNs?: (number | null)[],
+  ): {
+    container: HTMLDivElement;
+    layer: GhostLayer;
+    measureEls: HTMLDivElement[];
+    beatEls: Map<number, HTMLDivElement>; // encodedKey → element
+  } {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const layer = new GhostLayer(container);
+
+    const measureEls: HTMLDivElement[] = barNs.map((barN, i) => {
+      const endingN = endingNs?.[i] ?? null;
+      const key = measureGhostKey(barN, endingN);
+      const el = document.createElement('div');
+      el.className = 'ghost ghost-measure';
+      el.dataset['key'] = key;
+      layer._appendMeasureGhost(el);
+      layer.measureIndex.set(key, {
+        el, barN, endingN, key,
+        bounds: { left: i * 100, top: 0, width: 100, height: 50 },
+        systemTop: 0,
+      } satisfies MeasureGhostEntry);
+      return el;
+    });
+
+    const beatEls = new Map<number, HTMLDivElement>();
+    barNs.forEach((barN, renderOrder) => {
+      const endingN = endingNs?.[renderOrder] ?? null;
+      const mKey = measureGhostKey(barN, endingN);
+      const numBeats = beatsPerMeasure[renderOrder] ?? 0;
+      for (let b = 0; b < numBeats; b++) {
+        const encKey = encodeBeat(renderOrder, b);
+        const el = document.createElement('div');
+        el.className = 'ghost ghost-beat';
+        el.dataset['key'] = `${encKey}`;
+        layer._appendBeatGhost(el);
+        layer.beatIndex.set(encKey, {
+          el, barN, endingN, measureKey: mKey,
+          beatIdx: b, encodedKey: encKey,
+          beatFloat: b + 1,
+          bounds: { left: renderOrder * 100 + b * 20, top: 0, width: 20, height: 30 },
+        } satisfies BeatGhostEntry);
+        beatEls.set(encKey, el);
+      }
+    });
+
+    return { container, layer, measureEls, beatEls };
+  }
+
+  it('forward beat drag clamps at the barrier measure', () => {
+    // 3 measures: m1 (2 beats), m2 (2 beats, barrier), m3 (2 beats).
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
+      [1, 2, 3],
+      [2, 2, 2],
+    );
+    const barrier = new Set([measureGhostKey(2, null)]);
+    const session = new AnnotationSession(layer, {
+      resolution: 'beat',
+      closeRepeatMeasures: barrier,
+    });
+
+    // Anchor at m1 beat 0 (renderOrder=0, b=0), drag to m3 beat 0 (renderOrder=2, b=0).
+    const r0b0 = encodeBeat(0, 0);
+    const r2b0 = encodeBeat(2, 0);
+    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls.get(r2b0)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    // Should clamp at m2 (barrier): barStart=1, barEnd=2.
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(2);
+
+    session.destroy(); container.remove();
+  });
+
+  it('backward beat drag clamps at the barrier — anchor stays on its side', () => {
+    // Same 3-measure setup: barrier at m2.
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
+      [1, 2, 3],
+      [2, 2, 2],
+    );
+    const barrier = new Set([measureGhostKey(2, null)]);
+    const session = new AnnotationSession(layer, {
+      resolution: 'beat',
+      closeRepeatMeasures: barrier,
+    });
+
+    // Anchor at m3 beat 0 (renderOrder=2), drag backward through barrier to m1 beat 0.
+    const r2b0 = encodeBeat(2, 0);
+    const r0b0 = encodeBeat(0, 0);
+    beatEls.get(r2b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    // Barrier at m2 blocks backward crossing — selection stays on m3 side.
+    expect(session.selection?.barStart).toBe(3);
+    expect(session.selection?.barEnd).toBe(3);
+
+    session.destroy(); container.remove();
+  });
+
+  it('beat drag within one measure is unaffected by a barrier in another measure', () => {
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
+      [1, 2, 3],
+      [4, 4, 4],
+    );
+    const barrier = new Set([measureGhostKey(2, null)]);
+    const session = new AnnotationSession(layer, {
+      resolution: 'beat',
+      closeRepeatMeasures: barrier,
+    });
+
+    // Drag entirely within m3 (renderOrder=2).
+    const r2b0 = encodeBeat(2, 0);
+    const r2b3 = encodeBeat(2, 3);
+    beatEls.get(r2b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls.get(r2b3)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(session.selection?.barStart).toBe(3);
+    expect(session.selection?.barEnd).toBe(3);
+
+    session.destroy(); container.remove();
+  });
+
+  it('a beat drag that does not reach the barrier is unaffected', () => {
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
+      [1, 2, 3],
+      [2, 2, 2],
+    );
+    const barrier = new Set([measureGhostKey(2, null)]);
+    const session = new AnnotationSession(layer, {
+      resolution: 'beat',
+      closeRepeatMeasures: barrier,
+    });
+
+    // Drag from m1 beat 0 to m1 beat 1 — does not cross m2 barrier.
+    const r0b0 = encodeBeat(0, 0);
+    const r0b1 = encodeBeat(0, 1);
+    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls.get(r0b1)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(1);
+
+    session.destroy(); container.remove();
   });
 });
 

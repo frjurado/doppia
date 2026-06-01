@@ -142,10 +142,18 @@ function endingNFromEl(el: Element): number | null {
  *
  * A barrier measure may be the last measure of a selection, but the
  * selection cannot extend past it: the close-repeat barline is a hard stop.
+ *
+ * G2.3: uses the same deduplicated key scheme as buildGhosts — when two
+ * measures share the same @n (section-reset numbering), '#N' suffixes keep the
+ * keys consistent between the two functions.
  */
 export function buildRepeatBarriers(meiText: string): Set<string> {
   const doc = new DOMParser().parseFromString(meiText, 'text/xml');
   const barriers = new Set<string>();
+
+  // Mirrors the seenBaseKeys tracking in buildGhosts so the keys produced here
+  // match the deduplicated keys stored in measureIndex (G2.3).
+  const seenBaseKeys = new Map<string, number>();
 
   const measures = doc.getElementsByTagName('measure');
   for (let i = 0; i < measures.length; i++) {
@@ -173,9 +181,15 @@ export function buildRepeatBarriers(meiText: string): Set<string> {
       }
     }
 
+    const barN    = parseInt(m.getAttribute('n') ?? `${i + 1}`, 10);
+    const endingN = endingNFromEl(m);
+    const baseKey = measureGhostKey(barN, endingN);
+    const cnt     = seenBaseKeys.get(baseKey) ?? 0;
+    seenBaseKeys.set(baseKey, cnt + 1);
+    const mKey = cnt === 0 ? baseKey : `${baseKey}#${cnt}`;
+
     if (isBarrier) {
-      const barN = parseInt(m.getAttribute('n') ?? `${i + 1}`, 10);
-      barriers.add(measureGhostKey(barN, endingNFromEl(m)));
+      barriers.add(mKey);
     }
   }
 
@@ -828,6 +842,32 @@ export class AnnotationSession {
 
   private _updateBeatDrag(currentKey: number): void {
     if (this._anchorBeatKey === null) return;
+
+    // G2.3: Enforce measure-level barriers at beat resolution. The close-repeat
+    // barline is a hard gate in all resolution modes, not just measure mode.
+    // Resolve which measure keys are reachable from the anchor under the active
+    // barriers, then filter the numeric beat range to those measures only.
+    //
+    // Skip the filter when the measure index is unpopulated (empty ordered
+    // list) or when the anchor's measureKey is not in the ordered list — that
+    // signals a test fixture or a score where ghost building was not run, so
+    // there is no barrier information to apply.
+    const anchorEntry  = this._layer.beatIndex.get(this._anchorBeatKey);
+    const currentEntry = this._layer.beatIndex.get(currentKey);
+    const allowedMeasureRange =
+      anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
+        ? measureKeyRange(
+            anchorEntry.measureKey,
+            currentEntry.measureKey,
+            this._orderedMeasureKeys,
+            this._barriers,
+          )
+        : null;
+    const allowedMeasureKeys: Set<string> | null =
+      allowedMeasureRange !== null && allowedMeasureRange.length > 0
+        ? new Set(allowedMeasureRange)
+        : null;
+
     const range = numericKeyRange(
       this._anchorBeatKey,
       currentKey,
@@ -837,10 +877,10 @@ export class AnnotationSession {
     this._clearDark();
     for (const k of range) {
       const entry = this._layer.beatIndex.get(k);
-      if (entry) {
-        addClass(entry.el, 'dark');
-        this._darkGhosts.add(entry.el);
-      }
+      if (!entry) continue;
+      if (allowedMeasureKeys && !allowedMeasureKeys.has(entry.measureKey)) continue;
+      addClass(entry.el, 'dark');
+      this._darkGhosts.add(entry.el);
     }
   }
 
@@ -931,6 +971,24 @@ export class AnnotationSession {
 
   private _updateSubBeatDrag(currentKey: number): void {
     if (this._anchorSubBeatKey === null) return;
+
+    // G2.3: same barrier enforcement as beat resolution.
+    const anchorEntry  = this._layer.subBeatIndex.get(this._anchorSubBeatKey);
+    const currentEntry = this._layer.subBeatIndex.get(currentKey);
+    const allowedMeasureRange =
+      anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
+        ? measureKeyRange(
+            anchorEntry.measureKey,
+            currentEntry.measureKey,
+            this._orderedMeasureKeys,
+            this._barriers,
+          )
+        : null;
+    const allowedMeasureKeys: Set<string> | null =
+      allowedMeasureRange !== null && allowedMeasureRange.length > 0
+        ? new Set(allowedMeasureRange)
+        : null;
+
     const range = numericKeyRange(
       this._anchorSubBeatKey,
       currentKey,
@@ -940,10 +998,10 @@ export class AnnotationSession {
     this._clearDark();
     for (const k of range) {
       const entry = this._layer.subBeatIndex.get(k);
-      if (entry) {
-        addClass(entry.el, 'dark');
-        this._darkGhosts.add(entry.el);
-      }
+      if (!entry) continue;
+      if (allowedMeasureKeys && !allowedMeasureKeys.has(entry.measureKey)) continue;
+      addClass(entry.el, 'dark');
+      this._darkGhosts.add(entry.el);
     }
   }
 

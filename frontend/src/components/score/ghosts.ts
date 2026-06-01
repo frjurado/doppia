@@ -342,9 +342,21 @@ export interface BeatGhostEntry {
   el: HTMLElement;
   barN: number;
   endingN: number | null;
+  /**
+   * The deduplicated measure ghost key for this beat's parent measure.
+   * Equal to measureGhostKey(barN, endingN) in the common case, but may carry
+   * a '#N' suffix when two measures share the same @n (section-reset numbering).
+   * Used by the annotator barrier check to call measureKeyRange() without
+   * recomputing the key from barN+endingN (which would miss duplicates).
+   */
+  measureKey: string;
   /** 0-indexed beat within the measure (after compound correction). */
   beatIdx: number;
-  /** Encoded key: encodeBeat(barN, beatIdx). */
+  /**
+   * Encoded key: encodeBeat(renderOrder, beatIdx).
+   * Uses the measure's document-order render index (not barN) so that measures
+   * sharing the same @n due to section-reset numbering produce distinct keys.
+   */
   encodedKey: number;
   /** Float encoding for fragment.beat_start / beat_end (1-indexed). */
   beatFloat: number;
@@ -356,8 +368,11 @@ export interface SubBeatGhostEntry {
   el: HTMLElement;
   barN: number;
   endingN: number | null;
+  /** The deduplicated measure ghost key (see BeatGhostEntry.measureKey). */
+  measureKey: string;
   beatIdx: number;
   subBeatIdx: number;
+  /** Encoded key: encodeSubBeat(renderOrder, beatIdx, subBeatIdx). */
   encodedKey: number;
   beatFloat: number;
   bounds: GhostBounds;
@@ -690,6 +705,19 @@ interface MeasureInfo {
   rawBottom:        number;
   barN:             number;
   endingN:          number | null;
+  /**
+   * Deduplicated measure ghost key — equal to measureGhostKey(barN, endingN)
+   * unless another earlier-rendered measure shares the same base key, in which
+   * case a '#N' suffix disambiguates (G2.3: section-reset @n values).
+   */
+  key:              string;
+  /**
+   * 0-indexed position of this measure among all rendered measures (those with
+   * a matching SVG element). Used as the measure component of beat/subbeat
+   * encoded keys so that measures with duplicate @n values (section-reset
+   * numbering) still produce distinct integer keys in the beat/subbeat indexes.
+   */
+  renderOrder:      number;
   noteInputs:       NotePositionInput[];
   beatCount:        number;
   beatUnit:         number;
@@ -861,6 +889,12 @@ export function buildGhosts(
   const measureInfos: MeasureInfo[] = [];
   const meiMeasures = meiDoc.getElementsByTagName('measure');
 
+  // G2.3: track seen base keys to detect @n collisions from section-reset
+  // measure numbering. When a collision is found, a '#N' suffix disambiguates
+  // the key so no two rendered measures share the same ghost key string.
+  const seenBaseKeys = new Map<string, number>(); // baseKey → occurrence count
+  let renderOrder = 0; // 0-indexed render position among SVG-matched measures
+
   for (let mi = 0; mi < meiMeasures.length; mi++) {
     const meiMeasure = meiMeasures[mi];
     const measureId  = getMeiId(meiMeasure);
@@ -881,6 +915,13 @@ export function buildGhosts(
 
     const barN    = parseInt(meiMeasure.getAttribute('n') ?? `${mi + 1}`, 10);
     const endingN = getEndingN(meiMeasure);
+
+    // Deduplicated measure ghost key. Measures that share @n due to
+    // section-reset numbering get '#1', '#2', … suffixes in encounter order.
+    const baseKey   = measureGhostKey(barN, endingN);
+    const cnt       = seenBaseKeys.get(baseKey) ?? 0;
+    seenBaseKeys.set(baseKey, cnt + 1);
+    const key = cnt === 0 ? baseKey : `${baseKey}#${cnt}`;
 
     const [beatCount, beatUnit] = getMeterForMeasure(
       meiMeasure, globalBeatCount, globalBeatUnit,
@@ -904,7 +945,7 @@ export function buildGhosts(
     measureInfos.push({
       measureId, svgMeasure, meiMeasure,
       mLeft, mRight, rawTop, rawBottom,
-      barN, endingN,
+      barN, endingN, key, renderOrder: renderOrder++,
       noteInputs, beatCount, beatUnit, measureStartTime,
     });
   }
@@ -941,9 +982,8 @@ export function buildGhosts(
     const ghostHeight = sBounds.bottom - sBounds.top;
 
     for (const info of system) {
-      const { mLeft, mRight, barN, endingN,
+      const { mLeft, mRight, barN, endingN, key: mKey, renderOrder,
               noteInputs, beatCount, beatUnit, measureStartTime } = info;
-      const mKey = measureGhostKey(barN, endingN);
 
       // Measure ghost spans staff lines only.
       const msrBounds: GhostBounds = {
@@ -971,7 +1011,10 @@ export function buildGhosts(
         if (bRight <= bLeft) continue;
 
         const beatFloat = beatToFloat(b, 0, subDiv);
-        const encKey    = encodeBeat(barN, b);
+        // Use renderOrder (not barN) as the measure component so that
+        // measures with duplicate @n values (section-reset numbering) produce
+        // distinct encoded keys in the beat and sub-beat indexes (G2.3).
+        const encKey    = encodeBeat(renderOrder, b);
 
         const beatBounds: GhostBounds = {
           left: bLeft, top: sBounds.top, width: bRight - bLeft, height: ghostHeight,
@@ -979,7 +1022,7 @@ export function buildGhosts(
         const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
         layer._appendBeatGhost(beatEl);
         layer.beatIndex.set(encKey, {
-          el: beatEl, barN, endingN,
+          el: beatEl, barN, endingN, measureKey: mKey,
           beatIdx: b, encodedKey: encKey, beatFloat,
           bounds: beatBounds,
         });
@@ -992,7 +1035,7 @@ export function buildGhosts(
           if (sbRight <= sbLeft) continue;
 
           const sbFloat  = beatToFloat(b, sb, subDiv);
-          const sbEncKey = encodeSubBeat(barN, b, sb);
+          const sbEncKey = encodeSubBeat(renderOrder, b, sb);
 
           const sbBounds: GhostBounds = {
             left: sbLeft, top: sBounds.top, width: sbRight - sbLeft, height: ghostHeight,
@@ -1000,7 +1043,7 @@ export function buildGhosts(
           const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
           layer._appendSubBeatGhost(sbEl);
           layer.subBeatIndex.set(sbEncKey, {
-            el: sbEl, barN, endingN,
+            el: sbEl, barN, endingN, measureKey: mKey,
             beatIdx: b, subBeatIdx: sb,
             encodedKey: sbEncKey, beatFloat: sbFloat,
             bounds: sbBounds,
