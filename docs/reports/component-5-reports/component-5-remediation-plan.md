@@ -144,30 +144,30 @@ These are the data-correctness bugs. ADR-005 and `prototype-tagging-tool.md` are
 
 ## G3 — Ghost & bracket affordance
 
-### G3.1 — Move drag handles outside the main ghost; fix hover/drag classes
-**Issue (combines reported items + `issue-ghost-hover-and-drag-affordance.md`):**
-- The gradient/handle affordance "is there, mostly works, but isn't visible" (documented as Bug B, unsolved).
-- On beat/sub-beat resolution the handles are *tiny* because they must fit inside a very narrow ghost.
-- Hover does nothing; drag uses the wrong highlight class (Bug A).
+### G3.1 — Move drag handles outside the main ghost
+**Issue:**
+- The gradient/handle affordance "is there, mostly works, but isn't visible" (documented as Bug B in `issue-ghost-hover-and-drag-affordance.md`; Bug A — hover/drag class inversion — is already fixed).
+- On beat/sub-beat resolution the in-ghost gradient zones are *tiny* because they are width-constrained by a very narrow ghost.
+- The gradient merges visually with the ghost body (same hue), so the draggable-edge affordance is not legible regardless of size.
 
-**Decision/direction (from Francisco):** Move the drag handles **outside** the main ghost — render them as fixed-width affordances at the selection's extremes only, not constrained by ghost width. A fixed-width handle solves the "tiny on sub-beat" problem; once a drag begins the handle disappears so the true fragment limit stays legible.
+**Decision/direction (from Francisco):** Replace the in-ghost gradient zones with **a pair of fixed-width gradient ghost elements rendered just outside the selection boundary**, within the staves — one to the left of the leftmost selected ghost, one to the right of the rightmost selected ghost. These handle ghosts are owned by the ghost layer (not the bracket), live at staff level, and are fully independent of selection ghost width. Both the visible affordance *and* the hit-target for endpoint re-anchor move to these outside handle ghosts; the in-ghost `.ghost-gradient` children serve no further purpose and should be removed.
 
-**Files:** `annotator.ts` (Bug A logic), `ghosts.module.css` + `MainBracket.module.css` (Bug B styling), `MainBracket.tsx` (handles become bracket-owned, endpoint-anchored elements), `ghosts.ts` (gradient zones may be retained only as hit-targets).
+**Files:** `ghosts.ts` (create and position the handle ghost pair on commit; rebuild on re-projection), `ghosts.module.css` (style the handle ghosts; remove now-unused `.ghost-gradient` rules), `annotator.ts` (wire endpoint re-anchor drag to the handle ghosts as hit-targets, replacing the old gradient-zone path).
 
 **Change:**
-- **Bug A** exactly per `issue-ghost-hover-and-drag-affordance.md`: add `_hoverGhost` tracking and a `mouseleave` handler; hover applies `light`; in-progress drag applies `dark` (not `light`); clear hover on mousedown; commit collects from `_darkGhosts`. (That report's fix is correct as written — adopt it.)
-- **Handles outside the ghost:** instead of relying on `.ghost-gradient` children *inside* each ghost (which merge with the body fill and are width-constrained), render two **fixed-width handle elements owned by the main bracket**, absolutely positioned at the committed selection's left/right pixel extremes, above the staff, with their own colour and clear affordance. They are independent of ghost width, so beat/sub-beat selections get full-size handles. On drag-start, hide the handle (the dragging edge itself shows the live limit); on commit, re-show at the new extremes.
-- The in-ghost gradient zones can remain purely as **hit-targets** for endpoint re-anchor (`pointer-events: none` on the visual gradient is fine per the report's "non-issue" note), but they are no longer the visible affordance.
-- Update the `MainBracket.module.css` comment that currently defers the affordance to the ghost gradient — the bracket now *owns* the visible handle.
+- **Handle ghosts:** on commit, insert two fixed-width ghost elements in the overlay — a left handle placed immediately to the left of the selection's leftmost ghost, and a right handle immediately to the right of the rightmost ghost. Each renders as a gradient fading from solid (at the selection edge) to transparent (outward), giving a clear directional affordance. Width is fixed (e.g. one standard ghost width or a design-system constant), so a one-sub-beat selection still gets full-size handles.
+- **Hit-target and endpoint re-anchor:** `annotator.ts` treats the handle ghosts as the drag targets for endpoint re-anchor — mousedown on the left handle begins a backward drag; mousedown on the right handle begins a forward drag. This replaces the current gradient-zone hit-target path inside the selection ghosts entirely.
+- **Remove in-ghost gradient zones:** `.ghost-gradient-left` / `.ghost-gradient-right` children inside each ghost element no longer serve a visual or interactive purpose. Remove them from the ghost DOM construction in `ghosts.ts` and remove their CSS rules from `ghosts.module.css`. Clean up the `MainBracket.module.css` comment that referenced the gradient zones as the source of interactive affordance.
+- **Lifecycle:** on drag-start from a handle ghost, hide it so the live drag edge is legible; on commit, reposition and re-show both handle ghosts at the new extremes. On re-projection (G1.3), rebuild handle positions along with the rest of the ghost layer.
 
-**Verify:** Hover tints the ghost under the cursor with no mousedown; drag darkens the swept range; the resize handles are visible and full-size even on a one-sub-beat selection; handles hide during drag and reappear at the new extremes; existing selection-state Vitest tests pass with updated `light`/`dark` assertions.
+**Verify:** With a committed selection, two gradient handle ghosts appear just outside the selection boundary at staff level, visible at any resolution including one-sub-beat; dragging either handle re-anchors the corresponding endpoint; handle ghosts hide during drag and reappear at the new extremes; no in-ghost gradient zones remain in the DOM; re-projection after zoom/resize correctly repositions the handles; existing selection-state Vitest tests continue to pass.
 
 ### G3.2 — Main bracket must match the ghost to beat/sub-beat precision
 **Issue:** The above-staff bracket and the selected-fragment ghost don't always coincide — notably the bracket doesn't reach beat/sub-beat precision.
 
 **Files:** `MainBracket.tsx` (reads selection extremes), `selection.ts`/`ghosts.ts` (the pixel extents for a beat/sub-beat selection).
 
-**Change:** The bracket's left/right pixels must be derived from the **same** beat/sub-beat ghost rects the selection occupies, not from the enclosing measure ghost. Source both the bracket extents and the handle positions (G3.1) from one `selectionPixelBounds()` helper keyed on the committed logical coordinates at the active resolution, so bracket, ghosts, and handles are guaranteed coincident. This also closes the loop with G1.3 (re-projection uses the same helper).
+**Change:** The bracket's left/right pixels must be derived from the **same** beat/sub-beat ghost rects the selection occupies, not from the enclosing measure ghost. Source the bracket extents from one `selectionPixelBounds()` helper keyed on the committed logical coordinates at the active resolution, so bracket and ghosts are guaranteed coincident. The handle ghost positions (G3.1) are derived from the same helper — bracket, selection ghosts, and handle ghosts all share one source of truth. This also closes the loop with G1.3 (re-projection uses the same helper).
 
 **Verify:** A beat-level selection draws a bracket whose ends sit on the beat boundaries, not the bar boundaries; switching resolution re-derives the bracket from the corresponding ghost layer.
 

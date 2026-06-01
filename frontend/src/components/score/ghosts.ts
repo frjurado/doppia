@@ -381,6 +381,9 @@ export interface SubBeatGhostEntry {
 /** Which ghost layer receives pointer events (resolution toggle, ADR-005). */
 export type ResolutionMode = 'measure' | 'beat' | 'subbeat';
 
+/** Fixed width (px) of each drag handle ghost element placed outside the selection. */
+export const HANDLE_GHOST_W = 32;
+
 
 // ---------------------------------------------------------------------------
 // GhostLayer class
@@ -403,6 +406,13 @@ export class GhostLayer {
   private readonly _beatLayer: HTMLElement;
   private readonly _subBeatLayer: HTMLElement;
 
+  // Drag handle ghosts — positioned outside the committed selection boundary,
+  // within the staves. Both visual affordance and hit-target for endpoint
+  // re-anchor (G3.1). Hidden by default; shown/moved by AnnotationSession after
+  // each commit, hidden when a drag starts or the session resets.
+  private readonly _leftHandle: HTMLElement;
+  private readonly _rightHandle: HTMLElement;
+
   constructor(container: HTMLElement) {
     this._overlay = document.createElement('div');
     this._overlay.className = 'ghost-overlay';
@@ -421,6 +431,14 @@ export class GhostLayer {
     this._overlay.appendChild(this._measureLayer);
     this._overlay.appendChild(this._beatLayer);
     this._overlay.appendChild(this._subBeatLayer);
+
+    // Handle ghosts live directly in the overlay (not in any selection layer)
+    // and always have pointer-events: auto so clicks bubble to overlay listeners.
+    this._leftHandle = this._createHandleEl('left');
+    this._rightHandle = this._createHandleEl('right');
+    this._overlay.appendChild(this._leftHandle);
+    this._overlay.appendChild(this._rightHandle);
+
     container.appendChild(this._overlay);
   }
 
@@ -433,6 +451,54 @@ export class GhostLayer {
       pointerEvents: 'none',
     });
     return layer;
+  }
+
+  private _createHandleEl(side: 'left' | 'right'): HTMLElement {
+    const el = document.createElement('div');
+    el.className = `ghost-handle ghost-handle-${side}`;
+    el.dataset['handle'] = side;
+    Object.assign(el.style, {
+      position: 'absolute',
+      display: 'none',
+      width: `${HANDLE_GHOST_W}px`,
+      boxSizing: 'border-box',
+      pointerEvents: 'auto',
+    });
+    return el;
+  }
+
+  /**
+   * Position and show the drag handle ghosts outside the committed selection.
+   *
+   * leftEdge/rightEdge are the pixel x coordinates of the selection's outer
+   * boundaries. The left handle is placed immediately to the left of leftEdge;
+   * the right handle immediately to the right of rightEdge. Both share the same
+   * top/height as the adjacent selection ghosts so they sit within the staves.
+   */
+  showHandles(
+    leftEdge: number,
+    rightEdge: number,
+    top: number,
+    height: number,
+  ): void {
+    Object.assign(this._leftHandle.style, {
+      display: '',
+      left: `${leftEdge - HANDLE_GHOST_W}px`,
+      top: `${top}px`,
+      height: `${height}px`,
+    });
+    Object.assign(this._rightHandle.style, {
+      display: '',
+      left: `${rightEdge}px`,
+      top: `${top}px`,
+      height: `${height}px`,
+    });
+  }
+
+  /** Hide both drag handle ghosts (e.g. when a drag starts or the session resets). */
+  hideHandles(): void {
+    this._leftHandle.style.display = 'none';
+    this._rightHandle.style.display = 'none';
   }
 
   /**
@@ -516,33 +582,6 @@ function createGhostEl(
   el.className = className;
   el.dataset['key'] = dataKey;
   applyGhostBounds(el, bounds);
-
-  // Edge and gradient zones for drag affordance (prototype-tagging-tool.md).
-  const edgeW = Math.min(12, Math.floor(bounds.width * 0.15));
-  for (const side of ['left', 'right'] as const) {
-    const edge = document.createElement('div');
-    edge.className = `ghost-edge ghost-edge-${side}`;
-    Object.assign(edge.style, {
-      position: 'absolute',
-      top: '0',
-      bottom: '0',
-      width: `${edgeW}px`,
-      [side]: '0',
-    });
-    el.appendChild(edge);
-
-    const grad = document.createElement('div');
-    grad.className = `ghost-gradient ghost-gradient-${side}`;
-    Object.assign(grad.style, {
-      position: 'absolute',
-      top: '0',
-      bottom: '0',
-      width: `${edgeW * 2}px`,
-      [side]: `${edgeW}px`,
-    });
-    el.appendChild(grad);
-  }
-
   return el;
 }
 

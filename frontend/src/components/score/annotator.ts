@@ -238,13 +238,23 @@ export function buildEndingBarriers(
 
 /**
  * Find the nearest .ghost ancestor from a mouse event target.
- * The event may fire on a .ghost-edge or .ghost-gradient child because the
- * ghost element itself is the interactive container; we walk up via closest().
  * Returns null when the target is not within any ghost.
  */
 export function ghostFromTarget(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof HTMLElement)) return null;
   const el = target.closest('.ghost');
+  return el instanceof HTMLElement ? el : null;
+}
+
+/**
+ * Return the .ghost-handle element from a mouse event target, or null.
+ * Handle ghosts are direct siblings of the selection layers in the overlay;
+ * they carry data-handle="left"|"right" and class .ghost-handle but NOT .ghost,
+ * so ghostFromTarget correctly returns null for them.
+ */
+export function handleFromTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) return null;
+  const el = target.closest('.ghost-handle');
   return el instanceof HTMLElement ? el : null;
 }
 
@@ -523,6 +533,7 @@ export class AnnotationSession {
   reset(): void {
     this._cancelDrag();
     this._clearAllHighlights();
+    this._layer.hideHandles();
     this._selection = null;
     const anySet =
       this._flags.fragmentSet ||
@@ -605,6 +616,7 @@ export class AnnotationSession {
     }
 
     this._flags = { ...this._flags, fragmentSet: true };
+    this._updateHandleGhosts();
   }
 
   // ── Private: listener attachment ──────────────────────────────────────────
@@ -638,6 +650,17 @@ export class AnnotationSession {
       removeClass(this._hoverGhost, 'light');
       this._hoverGhost = null;
     }
+
+    // Handle ghost click: endpoint re-anchor from outside the selection boundary.
+    // Must be checked before ghostFromTarget — handle ghosts have class .ghost-handle,
+    // not .ghost, so ghostFromTarget would incorrectly return null for them.
+    const handle = handleFromTarget(e.target);
+    if (handle) {
+      e.preventDefault();
+      this._startHandleDrag(handle);
+      return;
+    }
+
     const ghost = ghostFromTarget(e.target);
     if (!ghost) return;
     const key = ghostDataKey(ghost);
@@ -807,6 +830,7 @@ export class AnnotationSession {
 
     this._setFlag('fragmentSet', true);
     this._onSelectionChange?.(this._selection);
+    this._updateHandleGhosts();
   }
 
   // ── Private: beat-level drag ───────────────────────────────────────────────
@@ -936,6 +960,7 @@ export class AnnotationSession {
 
     this._setFlag('fragmentSet', true);
     this._onSelectionChange?.(this._selection);
+    this._updateHandleGhosts();
   }
 
   // ── Private: sub-beat-level drag ───────────────────────────────────────────
@@ -1060,6 +1085,123 @@ export class AnnotationSession {
 
     this._setFlag('fragmentSet', true);
     this._onSelectionChange?.(this._selection);
+    this._updateHandleGhosts();
+  }
+
+  // ── Private: handle ghost drag ────────────────────────────────────────────
+
+  /**
+   * Start an endpoint re-anchor drag initiated from a drag handle ghost (G3.1).
+   *
+   * The left handle re-anchors from the right end of the committed selection;
+   * the right handle re-anchors from the left end. This is identical to the
+   * in-ghost endpoint re-anchor path but does not require the mouse to be over
+   * a selection ghost, so it works at any resolution even on narrow beat ghosts.
+   */
+  private _startHandleDrag(handle: HTMLElement): void {
+    const side = handle.dataset['handle'] as 'left' | 'right' | undefined;
+    if (side !== 'left' && side !== 'right') return;
+    if (!this._flags.fragmentSet) return;
+
+    this._layer.hideHandles();
+
+    if (this._resolution === 'measure') {
+      const darkMeasureKeys = this._orderedMeasureKeys.filter(k => {
+        const entry = this._layer.measureIndex.get(k);
+        return entry !== undefined && this._darkGhosts.has(entry.el);
+      });
+      if (darkMeasureKeys.length === 0) return;
+      const firstKey = darkMeasureKeys[0]!;
+      const lastKey = darkMeasureKeys[darkMeasureKeys.length - 1]!;
+      this._dragging = true;
+      if (side === 'left') {
+        this._anchorMeasureKey = lastKey;
+        this._updateMeasureDrag(firstKey);
+      } else {
+        this._anchorMeasureKey = firstKey;
+        this._updateMeasureDrag(lastKey);
+      }
+    } else if (this._resolution === 'beat') {
+      const sorted = this._sortedDarkBeatKeys();
+      if (sorted.length === 0) return;
+      this._dragging = true;
+      if (side === 'left') {
+        this._anchorBeatKey = sorted[sorted.length - 1]!;
+        this._updateBeatDrag(sorted[0]!);
+      } else {
+        this._anchorBeatKey = sorted[0]!;
+        this._updateBeatDrag(sorted[sorted.length - 1]!);
+      }
+    } else {
+      const sorted = this._sortedDarkSubBeatKeys();
+      if (sorted.length === 0) return;
+      this._dragging = true;
+      if (side === 'left') {
+        this._anchorSubBeatKey = sorted[sorted.length - 1]!;
+        this._updateSubBeatDrag(sorted[0]!);
+      } else {
+        this._anchorSubBeatKey = sorted[0]!;
+        this._updateSubBeatDrag(sorted[sorted.length - 1]!);
+      }
+    }
+  }
+
+  /**
+   * Derive the pixel bounding box of the current dark ghost set and update the
+   * handle ghost positions via GhostLayer.showHandles(). Called after every
+   * commit and after G1.3 re-projection. Reads bounds from index entries (not
+   * inline styles) so it works correctly in jsdom test fixtures.
+   */
+  private _updateHandleGhosts(): void {
+    if (!this._flags.fragmentSet || this._darkGhosts.size === 0) {
+      this._layer.hideHandles();
+      return;
+    }
+
+    let leftEdge = Infinity;
+    let rightEdge = -Infinity;
+    let top = 0;
+    let height = 0;
+    let found = false;
+
+    if (this._resolution === 'measure') {
+      for (const entry of this._layer.measureIndex.values()) {
+        if (!this._darkGhosts.has(entry.el)) continue;
+        const r = entry.bounds.left + entry.bounds.width;
+        if (entry.bounds.left < leftEdge) leftEdge = entry.bounds.left;
+        if (r > rightEdge) rightEdge = r;
+        top = entry.bounds.top;
+        height = entry.bounds.height;
+        found = true;
+      }
+    } else if (this._resolution === 'beat') {
+      for (const entry of this._layer.beatIndex.values()) {
+        if (!this._darkGhosts.has(entry.el)) continue;
+        const r = entry.bounds.left + entry.bounds.width;
+        if (entry.bounds.left < leftEdge) leftEdge = entry.bounds.left;
+        if (r > rightEdge) rightEdge = r;
+        top = entry.bounds.top;
+        height = entry.bounds.height;
+        found = true;
+      }
+    } else {
+      for (const entry of this._layer.subBeatIndex.values()) {
+        if (!this._darkGhosts.has(entry.el)) continue;
+        const r = entry.bounds.left + entry.bounds.width;
+        if (entry.bounds.left < leftEdge) leftEdge = entry.bounds.left;
+        if (r > rightEdge) rightEdge = r;
+        top = entry.bounds.top;
+        height = entry.bounds.height;
+        found = true;
+      }
+    }
+
+    if (!found) {
+      this._layer.hideHandles();
+      return;
+    }
+
+    this._layer.showHandles(leftEdge, rightEdge, top, height);
   }
 
   // ── Private: commit / cancel ───────────────────────────────────────────────

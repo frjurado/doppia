@@ -19,6 +19,7 @@ import {
   buildEndingBarriers,
   buildRepeatBarriers,
   ghostFromTarget,
+  handleFromTarget,
   measureKeyRange,
   numericKeyRange,
 } from '../annotator';
@@ -97,24 +98,6 @@ describe('ghostFromTarget', () => {
     expect(ghostFromTarget(el)).toBe(el);
   });
 
-  it('returns the ghost ancestor when target is a .ghost-edge child', () => {
-    const ghost = document.createElement('div');
-    ghost.className = 'ghost ghost-measure';
-    const edge = document.createElement('div');
-    edge.className = 'ghost-edge ghost-edge-left';
-    ghost.appendChild(edge);
-    expect(ghostFromTarget(edge)).toBe(ghost);
-  });
-
-  it('returns the ghost ancestor when target is a .ghost-gradient child', () => {
-    const ghost = document.createElement('div');
-    ghost.className = 'ghost ghost-beat';
-    const grad = document.createElement('div');
-    grad.className = 'ghost-gradient ghost-gradient-right';
-    ghost.appendChild(grad);
-    expect(ghostFromTarget(grad)).toBe(ghost);
-  });
-
   it('returns null when target has no .ghost ancestor', () => {
     const el = document.createElement('div');
     el.className = 'score-content';
@@ -123,6 +106,34 @@ describe('ghostFromTarget', () => {
 
   it('returns null for null target', () => {
     expect(ghostFromTarget(null)).toBeNull();
+  });
+
+  it('returns null for a .ghost-handle element (handles are not ghosts)', () => {
+    const el = document.createElement('div');
+    el.className = 'ghost-handle ghost-handle-left';
+    expect(ghostFromTarget(el)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleFromTarget
+// ---------------------------------------------------------------------------
+
+describe('handleFromTarget', () => {
+  it('returns the element itself when it carries .ghost-handle', () => {
+    const el = document.createElement('div');
+    el.className = 'ghost-handle ghost-handle-left';
+    expect(handleFromTarget(el)).toBe(el);
+  });
+
+  it('returns null for a .ghost element', () => {
+    const el = document.createElement('div');
+    el.className = 'ghost ghost-measure';
+    expect(handleFromTarget(el)).toBeNull();
+  });
+
+  it('returns null for null target', () => {
+    expect(handleFromTarget(null)).toBeNull();
   });
 });
 
@@ -422,6 +433,78 @@ describe('AnnotationSession — measure drag', () => {
 
     expect(session.selection?.barStart).toBe(2);
     expect(session.selection?.barEnd).toBe(5);
+  });
+
+  // G3.1 — handle ghost drag
+  it('handle ghosts appear in the overlay after a commit', () => {
+    measureDrag(els, 1, [3]); // commit [m2, m3, m4]
+    const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement | null;
+    const rightHandle = layer.overlay.querySelector('.ghost-handle-right') as HTMLElement | null;
+    expect(leftHandle).not.toBeNull();
+    expect(rightHandle).not.toBeNull();
+    expect(leftHandle?.style.display).not.toBe('none');
+    expect(rightHandle?.style.display).not.toBe('none');
+  });
+
+  it('mousedown on the left handle re-anchors from the right end (extends left)', () => {
+    // Commit a selection [m2, m3, m4].
+    measureDrag(els, 1, [3]);
+    expect(session.selection?.barStart).toBe(2);
+    expect(session.selection?.barEnd).toBe(4);
+
+    // The left handle re-anchors from m4 (last). Dragging to m1 → [m1,m2,m3,m4].
+    const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement;
+    leftHandle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(4);
+  });
+
+  it('mousedown on the right handle re-anchors from the left end (extends right)', () => {
+    // Commit a selection [m2, m3, m4].
+    measureDrag(els, 1, [3]);
+    expect(session.selection?.barStart).toBe(2);
+    expect(session.selection?.barEnd).toBe(4);
+
+    // The right handle re-anchors from m2 (first). Dragging to m5 → [m2,m3,m4,m5].
+    const rightHandle = layer.overlay.querySelector('.ghost-handle-right') as HTMLElement;
+    rightHandle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    els[4]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(session.selection?.barStart).toBe(2);
+    expect(session.selection?.barEnd).toBe(5);
+  });
+
+  it('handle ghosts are hidden during a handle drag and reappear after commit', () => {
+    measureDrag(els, 1, [3]); // commit [m2, m3, m4]
+
+    const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement;
+    const rightHandle = layer.overlay.querySelector('.ghost-handle-right') as HTMLElement;
+
+    // Handles visible after first commit.
+    expect(leftHandle.style.display).not.toBe('none');
+
+    // Begin handle drag — handles should hide.
+    leftHandle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    expect(leftHandle.style.display).toBe('none');
+    expect(rightHandle.style.display).toBe('none');
+
+    // Commit — handles should reappear.
+    els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+    expect(leftHandle.style.display).not.toBe('none');
+    expect(rightHandle.style.display).not.toBe('none');
+  });
+
+  it('handles are hidden after reset()', () => {
+    measureDrag(els, 0, [2]); // commit
+    const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement;
+    expect(leftHandle.style.display).not.toBe('none');
+    session.reset();
+    expect(leftHandle.style.display).toBe('none');
   });
 });
 

@@ -11,9 +11,9 @@
   /* No border-radius — project design system uses 0px everywhere (DESIGN.md). */
 }
 
-/* Left endpoint gradient handle: fades from transparent to bracket colour,
-   giving a visual cue that this edge is a drag affordance. The ghost layer's
-   own gradient zones provide the interactive affordance; this is decorative. */
+/* Left endpoint gradient handle: decorative fade at the bracket's left end.
+   The interactive drag affordance is the handle ghost element in the ghost layer
+   (G3.1); this element is purely cosmetic. */
 .handleLeft {
   position: absolute;
   top: 0;
