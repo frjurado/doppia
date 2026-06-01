@@ -42,6 +42,7 @@ from services.fragment_validation import (
     validate_containment,
 )
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Phase 1 approval threshold: one non-creator approving review is sufficient.
@@ -101,28 +102,34 @@ class FragmentService:
         validate_containment(payload, payload.sub_parts)
         await self._check_all_concepts(payload)
 
-        async with self._db.begin():
-            data_licence = await self._derive_data_licence(
-                payload.movement_id, payload.bar_start, payload.bar_end
-            )
-            parent = self._make_fragment_orm(
-                payload,
-                creator_id=uuid.UUID(creator_id),
-                data_licence=data_licence,
-                status="draft",
-            )
-            self._db.add(parent)
-            await self._db.flush()
-
-            self._add_concept_tags(parent.id, payload.concept_tags)
-
-            for sp in payload.sub_parts:
-                child = self._make_subpart_orm(
-                    sp, parent.id, payload.movement_id, data_licence
+        try:
+            async with self._db.begin():
+                data_licence = await self._derive_data_licence(
+                    payload.movement_id, payload.bar_start, payload.bar_end
                 )
-                self._db.add(child)
+                parent = self._make_fragment_orm(
+                    payload,
+                    creator_id=uuid.UUID(creator_id),
+                    data_licence=data_licence,
+                    status="draft",
+                )
+                self._db.add(parent)
                 await self._db.flush()
-                self._add_concept_tags(child.id, sp.concept_tags)
+
+                self._add_concept_tags(parent.id, payload.concept_tags)
+
+                for sp in payload.sub_parts:
+                    child = self._make_subpart_orm(
+                        sp, parent.id, payload.movement_id, data_licence
+                    )
+                    self._db.add(child)
+                    await self._db.flush()
+                    self._add_concept_tags(child.id, sp.concept_tags)
+        except IntegrityError as exc:
+            raise FragmentValidationError(
+                "Fragment references a missing related record (user or movement).",
+                detail={"integrity_error": str(exc.orig)},
+            ) from exc
 
         return parent
 
@@ -161,52 +168,58 @@ class FragmentService:
         validate_containment_for_update(payload)
         await self._check_all_concepts_for_update(payload)
 
-        async with self._db.begin():
-            fragment = await self._get_editable(fragment_id)
-            self._check_edit_permission(fragment, caller_id, caller_role)
+        try:
+            async with self._db.begin():
+                fragment = await self._get_editable(fragment_id)
+                self._check_edit_permission(fragment, caller_id, caller_role)
 
-            data_licence = await self._derive_data_licence(
-                fragment.movement_id, payload.bar_start, payload.bar_end
-            )
-
-            # Update scalar fields on the parent row.
-            fragment.bar_start = payload.bar_start
-            fragment.bar_end = payload.bar_end
-            fragment.mc_start = payload.mc_start
-            fragment.mc_end = payload.mc_end
-            fragment.beat_start = payload.beat_start
-            fragment.beat_end = payload.beat_end
-            fragment.repeat_context = payload.repeat_context
-            fragment.summary = payload.summary.model_dump()
-            fragment.prose_annotation = payload.prose_annotation
-            fragment.data_licence = data_licence
-            fragment.updated_at = datetime.now(tz=timezone.utc)
-            # Transition rejected → draft when the creator saves edits.
-            if fragment.status == "rejected":
-                fragment.status = "draft"
-            self._db.add(fragment)
-
-            # Delete and re-insert concept tags for the parent.
-            await self._db.execute(
-                delete(FragmentConceptTag).where(
-                    FragmentConceptTag.fragment_id == fragment_id
+                data_licence = await self._derive_data_licence(
+                    fragment.movement_id, payload.bar_start, payload.bar_end
                 )
-            )
-            self._add_concept_tags(fragment_id, payload.concept_tags)
 
-            # Delete existing sub-parts (cascade deletes their tags).
-            await self._db.execute(
-                delete(Fragment).where(Fragment.parent_fragment_id == fragment_id)
-            )
+                # Update scalar fields on the parent row.
+                fragment.bar_start = payload.bar_start
+                fragment.bar_end = payload.bar_end
+                fragment.mc_start = payload.mc_start
+                fragment.mc_end = payload.mc_end
+                fragment.beat_start = payload.beat_start
+                fragment.beat_end = payload.beat_end
+                fragment.repeat_context = payload.repeat_context
+                fragment.summary = payload.summary.model_dump()
+                fragment.prose_annotation = payload.prose_annotation
+                fragment.data_licence = data_licence
+                fragment.updated_at = datetime.now(tz=timezone.utc)
+                # Transition rejected → draft when the creator saves edits.
+                if fragment.status == "rejected":
+                    fragment.status = "draft"
+                self._db.add(fragment)
 
-            # Re-insert sub-parts.
-            for sp in payload.sub_parts:
-                child = self._make_subpart_orm(
-                    sp, fragment_id, fragment.movement_id, data_licence
+                # Delete and re-insert concept tags for the parent.
+                await self._db.execute(
+                    delete(FragmentConceptTag).where(
+                        FragmentConceptTag.fragment_id == fragment_id
+                    )
                 )
-                self._db.add(child)
-                await self._db.flush()
-                self._add_concept_tags(child.id, sp.concept_tags)
+                self._add_concept_tags(fragment_id, payload.concept_tags)
+
+                # Delete existing sub-parts (cascade deletes their tags).
+                await self._db.execute(
+                    delete(Fragment).where(Fragment.parent_fragment_id == fragment_id)
+                )
+
+                # Re-insert sub-parts.
+                for sp in payload.sub_parts:
+                    child = self._make_subpart_orm(
+                        sp, fragment_id, fragment.movement_id, data_licence
+                    )
+                    self._db.add(child)
+                    await self._db.flush()
+                    self._add_concept_tags(child.id, sp.concept_tags)
+        except IntegrityError as exc:
+            raise FragmentValidationError(
+                "Fragment references a missing related record (user or movement).",
+                detail={"integrity_error": str(exc.orig)},
+            ) from exc
 
         return fragment
 
