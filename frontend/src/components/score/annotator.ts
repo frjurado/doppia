@@ -88,6 +88,9 @@ export interface AnnotationSessionOptions {
    * close-repeat (:|) or da capo/dal segno marker. The selection may include
    * a barrier measure but cannot extend past its right barline.
    * Build with buildRepeatBarriers().
+   *
+   * Ending-transition barriers (G2.2) are derived automatically from the ghost
+   * layer in the AnnotationSession constructor and do not need to be included here.
    */
   closeRepeatMeasures?: Set<string>;
   /** Initial resolution mode. Defaults to 'measure'. */
@@ -173,6 +176,42 @@ export function buildRepeatBarriers(meiText: string): Set<string> {
     if (isBarrier) {
       const barN = parseInt(m.getAttribute('n') ?? `${i + 1}`, 10);
       barriers.add(measureGhostKey(barN, endingNFromEl(m)));
+    }
+  }
+
+  return barriers;
+}
+
+/**
+ * Return the set of measure ghost keys that form ending-transition barriers.
+ *
+ * Crossing from inside one repeat ending into a different ending is
+ * structurally forbidden — a selection must stay within its ending context.
+ * The last measure of each ending group is marked as a barrier whenever the
+ * adjacent next measure belongs to a different non-null ending (e.g. ending 1
+ * → ending 2). Entering an ending from the main body (null → non-null) and
+ * exiting back to the main body (non-null → null) are permitted.
+ *
+ * The AnnotationSession constructor calls this automatically and merges the
+ * result with closeRepeatMeasures. Callers need not invoke it directly.
+ *
+ * References: ADR-005 §"Edge cases — Repeat sections", G2.2.
+ */
+export function buildEndingBarriers(
+  measureIndex: Map<string, MeasureGhostEntry>,
+): Set<string> {
+  const barriers = new Set<string>();
+  const entries = [...measureIndex.values()];
+
+  for (let i = 0; i < entries.length - 1; i++) {
+    const curr = entries[i]!;
+    const next = entries[i + 1]!;
+    if (
+      curr.endingN !== null &&
+      next.endingN !== null &&
+      curr.endingN !== next.endingN
+    ) {
+      barriers.add(curr.key);
     }
   }
 
@@ -309,6 +348,11 @@ function repeatContextFromEndingN(
  * Manages a single annotation session: ghost-layer interaction, concurrent
  * flags, and the committed selection range.
  *
+ * On construction, ending-transition barriers are derived automatically from
+ * the ghost layer and merged with any caller-supplied closeRepeatMeasures (G2.2).
+ * Callers only need to supply repeat-barline barriers; ending barriers are
+ * always present without extra configuration.
+ *
  * Lifecycle: construct after buildGhosts() resolves; call destroy() before
  * the score re-renders or the ghost layer is destroyed.
  */
@@ -356,7 +400,18 @@ export class AnnotationSession {
 
   constructor(layer: GhostLayer, options: AnnotationSessionOptions = {}) {
     this._layer = layer;
-    this._barriers = options.closeRepeatMeasures ?? new Set();
+
+    // G2.2: auto-derive ending-transition barriers and merge with any
+    // caller-supplied close-repeat barriers. A crossing between two distinct
+    // ending contexts (e.g. ending 1 → ending 2) is always a hard gate,
+    // independent of whether a close-repeat barline is also present.
+    const endingBarriers = buildEndingBarriers(layer.measureIndex);
+    const closeRepeat = options.closeRepeatMeasures ?? new Set<string>();
+    this._barriers =
+      endingBarriers.size === 0
+        ? closeRepeat
+        : new Set([...closeRepeat, ...endingBarriers]);
+
     this._resolution = options.resolution ?? 'measure';
 
     this._orderedMeasureKeys = [...layer.measureIndex.keys()];

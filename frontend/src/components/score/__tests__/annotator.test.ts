@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AnnotationSession,
+  buildEndingBarriers,
   buildRepeatBarriers,
   ghostFromTarget,
   measureKeyRange,
@@ -719,6 +720,159 @@ describe('AnnotationSession — concurrent flags', () => {
     const snap = session.flags as Record<string, boolean>;
     snap['conceptSet'] = true;
     expect(session.flags.conceptSet).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildEndingBarriers (G2.2)
+// ---------------------------------------------------------------------------
+
+describe('buildEndingBarriers', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('returns an empty set when no measures have endings', () => {
+    const { layer, container } = makeLayerWithMeasures([1, 2, 3]);
+    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
+    layer.destroy(); container.remove();
+  });
+
+  it('returns an empty set when all measures are in the same ending', () => {
+    const { layer, container } = makeLayerWithMeasures([1, 2, 3], [1, 1, 1]);
+    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
+    layer.destroy(); container.remove();
+  });
+
+  it('marks the last measure of ending 1 as a barrier when followed by ending 2', () => {
+    // m1(null), m2-e1, m3-e1, m2-e2, m3-e2 — transition at m3-e1 → m2-e2.
+    const { layer, container } = makeLayerWithMeasures([1, 2, 3, 2, 3], [null, 1, 1, 2, 2]);
+    const barriers = buildEndingBarriers(layer.measureIndex);
+    expect(barriers.has(measureGhostKey(3, 1))).toBe(true);   // last of ending 1
+    expect(barriers.has(measureGhostKey(2, 1))).toBe(false);  // not last of ending 1
+    expect(barriers.has(measureGhostKey(3, 2))).toBe(false);  // ending 2 — not a barrier
+    expect(barriers.size).toBe(1);
+    layer.destroy(); container.remove();
+  });
+
+  it('does not block null → non-null (entering an ending from the main body)', () => {
+    // m1(null) → m2-e1: entering ending 1 is permitted.
+    const { layer, container } = makeLayerWithMeasures([1, 2, 3], [null, 1, 1]);
+    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
+    layer.destroy(); container.remove();
+  });
+
+  it('does not block non-null → null (exiting an ending back to the main body)', () => {
+    // m2-e1, m3(null): leaving ending 1 is permitted.
+    const { layer, container } = makeLayerWithMeasures([1, 2, 3], [1, 1, null]);
+    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
+    layer.destroy(); container.remove();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AnnotationSession — ending-boundary barrier (G2.2)
+// ---------------------------------------------------------------------------
+
+describe('AnnotationSession — ending-boundary barrier', () => {
+  let container: HTMLDivElement;
+  let layer: GhostLayer;
+  let els: HTMLDivElement[];
+  let session: AnnotationSession;
+
+  // Alla Turca fixture: m1–m5 main body, m6-e1/m7-e1 first ending,
+  // m6-e2/m7-e2 second ending, m8 continuation.
+  // Close-repeat on m7-e1; ending barrier is also auto-derived at m7-e1.
+  // Index:  0   1   2   3   4    5      6      7      8     9
+  // Key:    m1  m2  m3  m4  m5  m6-e1  m7-e1  m6-e2  m7-e2  m8
+  beforeEach(() => {
+    ({ container, layer, els } = makeLayerWithMeasures(
+      [1, 2, 3, 4, 5, 6, 7, 6, 7, 8],
+      [null, null, null, null, null, 1, 1, 2, 2, null],
+    ));
+    session = new AnnotationSession(layer, {
+      resolution: 'measure',
+      closeRepeatMeasures: new Set([measureGhostKey(7, 1)]),
+    });
+  });
+
+  afterEach(() => {
+    session.destroy();
+    container.remove();
+  });
+
+  it('same-barN measures in different endings have distinct ghost keys', () => {
+    expect(measureGhostKey(6, 1)).toBe('m6-e1');
+    expect(measureGhostKey(6, 2)).toBe('m6-e2');
+    expect(layer.measureIndex.has(measureGhostKey(6, 1))).toBe(true);
+    expect(layer.measureIndex.has(measureGhostKey(6, 2))).toBe(true);
+  });
+
+  it('forward drag from main body is clamped at the close-repeat of ending 1', () => {
+    // Anchor at m1 (idx 0), drag to m8 (idx 9) — barrier at m7-e1 (idx 6).
+    measureDrag(els, 0, [9]);
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(7); // m7-e1.barN = 7
+  });
+
+  it('drag within ending 1 is unaffected by barriers', () => {
+    measureDrag(els, 5, [6]); // m6-e1 → m7-e1
+    expect(session.selection?.barStart).toBe(6);
+    expect(session.selection?.barEnd).toBe(7);
+    expect(session.selection?.repeatContext).toBe('first_ending');
+  });
+
+  it('drag within ending 2 is unaffected by barriers', () => {
+    measureDrag(els, 7, [8]); // m6-e2 → m7-e2
+    expect(session.selection?.barStart).toBe(6);
+    expect(session.selection?.barEnd).toBe(7);
+    expect(session.selection?.repeatContext).toBe('second_ending');
+  });
+
+  it('forward drag from ending 1 cannot cross the boundary into ending 2', () => {
+    // Anchor at m6-e1 (idx 5), drag to m6-e2 (idx 7).
+    // Ending barrier at m7-e1 clamps the selection.
+    measureDrag(els, 5, [7]);
+    expect(session.selection?.barEnd).toBe(7); // m7-e1.barN = 7
+    expect(session.selection?.repeatContext).toBe('first_ending');
+  });
+
+  it('backward drag from ending 2 cannot cross the boundary into ending 1', () => {
+    // Anchor at m6-e2 (idx 7), drag backward past barrier to m1 (idx 0).
+    // Barrier at m7-e1 prevents the crossing — selection collapses to [m6-e2].
+    measureDrag(els, 7, [6, 5, 4, 3, 2, 1, 0]);
+    expect(session.selection?.barStart).toBe(6);
+    expect(session.selection?.barEnd).toBe(6);
+    expect(session.selection?.repeatContext).toBe('second_ending');
+  });
+
+  it('repeat_context is first_ending when selection is inside ending 1', () => {
+    measureDrag(els, 5, []); // single-measure click on m6-e1
+    expect(session.selection?.repeatContext).toBe('first_ending');
+  });
+
+  it('repeat_context is second_ending when selection is inside ending 2', () => {
+    measureDrag(els, 7, []); // single-measure click on m6-e2
+    expect(session.selection?.repeatContext).toBe('second_ending');
+  });
+
+  it('ending-boundary barrier is auto-derived even without a close-repeat barline', () => {
+    // Layer with two endings and NO close-repeat; relying solely on auto-derived barrier.
+    const { container: c2, layer: l2, els: e2 } = makeLayerWithMeasures(
+      [1, 2, 1, 2],
+      [1, 1, 2, 2],
+    );
+    const s2 = new AnnotationSession(l2, { resolution: 'measure' /* no closeRepeatMeasures */ });
+
+    // Drag from m1-e1 (idx 0) to m1-e2 (idx 2) — crosses ending boundary.
+    // Auto-derived barrier at m2-e1 (idx 1) must clamp the selection.
+    e2[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    e2[2]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(s2.selection?.barEnd).toBe(2); // m2-e1.barN = 2 (clamped at ending barrier)
+    expect(s2.selection?.repeatContext).toBe('first_ending');
+    s2.destroy(); c2.remove();
   });
 });
 
