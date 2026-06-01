@@ -6,7 +6,7 @@ import StageBrackets from '../components/score/StageBrackets';
 import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
 import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
 import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
-import type { AnnotationFlags, SelectionRange } from '../components/score/annotator';
+import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
 import type { StageAssignment, SubPartTag } from '../components/score/stages';
@@ -315,6 +315,10 @@ export default function ScoreViewer() {
   const annotationSessionRef = useRef<AnnotationSession | null>(null);
   // Precomputed barN → mc mapping for the currently loaded MEI.
   const mcIndexRef = useRef<Map<string, number> | null>(null);
+  // G1.3: tracks the (movementId, tagMode) context of the last ghost build so
+  // the svgPages effect can distinguish SVG re-renders of the same score
+  // (preserve annotator state) from new-score loads or mode changes (full reset).
+  const prevScoreKeyRef = useRef<string | null>(null);
 
   // ── Annotation state (Step 11) ────────────────────────────────────────────
   // Exposed to React render tree so MainBracket and future Part 4/5 panels
@@ -929,9 +933,14 @@ export default function ScoreViewer() {
   //
   // Rebuilt on every svgPages change so ghost positions stay aligned with the
   // rendered SVG geometry. On each rebuild the previous session and layer are
-  // destroyed first and the selection state is reset — the user starts a new
-  // annotation after any re-render (scale/font/transpose change). This is
-  // acceptable for Phase 1; Component 7 can add ghost-position persistence.
+  // destroyed first, then new ones are built over the fresh SVG.
+  //
+  // G1.3 — re-projection: when the rebuild is a re-render of the same score
+  // (zoom / resize / font change), any committed selection and its associated
+  // state survive. The new session is seeded with the logical coordinates from
+  // the old session so it re-highlights the ghosts on the new geometry and
+  // MainBracket / StageBrackets re-derive their pixel bounds automatically.
+  // A full reset happens only when the score changes (movementId or tagMode).
   //
   // The effect depends on `svgPages` (array reference changes on each update)
   // rather than `svgPages.length` because the final page addition produces a
@@ -953,29 +962,58 @@ export default function ScoreViewer() {
     const mei       = meiTextRef.current;
     const container = scorePanelRef.current;
 
-    // Teardown: destroy the previous session and layer before building new
-    // ones. State resets are batched with the subsequent setGhostLayer call so
-    // MainBracket sees a single coherent update.
+    // Determine whether this rebuild is a re-render of the same score
+    // (same movementId AND same tagMode → SVG-only change) or a context
+    // change (new score, or tagging mode entered/exited).
+    const scoreKey      = `${movementId ?? ''}:${tagMode}`;
+    const isSameContext = prevScoreKeyRef.current === scoreKey;
+    prevScoreKeyRef.current = scoreKey;
+
+    // Read committed selection state from the React state closure.
+    // We deliberately do NOT snapshot from annotationSessionRef.current here
+    // because React runs the previous effect's cleanup (which nulls the ref)
+    // BEFORE this effect body executes. For re-renders that add SVG pages
+    // progressively the cleanup destroys the session from the previous page
+    // before this run can read it. The closure values (selectionRange,
+    // annotationFlags) are captured at the render that triggered this effect
+    // and are unaffected by cleanup — they remain the committed selection until
+    // setSelectionRange(null) is explicitly called.
+    const hadFragment     = annotationFlags.fragmentSet;
+    const prevSelection   = selectionRange;
+    const prevFlags       = annotationFlags;
+    const shouldReproject = isSameContext && hadFragment;
+
+    // Teardown: destroy the previous session and layer.
     annotationSessionRef.current?.destroy();
     ghostLayerRef.current?.destroy();
     annotationSessionRef.current = null;
     ghostLayerRef.current        = null;
 
-    setSelectionRange(null);
-    setCommittedSelection(null);
-    setAnnotationFlags({
-      fragmentSet: false, conceptSet: false,
-      stagesComplete: false, propertiesComplete: false,
-    });
-    // Reset stage state so the ghost layer rebuild starts clean.
-    // Stage positions are pixel-anchored to the current render; stale positions
-    // would be wrong after a scale/transpose/font change.
-    setStageAssignments([]);
-    setActiveStageId(null);
-    // Reset sub-part tags alongside stages — the stage IDs they reference may
-    // have changed, and any stored bounds are tied to the previous render.
-    setSubPartTags({});
-    setSubPartResetKey(k => k + 1);
+    if (!shouldReproject) {
+      // Full reset — new score, tagMode change, or no committed fragment.
+      // State resets are batched with the subsequent setGhostLayer call so
+      // MainBracket sees a single coherent update.
+      setSelectionRange(null);
+      setCommittedSelection(null);
+      setAnnotationFlags({
+        fragmentSet: false, conceptSet: false,
+        stagesComplete: false, propertiesComplete: false,
+      });
+      setStageAssignments([]);
+      setActiveStageId(null);
+      setSubPartTags({});
+      setSubPartResetKey(k => k + 1);
+      setFragmentDraftId(null);
+    }
+    // When shouldReproject is true the following state all survives the rebuild:
+    //   selectionRange / committedSelection — logical bar/beat coordinates
+    //   annotationFlags — concept, stage, property completion state
+    //   stageAssignments — StageBounds are logical barN coords, not pixels
+    //   subPartTags — keyed by stageId (stable strings)
+    //   proseAnnotation — free text, independent of geometry
+    //   fragmentDraftId — API draft UUID, still valid for the same fragment
+    // MainBracket and StageBrackets re-derive pixel positions from the fresh
+    // ghostLayer on the next render automatically.
 
     // Build the new ghost layer over the currently rendered SVG.
     const layer = buildGhosts(container, mei);
@@ -992,8 +1030,24 @@ export default function ScoreViewer() {
     // state), so the score remains fully interactive for reading and MIDI
     // playback with no selection affordances.
     if (tagMode === 'tag') {
-      const barriers = buildRepeatBarriers(mei);
-      const session  = new AnnotationSession(layer, { closeRepeatMeasures: barriers });
+      const barriers    = buildRepeatBarriers(mei);
+      const sessionOpts: AnnotationSessionOptions = {
+        closeRepeatMeasures: barriers,
+        resolution: resolutionRef.current,
+      };
+
+      // G1.3: seed the new session with the logical selection so ghosts are
+      // re-highlighted on the fresh geometry without firing React callbacks.
+      if (shouldReproject && prevSelection && prevFlags) {
+        sessionOpts.initialSelection = prevSelection;
+        sessionOpts.initialFlags = {
+          conceptSet:         prevFlags.conceptSet,
+          stagesComplete:     prevFlags.stagesComplete,
+          propertiesComplete: prevFlags.propertiesComplete,
+        };
+      }
+
+      const session = new AnnotationSession(layer, sessionOpts);
       annotationSessionRef.current = session;
 
       // Subscribe: resolve mc coordinates at commit time and surface to React.
@@ -1024,6 +1078,10 @@ export default function ScoreViewer() {
   // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
   // tagMode entering 'tag' creates the session; leaving destroys it.
   // status gates the effect from running during loading.
+  // movementId is intentionally read from the closure (not the dep array):
+  // route changes always co-occur with status/tagMode/svgPages changes, so
+  // adding movementId would fire the effect before the new SVG is ready.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, svgPages, tagMode]);
 
   // Forward resolution changes to the active annotation session (Step 10).

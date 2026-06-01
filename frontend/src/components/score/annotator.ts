@@ -92,6 +92,23 @@ export interface AnnotationSessionOptions {
   closeRepeatMeasures?: Set<string>;
   /** Initial resolution mode. Defaults to 'measure'. */
   resolution?: ResolutionMode;
+  /**
+   * G1.3 — committed selection to re-project after a ghost-layer rebuild
+   * (zoom / resize / font change). The ghost elements are re-highlighted from
+   * the logical coordinates so endpoint re-anchor continues to work after the
+   * SVG geometry changes. Requires `resolution` to be set to the active mode.
+   */
+  initialSelection?: SelectionRange;
+  /**
+   * G1.3 — non-geometry flags to restore alongside `initialSelection`.
+   * `fragmentSet` is derived automatically from `initialSelection`; do not
+   * include it here.
+   */
+  initialFlags?: {
+    conceptSet?: boolean;
+    stagesComplete?: boolean;
+    propertiesComplete?: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +352,20 @@ export class AnnotationSession {
     // Activate the initial resolution layer.
     this._layer.setResolution(this._resolution);
     this._attachListeners();
+
+    // G1.3: re-project a committed selection from a previous ghost build.
+    // Called after _attachListeners so the DOM elements are live, but before
+    // any subscriber callbacks are registered — the restoring code sets state
+    // directly without firing onSelectionChange/onFlagsChange.
+    if (options.initialSelection) {
+      this._restoreSelection(options.initialSelection);
+    }
+    if (options.initialFlags) {
+      const { conceptSet, stagesComplete, propertiesComplete } = options.initialFlags;
+      if (conceptSet !== undefined)        this._flags = { ...this._flags, conceptSet };
+      if (stagesComplete !== undefined)    this._flags = { ...this._flags, stagesComplete };
+      if (propertiesComplete !== undefined) this._flags = { ...this._flags, propertiesComplete };
+    }
   }
 
   // ── Public read API ────────────────────────────────────────────────────────
@@ -431,6 +462,66 @@ export class AnnotationSession {
     if (this._flags[key] === value) return;
     this._flags = { ...this._flags, [key]: value };
     this._onFlagsChange?.(this.flags);
+  }
+
+  // ── Private: G1.3 re-projection ───────────────────────────────────────────
+
+  /**
+   * Re-project a committed SelectionRange onto the freshly rebuilt ghost layer.
+   *
+   * Called from the constructor when `options.initialSelection` is provided
+   * (SVG re-render path: zoom / resize / font change). Sets _selection and
+   * re-highlights the appropriate ghost elements as dark so endpoint re-anchor
+   * (G1.2) continues to work after the geometry change.
+   *
+   * For measure-level selections (beatStart null) the measure index is used.
+   * For beat/sub-beat selections the active resolution index is used; the
+   * resolution must therefore be set in options before this method runs.
+   *
+   * Callbacks are NOT fired — the React state in ScoreViewer already holds
+   * the preserved selection and flags, so there is nothing to notify.
+   */
+  private _restoreSelection(sel: SelectionRange): void {
+    this._selection = sel;
+
+    if (sel.beatStart === null) {
+      // Measure-level: highlight all measure ghosts in [barStart, barEnd].
+      for (const entry of this._layer.measureIndex.values()) {
+        if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
+          addClass(entry.el, 'dark');
+          this._darkGhosts.add(entry.el);
+        }
+      }
+    } else {
+      // Beat / sub-beat: highlight the fine-grained ghosts for the selection
+      // range using the currently active resolution index.
+      const beatStart = sel.beatStart;
+      const beatEnd   = sel.beatEnd ?? Infinity;
+      if (this._resolution === 'beat') {
+        for (const entry of this._layer.beatIndex.values()) {
+          if (
+            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
+            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
+          ) {
+            addClass(entry.el, 'dark');
+            this._darkGhosts.add(entry.el);
+          }
+        }
+      } else {
+        // 'subbeat' (or any future mode that carries beatStart)
+        for (const entry of this._layer.subBeatIndex.values()) {
+          if (
+            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
+            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
+          ) {
+            addClass(entry.el, 'dark');
+            this._darkGhosts.add(entry.el);
+          }
+        }
+      }
+    }
+
+    this._flags = { ...this._flags, fragmentSet: true };
   }
 
   // ── Private: listener attachment ──────────────────────────────────────────
