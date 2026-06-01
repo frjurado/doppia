@@ -53,14 +53,13 @@
   position: absolute;
   cursor: ew-resize;
   user-select: none;
-  opacity: 0.55;
 }
 
 /* Left handle: gradient solid at right edge (touches the selection), fading left. */
 :global(.ghost-handle-left) {
   background: linear-gradient(
     to right,
-    transparent,
+    color-mix(in srgb, var(--color-primary, #3f5f77) 0%, transparent),
     var(--color-primary, #3f5f77)
   );
 }
@@ -69,7 +68,7 @@
 :global(.ghost-handle-right) {
   background: linear-gradient(
     to left,
-    transparent,
+    color-mix(in srgb, var(--color-primary, #3f5f77) 0%, transparent),
     var(--color-primary, #3f5f77)
   );
 }

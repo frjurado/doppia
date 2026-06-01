@@ -27,6 +27,7 @@
 
 import type {
   BeatGhostEntry,
+  GhostBounds,
   GhostLayer,
   MeasureGhostEntry,
   ResolutionMode,
@@ -404,6 +405,10 @@ export class AnnotationSession {
   private readonly _darkGhosts = new Set<HTMLElement>();
   private _hoverGhost: HTMLElement | null = null;
 
+  // True once positionHandles() has been called with valid coordinates so that
+  // _handleMouseOver knows it is safe to call showHandles() on hover.
+  private _handlesReady = false;
+
   // Current committed selection (updated on mouseup).
   private _selection: SelectionRange | null = null;
 
@@ -475,15 +480,23 @@ export class AnnotationSession {
 
   /**
    * Switch the active ghost layer. Delegates to GhostLayer.setResolution()
-   * (which flips pointer-events) and cancels any in-progress drag. The
-   * committed selection is preserved — only the in-progress drag is cleared.
-   * Ghost construction is NOT re-run (ADR-005 §"Resolution toggle").
+   * (which flips pointer-events). Any in-progress drag is cancelled without
+   * firing callbacks. If a selection is committed, it is preserved: dark ghosts
+   * are re-projected onto the new resolution's layer so handle drags work
+   * correctly at the new granularity (the handle re-anchor paths rely on
+   * _darkGhosts containing elements from the active resolution index). Ghost
+   * construction is NOT re-run (ADR-005 §"Resolution toggle").
    */
   setResolution(mode: ResolutionMode): void {
     if (mode === this._resolution) return;
     this._resolution = mode;
     this._layer.setResolution(mode);
     this._cancelDrag();
+    if (this._flags.fragmentSet && this._selection) {
+      this._clearDark();
+      this._reprojectSelection();
+      this._updateHandleGhosts();
+    }
   }
 
   /** Mark a concept as selected (or unselected). */
@@ -533,7 +546,8 @@ export class AnnotationSession {
   reset(): void {
     this._cancelDrag();
     this._clearAllHighlights();
-    this._layer.hideHandles();
+    this._handlesReady = false;
+    this._layer.deactivateHandles();
     this._selection = null;
     const anySet =
       this._flags.fragmentSet ||
@@ -619,6 +633,73 @@ export class AnnotationSession {
     this._updateHandleGhosts();
   }
 
+  /**
+   * Re-project the committed selection onto the current resolution's ghost layer.
+   *
+   * Called from setResolution() when fragmentSet is true so that the handle
+   * re-anchor paths (_startHandleDrag, _sortedDark*Keys) always find elements
+   * from the active resolution index in _darkGhosts.
+   *
+   * For measure-level selections (beatStart null) switching to beat/subbeat,
+   * all ghosts in the bar range are illuminated so the user can refine with
+   * handle drags at finer granularity. Does NOT modify _selection or _flags.
+   */
+  private _reprojectSelection(): void {
+    if (!this._selection) return;
+    const sel = this._selection;
+
+    if (this._resolution === 'measure') {
+      for (const entry of this._layer.measureIndex.values()) {
+        if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
+          addClass(entry.el, 'dark');
+          this._darkGhosts.add(entry.el);
+        }
+      }
+    } else if (this._resolution === 'beat') {
+      if (sel.beatStart !== null && sel.beatEnd !== null) {
+        const beatStart = sel.beatStart;
+        const beatEnd   = sel.beatEnd;
+        for (const entry of this._layer.beatIndex.values()) {
+          if (
+            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
+            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
+          ) {
+            addClass(entry.el, 'dark');
+            this._darkGhosts.add(entry.el);
+          }
+        }
+      } else {
+        for (const entry of this._layer.beatIndex.values()) {
+          if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
+            addClass(entry.el, 'dark');
+            this._darkGhosts.add(entry.el);
+          }
+        }
+      }
+    } else {
+      if (sel.beatStart !== null && sel.beatEnd !== null) {
+        const beatStart = sel.beatStart;
+        const beatEnd   = sel.beatEnd;
+        for (const entry of this._layer.subBeatIndex.values()) {
+          if (
+            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
+            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
+          ) {
+            addClass(entry.el, 'dark');
+            this._darkGhosts.add(entry.el);
+          }
+        }
+      } else {
+        for (const entry of this._layer.subBeatIndex.values()) {
+          if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
+            addClass(entry.el, 'dark');
+            this._darkGhosts.add(entry.el);
+          }
+        }
+      }
+    }
+  }
+
   // ── Private: listener attachment ──────────────────────────────────────────
 
   private _attachListeners(): void {
@@ -686,10 +767,26 @@ export class AnnotationSession {
     const ghost = ghostFromTarget(e.target);
 
     if (!this._dragging) {
-      if (ghost !== this._hoverGhost) {
-        if (this._hoverGhost) removeClass(this._hoverGhost, 'light');
-        this._hoverGhost = ghost;
-        if (ghost) addClass(ghost, 'light');
+      // Light hover is only meaningful before a selection is committed.
+      // Once fragmentSet is true, clicking a non-dark ghost does nothing, so
+      // showing the hover affordance would imply an incorrect interaction model.
+      if (!this._flags.fragmentSet) {
+        if (ghost !== this._hoverGhost) {
+          if (this._hoverGhost) removeClass(this._hoverGhost, 'light');
+          this._hoverGhost = ghost;
+          if (ghost) addClass(ghost, 'light');
+        }
+      }
+      // Handles are hover-only: show when over a dark ghost or a handle element;
+      // hide otherwise so they don't clutter a non-hovered committed selection.
+      if (this._handlesReady) {
+        const overDark = ghost !== null && this._darkGhosts.has(ghost);
+        const overHandle = handleFromTarget(e.target) !== null;
+        if (overDark || overHandle) {
+          this._layer.showHandles();
+        } else {
+          this._layer.hideHandles();
+        }
       }
       return;
     }
@@ -717,6 +814,7 @@ export class AnnotationSession {
       removeClass(this._hoverGhost, 'light');
       this._hoverGhost = null;
     }
+    this._layer.hideHandles();
   }
 
   private _handleMouseUp(): void {
@@ -1147,61 +1245,67 @@ export class AnnotationSession {
   }
 
   /**
-   * Derive the pixel bounding box of the current dark ghost set and update the
-   * handle ghost positions via GhostLayer.showHandles(). Called after every
-   * commit and after G1.3 re-projection. Reads bounds from index entries (not
-   * inline styles) so it works correctly in jsdom test fixtures.
+   * Compute handle positions from the first and last dark ghost in document
+   * order and call GhostLayer.positionHandles(). The handles are NOT shown —
+   * _handleMouseOver shows them when the user hovers over the selection.
+   *
+   * Using first/last in document order (not global min-left / max-right) places
+   * each handle at the correct system edge for multi-system fragments instead of
+   * at opposite page extremes. Reads bounds from index entries (not inline
+   * styles) so it works in jsdom test fixtures.
    */
   private _updateHandleGhosts(): void {
     if (!this._flags.fragmentSet || this._darkGhosts.size === 0) {
-      this._layer.hideHandles();
+      this._handlesReady = false;
+      this._layer.deactivateHandles();
       return;
     }
 
-    let leftEdge = Infinity;
-    let rightEdge = -Infinity;
-    let top = 0;
-    let height = 0;
-    let found = false;
+    let firstBounds: GhostBounds | null = null;
+    let lastBounds: GhostBounds | null = null;
 
     if (this._resolution === 'measure') {
-      for (const entry of this._layer.measureIndex.values()) {
-        if (!this._darkGhosts.has(entry.el)) continue;
-        const r = entry.bounds.left + entry.bounds.width;
-        if (entry.bounds.left < leftEdge) leftEdge = entry.bounds.left;
-        if (r > rightEdge) rightEdge = r;
-        top = entry.bounds.top;
-        height = entry.bounds.height;
-        found = true;
+      for (const k of this._orderedMeasureKeys) {
+        const entry = this._layer.measureIndex.get(k);
+        if (!entry || !this._darkGhosts.has(entry.el)) continue;
+        if (!firstBounds) firstBounds = entry.bounds;
+        lastBounds = entry.bounds;
       }
     } else if (this._resolution === 'beat') {
-      for (const entry of this._layer.beatIndex.values()) {
-        if (!this._darkGhosts.has(entry.el)) continue;
-        const r = entry.bounds.left + entry.bounds.width;
-        if (entry.bounds.left < leftEdge) leftEdge = entry.bounds.left;
-        if (r > rightEdge) rightEdge = r;
-        top = entry.bounds.top;
-        height = entry.bounds.height;
-        found = true;
+      for (const k of this._orderedBeatKeys) {
+        const entry = this._layer.beatIndex.get(k);
+        if (!entry || !this._darkGhosts.has(entry.el)) continue;
+        if (!firstBounds) firstBounds = entry.bounds;
+        lastBounds = entry.bounds;
       }
     } else {
-      for (const entry of this._layer.subBeatIndex.values()) {
-        if (!this._darkGhosts.has(entry.el)) continue;
-        const r = entry.bounds.left + entry.bounds.width;
-        if (entry.bounds.left < leftEdge) leftEdge = entry.bounds.left;
-        if (r > rightEdge) rightEdge = r;
-        top = entry.bounds.top;
-        height = entry.bounds.height;
-        found = true;
+      for (const k of this._orderedSubBeatKeys) {
+        const entry = this._layer.subBeatIndex.get(k);
+        if (!entry || !this._darkGhosts.has(entry.el)) continue;
+        if (!firstBounds) firstBounds = entry.bounds;
+        lastBounds = entry.bounds;
       }
     }
 
-    if (!found) {
-      this._layer.hideHandles();
+    if (!firstBounds || !lastBounds) {
+      this._handlesReady = false;
+      this._layer.deactivateHandles();
       return;
     }
 
-    this._layer.showHandles(leftEdge, rightEdge, top, height);
+    // Opacity must match the adjacent dark ghost so the gradient's solid end
+    // blends seamlessly at the selection boundary.
+    const handleOpacity = this._resolution === 'beat' ? 0.55 : 0.45;
+
+    this._layer.positionHandles(
+      firstBounds.left, firstBounds.top, firstBounds.height,
+      lastBounds.left + lastBounds.width, lastBounds.top, lastBounds.height,
+      handleOpacity,
+    );
+    this._handlesReady = true;
+    // Handles are positioned at opacity 0 (interactive but invisible) —
+    // showHandles() is called from _handleMouseOver when the user hovers
+    // over a dark ghost or directly over a handle element.
   }
 
   // ── Private: commit / cancel ───────────────────────────────────────────────

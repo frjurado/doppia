@@ -436,14 +436,19 @@ describe('AnnotationSession — measure drag', () => {
   });
 
   // G3.1 — handle ghost drag
-  it('handle ghosts appear in the overlay after a commit', () => {
+  it('handle ghosts are positioned after commit and appear on hover over dark ghost', () => {
     measureDrag(els, 1, [3]); // commit [m2, m3, m4]
     const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement | null;
     const rightHandle = layer.overlay.querySelector('.ghost-handle-right') as HTMLElement | null;
     expect(leftHandle).not.toBeNull();
     expect(rightHandle).not.toBeNull();
-    expect(leftHandle?.style.display).not.toBe('none');
-    expect(rightHandle?.style.display).not.toBe('none');
+    // Handles are positioned at opacity 0 (interactive but invisible) until hover.
+    expect(leftHandle?.style.opacity).toBe('0');
+    expect(rightHandle?.style.opacity).toBe('0');
+    // Hover over a dark ghost → handles appear.
+    els[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(leftHandle?.style.opacity).not.toBe('0');
+    expect(rightHandle?.style.opacity).not.toBe('0');
   });
 
   it('mousedown on the left handle re-anchors from the right end (extends left)', () => {
@@ -478,31 +483,40 @@ describe('AnnotationSession — measure drag', () => {
     expect(session.selection?.barEnd).toBe(5);
   });
 
-  it('handle ghosts are hidden during a handle drag and reappear after commit', () => {
+  it('handle ghosts are hidden during a handle drag and reappear on hover after commit', () => {
     measureDrag(els, 1, [3]); // commit [m2, m3, m4]
 
     const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement;
     const rightHandle = layer.overlay.querySelector('.ghost-handle-right') as HTMLElement;
 
-    // Handles visible after first commit.
-    expect(leftHandle.style.display).not.toBe('none');
+    // Hover to show handles.
+    els[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(leftHandle.style.opacity).not.toBe('0');
 
-    // Begin handle drag — handles should hide.
+    // Begin handle drag — handles should go invisible immediately (opacity 0).
     leftHandle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    expect(leftHandle.style.display).toBe('none');
-    expect(rightHandle.style.display).toBe('none');
+    expect(leftHandle.style.opacity).toBe('0');
+    expect(rightHandle.style.opacity).toBe('0');
 
-    // Commit — handles should reappear.
+    // Drag to el[0] and commit.
     els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
-    expect(leftHandle.style.display).not.toBe('none');
-    expect(rightHandle.style.display).not.toBe('none');
+    // After commit, handles are invisible (opacity 0) until next hover.
+    expect(leftHandle.style.opacity).toBe('0');
+    expect(rightHandle.style.opacity).toBe('0');
+    // Hover over a dark ghost → handles reappear.
+    els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(leftHandle.style.opacity).not.toBe('0');
+    expect(rightHandle.style.opacity).not.toBe('0');
   });
 
-  it('handles are hidden after reset()', () => {
+  it('handles are deactivated (display:none) after reset()', () => {
     measureDrag(els, 0, [2]); // commit
     const leftHandle = layer.overlay.querySelector('.ghost-handle-left') as HTMLElement;
-    expect(leftHandle.style.display).not.toBe('none');
+    // Hover to show handles (opacity > 0).
+    els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(leftHandle.style.opacity).not.toBe('0');
+    // reset() fully deactivates — display:none, not just opacity:0.
     session.reset();
     expect(leftHandle.style.display).toBe('none');
   });
@@ -661,29 +675,30 @@ describe('AnnotationSession — resolution toggle', () => {
     expect(measureLayer?.style.pointerEvents).toBe('auto');
   });
 
-  it('resolution toggle cancels any in-progress drag without clearing committed selection', () => {
+  it('resolution toggle preserves committed selection and cancels any in-progress drag', () => {
     // Commit a selection first.
-    const { els } = makeLayerWithMeasures([1, 2, 3]);
-    // Use the layer from beforeEach (has its own els); re-create selection.
     const { els: testEls, layer: testLayer, container: tc } = makeLayerWithMeasures([1, 2, 3]);
     const sess = new AnnotationSession(testLayer, { resolution: 'measure' });
 
     measureDrag(testEls, 0, [2]);
     expect(sess.selection?.barStart).toBe(1);
+    expect(sess.flags.fragmentSet).toBe(true);
 
-    // Start a new drag then toggle resolution mid-drag.
+    // Start an in-progress endpoint re-anchor drag then toggle resolution mid-drag.
     testEls[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     testEls[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
-    sess.setResolution('beat'); // cancels drag
+    sess.setResolution('beat'); // cancels drag; keeps committed selection
 
-    // mouseup after toggle should not commit anything (dragging = false).
-    document.dispatchEvent(new MouseEvent('mouseup'));
-    // Selection is unchanged (still the previously committed one).
+    // Selection is preserved; fragmentSet remains true.
     expect(sess.selection?.barStart).toBe(1);
+    expect(sess.flags.fragmentSet).toBe(true);
+
+    // mouseup after toggle should not commit a new selection (dragging = false).
+    document.dispatchEvent(new MouseEvent('mouseup'));
+    expect(sess.selection?.barStart).toBe(1); // unchanged
 
     sess.destroy();
     tc.remove();
-    void els; // suppress unused warning
   });
 });
 

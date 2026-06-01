@@ -412,6 +412,9 @@ export class GhostLayer {
   // each commit, hidden when a drag starts or the session resets.
   private readonly _leftHandle: HTMLElement;
   private readonly _rightHandle: HTMLElement;
+  // Active opacity for handles — set per resolution so the solid gradient end
+  // matches the adjacent dark ghost opacity. Updated each positionHandles() call.
+  private _handleOpacity = 0.55;
 
   constructor(container: HTMLElement) {
     this._overlay = document.createElement('div');
@@ -468,37 +471,72 @@ export class GhostLayer {
   }
 
   /**
-   * Position and show the drag handle ghosts outside the committed selection.
+   * Position both drag handle ghosts and make them interactive-but-invisible
+   * (opacity: 0, pointer-events: auto).
    *
-   * leftEdge/rightEdge are the pixel x coordinates of the selection's outer
-   * boundaries. The left handle is placed immediately to the left of leftEdge;
-   * the right handle immediately to the right of rightEdge. Both share the same
-   * top/height as the adjacent selection ghosts so they sit within the staves.
+   * Left and right handles are positioned independently so each sits within its
+   * own system's staff row when the selection spans multiple systems. The left
+   * handle's solid (right) edge touches leftEdge; the right handle's solid
+   * (left) edge touches rightEdge.
+   *
+   * The opacity parameter must match the active dark ghost opacity so the
+   * gradient's solid end blends seamlessly with the adjacent selection ghost:
+   * 0.45 for measure/subbeat, 0.55 for beat.
+   *
+   * Call showHandles() to make them visible on hover.
    */
-  showHandles(
-    leftEdge: number,
-    rightEdge: number,
-    top: number,
-    height: number,
+  positionHandles(
+    leftEdge: number, leftTop: number, leftHeight: number,
+    rightEdge: number, rightTop: number, rightHeight: number,
+    opacity: number,
   ): void {
+    this._handleOpacity = opacity;
     Object.assign(this._leftHandle.style, {
-      display: '',
       left: `${leftEdge - HANDLE_GHOST_W}px`,
-      top: `${top}px`,
-      height: `${height}px`,
+      top: `${leftTop}px`,
+      height: `${leftHeight}px`,
+      display: '',
+      opacity: '0',
+      pointerEvents: 'auto',
     });
     Object.assign(this._rightHandle.style, {
-      display: '',
       left: `${rightEdge}px`,
-      top: `${top}px`,
-      height: `${height}px`,
+      top: `${rightTop}px`,
+      height: `${rightHeight}px`,
+      display: '',
+      opacity: '0',
+      pointerEvents: 'auto',
     });
   }
 
-  /** Hide both drag handle ghosts (e.g. when a drag starts or the session resets). */
+  /** Make both drag handle ghosts visible at the stored resolution opacity. */
+  showHandles(): void {
+    const op = String(this._handleOpacity);
+    this._leftHandle.style.opacity = op;
+    this._rightHandle.style.opacity = op;
+  }
+
+  /**
+   * Hide both drag handle ghosts without removing pointer events.
+   *
+   * Handles remain interactive at opacity 0 so that direct hover over
+   * the handle area (without first entering a dark ghost) still fires
+   * mouseover events and can trigger showHandles(). Call deactivateHandles()
+   * for a full shutdown that removes pointer events too.
+   */
   hideHandles(): void {
-    this._leftHandle.style.display = 'none';
-    this._rightHandle.style.display = 'none';
+    this._leftHandle.style.opacity = '0';
+    this._rightHandle.style.opacity = '0';
+  }
+
+  /**
+   * Fully deactivate both drag handle ghosts (display: none).
+   * Called when no selection is committed or after a full session reset.
+   * Unlike hideHandles(), this removes pointer events entirely.
+   */
+  deactivateHandles(): void {
+    Object.assign(this._leftHandle.style, { display: 'none', opacity: '' });
+    Object.assign(this._rightHandle.style, { display: 'none', opacity: '' });
   }
 
   /**
