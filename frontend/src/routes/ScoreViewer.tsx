@@ -233,6 +233,12 @@ export default function ScoreViewer() {
   const [isRerendering, setIsRerendering] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
 
+  // ── Tagging mode (G1.1) ──────────────────────────────────────────────────
+  // 'view' = score-only; ghost layer inert, FormPanel not mounted.
+  // 'tag'  = ghost layer interactive, annotator live, FormPanel mounted.
+  // Resets to 'view' on each score open (movementId change).
+  const [tagMode, setTagMode] = useState<'view' | 'tag'>('view');
+
   // ── Controls state ───────────────────────────────────────────────────────
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
   const [transpose, setTranspose] = useState('');
@@ -326,6 +332,10 @@ export default function ScoreViewer() {
 
   // ── Ghost resolution toggle (Step 10) ────────────────────────────────────
   const [resolution, setResolution] = useState<ResolutionMode>('measure');
+  // Mirrors resolution in a ref so the ghost/session effect can read the
+  // current value without needing resolution in its dependency array
+  // (adding it would rebuild the session on every resolution change).
+  const resolutionRef = useRef<ResolutionMode>('measure');
 
   // ── Stage state (Step 14) ─────────────────────────────────────────────────
   // Stage assignments are owned here (not in FormPanel) because they must be
@@ -947,21 +957,30 @@ export default function ScoreViewer() {
     const mcIdx = buildMcIndex(mei);
     mcIndexRef.current = mcIdx;
 
-    // Build the annotation session with repeat barriers so the drag cannot
-    // cross close-repeat barlines (prototype-tagging-tool.md §"Constraints").
-    const barriers = buildRepeatBarriers(mei);
-    const session  = new AnnotationSession(layer, { closeRepeatMeasures: barriers });
-    annotationSessionRef.current = session;
+    // Create the annotation session only in tag mode. In view mode the ghost
+    // layer is built but all layers keep pointer-events: none (their initial
+    // state), so the score remains fully interactive for reading and MIDI
+    // playback with no selection affordances.
+    if (tagMode === 'tag') {
+      const barriers = buildRepeatBarriers(mei);
+      const session  = new AnnotationSession(layer, { closeRepeatMeasures: barriers });
+      annotationSessionRef.current = session;
 
-    // Subscribe: resolve mc coordinates at commit time and surface to React.
-    session.onSelectionChange((sel) => {
-      setSelectionRange(sel);
-      setCommittedSelection(sel ? commitSelection(sel, mcIdx) : null);
-    });
+      // Subscribe: resolve mc coordinates at commit time and surface to React.
+      session.onSelectionChange((sel) => {
+        setSelectionRange(sel);
+        setCommittedSelection(sel ? commitSelection(sel, mcIdx) : null);
+      });
 
-    session.onFlagsChange((flags) => {
-      setAnnotationFlags({ ...flags });
-    });
+      session.onFlagsChange((flags) => {
+        setAnnotationFlags({ ...flags });
+      });
+
+      // Restore the active resolution so the correct ghost layer accepts
+      // pointer events (resolutionRef mirrors the resolution state without
+      // needing resolution itself in this effect's dependency array).
+      session.setResolution(resolutionRef.current);
+    }
 
     return () => {
       // DOM cleanup only — setState calls on unmounted components are
@@ -972,9 +991,10 @@ export default function ScoreViewer() {
       annotationSessionRef.current = null;
       ghostLayerRef.current        = null;
     };
-  // svgPages reference changes on every page addition/replace — this is the
-  // intended trigger; status gates the effect from running during loading.
-  }, [status, svgPages]);
+  // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
+  // tagMode entering 'tag' creates the session; leaving destroys it.
+  // status gates the effect from running during loading.
+  }, [status, svgPages, tagMode]);
 
   // Forward resolution changes to the active annotation session (Step 10).
   // The session handles the no-op case when the mode is unchanged, and cancels
@@ -986,6 +1006,7 @@ export default function ScoreViewer() {
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!movementId) return;
+    setTagMode('view');
     let cancelled = false;
 
     const load = async () => {
@@ -1201,44 +1222,70 @@ export default function ScoreViewer() {
               ))}
             </select>
           </div>
-          {/* Resolution toggle — Measure / Beat / Sub-beat */}
-          <div
-            className={styles.resolutionControl}
-            role="group"
-            aria-label="Selection resolution"
-          >
-            <Type
-              variant="label-md"
-              as="span"
-              style={{ color: 'var(--color-on-surface-variant)' }}
+          {/* Resolution toggle — visible only in tag mode (G1.1) */}
+          {tagMode === 'tag' && (
+            <div
+              className={styles.resolutionControl}
+              role="group"
+              aria-label="Selection resolution"
             >
-              Select
-            </Type>
-            {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((mode) => {
-              const LABELS: Record<ResolutionMode, string> = {
-                measure: 'Measure',
-                beat: 'Beat',
-                subbeat: 'Sub-beat',
-              };
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  className={[
-                    styles.resolutionButton,
-                    resolution === mode ? styles.resolutionButtonActive : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')}
-                  onClick={() => setResolution(mode)}
-                  aria-pressed={resolution === mode}
-                >
-                  <Type variant="label-sm" as="span">{LABELS[mode]}</Type>
-                </button>
-              );
-            })}
-          </div>
+              <Type
+                variant="label-md"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Select
+              </Type>
+              {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
+                const LABELS: Record<ResolutionMode, string> = {
+                  measure: 'Measure',
+                  beat: 'Beat',
+                  subbeat: 'Sub-beat',
+                };
+                return (
+                  <button
+                    key={resMode}
+                    type="button"
+                    className={[
+                      styles.resolutionButton,
+                      resolution === resMode ? styles.resolutionButtonActive : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => {
+                      resolutionRef.current = resMode;
+                      setResolution(resMode);
+                    }}
+                    aria-pressed={resolution === resMode}
+                  >
+                    <Type variant="label-sm" as="span">{LABELS[resMode]}</Type>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
+
+        {/* TAG / Done button — enters and exits annotation mode (G1.1).
+            Hidden while the score is loading so it can't be clicked before
+            the ghost layer is ready. */}
+        {status === 'ready' && (
+          <div className={styles.toolbarRight}>
+            <button
+              type="button"
+              className={[
+                styles.tagButton,
+                tagMode === 'tag' ? styles.tagButtonActive : '',
+              ].filter(Boolean).join(' ')}
+              onClick={() => setTagMode(tagMode === 'view' ? 'tag' : 'view')}
+              aria-pressed={tagMode === 'tag'}
+            >
+              <Type variant="label-sm" as="span">
+                {tagMode === 'tag' ? 'Done' : 'Tag'}
+              </Type>
+            </button>
+          </div>
+        )}
 
       </Surface>
 
@@ -1316,32 +1363,35 @@ export default function ScoreViewer() {
           </div>
         </div>
 
-        {/* Form panel (Steps 12–14: concept picker, type refinement, stage list,
-            property form). Steps 16–18 add harmony panel, prose field, and
-            submission checklist. Always rendered — concurrent-flag model. */}
-        <FormPanel
-          session={annotationSessionRef.current}
-          flags={annotationFlags}
-          onConceptChange={handleConceptChange}
-          onRefinementChange={handleRefinementChange}
-          assignments={stageAssignments}
-          activeStageId={activeStageId}
-          onStageActivate={handleStageActivate}
-          onToggleAbsent={handleToggleAbsent}
-          subPartTags={subPartTags}
-          onSubPartTagUpdate={handleSubPartTagUpdate}
-          subPartResetKey={subPartResetKey}
-          movementId={movementId}
-          selectionRange={selectionRange}
-          proseAnnotation={proseAnnotation}
-          onProseChange={setProseAnnotation}
-          onSaveDraft={handleSaveDraft}
-          onSubmitFragment={handleSubmitFragment}
-          isSavingDraft={isSavingDraft}
-          isSubmitting={isSubmitting}
-          submitError={submitError}
-          draftId={fragmentDraftId}
-        />
+        {/* Form panel — mounted only in tag mode (G1.1).
+            Mounting is gated so the score is fully usable for reading and
+            MIDI playback without the sidebar. The concurrent-flag model
+            still applies within the mounted panel. */}
+        {tagMode === 'tag' && (
+          <FormPanel
+            session={annotationSessionRef.current}
+            flags={annotationFlags}
+            onConceptChange={handleConceptChange}
+            onRefinementChange={handleRefinementChange}
+            assignments={stageAssignments}
+            activeStageId={activeStageId}
+            onStageActivate={handleStageActivate}
+            onToggleAbsent={handleToggleAbsent}
+            subPartTags={subPartTags}
+            onSubPartTagUpdate={handleSubPartTagUpdate}
+            subPartResetKey={subPartResetKey}
+            movementId={movementId}
+            selectionRange={selectionRange}
+            proseAnnotation={proseAnnotation}
+            onProseChange={setProseAnnotation}
+            onSaveDraft={handleSaveDraft}
+            onSubmitFragment={handleSubmitFragment}
+            isSavingDraft={isSavingDraft}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            draftId={fragmentDraftId}
+          />
+        )}
 
         {/* Re-render overlay: sits above both panels while options change */}
         {isRerendering && (
