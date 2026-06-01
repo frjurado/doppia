@@ -222,8 +222,12 @@ function removeClass(el: HTMLElement, cls: string): void {
  * orderedKeys must be in MEI document order (the insertion order of
  * GhostLayer.measureIndex, which mirrors buildGhosts()'s traversal order).
  *
- * Clamping rule: a barrier key means the selection may include that measure
- * but cannot include any measure that comes after it in the ordered list.
+ * Clamping is symmetric (G2.1):
+ * - Forward drag (anchor ≤ current): the selection may include the barrier
+ *   measure but cannot extend past its right barline into later measures.
+ * - Backward drag (anchor > current): the barrier's right barline blocks
+ *   passage in both directions; the selection is confined to measures on the
+ *   anchor's side of the barrier (barrier+1 … anchor).
  */
 export function measureKeyRange(
   anchorKey: string,
@@ -236,19 +240,29 @@ export function measureKeyRange(
   if (anchorIdx === -1) return [];
   if (currentIdx === -1) return anchorKey ? [anchorKey] : [];
 
-  const startIdx = Math.min(anchorIdx, currentIdx);
-  let endIdx = Math.max(anchorIdx, currentIdx);
-
-  // Clamp: if any measure between start (exclusive) and end has a barrier on
-  // its right barline, the selection cannot extend past it.
-  for (let i = startIdx; i < endIdx; i++) {
-    if (barriers.has(orderedKeys[i]!)) {
-      endIdx = i;
-      break;
+  if (anchorIdx <= currentIdx) {
+    // Forward drag: clamp at the first barrier from anchor toward current.
+    let endIdx = currentIdx;
+    for (let i = anchorIdx; i < endIdx; i++) {
+      if (barriers.has(orderedKeys[i]!)) {
+        endIdx = i;
+        break;
+      }
     }
+    return orderedKeys.slice(anchorIdx, endIdx + 1);
+  } else {
+    // Backward drag: clamp at the first barrier between anchor and current
+    // (scanning from anchor-1 toward current). The selection stays on the
+    // anchor's side of the barrier — never resets to the opposite side.
+    let startIdx = currentIdx;
+    for (let i = anchorIdx - 1; i >= startIdx; i--) {
+      if (barriers.has(orderedKeys[i]!)) {
+        startIdx = i + 1;
+        break;
+      }
+    }
+    return orderedKeys.slice(startIdx, anchorIdx + 1);
   }
-
-  return orderedKeys.slice(startIdx, endIdx + 1);
 }
 
 /**

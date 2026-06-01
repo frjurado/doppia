@@ -161,6 +161,33 @@ describe('measureKeyRange', () => {
     expect(measureKeyRange('m1', 'm5', keys, barriers)).toEqual(['m1', 'm2']);
   });
 
+  // G2.1 — symmetric backward clamping
+  it('clamps a backward drag at the barrier (anchor stays on its side)', () => {
+    const barriers = new Set(['m3']);
+    // Anchor at m5, drag backward through m1 — barrier at m3 blocks the crossing.
+    // Selection is confined to the anchor's side: [m4, m5].
+    expect(measureKeyRange('m5', 'm1', keys, barriers)).toEqual(['m4', 'm5']);
+  });
+
+  it('backward drag ending exactly at the barrier measure is blocked (anchor side only)', () => {
+    const barriers = new Set(['m3']);
+    // Anchor at m5, current at m3 — the barrier is at m3, so m3 is excluded.
+    expect(measureKeyRange('m5', 'm3', keys, barriers)).toEqual(['m4', 'm5']);
+  });
+
+  it('backward drag not crossing any barrier is unaffected', () => {
+    const barriers = new Set(['m3']);
+    // Anchor at m5, current at m4 — no barrier between them.
+    expect(measureKeyRange('m5', 'm4', keys, barriers)).toEqual(['m4', 'm5']);
+  });
+
+  it('backward drag clamps at the nearest barrier when multiple barriers exist', () => {
+    const barriers = new Set(['m2', 'm4']);
+    // Anchor at m5, drag to m1 — nearest barrier going backward from m5 is m4.
+    // Selection is confined to [m5] (barrier+1 = m5 = anchor).
+    expect(measureKeyRange('m5', 'm1', keys, barriers)).toEqual(['m5']);
+  });
+
   it('returns [anchorKey] when anchorKey is not in orderedKeys', () => {
     expect(measureKeyRange('mX', 'm3', keys, noBarriers)).toEqual([]);
   });
@@ -433,6 +460,22 @@ describe('AnnotationSession — close-repeat barrier clamping', () => {
 
   it('a selection starting after the barrier is also unaffected', () => {
     measureDrag(els, 3, [4]);
+    expect(session.selection?.barStart).toBe(4);
+    expect(session.selection?.barEnd).toBe(5);
+  });
+
+  // G2.1 — symmetric backward clamping via AnnotationSession
+  it('clamps a backward drag at the barrier — anchor stays on its side', () => {
+    // Anchor at m5 (index 4), drag backward past the barrier at m3 to m1.
+    // Expected: selection [m4, m5] (barrier blocks backward crossing).
+    measureDrag(els, 4, [3, 2, 1, 0]);
+    expect(session.selection?.barStart).toBe(4);
+    expect(session.selection?.barEnd).toBe(5);
+  });
+
+  it('backward drag that stops before the barrier is unaffected', () => {
+    // Anchor at m5, drag backward only to m4 — no barrier crossed.
+    measureDrag(els, 4, [3]);
     expect(session.selection?.barStart).toBe(4);
     expect(session.selection?.barEnd).toBe(5);
   });
