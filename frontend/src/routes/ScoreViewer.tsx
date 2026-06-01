@@ -360,6 +360,10 @@ export default function ScoreViewer() {
   // selection, concept, and stage data.
   const [proseAnnotation, setProseAnnotation] = useState<string>('');
 
+  // ── Fragment lifecycle (G1.2) ─────────────────────────────────────────────
+  // Passed as `key` to FormPanel so it remounts to a clean state on delete.
+  const [fragmentResetKey, setFragmentResetKey] = useState(0);
+
   // ── Submission state (Step 18) ────────────────────────────────────────────
   // fragmentDraftId: UUID of the in-progress draft, set after the first
   // successful create. Subsequent saves use PATCH; null = not yet saved.
@@ -694,6 +698,32 @@ export default function ScoreViewer() {
     },
     [],
   );
+
+  // ── Delete fragment handler (G1.2) ──────────────────────────────────────
+  /**
+   * Full reset of the current in-progress annotation. Clears selection, all
+   * four concurrent flags, stage assignments, sub-part tags, prose annotation,
+   * and remounts FormPanel to a blank concept/property state.
+   *
+   * This is the single reset path after fragmentSet is true — there is no
+   * partial "clear selection only" (tagging-tool-design.md §6).
+   *
+   * Any previously saved draft persists on the backend (no DELETE request is
+   * made); it becomes an orphaned draft until a future delete endpoint removes it.
+   */
+  const handleDeleteFragment = useCallback(() => {
+    annotationSessionRef.current?.reset();
+    setSelectionRange(null);
+    setCommittedSelection(null);
+    setStageAssignments([]);
+    setActiveStageId(null);
+    setSubPartTags({});
+    setSubPartResetKey(k => k + 1);
+    setProseAnnotation('');
+    setFragmentDraftId(null);
+    activeSchemaTreeRef.current = null;
+    setFragmentResetKey(k => k + 1);
+  }, []);
 
   // ── Submission handlers (Step 18) ────────────────────────────────────────
 
@@ -1369,7 +1399,9 @@ export default function ScoreViewer() {
             still applies within the mounted panel. */}
         {tagMode === 'tag' && (
           <FormPanel
+            key={fragmentResetKey}
             session={annotationSessionRef.current}
+            onDeleteFragment={handleDeleteFragment}
             flags={annotationFlags}
             onConceptChange={handleConceptChange}
             onRefinementChange={handleRefinementChange}

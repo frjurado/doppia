@@ -398,6 +398,33 @@ export class AnnotationSession {
     this._clearAllHighlights();
   }
 
+  /**
+   * Full session reset: clear the committed selection, all four concurrent
+   * flags, drag state, and visual highlights. Event listeners are preserved —
+   * the session stays live and ready for a new selection after reset.
+   *
+   * This is the single reset path after fragmentSet becomes true. There is no
+   * partial "clear selection only". See tagging-tool-design.md §6.
+   */
+  reset(): void {
+    this._cancelDrag();
+    this._clearAllHighlights();
+    this._selection = null;
+    const anySet =
+      this._flags.fragmentSet ||
+      this._flags.conceptSet ||
+      this._flags.stagesComplete ||
+      this._flags.propertiesComplete;
+    this._flags = {
+      fragmentSet: false,
+      conceptSet: false,
+      stagesComplete: false,
+      propertiesComplete: false,
+    };
+    if (anySet) this._onFlagsChange?.(this.flags);
+    this._onSelectionChange?.(null);
+  }
+
   // ── Private: flag management ──────────────────────────────────────────────
 
   private _setFlag(key: keyof AnnotationFlags, value: boolean): void {
@@ -529,6 +556,10 @@ export class AnnotationSession {
       }
     }
 
+    // A fragment is already committed — only endpoint re-anchor (above) is
+    // permitted. Fresh selection requires the Delete control. §6.
+    if (this._flags.fragmentSet) return;
+
     this._clearAllHighlights();
     this._dragging = true;
     this._anchorMeasureKey = key;
@@ -626,6 +657,8 @@ export class AnnotationSession {
         }
       }
     }
+
+    if (this._flags.fragmentSet) return;
 
     this._clearAllHighlights();
     this._dragging = true;
@@ -727,6 +760,8 @@ export class AnnotationSession {
         }
       }
     }
+
+    if (this._flags.fragmentSet) return;
 
     this._clearAllHighlights();
     this._dragging = true;

@@ -154,6 +154,11 @@ export interface FormPanelProps {
   submitError?: string | null;
   /** UUID of the previously saved draft; null = unsaved. */
   draftId?: string | null;
+  /**
+   * Called when the user clicks the Delete fragment button. Triggers a full
+   * reset of the session and all annotation state (G1.2).
+   */
+  onDeleteFragment?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +187,7 @@ export default function FormPanel({
   isSubmitting = false,
   submitError = null,
   draftId = null,
+  onDeleteFragment,
 }: FormPanelProps) {
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -258,6 +264,26 @@ export default function FormPanel({
 
   return (
     <aside className={styles.panel} aria-label="Annotation form">
+      {/* ── Fragment header: Delete control (G1.2) ───────────────────── */}
+      {/* Once a fragment is committed, the only reset path is Delete —
+          which clears selection, concept, stages, and properties together.
+          tagging-tool-design.md §6. */}
+      {flags.fragmentSet && (
+        <div className={styles.fragmentHeader}>
+          <Type variant="label-sm" as="span" className={styles.fragmentHeaderLabel}>
+            Fragment
+          </Type>
+          <button
+            type="button"
+            className={styles.deleteButton}
+            onClick={onDeleteFragment}
+            aria-label="Delete fragment and start over"
+          >
+            <Type variant="label-sm" as="span">Delete</Type>
+          </button>
+        </div>
+      )}
+
       {/* ── Section: Concept ─────────────────────────────────────────── */}
       <section className={styles.section}>
         <Type variant="label-sm" as="h2" className={styles.sectionHeading}>

@@ -146,6 +146,20 @@ When a concept's stages carry `containment_mode: free`, each bracket has indepen
 
 Inherited from the prototype: clicking within the gradient zone of any bracket endpoint re-anchors the drag from the opposite end, allowing boundary adjustment without discarding and redrawing. This applies to the main bracket endpoints and to the outer endpoints of each stage bracket.
 
+### Delete / re-selection workflow
+
+After a fragment is committed (`fragmentSet` true), clicking on empty ghost space does **not** start a new selection. The only permitted action on the ghost layer is endpoint re-anchor (above). This prevents accidental overwriting of committed work.
+
+If the annotator needs to change the bar range entirely, the workflow is:
+
+1. Click **Delete** in the sidebar header (appears once `fragmentSet` is true).
+2. The session resets completely: selection, concept, Type Refinement, properties, and all stage brackets are cleared. There is **no** partial "clear selection only" — Delete is always a full reset.
+3. Draw a new selection from scratch.
+
+The Delete control is always accessible in the sidebar while a fragment is committed, regardless of how far the annotator has progressed through the checklist. Clearing the ghost layer via Delete is the *only* way to restart selection; the drag handler ignores mousedown on committed ghost space.
+
+**Note on saved drafts:** if Save Draft was called before Delete, the previously saved draft persists on the backend with `status: 'draft'` and is not automatically removed. The local session simply loses the reference. A future delete endpoint will allow explicit removal of orphaned drafts.
+
 ### Concept change after stages are committed
 
 If the user changes the selected concept after stage brackets have been drawn, the system attempts to preserve as much work as possible:
