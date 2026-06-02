@@ -1437,6 +1437,7 @@ export default function ScoreViewer() {
                 selection={selectionRange}
                 layer={ghostLayer}
                 fragmentSet={annotationFlags.fragmentSet}
+                resolution={resolution}
               />
               <StageBrackets
                 assignments={stageAssignments}
