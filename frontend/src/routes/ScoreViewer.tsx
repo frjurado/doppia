@@ -36,7 +36,8 @@ import {
   submitFragment,
 } from '../services/fragmentApi';
 import type { FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
-import { parseMeiKey, parseMeiMeter } from '../utils/meiParsing';
+import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
+import { ResolutionIcon } from '../components/score/ResolutionIcons';
 import { ApiError } from '../services/api';
 
 // ---------------------------------------------------------------------------
@@ -340,6 +341,9 @@ export default function ScoreViewer() {
   // current value without needing resolution in its dependency array
   // (adding it would rebuild the session on every resolution change).
   const resolutionRef = useRef<ResolutionMode>('measure');
+  // Global meter parsed from the loaded MEI — drives the beat/sub-beat icons
+  // (G4.4). Defaults to [4, 4] until the MEI finishes loading.
+  const [globalMeter, setGlobalMeter] = useState<[number, number]>([4, 4]);
 
   // ── Stage state (Step 14) ─────────────────────────────────────────────────
   // Stage assignments are owned here (not in FormPanel) because they must be
@@ -1127,6 +1131,7 @@ export default function ScoreViewer() {
         const meiText = await meiResponse.text();
         if (cancelled) return;
         meiTextRef.current = meiText;
+        setGlobalMeter(parseMeiMeterParts(meiText));
         // Build note info map synchronously from MEI (DOMParser, no toolkit needed).
         // Built once per score load; does not need rebuilding on options re-renders.
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
@@ -1325,10 +1330,10 @@ export default function ScoreViewer() {
                 Select
               </Type>
               {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
-                const LABELS: Record<ResolutionMode, string> = {
-                  measure: 'Measure',
-                  beat: 'Beat',
-                  subbeat: 'Sub-beat',
+                const ARIA_LABELS: Record<ResolutionMode, string> = {
+                  measure: 'Measure resolution',
+                  beat: 'Beat resolution',
+                  subbeat: 'Sub-beat resolution',
                 };
                 return (
                   <button
@@ -1345,8 +1350,14 @@ export default function ScoreViewer() {
                       setResolution(resMode);
                     }}
                     aria-pressed={resolution === resMode}
+                    aria-label={ARIA_LABELS[resMode]}
+                    title={ARIA_LABELS[resMode]}
                   >
-                    <Type variant="label-sm" as="span">{LABELS[resMode]}</Type>
+                    <ResolutionIcon
+                      mode={resMode}
+                      beatCount={globalMeter[0]}
+                      beatUnit={globalMeter[1]}
+                    />
                   </button>
                 );
               })}

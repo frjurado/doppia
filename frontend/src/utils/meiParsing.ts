@@ -79,3 +79,39 @@ export function parseMeiMeter(meiText: string): string {
 
   return `${count}/${unit}`;
 }
+
+/**
+ * Extract the notated meter as a numeric pair [beatCount, beatUnit] from MEI text.
+ *
+ * Mirrors the probe order used by ghosts.ts parseGlobalMeter:
+ *   1. meter.count / meter.unit attributes on <scoreDef> or <staffDef>
+ *   2. count / unit attributes on the first <meterSig> child
+ * Falls back to [4, 4] when nothing is found.
+ *
+ * @example parseMeiMeterParts(meiText) → [4, 4], [3, 4], [6, 8]
+ */
+export function parseMeiMeterParts(meiText: string): [number, number] {
+  const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+
+  for (const tag of ['scoreDef', 'staffDef']) {
+    const els = doc.getElementsByTagName(tag);
+    for (let i = 0; i < els.length; i++) {
+      const count = parseInt(els[i]!.getAttribute('meter.count') ?? '', 10);
+      const unit  = parseInt(els[i]!.getAttribute('meter.unit')  ?? '', 10);
+      if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
+        return [count, unit];
+      }
+    }
+  }
+
+  const sigs = doc.getElementsByTagName('meterSig');
+  for (let i = 0; i < sigs.length; i++) {
+    const count = parseInt(sigs[i]!.getAttribute('count') ?? '', 10);
+    const unit  = parseInt(sigs[i]!.getAttribute('unit')  ?? '', 10);
+    if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
+      return [count, unit];
+    }
+  }
+
+  return [4, 4];
+}
