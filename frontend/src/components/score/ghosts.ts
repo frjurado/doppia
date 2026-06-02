@@ -599,6 +599,45 @@ export class GhostLayer {
 // DOM helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Return the left edge (px, container-relative) of the notehead within a
+ * Verovio note SVG group, explicitly excluding any preceding accidental glyph.
+ *
+ * Verovio places <g class="accid"> to the left of <g class="noteHead">.
+ * Using the note group's bbox includes the accidental and shifts the beat
+ * boundary left of the actual note onset. The beat boundary is defined as the
+ * notehead left edge (G4.2, ADR-005 §"Beat boundary computation").
+ *
+ * Falls back progressively:
+ *  1. Direct <g class="noteHead"> child (Verovio default).
+ *  2. Leftmost non-accidental child with non-zero width.
+ *  3. Note group's own left edge.
+ */
+function noteheadLeftEdge(svgNote: Element, containerLeft: number): number {
+  const notehead =
+    svgNote.querySelector(':scope > g.noteHead') ??
+    svgNote.querySelector(':scope > g.notehead');
+
+  if (notehead) {
+    return notehead.getBoundingClientRect().left - containerLeft;
+  }
+
+  // Fallback: leftmost child that is not an accidental.
+  let minLeft = Infinity;
+  for (const child of svgNote.children) {
+    const cls = child.getAttribute('class') ?? '';
+    if (cls === 'accid' || cls.includes('accid')) continue;
+    const r = child.getBoundingClientRect();
+    if (r.width > 0) {
+      const left = r.left - containerLeft;
+      if (left < minLeft) minLeft = left;
+    }
+  }
+  if (isFinite(minLeft)) return minLeft;
+
+  return svgNote.getBoundingClientRect().left - containerLeft;
+}
+
 function applyGhostBounds(el: HTMLElement, bounds: GhostBounds): void {
   Object.assign(el.style, {
     position: 'absolute',
@@ -878,9 +917,8 @@ function collectLayerNotes(
         if (noteId) {
           const svgNote = container.querySelector(`[id="${noteId}"]`);
           if (svgNote) {
-            const r = svgNote.getBoundingClientRect();
             out.push({
-              xLeft:             r.left - containerRect.left,
+              xLeft:             noteheadLeftEdge(svgNote, containerRect.left),
               scoreTimeOnset:    ppq / ppqPerQn,
               scoreTimeDuration: durPpq / ppqPerQn,
             });
@@ -901,9 +939,8 @@ function collectLayerNotes(
           if (noteId) {
             const svgNote = container.querySelector(`[id="${noteId}"]`);
             if (svgNote) {
-              const r = svgNote.getBoundingClientRect();
               out.push({
-                xLeft:             r.left - containerRect.left,
+                xLeft:             noteheadLeftEdge(svgNote, containerRect.left),
                 scoreTimeOnset:    ppq / ppqPerQn,
                 scoreTimeDuration: durPpq / ppqPerQn,
               });
