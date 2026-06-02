@@ -91,11 +91,14 @@ export default function StageList({
 
   if (sorted.length === 0) return null;
 
+  const activeCount = assignments.filter(a => !a.absent && !a.orphaned).length;
+
   return (
     <div className={styles.list} data-testid="stage-list">
       {sorted.map((assignment, orderIdx) => {
         const isActive = assignment.stageId === activeStageId;
         const color = assignment.orphaned ? '#aaaaaa' : stageColor(orderIdx);
+        const isLastActive = !assignment.absent && !assignment.orphaned && activeCount === 1;
 
         return (
           <div
@@ -139,7 +142,9 @@ export default function StageList({
                     e.stopPropagation();
                     onToggleAbsent(assignment.stageId, !assignment.absent);
                   }}
-                  aria-label={`${assignment.stageName}: ${assignment.absent ? 'absent' : 'present'}`}
+                  disabled={isLastActive}
+                  aria-disabled={isLastActive}
+                  aria-label={`${assignment.stageName}: ${assignment.absent ? 'absent' : 'present'}${isLastActive ? ' (cannot remove last active stage)' : ''}`}
                   data-testid={`absent-toggle-${assignment.stageId}`}
                 />
               ) : (

@@ -258,6 +258,56 @@ export function moveSplitHandle(
       leftStage.bounds.barStart,
       Math.min(rightStage.bounds.barEnd, barN),
     );
+
+    // beatFloat = 1.0 is the very start of a bar (beatToFloat is 1-indexed:
+    // beat 0, sub-beat 0 → 1.0). A boundary there gives the left stage
+    // beatEnd = 1.0 and no ghosts satisfy beatFloat < 1.0, so resolveSegments
+    // falls back to full-measure rendering — both brackets cover the same bar
+    // (visual overlap). Convert to a measure-level boundary instead:
+    // leftStage.barEnd = clampedBarN − 1, rightStage.barStart = clampedBarN.
+    if (beatFloat <= 1.0) {
+      const measureBarN = clampedBarN - 1;
+      const minMeasureBarN = leftStage.bounds.barStart;     // 1-bar minimum left
+      const maxMeasureBarN = rightStage.bounds.barEnd - 1;  // 1-bar minimum right
+      if (measureBarN < minMeasureBarN || measureBarN > maxMeasureBarN) return assignments;
+
+      return assignments.map(a => {
+        if (a.stageId === leftStage.stageId) {
+          return {
+            ...a,
+            bounds: { ...a.bounds!, barEnd: measureBarN, beatEnd: null },
+            confirmed: true,
+          };
+        }
+        if (a.stageId === rightStage.stageId) {
+          return {
+            ...a,
+            bounds: { ...a.bounds!, barStart: measureBarN + 1, beatStart: null },
+            confirmed: true,
+          };
+        }
+        return a;
+      });
+    }
+
+    // Standard beat / sub-beat boundary (beatFloat > 1.0).
+    // 1-beat (or 1-sub-beat) minimum: block if the boundary would land at or
+    // before leftStage's own start beat within its starting bar.
+    // beatStart = null means the stage starts at the bar beginning (beat 1.0).
+    const leftBeatStart = leftStage.bounds.beatStart ?? 1.0;
+    if (clampedBarN === leftStage.bounds.barStart && beatFloat <= leftBeatStart) {
+      return assignments;
+    }
+    // Same guard for rightStage: block if boundary lands at or after its beat end.
+    // null beatEnd means the stage ends at the bar boundary (always safe — skip).
+    if (
+      clampedBarN === rightStage.bounds.barEnd &&
+      rightStage.bounds.beatEnd !== null &&
+      beatFloat >= rightStage.bounds.beatEnd
+    ) {
+      return assignments;
+    }
+
     return assignments.map(a => {
       if (a.stageId === leftStage.stageId) {
         return {
@@ -277,9 +327,14 @@ export function moveSplitHandle(
     });
   }
 
-  // Measure-level boundary: enforce minimum 1-bar width on each side.
-  const minBarN = leftStage.bounds.barStart + 1;
-  const maxBarN = rightStage.bounds.barEnd;
+  // Measure-level boundary: enforce 1-bar minimum for all stages (required and optional).
+  // Sidebar toggle is the only mechanism for marking stages absent.
+  const minBarN = leftStage.bounds.barStart;     // barEnd ≥ barStart always
+  const maxBarN = rightStage.bounds.barEnd - 1;  // barStart ≤ barEnd always
+
+  // No valid split position (fewer bars than stages need) — leave unchanged.
+  if (minBarN > maxBarN) return assignments;
+
   const clampedBarN = Math.max(minBarN, Math.min(maxBarN, barN));
 
   return assignments.map(a => {
@@ -335,6 +390,10 @@ export function toggleStageAbsent(
   if (stage.required) return assignments;
 
   if (newAbsent) {
+    // Prevent removing the last active stage — no neighbour would absorb the space.
+    const activeCount = sorted.filter(a => !a.absent).length;
+    if (activeCount <= 1) return assignments;
+
     // Find nearest active neighbour (left first, then right).
     const prevActive = sorted.slice(0, idx).reverse().find(a => !a.absent);
     const nextActive = sorted.slice(idx + 1).find(a => !a.absent);
@@ -520,3 +579,4 @@ export function reconcileWithNewConcept(
 
   return updated;
 }
+

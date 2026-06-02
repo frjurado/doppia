@@ -680,7 +680,7 @@ export default function ScoreViewer() {
     [selectionRange],
   );
 
-  /** Called by StageBrackets when a split handle drag completes. */
+  /** Called by StageBrackets on every split handle drag tick. */
   const handleSplitHandleMove = useCallback((updated: StageAssignment[]) => {
     setStageAssignments(updated);
   }, []);
