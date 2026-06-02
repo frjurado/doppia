@@ -283,6 +283,33 @@
   position: relative;
 }
 
+/* G7: Score title block — HTML header above the Verovio SVG pages.
+   Replaces the suppressed Verovio <pgHead> title block. Spacing below
+   separates the header from the first system. No borders per DESIGN.md.
+   Three lines, all centered: composer (label-md) → work title (headline)
+   → movement number + title (title, de-emphasised). */
+.scoreTitle {
+  padding-bottom: var(--spacing-6);
+  text-align: center;
+}
+
+.scoreTitleComposer {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.scoreTitleWork {
+  color: var(--color-on-background);
+  margin: 0;
+  margin-top: var(--spacing-1);
+}
+
+.scoreTitleMovement {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+  margin-top: var(--spacing-1);
+}
+
 /* Each SVG page from Verovio. Gap on the container provides spacing between
    pages; no per-page margin needed. */
 .svgPage {

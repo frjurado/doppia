@@ -24,6 +24,7 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { fetchMeiUrl } from '../services/scoreApi';
+import type { ScoreTitle } from '../services/scoreApi';
 import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioToolkit, parseMeiMeterUnit, renderMidi, renderProgressively } from '../services/verovio';
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
@@ -233,6 +234,9 @@ export default function ScoreViewer() {
   const [svgPages, setSvgPages] = useState<string[]>([]);
   const [isRerendering, setIsRerendering] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
+  // G7: title sourced from MEI <meiHead> and rendered as an HTML block above
+  // the score, replacing Verovio's suppressed <pgHead> output.
+  const [scoreTitle, setScoreTitle] = useState<ScoreTitle | null>(null);
 
   // ── Tagging mode (G1.1) ──────────────────────────────────────────────────
   // 'view' = score-only; ghost layer inert, FormPanel not mounted.
@@ -1105,6 +1109,7 @@ export default function ScoreViewer() {
       setStatus('loading');
       setLoadingLabel('Loading score…');
       setSvgPages([]);
+      setScoreTitle(null);
       setErrorMessage(null);
       setMidiBase64(null);
       // Reset note info map so stale data from a previous score is not used
@@ -1121,8 +1126,10 @@ export default function ScoreViewer() {
 
       try {
         // 1. Resolve MEI object key → signed URL → MEI text.
-        const { url } = await fetchMeiUrl(movementId);
+        // Title metadata arrives in the same response, no extra round-trip.
+        const { url, ...titleData } = await fetchMeiUrl(movementId);
         if (cancelled) return;
+        setScoreTitle(titleData);
 
         const meiResponse = await fetch(url);
         if (!meiResponse.ok) {
@@ -1427,6 +1434,38 @@ export default function ScoreViewer() {
               Its offsetWidth (≤ 1200px via max-width) is what we pass to
               Verovio as pageWidth, so the SVG fills the container exactly. */}
           <div ref={scorePanelRef} className={styles.scoreContent}>
+            {/* G7: HTML title block sourced from the DB via the mei-url response.
+                Replaces Verovio's suppressed <pgHead> output. Rendered here
+                so the score SVG starts at the top of the container and the
+                main bracket's systemTop is anchored to music, not the title.
+                Three lines (all centered): composer → work title → movement. */}
+            {scoreTitle && (
+              <div className={styles.scoreTitle}>
+                <Type
+                  variant="label-md"
+                  as="p"
+                  className={styles.scoreTitleComposer}
+                >
+                  {scoreTitle.composer_name}
+                </Type>
+                <Type
+                  variant="headline"
+                  as="h2"
+                  className={styles.scoreTitleWork}
+                >
+                  {scoreTitle.work_title}
+                </Type>
+                {scoreTitle.movement_title && (
+                  <Type
+                    variant="title"
+                    as="p"
+                    className={styles.scoreTitleMovement}
+                  >
+                    {`${scoreTitle.movement_number}. ${scoreTitle.movement_title}`}
+                  </Type>
+                )}
+              </div>
+            )}
             {svgPages.map((svg, i) => (
               <div
                 key={i}

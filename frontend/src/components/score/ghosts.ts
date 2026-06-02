@@ -1088,12 +1088,18 @@ export function buildGhosts(
   // ── Phase 3: emit ghost elements with per-system uniform bounds ────────────
 
   for (const system of systems) {
-    // systemTop: min rawTop including note content — anchor for the bracket.
-    const systemTop = system.reduce((mn, m) => Math.min(mn, m.rawTop), Infinity);
-
     // Staff-line bounds: first staff line to last staff line, no note content.
-    const sBounds    = staffLineBounds(system, containerRect);
+    // Computed first so the result can cap systemTop below.
+    const sBounds     = staffLineBounds(system, containerRect);
     const ghostHeight = sBounds.bottom - sBounds.top;
+
+    // systemTop: bracket anchor above the system. Raw measure tops include high
+    // ledger lines and accidentals, which is correct. But metronome marks with
+    // note figures (e.g. ♩=120) extend 50–80px above the staff and would push
+    // the bracket absurdly high. Cap at 40px above the top staff line — enough
+    // to cover two ledger lines but immune to tall tempo-mark notation.
+    const rawSystemTop = system.reduce((mn, m) => Math.min(mn, m.rawTop), Infinity);
+    const systemTop    = Math.max(rawSystemTop, sBounds.top - 40);
 
     for (const info of system) {
       const { mLeft, mRight, barN, endingN, key: mKey, renderOrder,

@@ -121,6 +121,15 @@ def _mock_db_scalar(value: Any) -> AsyncMock:
     return db
 
 
+def _mock_db_one(value: Any) -> AsyncMock:
+    """Return a mock db.execute() result whose one_or_none() returns value."""
+    result = MagicMock()
+    result.one_or_none.return_value = value
+    db = AsyncMock()
+    db.execute.return_value = result
+    return db
+
+
 def _mock_db_scalars(items: list[Any]) -> AsyncMock:
     """Return a mock db.execute() result whose scalars().all() returns items."""
     scalars = MagicMock()
@@ -388,17 +397,31 @@ class TestListMovements:
 class TestGetMovementMeiUrl:
     """Unit tests for ``get_movement_mei_url`` — the MEI signed URL service function."""
 
-    def _make_mei_movement(self, **kwargs: Any) -> MagicMock:
-        m = MagicMock(spec_set=["id", "mei_object_key"])
-        m.id = kwargs.get("id", uuid.uuid4())
-        m.mei_object_key = kwargs.get(
+    def _make_row(self, **kwargs: Any) -> tuple[MagicMock, MagicMock, MagicMock]:
+        """Return a (Movement, Work, Composer) mock tuple as returned by the join query."""
+        movement = MagicMock(
+            spec_set=["id", "mei_object_key", "movement_number", "title"]
+        )
+        movement.id = kwargs.get("id", uuid.uuid4())
+        movement.mei_object_key = kwargs.get(
             "mei_object_key", "mozart/piano-sonatas/k331/movement-1.mei"
         )
-        return m
+        movement.movement_number = kwargs.get("movement_number", 1)
+        movement.title = kwargs.get("movement_title", "Allegro")
+
+        work = MagicMock(spec_set=["id", "title"])
+        work.id = uuid.uuid4()
+        work.title = kwargs.get("work_title", "Piano Sonata No. 11 in A major")
+
+        composer = MagicMock(spec_set=["id", "name"])
+        composer.id = uuid.uuid4()
+        composer.name = kwargs.get("composer_name", "Wolfgang Amadeus Mozart")
+
+        return movement, work, composer
 
     async def test_returns_none_for_unknown_movement(self) -> None:
         """Service returns None when the movement ID is not in the database."""
-        db = _mock_db_scalar(None)
+        db = _mock_db_one(None)
         storage = AsyncMock()
 
         result = await get_movement_mei_url(uuid.uuid4(), db, storage)
@@ -407,12 +430,18 @@ class TestGetMovementMeiUrl:
         storage.signed_url.assert_not_called()
 
     async def test_resolves_mei_object_key_via_signed_url(self) -> None:
-        """Service resolves ``mei_object_key`` via ``storage.signed_url`` and returns
-        a ``MeiUrlResponse`` containing the resulting URL."""
+        """Service resolves ``mei_object_key`` and returns a ``MeiUrlResponse``
+        with the signed URL, work title, composer name, and movement metadata."""
         key = "mozart/piano-sonatas/k331/movement-1.mei"
         signed = "https://minio.example.com/signed-mei.mei?token=abc"
-        movement = self._make_mei_movement(mei_object_key=key)
-        db = _mock_db_scalar(movement)
+        movement, work, composer = self._make_row(
+            mei_object_key=key,
+            work_title="Piano Sonata No. 11 in A major",
+            composer_name="Wolfgang Amadeus Mozart",
+            movement_number=1,
+            movement_title="Allegro",
+        )
+        db = _mock_db_one((movement, work, composer))
         storage = AsyncMock()
         storage.signed_url = AsyncMock(return_value=signed)
 
@@ -420,4 +449,8 @@ class TestGetMovementMeiUrl:
 
         assert result is not None
         assert result.url == signed
+        assert result.work_title == "Piano Sonata No. 11 in A major"
+        assert result.composer_name == "Wolfgang Amadeus Mozart"
+        assert result.movement_number == 1
+        assert result.movement_title == "Allegro"
         storage.signed_url.assert_awaited_once_with(key, expires_in=3600)

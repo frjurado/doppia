@@ -7,6 +7,9 @@
  * fragment-schema.md, these fields reflect the notated (high-reliability) key
  * and meter of the source movement.
  *
+ * Score title (composer, work title, movement) is sourced from the DB via the
+ * mei-url API response and lives in services/scoreApi.ts — not parsed here.
+ *
  * References: fragment-schema.md §"The summary JSONB schema", ADR-015.
  */
 
