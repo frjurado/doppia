@@ -41,7 +41,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ContainsStage } from '../../../services/conceptApi';
 import type { SelectionRange } from '../annotator';
-import type { StageAssignment } from '../stages';
+import type { StageBeatBoundary, StageAssignment } from '../stages';
 import {
   computeStagesComplete,
   moveSplitHandle,
@@ -50,6 +50,16 @@ import {
   reconcileWithSelection,
   toggleStageAbsent,
 } from '../stages';
+
+/** Shorthand for a measure-level boundary (beatFloat: null). */
+function mBoundary(barN: number): StageBeatBoundary {
+  return { barN, beatFloat: null };
+}
+
+/** Shorthand for a beat-level boundary. */
+function bBoundary(barN: number, beatFloat: number): StageBeatBoundary {
+  return { barN, beatFloat };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -223,53 +233,92 @@ describe('computeStagesComplete', () => {
 // ---------------------------------------------------------------------------
 
 describe('moveSplitHandle', () => {
-  it('moves shared boundary so left stage ends at newBarN, right starts at newBarN+1', () => {
+  // ── Measure-level boundary (beatFloat: null) ──────────────────────────────
+
+  it('moves shared boundary so left stage ends at barN, right starts at barN+1', () => {
     const assignments = makePacAssignments();
-    // Sorted active: [Predominant(1-2), Dominant(3-4), PreTonic(5-5), Tonic(6-8)]
+    // Sorted active: [Predominant(1-2), Dominant(3-5), PreTonic(6-6), Tonic(7-8)]
     // Move boundary at sortedIdx=0 (between Predominant and Dominant) to barN=3
     // → Predominant ends at 3, Dominant starts at 4.
-    const updated = moveSplitHandle(assignments, 0, 3);
+    const updated = moveSplitHandle(assignments, 0, mBoundary(3));
     const predominant = updated.find(a => a.stageId === 'Predominant')!;
     const dominant = updated.find(a => a.stageId === 'Dominant')!;
     expect(predominant.bounds!.barEnd).toBe(3);
     expect(dominant.bounds!.barStart).toBe(4);
     // No gap: barEnd + 1 === barStart.
     expect(predominant.bounds!.barEnd + 1).toBe(dominant.bounds!.barStart);
+    // Beat coords cleared at measure-level boundary.
+    expect(predominant.bounds!.beatEnd).toBeNull();
+    expect(dominant.bounds!.beatStart).toBeNull();
   });
 
-  it('both flanking stages are marked confirmed', () => {
+  it('both flanking stages are marked confirmed (measure boundary)', () => {
     const assignments = makePacAssignments();
-    const updated = moveSplitHandle(assignments, 1, 4);
+    const updated = moveSplitHandle(assignments, 1, mBoundary(4));
     const dominant = updated.find(a => a.stageId === 'Dominant')!;
     const preTonic = updated.find(a => a.stageId === 'PreTonic')!;
     expect(dominant.confirmed).toBe(true);
     expect(preTonic.confirmed).toBe(true);
   });
 
-  it('clamps to minimum 1-bar width on the left stage', () => {
+  it('clamps to minimum 1-bar width on the left stage (measure boundary)', () => {
     const assignments = makePacAssignments();
     // Predominant starts at bar 1 — cannot move handle below bar 2.
-    const updated = moveSplitHandle(assignments, 0, 0); // newBarN=0 → clamps to 1
+    const updated = moveSplitHandle(assignments, 0, mBoundary(0));
     const predominant = updated.find(a => a.stageId === 'Predominant')!;
     expect(predominant.bounds!.barEnd).toBeGreaterThanOrEqual(1);
   });
 
-  it('clamps to minimum 1-bar width on the right stage', () => {
+  it('clamps to minimum 1-bar width on the right stage (measure boundary)', () => {
     const assignments = makePacAssignments();
-    // sortedIdx=0 boundary: Predominant(1-2) and Dominant(3-4).
-    // Moving to barN=4 = Dominant's barEnd → Dominant would be 0 bars wide.
-    // moveSplitHandle treats newBoundaryBarN as the barEnd for left stage.
-    // maxBarN = rightStage.bounds.barEnd = 4; clamp to maxBarN = 4 means
-    // right stage [5..4] which is invalid → actual max must be barEnd-1=3.
-    const updated = moveSplitHandle(assignments, 0, 4);
+    const updated = moveSplitHandle(assignments, 0, mBoundary(4));
     const dominant = updated.find(a => a.stageId === 'Dominant')!;
     expect(dominant.bounds!.barStart).toBeLessThanOrEqual(dominant.bounds!.barEnd);
   });
 
   it('returns unchanged assignments for out-of-range sortedIdx', () => {
     const assignments = makePacAssignments();
-    const updated = moveSplitHandle(assignments, 99, 3);
+    const updated = moveSplitHandle(assignments, 99, mBoundary(3));
     expect(updated).toEqual(assignments);
+  });
+
+  // ── Beat-level boundary (beatFloat !== null) ──────────────────────────────
+
+  it('beat boundary: both stages share barN; beatFloat divides them', () => {
+    const assignments = makePacAssignments();
+    // Move the boundary between Predominant and Dominant to beat 2.0 of bar 3.
+    const updated = moveSplitHandle(assignments, 0, bBoundary(3, 2.0));
+    const predominant = updated.find(a => a.stageId === 'Predominant')!;
+    const dominant = updated.find(a => a.stageId === 'Dominant')!;
+    expect(predominant.bounds!.barEnd).toBe(3);
+    expect(predominant.bounds!.beatEnd).toBe(2.0);
+    expect(dominant.bounds!.barStart).toBe(3);
+    expect(dominant.bounds!.beatStart).toBe(2.0);
+  });
+
+  it('beat boundary: both flanking stages are marked confirmed', () => {
+    const assignments = makePacAssignments();
+    const updated = moveSplitHandle(assignments, 0, bBoundary(2, 1.5));
+    const predominant = updated.find(a => a.stageId === 'Predominant')!;
+    const dominant = updated.find(a => a.stageId === 'Dominant')!;
+    expect(predominant.confirmed).toBe(true);
+    expect(dominant.confirmed).toBe(true);
+  });
+
+  it('beat boundary: barN clamped to [leftStage.barStart, rightStage.barEnd]', () => {
+    const assignments = makePacAssignments();
+    // Predominant starts at 1, Dominant ends at 5; barN=99 should clamp to 5.
+    const updated = moveSplitHandle(assignments, 0, bBoundary(99, 1.0));
+    const predominant = updated.find(a => a.stageId === 'Predominant')!;
+    expect(predominant.bounds!.barEnd).toBeLessThanOrEqual(5);
+  });
+
+  it('beat boundary: non-flanking stages are unchanged', () => {
+    const assignments = makePacAssignments();
+    const original = assignments.find(a => a.stageId === 'Tonic')!;
+    const updated = moveSplitHandle(assignments, 0, bBoundary(2, 2.0));
+    const tonic = updated.find(a => a.stageId === 'Tonic')!;
+    expect(tonic.bounds).toEqual(original.bounds);
   });
 });
 

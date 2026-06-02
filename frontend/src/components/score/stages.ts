@@ -192,26 +192,53 @@ export function prePopulateStages(
 // ---------------------------------------------------------------------------
 
 /**
+ * Boundary coordinates for a stage split handle drag result (G4.1).
+ *
+ * Measure resolution: `barN` is the barEnd of the left stage; `beatFloat` is
+ * null. The right stage's barStart = barN + 1, keeping the two stages on
+ * separate bars with no gap.
+ *
+ * Beat / sub-beat resolution: both stages share `barN`; `beatFloat` is the
+ * onset at which the split falls. `beatFloat` is the exclusive upper bound
+ * for the left stage (beatEnd) and the inclusive lower bound for the right
+ * stage (beatStart). The two stages overlap on the same bar number but are
+ * distinguished by their beat coordinates.
+ */
+export interface StageBeatBoundary {
+  /** Bar number for the boundary. At measure level: leftStage.barEnd. At beat
+   *  level: the shared bar number that both stages reference. */
+  barN: number;
+  /** Beat float at the split point, or null for a measure-level boundary. */
+  beatFloat: number | null;
+}
+
+/**
  * Move the shared boundary between the stage at sortedActiveIdx and the next
- * active stage to newBoundaryBarN.
+ * active stage to newBoundary.
  *
  * sortedActiveIdx is the 0-based index into the sorted (by order), non-absent,
  * non-orphaned list of stage assignments. The boundary sits between
  * sortedActiveIdx and sortedActiveIdx + 1.
  *
- * Constraints:
- *  - Left stage must have at least 1 bar (barEnd >= barStart).
- *  - Right stage must have at least 1 bar (barStart <= barEnd).
- *  - newBoundaryBarN must be within [leftStage.barStart, rightStage.barEnd - 1].
+ * Measure-level boundary (beatFloat === null):
+ *  - leftStage.barEnd  = newBoundary.barN;  leftStage.beatEnd  = null.
+ *  - rightStage.barStart = newBoundary.barN + 1; rightStage.beatStart = null.
+ *  - Clamped to [leftStage.barStart + 1, rightStage.barEnd] so each side
+ *    keeps at least 1 bar.
  *
- * Both stages are marked confirmed (explicitly positioned by the annotator).
+ * Beat / sub-beat boundary (beatFloat !== null):
+ *  - Both stages share barN (the split is within a single measure).
+ *  - leftStage.barEnd = barN, leftStage.beatEnd = beatFloat.
+ *  - rightStage.barStart = barN, rightStage.beatStart = beatFloat.
+ *  - barN is clamped to [leftStage.barStart, rightStage.barEnd].
  *
- * Only contiguous mode is supported in Phase 1. Free mode is a no-op here.
+ * Both flanking stages are marked confirmed (explicitly positioned by the
+ * annotator). Only contiguous mode is supported in Phase 1.
  */
 export function moveSplitHandle(
   assignments: StageAssignment[],
   sortedActiveIdx: number,
-  newBoundaryBarN: number,
+  newBoundary: StageBeatBoundary,
 ): StageAssignment[] {
   const active = assignments
     .filter(a => !a.absent && !a.orphaned)
@@ -223,10 +250,37 @@ export function moveSplitHandle(
   if (!leftStage || !rightStage) return assignments;
   if (!leftStage.bounds || !rightStage.bounds) return assignments;
 
-  // Enforce minimum 1-bar width on both sides.
+  const { barN, beatFloat } = newBoundary;
+
+  if (beatFloat !== null) {
+    // Beat / sub-beat boundary: both stages share barN; beatFloat divides them.
+    const clampedBarN = Math.max(
+      leftStage.bounds.barStart,
+      Math.min(rightStage.bounds.barEnd, barN),
+    );
+    return assignments.map(a => {
+      if (a.stageId === leftStage.stageId) {
+        return {
+          ...a,
+          bounds: { ...a.bounds!, barEnd: clampedBarN, beatEnd: beatFloat },
+          confirmed: true,
+        };
+      }
+      if (a.stageId === rightStage.stageId) {
+        return {
+          ...a,
+          bounds: { ...a.bounds!, barStart: clampedBarN, beatStart: beatFloat },
+          confirmed: true,
+        };
+      }
+      return a;
+    });
+  }
+
+  // Measure-level boundary: enforce minimum 1-bar width on each side.
   const minBarN = leftStage.bounds.barStart + 1;
   const maxBarN = rightStage.bounds.barEnd;
-  const clampedBarN = Math.max(minBarN, Math.min(maxBarN, newBoundaryBarN));
+  const clampedBarN = Math.max(minBarN, Math.min(maxBarN, barN));
 
   return assignments.map(a => {
     if (a.stageId === leftStage.stageId) {

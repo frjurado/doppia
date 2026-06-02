@@ -1444,6 +1444,7 @@ export default function ScoreViewer() {
                 selection={selectionRange}
                 layer={ghostLayer}
                 visible={annotationFlags.conceptSet && stageAssignments.length > 0}
+                resolution={resolution}
                 activeStageId={activeStageId}
                 onStageActivate={handleStageActivate}
                 onSplitHandleMove={handleSplitHandleMove}
