@@ -6,9 +6,9 @@
  * logic — the schema drives every control type and layout.
  *
  * Control types by cardinality:
- *  ONE_OF  → radio group (≤5 values) or select dropdown (>5 values)
- *  MANY_OF → checkbox group
- *  BOOL    → Yes / No toggle; null = unset (ADR-019; no value list)
+ *  ONE_OF  → radio group (≤2 values) or compact single-select popover (>2 values)
+ *  MANY_OF → checkbox group (≤2 values) or compact multi-select popover (>2 values)
+ *  BOOL    → binary on/off toggle; null = never-touched initial state (ADR-019)
  *
  * Ordering (ADR-023): schemas are rendered in the order returned by the server,
  * which sorts by (grouped-first, order, name). Schemas sharing the same `group`
@@ -26,7 +26,7 @@
  * References: tagging-tool-design.md §7.4, ADR-019, ADR-023.
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { PropertySchema } from '../../services/conceptApi';
 import Type from '../ui/Type';
 import styles from './PropertyForm.module.css';
@@ -105,33 +105,175 @@ interface FieldProps {
   onChange: (schemaId: string, val: PropertyFieldValue) => void;
 }
 
-/** ONE_OF: radio group (≤5 values) or select dropdown (>5 values). */
+/**
+ * OptionDropdown — compact popover used by ONE_OF (>2 values, single-select)
+ * and MANY_OF (>2 values, multi-select).
+ *
+ * Trigger shows selected value name(s) or a count; clicking opens an absolutely-
+ * positioned panel with the full option list. Closes on click-outside or Escape.
+ */
+interface OptionDropdownProps {
+  schema: PropertySchema;
+  value: PropertyFieldValue;
+  /** true → MANY_OF multi-select; false → ONE_OF single-select. */
+  multiple: boolean;
+  onChange: (schemaId: string, val: PropertyFieldValue) => void;
+}
+
+function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const selectedIds: string[] = multiple
+    ? (Array.isArray(value) ? value : [])
+    : (typeof value === 'string' ? [value] : []);
+
+  // Close on click outside.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Close on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open]);
+
+  // Trigger label text.
+  let triggerLabel: string;
+  if (selectedIds.length === 0) {
+    triggerLabel = 'Select…';
+  } else if (!multiple) {
+    triggerLabel = schema.values.find(pv => pv.id === selectedIds[0])?.name ?? 'Select…';
+  } else if (selectedIds.length <= 2) {
+    triggerLabel = selectedIds
+      .map(id => schema.values.find(pv => pv.id === id)?.name ?? id)
+      .join(', ');
+  } else {
+    triggerLabel = `${selectedIds.length} selected`;
+  }
+
+  const handleOptionClick = (pvId: string) => {
+    if (!multiple) {
+      // ONE_OF: select → close; click selected → deselect.
+      onChange(schema.id, selectedIds[0] === pvId ? null : pvId);
+      setOpen(false);
+    } else {
+      // MANY_OF: toggle; keep popover open.
+      const next = selectedIds.includes(pvId)
+        ? selectedIds.filter(id => id !== pvId)
+        : [...selectedIds, pvId];
+      onChange(schema.id, next.length > 0 ? next : null);
+    }
+  };
+
+  return (
+    <div className={styles.field} data-testid={`field-${schema.id}`}>
+      <FieldMeta schema={schema} />
+      <div className={styles.optionDropdownWrapper} ref={wrapperRef}>
+        <button
+          type="button"
+          className={styles.optionDropdownTrigger}
+          onClick={() => setOpen(o => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          data-testid={`dropdown-trigger-${schema.id}`}
+        >
+          <span>{triggerLabel}</span>
+          <span className={styles.optionDropdownChevron} aria-hidden="true">▾</span>
+        </button>
+        {open && (
+          <div
+            className={styles.optionDropdownPopover}
+            role={multiple ? 'group' : 'listbox'}
+            aria-label={schema.name}
+            data-testid={`dropdown-popover-${schema.id}`}
+          >
+            {schema.values.map(pv => {
+              const isSelected = selectedIds.includes(pv.id);
+              const isInfoOpen = infoOpenId === pv.id;
+              const hasRef = !!pv.referenced_concept;
+              return (
+                <div key={pv.id}>
+                  <div
+                    className={[
+                      styles.optionLabel,
+                      isSelected ? styles.optionLabelSelected : '',
+                    ].filter(Boolean).join(' ')}
+                    role={multiple ? 'checkbox' : 'option'}
+                    aria-selected={isSelected}
+                    aria-checked={multiple ? isSelected : undefined}
+                    onClick={() => handleOptionClick(pv.id)}
+                    data-testid={`dropdown-option-${schema.id}-${pv.id}`}
+                  >
+                    <Type
+                      variant="label-md"
+                      as="span"
+                      className={isSelected ? styles.optionTextSelected : styles.optionText}
+                    >
+                      {pv.name}
+                    </Type>
+                    {hasRef && (
+                      <button
+                        type="button"
+                        className={styles.infoButton}
+                        aria-label={`Info: ${pv.referenced_concept!.name}`}
+                        aria-expanded={isInfoOpen}
+                        onClick={e => {
+                          e.stopPropagation();
+                          setInfoOpenId(isInfoOpen ? null : pv.id);
+                        }}
+                        data-testid={`info-btn-${pv.id}`}
+                      >
+                        ⓘ
+                      </button>
+                    )}
+                  </div>
+                  {hasRef && isInfoOpen && (
+                    <div
+                      className={styles.infoPanel}
+                      data-testid={`info-panel-${pv.id}`}
+                    >
+                      <Type variant="label-md" as="span" className={styles.infoTitle}>
+                        {pv.referenced_concept!.name}
+                      </Type>
+                      {pv.referenced_concept!.definition && (
+                        <Type variant="label-sm" as="span" className={styles.infoDef}>
+                          {pv.referenced_concept!.definition}
+                        </Type>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** ONE_OF: radio group (≤2 values) or compact single-select popover (>2 values). */
 function OneOfField({ schema, value, onChange }: FieldProps) {
   const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const selected = typeof value === 'string' ? value : null;
 
-  // Select dropdown for schemas with more than 5 options.
-  if (schema.values.length > 5) {
-    return (
-      <div className={styles.field} data-testid={`field-${schema.id}`}>
-        <FieldMeta schema={schema} />
-        <select
-          className={styles.select}
-          value={selected ?? ''}
-          onChange={e => onChange(schema.id, e.target.value || null)}
-          data-testid={`select-${schema.id}`}
-          aria-label={schema.name}
-        >
-          <option value="">— select —</option>
-          {schema.values.map(pv => (
-            <option key={pv.id} value={pv.id}>{pv.name}</option>
-          ))}
-        </select>
-      </div>
-    );
+  if (schema.values.length > 2) {
+    return <OptionDropdown schema={schema} value={value} multiple={false} onChange={onChange} />;
   }
 
-  // Radio group for ≤5 values.
+  // Radio group for ≤2 values.
   return (
     <div className={styles.field} data-testid={`field-${schema.id}`}>
       <FieldMeta schema={schema} />
@@ -205,10 +347,14 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
   );
 }
 
-/** MANY_OF: checkbox group. */
+/** MANY_OF: checkbox group (≤2 values) or compact multi-select popover (>2 values). */
 function ManyOfField({ schema, value, onChange }: FieldProps) {
   const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const selected: string[] = Array.isArray(value) ? value : [];
+
+  if (schema.values.length > 2) {
+    return <OptionDropdown schema={schema} value={value} multiple={true} onChange={onChange} />;
+  }
 
   const toggle = (pvId: string) => {
     const next = selected.includes(pvId)
@@ -288,28 +434,28 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
 }
 
 /**
- * BOOL: compact inline toggle cycling null → true → false → null.
+ * BOOL: compact inline toggle.
  *
- * The toggle sits on the same row as the field name. Three visual states:
- *  null  → "—" (unset; required BOOL with this state blocks submission)
+ * Starts null (unset — never touched). After the first click cycles true ↔ false
+ * and never returns to null. Null and false share the same "off" visual so the
+ * toggle looks binary to the user; the null/false distinction is preserved in the
+ * payload for optional semantics but is not surfaced visually.
+ *
+ *  null  → "✗" (off appearance — unset, safe to submit for optional schemas)
  *  true  → "✓" (primary background)
- *  false → "✗" (surface-container-high background)
+ *  false → "✗" (off appearance — explicitly no)
  */
 function BoolField({ schema, value, onChange }: FieldProps) {
   const current = typeof value === 'boolean' ? value : null;
   const nextValue: boolean | null =
-    current === null ? true : current === true ? false : null;
-  const indicator = current === null ? '—' : current ? '✓' : '✗';
+    current === null ? true : current === true ? false : true;
+  const indicator = current === true ? '✓' : '✗';
 
   return (
     <div className={styles.boolInlineField} data-testid={`field-${schema.id}`}>
       <button
         type="button"
-        className={[
-          styles.boolToggle,
-          current === true ? styles.boolToggleOn : '',
-          current === false ? styles.boolToggleOff : '',
-        ].filter(Boolean).join(' ')}
+        className={`${styles.boolToggle} ${current === true ? styles.boolToggleOn : styles.boolToggleOff}`}
         onClick={() => onChange(schema.id, nextValue)}
         aria-label={`${schema.name}: ${current === null ? 'unset' : current ? 'yes' : 'no'}`}
         data-testid={`bool-toggle-${schema.id}`}

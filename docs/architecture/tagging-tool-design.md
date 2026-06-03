@@ -245,10 +245,13 @@ Layout within the property form:
 1. **Required properties** (PropertySchema with `required: true`) — displayed first. A missing value here blocks submission.
 2. **Optional properties** (PropertySchema with `required: false`) — displayed after, visually separated.
 
-Control type by PropertySchema `cardinality`:
+Control type by PropertySchema `cardinality` (threshold applies to both):
 
-- `ONE_OF` → radio group (≤ 5 values) or select dropdown (> 5 values).
-- `MANY_OF` → checkbox group or multiselect.
+- `ONE_OF` → radio group (≤ 2 values) or compact single-select popover (> 2 values).
+- `MANY_OF` → checkbox group (≤ 2 values) or compact multi-select popover (> 2 values).
+- `BOOL` → binary on/off toggle. Starts `null` (never-touched; valid to submit for optional schemas). After first interaction cycles `true ↔ false` and never returns to null. Both `null` and `false` render with the same "off" visual; the distinction is preserved in the payload for optional-field semantics.
+
+The stage property form (§6, inline card) uses the same control types.
 
 For PropertyValues that carry a `VALUE_REFERENCES` edge: an inline info-link (ⓘ) opens a tooltip or inline panel showing the referenced concept's name and definition. This is helpful for elaboration types (e.g. distinguishing Cadential 6-4 from Applied Dominant from within the CadentialElaboration property).
 
