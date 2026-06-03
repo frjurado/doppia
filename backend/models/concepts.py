@@ -37,12 +37,15 @@ class PropertyValueItem(BaseModel):
     Attributes:
         id: Stable value identifier.
         name: Human-readable value label.
+        order: Display position within the schema's value list (from the
+            ``HAS_VALUE`` edge); ``None`` when not declared (sorts last).
         referenced_concept: If this value has a ``VALUE_REFERENCES`` edge,
             the target concept's id, name, and definition; ``None`` otherwise.
     """
 
     id: str
     name: str
+    order: int | None = None
     referenced_concept: ReferencedConcept | None = None
 
 
@@ -55,6 +58,10 @@ class PropertySchemaItem(BaseModel):
         description: Prose explanation of the property dimension.
         cardinality: ``"ONE_OF"``, ``"MANY_OF"``, or ``"BOOL"``.
         required: Whether an instance must supply a value for this property.
+        order: Display position in the concept's property form (from the
+            ``HAS_PROPERTY_SCHEMA`` edge); ``None`` when not declared (sorts last).
+        group: Optional cluster label grouping related schemas in the form
+            (from the ``HAS_PROPERTY_SCHEMA`` edge); ``None`` for ungrouped schemas.
         values: Permitted values; empty list for BOOL schemas.
     """
 
@@ -63,6 +70,8 @@ class PropertySchemaItem(BaseModel):
     description: str | None = None
     cardinality: str
     required: bool
+    order: int | None = None
+    group: str | None = None
     values: list[PropertyValueItem] = Field(default_factory=list)
 
 
@@ -131,8 +140,8 @@ class ConceptSchemaTreeResponse(BaseModel):
 
     Attributes:
         concept_id: The queried concept id.
-        schemas: All applicable PropertySchemas with hydrated values, ordered
-            alphabetically by schema id.
+        schemas: All applicable PropertySchemas with hydrated values, sorted by
+            (grouped-first, order, name) per ADR-023.
         stages: All inherited CONTAINS stages ordered by ``order`` ascending.
         type_refinement: Refinement section visibility and child list.
     """

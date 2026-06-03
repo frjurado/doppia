@@ -9,7 +9,7 @@
   gap: var(--spacing-4);
 }
 
-/* ── Required / Optional groups ──────────────────────────────────────────── */
+/* ── Schema groups (ADR-023: schemas sharing the same `group` label cluster) ─ */
 
 .group {
   display: flex;
@@ -17,8 +17,14 @@
   gap: var(--spacing-3);
 }
 
-/* "Required" / "Optional" section heading — same style as .sectionHeading in
-   FormPanel: uppercase, muted, small label. */
+/* Ungrouped schemas: same layout, no label. */
+.ungrouped {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+/* Group label — uppercase, muted, same style as FormPanel section headings. */
 .groupLabel {
   color: var(--color-on-surface-variant);
   text-transform: uppercase;

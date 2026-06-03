@@ -473,10 +473,10 @@ def _seed_domain(
             merge_contains_edge(session, concept.id, entry)
             stats.contains_edges_seeded += 1
 
-    # Step 7: HAS_PROPERTY_SCHEMA edges
+    # Step 7: HAS_PROPERTY_SCHEMA edges (carry order/group per ADR-023)
     for concept in domain.concepts:
-        for schema_id in concept.property_schemas:
-            merge_has_property_schema_edge(session, concept.id, schema_id)
+        for ref in concept.property_schemas:
+            merge_has_property_schema_edge(session, concept.id, ref)
             stats.has_property_schema_edges_seeded += 1
 
     # Step 8: VALUE_REFERENCES edges (PropertyValue → Concept)

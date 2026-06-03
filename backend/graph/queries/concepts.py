@@ -115,18 +115,18 @@ RETURN c.id AS id
 
 _GET_CONCEPT_PROPERTY_SCHEMAS = """\
 MATCH (c:Concept {id: $concept_id})-[:IS_SUBTYPE_OF*0..]->(ancestor:Concept)
-      -[:HAS_PROPERTY_SCHEMA]->(ps:PropertySchema)
-WITH DISTINCT ps
-OPTIONAL MATCH (ps)-[:HAS_VALUE]->(pv:PropertyValue)
-WITH ps, pv
+      -[r:HAS_PROPERTY_SCHEMA]->(ps:PropertySchema)
+WITH DISTINCT ps, r.order AS schema_order, r.group AS schema_group
+OPTIONAL MATCH (ps)-[rv:HAS_VALUE]->(pv:PropertyValue)
 OPTIONAL MATCH (pv)-[:VALUE_REFERENCES]->(ref:Concept)
-WITH ps, pv, ref
-ORDER BY ps.id, pv.id
-WITH ps, collect(
+WITH ps, schema_order, schema_group, rv, pv, ref
+ORDER BY coalesce(rv.order, 9999), pv.name
+WITH ps, schema_order, schema_group, collect(
   CASE WHEN pv IS NOT NULL
     THEN {
       id: pv.id,
       name: pv.name,
+      order: rv.order,
       referenced_concept_id: ref.id,
       referenced_concept_name: ref.name,
       referenced_concept_definition: ref.definition
@@ -139,14 +139,24 @@ RETURN ps.id          AS schema_id,
        ps.description AS schema_description,
        ps.cardinality AS cardinality,
        ps.required    AS required,
+       schema_order   AS order,
+       schema_group   AS group,
        [v IN raw_values WHERE v IS NOT NULL] AS values
-ORDER BY ps.id
+ORDER BY
+  CASE WHEN schema_group IS NULL THEN 1 ELSE 0 END,
+  coalesce(schema_order, 9999),
+  ps.name
 """
 """All PropertySchemas applicable to a concept (inherited via IS_SUBTYPE_OF).
 
 For each schema, the values list is hydrated with name and optional
 VALUE_REFERENCES concept info (id, name, definition).  BOOL schemas have
-an empty values list.  Rows are ordered alphabetically by schema id.
+an empty values list.
+
+Schemas are sorted by (group, order, name) per ADR-023: schemas with a
+non-null group come first, ordered by their declared order within the group;
+ungrouped schemas follow, also ordered by their declared order.  Values within
+each schema are sorted by their HAS_VALUE edge order (nulls last), then name.
 """
 
 _GET_CONCEPT_CONTAINS_STAGES = """\
@@ -216,9 +226,10 @@ async def get_concept_property_schemas(
     """Return all PropertySchemas applicable to a concept, with hydrated values.
 
     Each dict has keys: ``schema_id``, ``schema_name``, ``schema_description``,
-    ``cardinality``, ``required``, ``values`` (list of value dicts, empty for BOOL).
+    ``cardinality``, ``required``, ``order``, ``group``, ``values``
+    (list of value dicts, empty for BOOL).
 
-    Each value dict has: ``id``, ``name``, ``referenced_concept_id``,
+    Each value dict has: ``id``, ``name``, ``order``, ``referenced_concept_id``,
     ``referenced_concept_name``, ``referenced_concept_definition`` (last three
     may be ``None`` when the value carries no VALUE_REFERENCES edge).
 
@@ -227,7 +238,7 @@ async def get_concept_property_schemas(
         concept_id: The concept id to resolve schemas for.
 
     Returns:
-        List of schema dicts ordered alphabetically by schema id.
+        List of schema dicts sorted by (grouped-first, order, name) per ADR-023.
     """
     result = await session.run(_GET_CONCEPT_PROPERTY_SCHEMAS, concept_id=concept_id)
     return await result.data()

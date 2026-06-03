@@ -10,9 +10,11 @@
  *  MANY_OF → checkbox group
  *  BOOL    → Yes / No toggle; null = unset (ADR-019; no value list)
  *
- * Required properties appear first; optional after, visually separated.
- * A missing required value blocks submission via the propertiesComplete flag
- * (the parent calls session.setPropertiesComplete via computeIsComplete).
+ * Ordering (ADR-023): schemas are rendered in the order returned by the server,
+ * which sorts by (grouped-first, order, name). Schemas sharing the same `group`
+ * label are rendered as a contiguous cluster with a visible group label.
+ * Required schemas are marked with * but are not separated from optional ones
+ * by position — a required schema may appear inside the same group as optional ones.
  *
  * Values carrying VALUE_REFERENCES show an inline ⓘ button that expands a
  * definition panel inline below the option label.
@@ -21,7 +23,7 @@
  * values for schemas shared by id are kept; others are discarded.
  * Call carryOverValues(prev, nextSchemas) in the parent when concept changes.
  *
- * References: tagging-tool-design.md §7.4, ADR-019.
+ * References: tagging-tool-design.md §7.4, ADR-019, ADR-023.
  */
 
 import { useState } from 'react';
@@ -334,11 +336,35 @@ function SchemaField({ schema, value, onChange }: FieldProps) {
 // PropertyForm
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Group schemas into contiguous sections by their `group` label (ADR-023).
+// The server already delivers schemas in (grouped-first, order, name) order;
+// we only need to detect group boundaries and cluster them visually.
+// ---------------------------------------------------------------------------
+
+interface SchemaSection {
+  group: string | null;
+  schemas: PropertySchema[];
+}
+
+function groupSchemas(schemas: PropertySchema[]): SchemaSection[] {
+  const sections: SchemaSection[] = [];
+  for (const schema of schemas) {
+    const groupKey = schema.group ?? null;
+    const last = sections[sections.length - 1];
+    if (last && last.group === groupKey) {
+      last.schemas.push(schema);
+    } else {
+      sections.push({ group: groupKey, schemas: [schema] });
+    }
+  }
+  return sections;
+}
+
 export default function PropertyForm({ schemas, values, onChange }: PropertyFormProps) {
   if (schemas.length === 0) return null;
 
-  const required = schemas.filter(s => s.required);
-  const optional = schemas.filter(s => !s.required);
+  const sections = groupSchemas(schemas);
 
   const handleFieldChange = (schemaId: string, val: PropertyFieldValue) => {
     onChange({ ...values, [schemaId]: val });
@@ -346,12 +372,18 @@ export default function PropertyForm({ schemas, values, onChange }: PropertyForm
 
   return (
     <div className={styles.form} data-testid="property-form">
-      {required.length > 0 && (
-        <div className={styles.group} data-testid="required-properties">
-          <Type variant="label-sm" as="span" className={styles.groupLabel}>
-            Required
-          </Type>
-          {required.map(schema => (
+      {sections.map(section => (
+        <div
+          key={section.group ?? '__ungrouped'}
+          className={section.group ? styles.group : styles.ungrouped}
+          data-testid={section.group ? `group-${section.group}` : 'ungrouped-properties'}
+        >
+          {section.group && (
+            <Type variant="label-sm" as="span" className={styles.groupLabel}>
+              {section.group}
+            </Type>
+          )}
+          {section.schemas.map(schema => (
             <SchemaField
               key={schema.id}
               schema={schema}
@@ -360,22 +392,7 @@ export default function PropertyForm({ schemas, values, onChange }: PropertyForm
             />
           ))}
         </div>
-      )}
-      {optional.length > 0 && (
-        <div className={styles.group} data-testid="optional-properties">
-          <Type variant="label-sm" as="span" className={styles.groupLabel}>
-            Optional
-          </Type>
-          {optional.map(schema => (
-            <SchemaField
-              key={schema.id}
-              schema={schema}
-              value={values[schema.id] ?? null}
-              onChange={handleFieldChange}
-            />
-          ))}
-        </div>
-      )}
+      ))}
     </div>
   );
 }

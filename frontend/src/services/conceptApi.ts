@@ -23,6 +23,7 @@ const BASE = '/api/v1';
 const PropertyValueSchema = z.object({
   id: z.string(),
   name: z.string(),
+  order: z.number().nullable().optional(),
   referenced_concept: z
     .object({ id: z.string(), name: z.string(), definition: z.string().nullable() })
     .nullable()
@@ -35,6 +36,8 @@ const PropertySchemaSchema = z.object({
   cardinality: z.enum(['ONE_OF', 'MANY_OF', 'BOOL']),
   required: z.boolean(),
   description: z.string().nullable().optional(),
+  order: z.number().nullable().optional(),
+  group: z.string().nullable().optional(),
   values: z.array(PropertyValueSchema),
 });
 

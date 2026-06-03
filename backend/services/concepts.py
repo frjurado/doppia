@@ -173,7 +173,12 @@ def _build_schema_item(row: dict) -> PropertySchemaItem:
                 definition=v.get("referenced_concept_definition"),
             )
         values.append(
-            PropertyValueItem(id=v["id"], name=v["name"], referenced_concept=ref)
+            PropertyValueItem(
+                id=v["id"],
+                name=v["name"],
+                order=v.get("order"),
+                referenced_concept=ref,
+            )
         )
     return PropertySchemaItem(
         id=row["schema_id"],
@@ -181,6 +186,8 @@ def _build_schema_item(row: dict) -> PropertySchemaItem:
         description=row.get("schema_description"),
         cardinality=row["cardinality"],
         required=row["required"],
+        order=row.get("order"),
+        group=row.get("group"),
         values=values,
     )
 
