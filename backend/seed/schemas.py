@@ -59,6 +59,8 @@ class PropertyValueYAML(BaseModel):
 
     id: str
     name: str
+    order: int | None = None
+    """Display position within this property schema's value list; unset sorts last."""
     references: str | None = None
     """Concept id this value points back to via a VALUE_REFERENCES edge (optional)."""
     aliases: list[str] = []
@@ -148,6 +150,23 @@ class CaptureExtensionYAML(BaseModel):
     description: str
 
 
+class PropertySchemaRefYAML(BaseModel):
+    """A concept's reference to a PropertySchema with display-ordering metadata.
+
+    Object form of a ``property_schemas`` entry on a concept node (ADR-023).
+    The bare-string form (schema id only) is still accepted for backward compatibility.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema: str
+    """Id of the PropertySchema node being referenced."""
+    order: int | None = None
+    """Display position in the property form; unset sorts after all numbered schemas."""
+    group: str | None = None
+    """Optional cluster label; schemas sharing the same group are rendered together."""
+
+
 class ConceptYAML(BaseModel):
     """A single concept node definition in the seed YAML."""
 
@@ -170,8 +189,10 @@ class ConceptYAML(BaseModel):
     """When False the concept does not appear in the concept picker as a direct tag."""
     relationships: list[RelationshipYAML] = []
     contains: list[ContainsEntryYAML] = []
-    property_schemas: list[str] = []
-    """Ids of PropertySchema nodes applicable to this concept (and inherited by subtypes)."""
+    property_schemas: list[str | PropertySchemaRefYAML] = []
+    """PropertySchema references applicable to this concept (and inherited by subtypes).
+    Each entry is either a bare schema id string or a ``PropertySchemaRefYAML`` object
+    carrying ``order`` and ``group`` metadata for the ``HAS_PROPERTY_SCHEMA`` edge."""
     capture_extensions: list[CaptureExtensionYAML] = []
     """Structured extra fields the tagging tool should collect for this concept.
     Stored as a JSON-encoded string on the Neo4j node (``c.capture_extensions``)."""

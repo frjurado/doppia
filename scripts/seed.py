@@ -274,9 +274,12 @@ def _check_references(
                         f"not in loaded files (domain={domain.domain!r})"
                     )
             for schema_ref in concept.property_schemas:
-                if schema_ref not in schema_ids:
+                schema_id = (
+                    schema_ref if isinstance(schema_ref, str) else schema_ref.schema
+                )
+                if schema_id not in schema_ids:
                     unresolved.append(
-                        f"  concept {concept.id!r}: property_schema {schema_ref!r} "
+                        f"  concept {concept.id!r}: property_schema {schema_id!r} "
                         f"not in loaded files (domain={domain.domain!r})"
                     )
 

@@ -220,13 +220,13 @@ These are the data-correctness bugs. ADR-005 and `prototype-tagging-tool.md` are
 
 **Decision taken:** add a numeric **`order`** to `HAS_PROPERTY_SCHEMA` edges (the way `CONTAINS` already carries `order`), plus an optional **`group`** label so related schemas cluster. Schema-driven — no hardcoded concept logic in the frontend.
 
-**This needs an ADR** (new design decision per CLAUDE.md Definition of Done #2). Write **`docs/adr/ADR-023-property-and-value-ordering.md`**: decision = `order` (int) on `HAS_PROPERTY_SCHEMA` and on `HAS_VALUE` edges, optional `group` (string) on `HAS_PROPERTY_SCHEMA`; unset `order` sorts last, ties broken by name; the form renders required-before-optional first, then by (`group`, `order`, name) within each band. Reference `edge-vocabulary-reference.md` and `knowledge-graph-design-reference.md`.
+**This needs an ADR** (new design decision per CLAUDE.md Definition of Done #2). Write **`docs/adr/ADR-023-property-and-value-ordering.md`**: decision = `order` (int) on `HAS_PROPERTY_SCHEMA` and on `HAS_VALUE` edges, optional `group` (string) on `HAS_PROPERTY_SCHEMA`; unset `order` sorts last, ties broken by name; the form renders by (`group`, `order`, `name`) — required vs optional does not affect sort position and is signalled by a `*` marker only, so related required and optional properties can cluster together under the same group. Reference `edge-vocabulary-reference.md` and `knowledge-graph-design-reference.md`.
 
 **Files (Claude Code):**
 - `backend/seed/domains/cadences.yaml` — add `order` (and `group` where useful) to each `property_schemas`/value declaration. *Note:* the YAML currently lists `property_schemas` as a bare id list; this becomes a list of `{schema, order, group}` objects (or `order` is read from the schema-definition block). Confirm the seed-loader shape with the existing `contains:` precedent.
 - `backend/scripts/seed.py` / loader — persist `order`/`group` onto the edges (MERGE, never CREATE — CLAUDE.md invariant).
 - `backend/graph/queries/concepts.py` — the schema-tree query (Step 4) returns `order`/`group`.
-- `frontend/src/components/score/PropertyForm.tsx` + `propertyFormHelpers.ts` — sort by (`required`, `group`, `order`, `name`).
+- `frontend/src/components/score/PropertyForm.tsx` + `propertyFormHelpers.ts` — sort by (`group`, `order`, `name`). Required status is indicated by a `*` marker and does not affect sort position.
 - `docs/architecture/edge-vocabulary-reference.md`, `knowledge-graph-design-reference.md`, `fragment-schema.md` (schema-tree payload), `tagging-tool-design.md` §7.4 — document the ordering contract.
 
 **Verify:** `validate_graph.py` still passes; the schema-tree endpoint returns ordered schemas; the form renders them in declared order with groups contiguous; `visualize_domain.py --domain cadences` confirms structure (per CLAUDE.md, run after the YAML change).
