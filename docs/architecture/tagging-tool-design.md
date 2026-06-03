@@ -195,6 +195,13 @@ The concept picker sits at the top of the form panel. It provides:
 
 The picker only surfaces concepts where `stub: false` and `top_level_taggable: true` (see `knowledge-graph-design-reference.md`). Stub nodes and nodes that exist only as stage targets are excluded.
 
+**Result ordering (G5.3 / ADR-020):** the server returns results pre-sorted by `(complexity_rank, prereq_depth, score DESC, name ASC)`. The client renders them in the order received and never re-sorts by score.
+
+- `complexity_rank` — `foundational` < `intermediate` < `advanced` < unset. Foundational concepts always appear at the top of any search result, regardless of full-text score.
+- `prereq_depth` — count of distinct ancestor concepts that have a `PREREQUISITE_FOR` path leading to this concept. Within a complexity band, a concept that is a prerequisite for others (depth 0 or lower) sorts before its dependents. For example, PAC (prerequisite for IAC, prereq_depth=0) appears before IAC (prereq_depth=1) within the foundational band.
+- `score DESC` — full-text relevance; tiebreaker within same band and prereq_depth.
+- `name ASC` — alphabetical final tiebreaker.
+
 ### 7.2 Type Refinement section
 
 Shown **only** when the selected concept has direct `IS_SUBTYPE_OF` children whose `CONTAINS` structures differ from one another (i.e. choosing among the children changes which stage brackets appear). Shown at the top of the form, before properties, because the choice reshapes everything below it.

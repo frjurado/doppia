@@ -71,7 +71,21 @@ CALL db.index.fulltext.queryNodes("concept_search", $q)
 YIELD node, score
 WHERE node.stub = false AND node.top_level_taggable = true
   AND ($domain IS NULL OR node.domain = $domain)
-WITH node, score ORDER BY score DESC SKIP $skip LIMIT $limit
+CALL {
+  WITH node
+  OPTIONAL MATCH (x:Concept)-[:PREREQUISITE_FOR*1..]->(node)
+  RETURN count(DISTINCT x) AS prereq_depth
+}
+WITH node, score,
+     CASE node.complexity
+       WHEN 'foundational' THEN 0
+       WHEN 'intermediate' THEN 1
+       WHEN 'advanced'     THEN 2
+       ELSE 99
+     END AS complexity_rank,
+     prereq_depth
+ORDER BY complexity_rank ASC, prereq_depth ASC, score DESC, node.name ASC
+SKIP $skip LIMIT $limit
 CALL {
   WITH node
   MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
@@ -85,22 +99,30 @@ RETURN node.id                       AS id,
        node.definition               AS definition,
        hierarchy_path,
        score
-ORDER BY score DESC
+ORDER BY complexity_rank ASC, prereq_depth ASC, score DESC, node.name ASC
 """
-"""Full-text search against the ``concept_search`` index.
+"""Full-text search against the ``concept_search`` index (G5.3 / ADR-020).
 
-Filters to taggable non-stub concepts; computes the IS_SUBTYPE_OF hierarchy
-path (root → concept) in a correlated subquery; paginates via SKIP/LIMIT.
+Filters to taggable non-stub concepts; sorts by pedagogical complexity band
+then prerequisite depth before applying SKIP/LIMIT, so pagination is stable
+with respect to the ordering the UI displays.
 
-The subquery picks the longest path when multiple paths to a root exist
+Sort key: (complexity_rank ASC, prereq_depth ASC, score DESC, name ASC).
+  complexity_rank — foundational=0, intermediate=1, advanced=2, unset=99.
+  prereq_depth    — count of distinct ancestor concepts that have a
+                    PREREQUISITE_FOR path leading to this node; concepts with
+                    fewer predecessors (i.e. they are the prerequisites) sort
+                    first within their band.
+
+The hierarchy_path subquery picks the longest IS_SUBTYPE_OF path to a root
 (defensive — the graph is a tree in Phase 1, but safe for DAG structures).
 
 Parameters:
     q      — Lucene query string (must be non-empty)
     domain — exact domain filter, or ``null`` to search all domains
-    skip   — number of results to skip (offset)
-    limit  — max number of results to return (should be page_size + 1 to
-             detect whether a next page exists)
+    skip   — number of results to skip (cursor offset)
+    limit  — max number of results to return; pass ``page_size + 1``
+             to detect whether a following page exists
 """
 
 
@@ -346,6 +368,11 @@ async def search_concepts(
 
     Each dict has keys: ``id``, ``name``, ``aliases``, ``definition``,
     ``hierarchy_path``, ``score``.
+
+    Results are ordered by ``(complexity_rank, prereq_depth, score DESC,
+    name ASC)`` so foundational concepts appear before intermediate and
+    advanced ones, and prerequisites appear before their dependents within
+    the same band (ADR-020, G5.3).
 
     Args:
         session: An open async Neo4j session.
