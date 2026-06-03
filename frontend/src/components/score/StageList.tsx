@@ -158,8 +158,8 @@ export default function StageList({
                 {assignment.stageName}
               </Type>
               {assignment.required && (
-                <span className={styles.badgeRequired} title="Required stage">
-                  required
+                <span className={styles.badgeRequired} aria-label="required" title="Required stage">
+                  *
                 </span>
               )}
             </div>
