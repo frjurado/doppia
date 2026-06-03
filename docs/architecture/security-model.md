@@ -438,7 +438,7 @@ python scripts/seed_dev_users.py
 
 The script reads `DATABASE_URL` from `.env` and is safe to re-run. **Do not run it against staging or production.** Those environments use real Supabase Auth — `app_user` rows are created by the normal authentication flow when a user first signs in.
 
-Integration tests in `tests/integration/conftest.py` seed these rows automatically via the `_seed_dev_users` fixture; the script is only needed for manual local development.
+Integration tests seed these rows automatically via the `_seed_dev_users` fixture in conftest; the script is only needed for manual local development.
 
 ---
 
