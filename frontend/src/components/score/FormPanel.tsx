@@ -38,7 +38,7 @@
  * References: tagging-tool-design.md §2 §7, ADR-011 §2 §7.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getConceptSchemas } from '../../services/conceptApi';
 import type {
   ConceptSchemaTree,
@@ -162,6 +162,58 @@ export interface FormPanelProps {
 }
 
 // ---------------------------------------------------------------------------
+// Panel resize (G6.1)
+// ---------------------------------------------------------------------------
+
+const STORAGE_KEY = 'doppia.harmonyPanel.width';
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 560;
+const DEFAULT_WIDTH = 320;
+
+function readStoredWidth(): number {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return DEFAULT_WIDTH;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n)) : DEFAULT_WIDTH;
+  } catch {
+    return DEFAULT_WIDTH;
+  }
+}
+
+function usePanelResize() {
+  const [width, setWidth] = useState<number>(readStoredWidth);
+  const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragState.current = { startX: e.clientX, startWidth: width };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragState.current) return;
+      const delta = dragState.current.startX - ev.clientX;
+      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
+      setWidth(next);
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      if (!dragState.current) return;
+      const delta = dragState.current.startX - ev.clientX;
+      const final = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
+      dragState.current = null;
+      try { localStorage.setItem(STORAGE_KEY, String(final)); } catch { /* ignore */ }
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [width]);
+
+  return { width, onMouseDown };
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -189,6 +241,7 @@ export default function FormPanel({
   draftId = null,
   onDeleteFragment,
 }: FormPanelProps) {
+  const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
   const [isLoadingSchema, setIsLoadingSchema] = useState(false);
@@ -263,7 +316,13 @@ export default function FormPanel({
   const typeRefinements = schemaTree?.type_refinement.children ?? [];
 
   return (
-    <aside className={styles.panel} aria-label="Annotation form">
+    <aside className={styles.panel} style={{ width: panelWidth }} aria-label="Annotation form">
+      {/* ── Resize handle (G6.1) ─────────────────────────────────────── */}
+      <div
+        className={styles.resizeHandle}
+        onMouseDown={onHandleMouseDown}
+        aria-hidden="true"
+      />
       {/* ── Fragment header: Delete control (G1.2) ───────────────────── */}
       {/* Once a fragment is committed, the only reset path is Delete —
           which clears selection, concept, stages, and properties together.

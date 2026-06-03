@@ -2,15 +2,36 @@
    Design system: DESIGN.md — tonal layering, no divider lines, 0px radius. */
 
 .panel {
-  width: 320px;
+  /* Width is controlled via inline style (G6.1 resize); default 320px. */
   flex-shrink: 0;
   background-color: var(--color-surface-container-low);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  position: relative;
 
   /* Leave room for the fixed playback bar (80px) at the bottom. */
   padding-bottom: 88px;
+}
+
+/* ── Resize handle (G6.1) ─────────────────────────────────────────────────── */
+
+/* Vertical grab strip on the panel's left edge. Dragging left/right widens
+   or narrows the panel; width is persisted in localStorage. */
+.resizeHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.resizeHandle:hover,
+.resizeHandle:active {
+  background-color: var(--color-primary);
+  opacity: 0.4;
 }
 
 /* ── Sections ─────────────────────────────────────────────────────────────── */
