@@ -274,7 +274,23 @@ Snapshot tests (`tests/snapshots/`) are scaffolded but not yet populated — the
 
 ### Frontend tests
 
-No frontend test framework is configured yet. This is a deliberate Phase 1 choice — the frontend is a thin browser layer on top of four read-only endpoints. See `frontend/TESTING.md` for the rationale and the planned Phase 2 approach (Vitest + React Testing Library).
+Frontend tests use **Vitest** with **React Testing Library**, added in Component 5. Tests live alongside the source files in `__tests__/` subdirectories:
+
+```bash
+cd frontend
+npm test           # run all Vitest tests once
+npm test -- --watch  # watch mode during development
+```
+
+The highest-priority tests are in `frontend/src/components/score/__tests__/`:
+
+- **`ghosts.test.ts`** — beat-boundary inference across 4/4, 6/8, mid-piece meter changes, pickup bars, and repeat-ending collision; the flat index encode/decode round-trip. These guard the coordinate data written to the database.
+- **`selection.test.ts`** — selection state model, concurrent flags, endpoint re-selection, and repeat-barrier clamping.
+- **`annotator.test.ts`** — drag interaction, resolution toggle, and committed-ghost protection.
+- **`stages.test.ts`** — stage pre-population by weight, split-handle math, and `mc_start`/`mc_end` derivation.
+- **`PropertyForm.test.tsx`**, **`ConceptPicker.test.tsx`**, **`TypeRefinement.test.tsx`** — UI component rendering from schema fixtures.
+
+CI runs `npm test` in the lint job on every push.
 
 ### What is not tested in Phase 1
 

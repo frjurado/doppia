@@ -52,6 +52,7 @@ npm install
 npm run dev         # outside Docker
 npm run format      # Prettier
 npm run lint        # ESLint
+npm test            # Vitest unit tests (ghost geometry, state model, UI components)
 ```
 
 ### Python formatting and linting

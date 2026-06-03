@@ -304,3 +304,34 @@ What is new relative to the prototype:
 - **Layer 5 (active-stage beat sub-selection)** requires `addSuperGhosts` (or a new variant) to accept a range constraint, activating beat ghosts only within a specified bar/beat window rather than the full main bracket.
 - **The `Annotation` class** in annotator.js is substantially replaced: the new state model (§2) and the form panel coupling (§7) require a richer session object. The prototype's `Annotation` class can serve as a reference for the mousedown/enter/up interaction pattern but not as a structural base.
 - **Event delegation** replaces the prototype's per-element `addListeners` pattern, as noted in the prototype analysis transfer table.
+
+---
+
+## 11. Implemented in Component 5
+
+This section maps each design section above to the shipped modules. It is updated as implementation lands; use it to navigate to the relevant source when the design and code diverge.
+
+| Design section | Shipped module(s) |
+|---|---|
+| §2 State model (concurrent flags) | `frontend/src/components/score/selection.ts` |
+| §3 Layer 2 — Ghost overlay | `frontend/src/components/score/ghosts.ts` |
+| §3 Layer 3 — Main bracket track | `frontend/src/components/score/MainBracket.tsx` |
+| §3 Layer 4 — Stage bracket track | `frontend/src/components/score/StageBrackets.tsx` |
+| §4 Stage pre-population and grid snapping | `frontend/src/components/score/stages.ts` |
+| §5 Selection grid (resolution toggle) | `frontend/src/components/score/ghosts.ts` (layer switching), `frontend/src/components/score/annotator.ts` (toggle handler) |
+| §6 Interaction model (drag, split-handle, endpoint re-selection) | `frontend/src/components/score/annotator.ts` |
+| §7.1 Concept picker | `frontend/src/components/score/ConceptPicker.tsx` |
+| §7.2 Type Refinement | `frontend/src/components/score/TypeRefinement.tsx` |
+| §7.3 Stage list and absent toggle | `frontend/src/components/score/StageList.tsx` |
+| §7.3 Stage-level property form | `frontend/src/components/score/SubPartForm.tsx` |
+| §7.4 Property form (ONE_OF / MANY_OF / BOOL) | `frontend/src/components/score/PropertyForm.tsx`, `frontend/src/components/score/propertyFormHelpers.ts` |
+| §7.5 Submission checklist | `frontend/src/components/score/SubmissionChecklist.tsx` |
+| §9 Validation and save states | `frontend/src/components/score/FormPanel.tsx` (client); `backend/services/fragment_validation.py`, `backend/services/fragments.py` (server) |
+| §10 Form panel (aggregates all panels) | `frontend/src/components/score/FormPanel.tsx` |
+| Harmony summary panel (Step 16) | `frontend/src/components/score/HarmonyPanel.tsx` |
+| Backend — concept search (Step 3) | `backend/services/concepts.py`, `backend/api/routes/concepts.py` |
+| Backend — schema-tree endpoint (Step 4) | `backend/services/concepts.py`, `backend/api/routes/concepts.py` |
+| Backend — write validation (Step 5) | `backend/services/fragment_validation.py` |
+| Backend — fragment submission endpoints (Step 6) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+| Backend — harmony-event correction (Step 7) | `backend/services/analysis.py`, `backend/api/routes/movements.py` |
+| Backend — review state machine (Step 8) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
