@@ -418,6 +418,28 @@ The `deployment.md` note that "`ENVIRONMENT=production` disables the local auth 
 
 The specific string `"dev-token"` has no special significance in production. Even if the bypass check were somehow defeated, a production user would need to know the exact value. It is not a secret — it is in the README — but it is also not meaningful without the environment preconditions. Changing it periodically provides no additional security; the environment checks are the actual controls.
 
+### Dev-user rows in `app_user`
+
+The bypass assigns synthetic UUIDs to each token:
+
+| Token | UUID | Role |
+|---|---|---|
+| `dev-token` | `00000000-0000-0000-0000-000000000001` | `editor` |
+| `admin-token` | `00000000-0000-0000-0000-000000000002` | `admin` |
+
+These UUIDs are written into `fragment.created_by` and `fragment_review.reviewer_id`, both of which carry `ForeignKey("app_user.id")`. On a fresh local database the `app_user` table is empty, so any fragment write fails with `ForeignKeyViolationError` before the application can return a response.
+
+**Fix:** `backend/scripts/seed_dev_users.py` inserts both rows idempotently (`ON CONFLICT (id) DO NOTHING`). Run it once after `alembic upgrade head` when setting up a local development database:
+
+```bash
+cd backend
+python scripts/seed_dev_users.py
+```
+
+The script reads `DATABASE_URL` from `.env` and is safe to re-run. **Do not run it against staging or production.** Those environments use real Supabase Auth — `app_user` rows are created by the normal authentication flow when a user first signs in.
+
+Integration tests seed these rows automatically via the `_seed_dev_users` fixture in conftest; the script is only needed for manual local development.
+
 ---
 
 ## 6. PostgREST exposure and RLS enforcement

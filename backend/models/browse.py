@@ -78,6 +78,15 @@ class MeiUrlResponse(BaseModel):
     The ``url`` is a pre-signed object storage URL valid for 15 minutes.
     Clients must fetch the MEI text immediately via this URL; the URL itself
     should not be stored or reused after expiry.
+
+    Work and movement metadata are included so the score viewer can render a
+    proper title block without a second round-trip.  ``work_title`` and
+    ``composer_name`` are always present; ``movement_title`` may be null for
+    movements that have no dedicated title in the database.
     """
 
     url: str
+    work_title: str
+    composer_name: str
+    movement_number: int
+    movement_title: str | None

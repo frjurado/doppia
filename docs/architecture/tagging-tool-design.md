@@ -146,6 +146,20 @@ When a concept's stages carry `containment_mode: free`, each bracket has indepen
 
 Inherited from the prototype: clicking within the gradient zone of any bracket endpoint re-anchors the drag from the opposite end, allowing boundary adjustment without discarding and redrawing. This applies to the main bracket endpoints and to the outer endpoints of each stage bracket.
 
+### Delete / re-selection workflow
+
+After a fragment is committed (`fragmentSet` true), clicking on empty ghost space does **not** start a new selection. The only permitted action on the ghost layer is endpoint re-anchor (above). This prevents accidental overwriting of committed work.
+
+If the annotator needs to change the bar range entirely, the workflow is:
+
+1. Click **Delete** in the sidebar header (appears once `fragmentSet` is true).
+2. The session resets completely: selection, concept, Type Refinement, properties, and all stage brackets are cleared. There is **no** partial "clear selection only" — Delete is always a full reset.
+3. Draw a new selection from scratch.
+
+The Delete control is always accessible in the sidebar while a fragment is committed, regardless of how far the annotator has progressed through the checklist. Clearing the ghost layer via Delete is the *only* way to restart selection; the drag handler ignores mousedown on committed ghost space.
+
+**Note on saved drafts:** if Save Draft was called before Delete, the previously saved draft persists on the backend with `status: 'draft'` and is not automatically removed. The local session simply loses the reference. A future delete endpoint will allow explicit removal of orphaned drafts.
+
 ### Concept change after stages are committed
 
 If the user changes the selected concept after stage brackets have been drawn, the system attempts to preserve as much work as possible:
@@ -181,11 +195,18 @@ The concept picker sits at the top of the form panel. It provides:
 
 The picker only surfaces concepts where `stub: false` and `top_level_taggable: true` (see `knowledge-graph-design-reference.md`). Stub nodes and nodes that exist only as stage targets are excluded.
 
+**Result ordering (G5.3 / ADR-020):** the server returns results pre-sorted by `(complexity_rank, prereq_depth, score DESC, name ASC)`. The client renders them in the order received and never re-sorts by score.
+
+- `complexity_rank` — `foundational` < `intermediate` < `advanced` < unset. Foundational concepts always appear at the top of any search result, regardless of full-text score.
+- `prereq_depth` — count of distinct ancestor concepts that have a `PREREQUISITE_FOR` path leading to this concept. Within a complexity band, a concept that is a prerequisite for others (depth 0 or lower) sorts before its dependents. For example, PAC (prerequisite for IAC, prereq_depth=0) appears before IAC (prereq_depth=1) within the foundational band.
+- `score DESC` — full-text relevance; tiebreaker within same band and prereq_depth.
+- `name ASC` — alphabetical final tiebreaker.
+
 ### 7.2 Type Refinement section
 
 Shown **only** when the selected concept has direct `IS_SUBTYPE_OF` children whose `CONTAINS` structures differ from one another (i.e. choosing among the children changes which stage brackets appear). Shown at the top of the form, before properties, because the choice reshapes everything below it.
 
-Rendered as a compact radio group or segmented button labelled with the child concept names (e.g. "Simple / Compound" for `PreDominant`). Selecting a child:
+Rendered as a compact radio group or segmented button labelled with the child concept names. Selecting a child:
 
 - Updates the active concept for stage-panel purposes (the selected concept in the picker stays as the parent; the refinement is a display-layer decision).
 - Re-evaluates which stage brackets are shown (§6, "Concept change after stages are committed").
@@ -207,6 +228,14 @@ Each card shows:
 
 Clicking anywhere on a stage card highlights and centres the corresponding bracket in the score.
 
+#### Stage-level property form
+
+Each stage concept may carry `HAS_PROPERTY_SCHEMA` edges of its own. When a stage card is active (selected in the form panel or clicked in the score), it expands to show an inline property form generated from those schemas — using the same control types as the main property form (§7.4): radio groups or selects for `ONE_OF`, checkboxes or multiselects for `MANY_OF`, toggles for `BOOL`.
+
+Every stage confirmed as present (required, or optional and not toggled absent) becomes a **child fragment** on submission, whether or not its property form was filled. Stage schemas are `required: false`; property completion is not a prerequisite for the child fragment to be created. A child fragment's `summary.properties` will be an empty object if no stage properties were recorded — the fragment's existence is the assertion of presence and location; the properties are optional enrichment.
+
+No concept picker is shown. The child fragment's `concept_id` is the stage concept's own id (e.g. `CadentialPreDominant`), implicit from the stage bracket's graph metadata. The atomic write described in §9 covers the parent cadence fragment and all stage child fragments in one transaction.
+
 ### 7.4 Property form
 
 Generated dynamically from the selected concept's `HAS_PROPERTY_SCHEMA` edges, traversed up the `IS_SUBTYPE_OF` hierarchy. Schema nodes inherited from ancestors are included; they do not need to be re-attached to each subtype.
@@ -216,10 +245,13 @@ Layout within the property form:
 1. **Required properties** (PropertySchema with `required: true`) — displayed first. A missing value here blocks submission.
 2. **Optional properties** (PropertySchema with `required: false`) — displayed after, visually separated.
 
-Control type by PropertySchema `cardinality`:
+Control type by PropertySchema `cardinality` (threshold applies to both):
 
-- `ONE_OF` → radio group (≤ 5 values) or select dropdown (> 5 values).
-- `MANY_OF` → checkbox group or multiselect.
+- `ONE_OF` → radio group (≤ 2 values) or compact single-select popover (> 2 values).
+- `MANY_OF` → checkbox group (≤ 2 values) or compact multi-select popover (> 2 values).
+- `BOOL` → binary on/off toggle. Starts `null` (never-touched; valid to submit for optional schemas). After first interaction cycles `true ↔ false` and never returns to null. Both `null` and `false` render with the same "off" visual; the distinction is preserved in the payload for optional-field semantics.
+
+The stage property form (§6, inline card) uses the same control types.
 
 For PropertyValues that carry a `VALUE_REFERENCES` edge: an inline info-link (ⓘ) opens a tooltip or inline panel showing the referenced concept's name and definition. This is helpful for elaboration types (e.g. distinguishing Cadential 6-4 from Applied Dominant from within the CadentialElaboration property).
 
@@ -272,3 +304,34 @@ What is new relative to the prototype:
 - **Layer 5 (active-stage beat sub-selection)** requires `addSuperGhosts` (or a new variant) to accept a range constraint, activating beat ghosts only within a specified bar/beat window rather than the full main bracket.
 - **The `Annotation` class** in annotator.js is substantially replaced: the new state model (§2) and the form panel coupling (§7) require a richer session object. The prototype's `Annotation` class can serve as a reference for the mousedown/enter/up interaction pattern but not as a structural base.
 - **Event delegation** replaces the prototype's per-element `addListeners` pattern, as noted in the prototype analysis transfer table.
+
+---
+
+## 11. Implemented in Component 5
+
+This section maps each design section above to the shipped modules. It is updated as implementation lands; use it to navigate to the relevant source when the design and code diverge.
+
+| Design section | Shipped module(s) |
+|---|---|
+| §2 State model (concurrent flags) | `frontend/src/components/score/selection.ts` |
+| §3 Layer 2 — Ghost overlay | `frontend/src/components/score/ghosts.ts` |
+| §3 Layer 3 — Main bracket track | `frontend/src/components/score/MainBracket.tsx` |
+| §3 Layer 4 — Stage bracket track | `frontend/src/components/score/StageBrackets.tsx` |
+| §4 Stage pre-population and grid snapping | `frontend/src/components/score/stages.ts` |
+| §5 Selection grid (resolution toggle) | `frontend/src/components/score/ghosts.ts` (layer switching), `frontend/src/components/score/annotator.ts` (toggle handler) |
+| §6 Interaction model (drag, split-handle, endpoint re-selection) | `frontend/src/components/score/annotator.ts` |
+| §7.1 Concept picker | `frontend/src/components/score/ConceptPicker.tsx` |
+| §7.2 Type Refinement | `frontend/src/components/score/TypeRefinement.tsx` |
+| §7.3 Stage list and absent toggle | `frontend/src/components/score/StageList.tsx` |
+| §7.3 Stage-level property form | `frontend/src/components/score/SubPartForm.tsx` |
+| §7.4 Property form (ONE_OF / MANY_OF / BOOL) | `frontend/src/components/score/PropertyForm.tsx`, `frontend/src/components/score/propertyFormHelpers.ts` |
+| §7.5 Submission checklist | `frontend/src/components/score/SubmissionChecklist.tsx` |
+| §9 Validation and save states | `frontend/src/components/score/FormPanel.tsx` (client); `backend/services/fragment_validation.py`, `backend/services/fragments.py` (server) |
+| §10 Form panel (aggregates all panels) | `frontend/src/components/score/FormPanel.tsx` |
+| Harmony summary panel (Step 16) | `frontend/src/components/score/HarmonyPanel.tsx` |
+| Backend — concept search (Step 3) | `backend/services/concepts.py`, `backend/api/routes/concepts.py` |
+| Backend — schema-tree endpoint (Step 4) | `backend/services/concepts.py`, `backend/api/routes/concepts.py` |
+| Backend — write validation (Step 5) | `backend/services/fragment_validation.py` |
+| Backend — fragment submission endpoints (Step 6) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+| Backend — harmony-event correction (Step 7) | `backend/services/analysis.py`, `backend/api/routes/movements.py` |
+| Backend — review state machine (Step 8) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |

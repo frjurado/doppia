@@ -161,6 +161,76 @@
   color: var(--color-on-surface-variant);
 }
 
+/* ── Resolution toggle (Measure / Beat / Sub-beat) ──────────────────────── */
+
+.resolutionControl {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+/* Inactive segment: low-surface tonal band, no border. */
+.resolutionButton {
+  background-color: var(--color-surface-container-low);
+  border: 0;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.resolutionButton:hover {
+  color: var(--color-on-surface);
+}
+
+/* Active segment: one step up the tonal ladder to signal selection. */
+.resolutionButtonActive {
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+/* ── TAG / Done mode button ──────────────────────────────────────────────── */
+
+/* Right column of the 1fr/auto/1fr toolbar grid — contains the TAG button. */
+.toolbarRight {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Base style matches the size and resolution buttons. */
+.tagButton {
+  background-color: var(--color-surface-container-low);
+  border: 0;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-4);
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tagButton:hover {
+  color: var(--color-on-surface);
+}
+
+/* Active (tag mode): primary fill to signal the live annotation state. */
+.tagButtonActive {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.tagButtonActive:hover {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  opacity: 0.9;
+}
+
 /* ── Narrow-screen notice ─────────────────────────────────────────────────── */
 
 /* Shown when the score panel is narrower than 480px. */
@@ -175,12 +245,15 @@
 
 /* ── Score panel ─────────────────────────────────────────────────────────── */
 
+/* Score panel wrapper: row layout — score on the left, form panel on the right.
+   The form panel has a fixed width (FormPanel.module.css); the score panel
+   takes the remaining space via flex: 1. */
 .scorePanelWrapper {
   flex: 1;
   overflow: hidden;
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
 }
 
 /* Scrollable score content — horizontal scroll handles SVGs wider than the
@@ -208,6 +281,33 @@
      All overlay coordinates (brackets, labels) are relative to this element,
      which matches the SVG measure geometry exactly. */
   position: relative;
+}
+
+/* G7: Score title block — HTML header above the Verovio SVG pages.
+   Replaces the suppressed Verovio <pgHead> title block. Spacing below
+   separates the header from the first system. No borders per DESIGN.md.
+   Three lines, all centered: composer (label-md) → work title (headline)
+   → movement number + title (title, de-emphasised). */
+.scoreTitle {
+  padding-bottom: var(--spacing-6);
+  text-align: center;
+}
+
+.scoreTitleComposer {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.scoreTitleWork {
+  color: var(--color-on-background);
+  margin: 0;
+  margin-top: var(--spacing-1);
+}
+
+.scoreTitleMovement {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+  margin-top: var(--spacing-1);
 }
 
 /* Each SVG page from Verovio. Gap on the container provides spacing between
@@ -261,7 +361,12 @@
   justify-content: center;
   gap: var(--spacing-3);
   padding: 0 var(--spacing-6);
-  z-index: 10;
+
+  /* z-index ladder: ghost overlay = 20, fragment overlay = 30, transport = 40.
+     All three are in the root stacking context (no positioned ancestor with an
+     explicit z-index between them and the root), so this value must exceed 30
+     to ensure the transport bar paints above the score overlays. */
+  z-index: 40;
 }
 
 .loadingInstrumentLabel {

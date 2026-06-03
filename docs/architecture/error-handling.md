@@ -311,6 +311,31 @@ When Neo4j is down but PostgreSQL is up, write operations that require graph val
 
 This is a deliberate trade-off: temporary unavailability is preferable to silent referential-integrity violations (tags referencing concepts that were never validated). Retryable 503s are safe; corrupted data is not.
 
+### PostgreSQL `IntegrityError` → `FragmentValidationError`
+
+SQLAlchemy raises `sqlalchemy.exc.IntegrityError` when a database constraint is violated — most commonly a `ForeignKeyViolationError` (a referenced row does not exist) or a `UniqueViolationError` (a unique constraint is broken). These are not infrastructure failures; they are referential-integrity violations caused by missing or inconsistent data.
+
+In `FragmentService.create_draft` and `update_draft`, the transaction flush can raise `IntegrityError` if:
+- `fragment.created_by` references a UUID not present in `app_user` — the common case in local development when the dev-user seed has not been run (see `docs/architecture/security-model.md §5`).
+- `fragment.movement_id` references a UUID not present in `movement`.
+
+The service layer wraps both transaction blocks in `try/except IntegrityError` and re-raises as `FragmentValidationError`:
+
+```python
+try:
+    async with self._db.begin():
+        ...
+except IntegrityError as exc:
+    raise FragmentValidationError(
+        "Fragment references a missing related record (user or movement).",
+        detail={"integrity_error": str(exc.orig)},
+    ) from exc
+```
+
+This ensures a missing FK row returns `422 Unprocessable Entity` with a structured envelope, never a bare `500`. The `detail.integrity_error` field carries the raw database message for diagnosability.
+
+**Rule:** `IntegrityError` must never escape the service layer as an unhandled exception. Wrap it at the transaction boundary and re-raise as the appropriate `DoppiaError` subclass (`FragmentValidationError` for FK and uniqueness violations on the fragment write path).
+
 ---
 
 ## 5. Exception handler mapping
@@ -328,6 +353,7 @@ All `DoppiaError` subclasses are registered with FastAPI at startup. The mapping
 | `UserNotFoundError` | 404 | `USER_NOT_FOUND` |
 | `FragmentAlreadyApprovedError` | 409 | `FRAGMENT_ALREADY_APPROVED` |
 | `HarmonyNotReviewedError` | 422 | `HARMONY_NOT_REVIEWED` |
+| `FragmentValidationError` | 422 | `FRAGMENT_VALIDATION_ERROR` |
 | `AuthorizationError` | 403 | `FORBIDDEN` |
 | `GraphIntegrityError` | 500 | `GRAPH_INTEGRITY_ERROR` |
 | (any other `DoppiaError`) | 500 | `INTERNAL_ERROR` |

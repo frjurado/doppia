@@ -1,0 +1,146 @@
+/* StageList — tagging-tool-design.md §7.3
+   Design system: DESIGN.md — tonal layering, no borders, 0px radius. */
+
+/* Container: no explicit gap — cards use margin-top to create vertical rhythm
+   without divider lines (DESIGN.md §5 §"Lists"). */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Stage card ─────────────────────────────────────────────────────────── */
+
+.card {
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-surface-container);
+  cursor: pointer;
+  user-select: none;
+  border-left: 3px solid transparent; /* replaced by active/error states */
+  transition: background-color 0.1s;
+  margin-top: 1px; /* tonal separation — no divider line */
+}
+
+.card:hover {
+  background-color: var(--color-surface-container-high);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--color-primary, #3f5f77);
+  outline-offset: -2px;
+}
+
+/* Active card: accent left border + slightly elevated background. */
+.cardActive {
+  background-color: var(--color-surface-container-high);
+  border-left-color: var(--color-primary, #3f5f77);
+}
+
+/* Orphaned: grey tint, reduced opacity. */
+.cardOrphaned {
+  opacity: 0.6;
+  background-color: var(--color-surface-container);
+}
+
+/* Error: red left border. */
+.cardError {
+  border-left-color: var(--color-error, #b3261e);
+}
+
+/* Absent: slight opacity reduction to signal the stage is not present. */
+.cardAbsent {
+  opacity: 0.55;
+}
+
+/* ── Card header ─────────────────────────────────────────────────────────── */
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-1);
+}
+
+/* 14×14 swatch — doubles as a present/absent toggle for optional stages.
+   Uses --swatch-color CSS custom property set via inline style. */
+.colorSwatch {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* 0px radius — project design system. */
+}
+
+/* Reset for the interactive button variant (optional non-orphaned stages). */
+.swatchToggle {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Present state: filled with the stage colour, white tick via pseudo-element. */
+.swatchPresent {
+  background-color: var(--swatch-color);
+}
+
+.swatchPresent::after {
+  content: '✓';
+  color: var(--color-on-primary);
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Absent state: hollow outline in the stage colour, no fill. */
+.swatchAbsent {
+  background: transparent;
+  border: 1.5px solid var(--swatch-color);
+}
+
+.stageName {
+  flex: 1;
+  color: var(--color-on-surface);
+  font-weight: 600;
+}
+
+/* Required badge: muted label-sm chip — only shown for required stages. */
+.badgeRequired {
+  font-family: var(--font-label, 'Public Sans', sans-serif);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  white-space: nowrap;
+  color: var(--color-primary, #3f5f77);
+  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 12%, transparent);
+}
+
+/* ── Bounds row ──────────────────────────────────────────────────────────── */
+
+.boundsRow {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: var(--spacing-1);
+}
+
+.boundsText {
+  color: var(--color-on-surface-variant, #41484d);
+}
+
+.warnText {
+  color: var(--color-tertiary, #7a5900);
+}
+
+.errorText {
+  color: var(--color-error, #b3261e);
+}
+
+/* ── Sub-part tagging (Step 15) ──────────────────────────────────────────── */
+
+/* Wrapper for the inline property form shown when the card is active. */
+.subPartRow {
+  margin-top: var(--spacing-2);
+}

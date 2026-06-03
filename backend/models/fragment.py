@@ -1,10 +1,13 @@
 """SQLAlchemy ORM models and Pydantic schemas for the fragment data model.
 
 Covers:
-- Fragment          — the central record; one row per tagged musical excerpt
-- FragmentConceptTag — join surface between PostgreSQL and Neo4j
-- FragmentReview    — per-reviewer decisions on a fragment
-- FragmentSummary   — Pydantic schema for the versioned summary JSONB field
+- Fragment              — the central record; one row per tagged musical excerpt
+- FragmentConceptTag    — join surface between PostgreSQL and Neo4j
+- FragmentReview        — per-reviewer decisions on a fragment
+- FragmentSummary       — Pydantic schema for the versioned summary JSONB field
+- ConceptTagCreate      — write model for a single concept tag
+- SubPartFragmentCreate — write model for a sub-part (child) fragment
+- FragmentCreate        — write model for a top-level fragment create request
 
 The summary JSONB schema is versioned and documented in
 docs/architecture/fragment-schema.md. The ``version`` field inside ``summary``
@@ -13,7 +16,8 @@ field names, types, or structure.
 
 ``fragment_concept_tag.concept_id`` values are Neo4j Concept.id strings. There
 is no database-level foreign key across systems; referential integrity is
-enforced by the Pydantic validation layer at write time.
+enforced by the Pydantic validation layer at write time (see
+``services/fragment_validation.py``).
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from models.base import Base
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -51,12 +55,16 @@ class ActualKey(BaseModel):
     ``confidence`` reflects the machine's certainty at analysis time and is
     preserved even after a human edit (when ``auto`` becomes ``False``).
     Treat ``confidence`` as meaningful only when ``auto = True``.
+
+    ``confidence`` is optional to support the DCML-only seeding path (option b
+    in Component 5): when ``actual_key`` is seeded from the DCML ``local_key``
+    with ``auto: false, reviewed: true``, no machine confidence score exists.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     value: str
-    confidence: float
+    confidence: float | None = None
     auto: bool
     reviewed: bool
 
@@ -74,6 +82,10 @@ class FragmentSummary(BaseModel):
     it to the database.  A dict that bypasses validation and reaches the DB
     with a missing or wrong-version ``version`` key breaks the invariant that
     ``fragment.summary["version"]`` is always present and interpretable.
+
+    ``music21_version`` is required when any auto-derived field (e.g. a
+    ``actual_key`` with ``auto: true``) is present; it may be ``None`` (or the
+    sentinel ``"none"``) in the DCML-only path where no music21 analysis runs.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -81,11 +93,160 @@ class FragmentSummary(BaseModel):
     version: Literal[1]
     key: str
     meter: str
-    music21_version: str
-    concepts: list[str]
+    music21_version: str | None = None
+    concepts: list[str] = Field(min_length=1)
     actual_key: ActualKey | None = None
     properties: dict[str, str | list[str]] = {}
     concept_extensions: dict[str, Any] = {}
+
+
+# ---------------------------------------------------------------------------
+# Write models (used by POST /api/v1/fragments and sub-part payloads)
+# ---------------------------------------------------------------------------
+
+
+class ConceptTagCreate(BaseModel):
+    """A single concept tag in a fragment write request.
+
+    ``concept_id`` is the immutable Neo4j Concept.id.  Existence is verified
+    against the graph by ``services.fragment_validation.validate_concept_existence``
+    before any database write; there is no DB-level foreign key.
+
+    ``is_primary`` must be ``True`` for exactly one tag per fragment — the
+    concept that drove the tagging decision.  Additional tags carry
+    ``is_primary=False`` and are applied for cross-referencing purposes only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    concept_id: str = Field(min_length=1)
+    is_primary: bool = True
+
+
+class _FragmentWriteBase(BaseModel):
+    """Shared coordinate and content fields for top-level and sub-part writes.
+
+    Beat constraints follow ADR-005:
+    - ``beat_start`` and ``beat_end`` must both be set or both be null.
+    - When set, ``beat_start`` must be strictly less than ``beat_end``.
+
+    The measure-level floor/ceil bounds from ADR-005 (floor(beat_start) >=
+    bar_start, ceil(beat_end) <= bar_end) are omitted here because the beat
+    encoding (1-indexed beat number within a measure) makes those inequalities
+    unsatisfiable for any measure beyond bar 1.  The tagging tool enforces the
+    spatial bounds at the ghost-overlay layer before the selection is committed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    bar_start: int = Field(ge=0)
+    bar_end: int = Field(ge=0)
+    mc_start: int = Field(ge=1)
+    mc_end: int = Field(ge=1)
+    beat_start: float | None = None
+    beat_end: float | None = None
+    repeat_context: str | None = None
+    summary: FragmentSummary
+    prose_annotation: str | None = None
+    concept_tags: list[ConceptTagCreate] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_beat_constraints(self) -> "_FragmentWriteBase":
+        """Enforce ADR-005 beat constraints."""
+        bs, be = self.beat_start, self.beat_end
+        if bs is None and be is None:
+            return self
+        if (bs is None) != (be is None):
+            raise ValueError(
+                "beat_start and beat_end must both be set or both be null "
+                "(ADR-005: null means measure-level selection)"
+            )
+        # Both are non-null at this point.
+        assert bs is not None and be is not None  # narrow type for mypy
+        if bs >= be:
+            raise ValueError(
+                f"beat_start ({bs}) must be strictly less than beat_end ({be}) "
+                "(ADR-005)"
+            )
+        return self
+
+
+class SubPartFragmentCreate(_FragmentWriteBase):
+    """Write model for a sub-part (child) fragment.
+
+    Sub-parts share the same coordinate and content fields as the parent.
+    The service layer checks containment: every sub-part's bar range must
+    fall within the parent's range before the atomic write proceeds.
+    """
+
+
+class FragmentCreate(_FragmentWriteBase):
+    """Write model for a top-level fragment create request.
+
+    Sent as the body of ``POST /api/v1/fragments``.  The ``movement_id``
+    identifies the MEI source; ``sub_parts`` are written atomically alongside
+    the parent (all succeed or all roll back).
+
+    The ``data_licence`` field is not in the payload — it is derived from the
+    movement's harmony event sources (ADR-009) and set by the service layer
+    at write time.
+    """
+
+    movement_id: uuid.UUID
+    sub_parts: list[SubPartFragmentCreate] = Field(default_factory=list)
+
+
+class ReviewRequest(BaseModel):
+    """Optional body for the approve and reject review endpoints.
+
+    Both approve and reject accept an optional comment.  The comment is
+    persisted in ``fragment_review.comment`` regardless of whether the
+    approval gate passes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    comment: str | None = None
+
+
+class FragmentUpdate(_FragmentWriteBase):
+    """Write model for updating a draft fragment (PATCH /api/v1/fragments/{id}).
+
+    Replaces all mutable fields of the draft in a single atomic operation:
+    concept tags, sub-parts, coordinates, summary, and prose are all replaced
+    from this payload. ``movement_id`` cannot change after creation.
+    """
+
+    sub_parts: list[SubPartFragmentCreate] = Field(default_factory=list)
+
+
+class FragmentResponse(BaseModel):
+    """API response shape for a fragment after create, update, or submit.
+
+    All timestamps are timezone-aware UTC datetimes. ``summary`` is returned
+    as the structured Pydantic model so callers get typed fields rather than
+    a raw dict.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    parent_fragment_id: uuid.UUID | None
+    summary: dict
+    prose_annotation: str | None
+    data_licence: str | None
+    status: str
+    created_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class Fragment(Base):

@@ -1,0 +1,40 @@
+/* Layer 3 — Main bracket track (tagging-tool-design.md §3).
+   Positioned absolutely within FragmentOverlay (position: relative containing
+   block is .scoreContent). All children carry pointer-events: none so that
+   mouse events pass through to the ghost layer (z-index: 20) below. */
+
+.bracket {
+  position: absolute;
+  background-color: var(--color-primary, #3f5f77);
+  pointer-events: none;
+
+  /* No border-radius — project design system uses 0px everywhere (DESIGN.md). */
+}
+
+/* Left endpoint gradient handle: decorative fade at the bracket's left end.
+   The interactive drag affordance is the handle ghost element in the ghost layer
+   (G3.1); this element is purely cosmetic. */
+.handleLeft {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-primary, #3f5f77) 0%, transparent),
+    var(--color-primary, #3f5f77)
+  );
+}
+
+/* Right endpoint gradient handle: mirror of .handleLeft. */
+.handleRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--color-primary, #3f5f77) 0%, transparent),
+    var(--color-primary, #3f5f77)
+  );
+}

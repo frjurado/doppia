@@ -18,7 +18,12 @@ import json
 
 from neo4j import Session as _Session
 
-from backend.seed.schemas import ConceptYAML, ContainsEntryYAML, PropertySchemaYAML
+from backend.seed.schemas import (
+    ConceptYAML,
+    ContainsEntryYAML,
+    PropertySchemaRefYAML,
+    PropertySchemaYAML,
+)
 
 # ---------------------------------------------------------------------------
 # Infrastructure DDL
@@ -85,7 +90,9 @@ ON MATCH SET  ps.name        = $name,
 _MERGE_HAS_VALUE_EDGE = """\
 MATCH (ps:PropertySchema {id: $schema_id})
 MATCH (pv:PropertyValue  {id: $value_id})
-MERGE (ps)-[:HAS_VALUE]->(pv)
+MERGE (ps)-[r:HAS_VALUE]->(pv)
+ON CREATE SET r.order = $order
+ON MATCH SET  r.order = $order
 """
 
 # ---------------------------------------------------------------------------
@@ -145,7 +152,9 @@ ON MATCH SET  r.order            = $order,
 _MERGE_HAS_PROPERTY_SCHEMA_EDGE = """\
 MATCH (c:Concept      {id: $concept_id})
 MATCH (ps:PropertySchema {id: $schema_id})
-MERGE (c)-[:HAS_PROPERTY_SCHEMA]->(ps)
+MERGE (c)-[r:HAS_PROPERTY_SCHEMA]->(ps)
+ON CREATE SET r.order = $order, r.group = $group
+ON MATCH SET  r.order = $order, r.group = $group
 """
 
 _MERGE_BELONGS_TO_EDGE = """\
@@ -255,7 +264,12 @@ def merge_property_schema(session: _Session, schema: PropertySchemaYAML) -> None
     )
     for pv in schema.values:
         merge_property_value(session, pv.id, pv.name, pv.aliases, pv.references)
-        session.run(_MERGE_HAS_VALUE_EDGE, schema_id=schema.id, value_id=pv.id)
+        session.run(
+            _MERGE_HAS_VALUE_EDGE,
+            schema_id=schema.id,
+            value_id=pv.id,
+            order=pv.order,
+        )
 
 
 def merge_concept(session: _Session, concept: ConceptYAML) -> None:
@@ -334,19 +348,30 @@ def merge_contains_edge(
 def merge_has_property_schema_edge(
     session: _Session,
     concept_id: str,
-    schema_id: str,
+    ref: str | PropertySchemaRefYAML,
 ) -> None:
     """Upsert a HAS_PROPERTY_SCHEMA edge from a Concept to a PropertySchema.
+
+    Persists ``order`` and ``group`` edge properties when the ref is in object
+    form (ADR-023).  Bare-string refs produce ``null`` for both properties.
 
     Args:
         session: An open synchronous Neo4j session.
         concept_id: The Concept id.
-        schema_id: The PropertySchema id.
+        ref: Either a bare PropertySchema id string (legacy) or a
+            :class:`~backend.seed.schemas.PropertySchemaRefYAML` object carrying
+            ``order`` and ``group`` metadata for the edge.
     """
+    if isinstance(ref, str):
+        schema_id, order, group = ref, None, None
+    else:
+        schema_id, order, group = ref.schema, ref.order, ref.group
     session.run(
         _MERGE_HAS_PROPERTY_SCHEMA_EDGE,
         concept_id=concept_id,
         schema_id=schema_id,
+        order=order,
+        group=group,
     )
 
 

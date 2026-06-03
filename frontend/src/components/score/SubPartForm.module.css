@@ -1,0 +1,29 @@
+/* SubPartForm — inline stage property form inside an active stage card.
+   Design system: DESIGN.md — tonal layering, no dividers, 0px radius. */
+
+/* Container: slightly elevated tonal background relative to the stage card. */
+.form {
+  padding: var(--spacing-2) var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-surface-container-highest, #e4e3da);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.heading {
+  color: var(--color-on-surface-variant, #41484d);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Status / error lines ─────────────────────────────────────────────────── */
+
+.status {
+  color: var(--color-on-surface-variant, #41484d);
+  margin: 0;
+}
+
+.error {
+  color: var(--color-error, #b3261e);
+  margin: 0;
+}

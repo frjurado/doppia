@@ -1,0 +1,74 @@
+/* Ghost layer styles.
+   All positioning is applied inline (computed from SVG pixel bounds).
+   These classes handle visual state and pointer-events management only. */
+
+/* --- Base ghost element --- */
+:global(.ghost) {
+  box-sizing: border-box;
+  opacity: 0;
+  transition: opacity 80ms ease;
+  user-select: none;
+}
+
+/* Hover hint (applied by the selection layer on mouseenter) */
+:global(.ghost.light) {
+  opacity: 0.35;
+  background-color: var(--color-primary, #3f5f77);
+}
+
+/* Active selection (applied by the selection layer on committed range) */
+:global(.ghost.dark) {
+  opacity: 0.55;
+  background-color: var(--color-primary, #3f5f77);
+}
+
+/* Measure ghosts: slightly more opaque when active */
+:global(.ghost-measure.dark) {
+  opacity: 0.45;
+}
+
+/* Beat ghosts: above-staff region */
+:global(.ghost-beat) {
+  border-radius: 0;
+}
+
+/* Sub-beat ghosts: slightly smaller visual presence */
+:global(.ghost-subbeat) {
+  opacity: 0;
+}
+
+:global(.ghost-subbeat.light) {
+  opacity: 0.25;
+}
+
+:global(.ghost-subbeat.dark) {
+  opacity: 0.45;
+}
+
+/* --- Drag handle ghosts (G3.1) ---
+   Absolutely-positioned elements rendered just outside the committed selection
+   boundary, within the staves. Clicking either handle re-anchors the endpoint
+   drag from the opposite end of the selection. */
+:global(.ghost-handle) {
+  position: absolute;
+  cursor: ew-resize;
+  user-select: none;
+}
+
+/* Left handle: gradient solid at right edge (touches the selection), fading left. */
+:global(.ghost-handle-left) {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-primary, #3f5f77) 0%, transparent),
+    var(--color-primary, #3f5f77)
+  );
+}
+
+/* Right handle: gradient solid at left edge (touches the selection), fading right. */
+:global(.ghost-handle-right) {
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--color-primary, #3f5f77) 0%, transparent),
+    var(--color-primary, #3f5f77)
+  );
+}

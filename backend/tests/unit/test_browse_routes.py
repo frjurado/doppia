@@ -568,13 +568,25 @@ class TestGetMovementMeiUrl:
         signed = "https://minio.example.com/signed-mei.mei?token=xyz"
         monkeypatch.setattr(
             "api.routes.browse.get_movement_mei_url",
-            AsyncMock(return_value=MeiUrlResponse(url=signed)),
+            AsyncMock(
+                return_value=MeiUrlResponse(
+                    url=signed,
+                    work_title="Piano Sonata No. 11 in A major",
+                    composer_name="Wolfgang Amadeus Mozart",
+                    movement_number=1,
+                    movement_title="Allegro",
+                )
+            ),
         )
         movement_id = uuid.uuid4()
         resp = await client.get(f"/api/v1/movements/{movement_id}/mei-url")
         assert resp.status_code == 200
         body = resp.json()
         assert body["url"] == signed
+        assert body["work_title"] == "Piano Sonata No. 11 in A major"
+        assert body["composer_name"] == "Wolfgang Amadeus Mozart"
+        assert body["movement_number"] == 1
+        assert body["movement_title"] == "Allegro"
 
     async def test_unknown_movement_returns_404(
         self,

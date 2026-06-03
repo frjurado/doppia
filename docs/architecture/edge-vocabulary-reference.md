@@ -37,8 +37,8 @@
 
 | Edge type | Direction | Meaning | Notes |
 |---|---|---|---|
-| `HAS_PROPERTY_SCHEMA` | Concept → PropertySchema | Links a concept to a dimension of instance variation. | Inherited down `IS_SUBTYPE_OF` by query convention. Define once on the highest applicable concept. |
-| `HAS_VALUE` | PropertySchema → PropertyValue | Lists a permitted value for a property. | |
+| `HAS_PROPERTY_SCHEMA` | Concept → PropertySchema | Links a concept to a dimension of instance variation. | Inherited down `IS_SUBTYPE_OF` by query convention. Define once on the highest applicable concept. Carries `order` and `group` edge properties (ADR-023) — see table below. |
+| `HAS_VALUE` | PropertySchema → PropertyValue | Lists a permitted value for a property. | Carries an `order` edge property (ADR-023) — see table below. |
 | `VALUE_REFERENCES` | PropertyValue → Concept | Links a property value back to a concept node in the graph. | Enables unified traversal: a query for "all fragments involving Applied Dominant" traverses both direct concept tags and VALUE_REFERENCES links. Values with no independent conceptual identity (e.g., "complete", "incomplete") carry no VALUE_REFERENCES edge. |
 
 ### Cross-Database (Virtual)
@@ -84,6 +84,19 @@ Only `CONTAINS` carries edge properties. All other edges are property-free. If a
 | `display_mode` | `'stage'` \| `'segment'` | No (default: `'stage'`) | `'stage'` — this component creates its own bracket row below the staff in the tagging tool. `'segment'` — this component is rendered as a subdivision within the parent concept's bracket row (no third row is created). Use `'segment'` for sub-stages of compound structural slots (e.g. the two chords of a `CompoundPredominant`). Concepts with `display_mode: 'stage'` must not themselves have children with `display_mode: 'stage'` — the UI supports at most two levels of bracket nesting. |
 | `containment_mode` | `'contiguous'` \| `'free'` | No (default: `'contiguous'`) | `'contiguous'` — adjacent sibling stages share a single split handle; no gaps or overlaps are possible. `'free'` — each stage bracket has independent endpoints; gaps and overlaps are permitted (submission generates a warning but is not blocked). |
 | `default_weight` | float | No (default: `1.0`) | Relative width of this stage in the pre-populated default bracket layout. Normalised across siblings: a stage with weight 2.0 among three siblings of weight 1.0 each receives 2/4 of the main bracket width. Equal weight for all siblings is the fallback when no `default_weight` is set. |
+
+### HAS_PROPERTY_SCHEMA edge properties (ADR-023)
+
+| Property | Type | Required? | Meaning |
+|---|---|---|---|
+| `order` | integer | No | Display position of this schema in the concept's property form. Unset sorts after all numbered schemas; ties broken alphabetically by schema name. |
+| `group` | string | No | Cluster label. All schemas sharing the same non-null `group` value are rendered as a contiguous block in the form. Groups are sorted by the lowest `order` value among their members. Schemas with no `group` are rendered ungrouped after all grouped schemas. |
+
+### HAS_VALUE edge properties (ADR-023)
+
+| Property | Type | Required? | Meaning |
+|---|---|---|---|
+| `order` | integer | No | Display position of this value within the property schema's value list. Unset sorts after all numbered values; ties broken alphabetically by value name. |
 
 ### Adding new edge types
 

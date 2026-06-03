@@ -131,7 +131,7 @@ class TestBrowseApi:
         ):
             resp = await integration_test_client.post(
                 f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
-                headers={"Authorization": "Bearer dev-token"},
+                headers={"Authorization": "Bearer admin-token"},
                 files={"archive": ("corpus.zip", _build_zip(), "application/zip")},
             )
         assert resp.status_code == 201, resp.text

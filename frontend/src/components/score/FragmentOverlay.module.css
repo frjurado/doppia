@@ -7,10 +7,14 @@
      (e.g. bracket resize handles in Components 7/8).
    - No background, border, or border-radius — this is a pure positional
      container, not a visual surface.
-   - No z-index here — stacking relative to siblings is resolved by Components
-     7/8 when real bracket content is added. */
+   - z-index: 30 — stacks above the ghost overlay (z-index: 20) so bracket
+     content is visually on top of ghost highlights, while both remain below
+     the transport bar (z-index: 40). pointer-events: none on this container
+     means clicks still reach the ghost layer below; individual interactive
+     children re-enable pointer-events on themselves. */
 .overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  z-index: 30;
 }

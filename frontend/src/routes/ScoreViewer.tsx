@@ -1,15 +1,45 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import FragmentOverlay from '../components/score/FragmentOverlay';
+import MainBracket from '../components/score/MainBracket';
+import StageBrackets from '../components/score/StageBrackets';
+import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
+import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
+import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
+import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
+import { buildMcIndex, commitSelection } from '../components/score/selection';
+import type { CommittedSelection } from '../components/score/selection';
+import type { StageAssignment, SubPartTag } from '../components/score/stages';
+import {
+  computeStagesComplete,
+  prePopulateStages,
+  reconcileWithNewConcept,
+  reconcileWithSelection,
+  toggleStageAbsent,
+} from '../components/score/stages';
+import FormPanel from '../components/score/FormPanel';
+import type { FormSubmitData } from '../components/score/FormPanel';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { fetchMeiUrl } from '../services/scoreApi';
+import type { ScoreTitle } from '../services/scoreApi';
 import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioToolkit, parseMeiMeterUnit, renderMidi, renderProgressively } from '../services/verovio';
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 import { transposeKey } from '../utils/transposeKey';
+import type { ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
+import { getConceptSchemas } from '../services/conceptApi';
+import {
+  createFragment,
+  updateFragment,
+  submitFragment,
+} from '../services/fragmentApi';
+import type { FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
+import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
+import { ResolutionIcon } from '../components/score/ResolutionIcons';
+import { ApiError } from '../services/api';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -204,6 +234,15 @@ export default function ScoreViewer() {
   const [svgPages, setSvgPages] = useState<string[]>([]);
   const [isRerendering, setIsRerendering] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
+  // G7: title sourced from MEI <meiHead> and rendered as an HTML block above
+  // the score, replacing Verovio's suppressed <pgHead> output.
+  const [scoreTitle, setScoreTitle] = useState<ScoreTitle | null>(null);
+
+  // ── Tagging mode (G1.1) ──────────────────────────────────────────────────
+  // 'view' = score-only; ghost layer inert, FormPanel not mounted.
+  // 'tag'  = ghost layer interactive, annotator live, FormPanel mounted.
+  // Resets to 'view' on each score open (movementId change).
+  const [tagMode, setTagMode] = useState<'view' | 'tag'>('view');
 
   // ── Controls state ───────────────────────────────────────────────────────
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
@@ -271,6 +310,79 @@ export default function ScoreViewer() {
   // changes so we can compute beat = floor((timeMs - barStartMs) / beatDurationMs) + 1.
   // Reset to { barN: 1, startMs: 0 } when playback stops or returns to ready/idle.
   const currentBarRef = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
+
+  // ── Ghost layer + annotation session (Step 11) ───────────────────────────
+  // The ghost layer and annotation session are imperative objects managed
+  // outside React state (they interact with the DOM directly). Their lifecycle
+  // is tied to the SVG render cycle: rebuilt whenever svgPages changes so that
+  // ghost positions match the currently rendered score geometry.
+  const ghostLayerRef = useRef<GhostLayer | null>(null);
+  const annotationSessionRef = useRef<AnnotationSession | null>(null);
+  // Precomputed barN → mc mapping for the currently loaded MEI.
+  const mcIndexRef = useRef<Map<string, number> | null>(null);
+  // G1.3: tracks the (movementId, tagMode) context of the last ghost build so
+  // the svgPages effect can distinguish SVG re-renders of the same score
+  // (preserve annotator state) from new-score loads or mode changes (full reset).
+  const prevScoreKeyRef = useRef<string | null>(null);
+
+  // ── Annotation state (Step 11) ────────────────────────────────────────────
+  // Exposed to React render tree so MainBracket and future Part 4/5 panels
+  // can react to selection and flag changes.
+  const [ghostLayer, setGhostLayer] = useState<GhostLayer | null>(null);
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
+  // Populated at every commit; consumed by Part 5 submission handlers (Step 18).
+  const [committedSelection, setCommittedSelection] = useState<CommittedSelection | null>(null);
+  const [annotationFlags, setAnnotationFlags] = useState<AnnotationFlags>({
+    fragmentSet: false,
+    conceptSet: false,
+    stagesComplete: false,
+    propertiesComplete: false,
+  });
+
+  // ── Ghost resolution toggle (Step 10) ────────────────────────────────────
+  const [resolution, setResolution] = useState<ResolutionMode>('measure');
+  // Mirrors resolution in a ref so the ghost/session effect can read the
+  // current value without needing resolution in its dependency array
+  // (adding it would rebuild the session on every resolution change).
+  const resolutionRef = useRef<ResolutionMode>('measure');
+  // Global meter parsed from the loaded MEI — drives the beat/sub-beat icons
+  // (G4.4). Defaults to [4, 4] until the MEI finishes loading.
+  const [globalMeter, setGlobalMeter] = useState<[number, number]>([4, 4]);
+
+  // ── Stage state (Step 14) ─────────────────────────────────────────────────
+  // Stage assignments are owned here (not in FormPanel) because they must be
+  // shared between the StageBrackets overlay (Layer 4) and the FormPanel stage
+  // list. The schema tree for the currently-active concept/refinement is cached
+  // so it can be re-applied when the main bracket changes.
+  const [stageAssignments, setStageAssignments] = useState<StageAssignment[]>([]);
+  const [activeStageId, setActiveStageId] = useState<string | null>(null);
+  // The schema tree for the currently active concept (or its refinement child).
+  // Cached so reconcileWithNewConcept can compute brand-new default placements.
+  const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
+
+  // ── Sub-part tags (Step 15) ───────────────────────────────────────────────
+  // Keyed by stageId; null means the stage has no sub-part tag yet.
+  // Cleared (and subPartResetKey incremented) when the main concept changes so
+  // sub-part forms reset to empty state automatically.
+  const [subPartTags, setSubPartTags] = useState<Record<string, SubPartTag | null>>({});
+  const [subPartResetKey, setSubPartResetKey] = useState(0);
+
+  // ── Prose annotation (Step 17) ────────────────────────────────────────────
+  // Owned here so the submission payload (Step 18) can read it alongside the
+  // selection, concept, and stage data.
+  const [proseAnnotation, setProseAnnotation] = useState<string>('');
+
+  // ── Fragment lifecycle (G1.2) ─────────────────────────────────────────────
+  // Passed as `key` to FormPanel so it remounts to a clean state on delete.
+  const [fragmentResetKey, setFragmentResetKey] = useState(0);
+
+  // ── Submission state (Step 18) ────────────────────────────────────────────
+  // fragmentDraftId: UUID of the in-progress draft, set after the first
+  // successful create. Subsequent saves use PATCH; null = not yet saved.
+  const [fragmentDraftId, setFragmentDraftId] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
@@ -496,15 +608,508 @@ export default function ScoreViewer() {
     };
   }, [scheduleRerender]);
 
+  // ── Stage handlers (Step 14) ─────────────────────────────────────────────
+
+  /**
+   * Called from FormPanel when the concept (or refinement) changes.
+   * Reconciles existing stage assignments with the new concept's stage list,
+   * or pre-populates fresh assignments if none exist.
+   * When schemaTree.stages is empty the stage track does not render (§8).
+   */
+  const handleConceptChange = useCallback(
+    (concept: ConceptSearchHit | null, schemaTree: ConceptSchemaTree | null) => {
+      activeSchemaTreeRef.current = schemaTree;
+      // Clear sub-part tags and reset all SubPartForms whenever the parent
+      // concept changes — stage structure may be entirely different.
+      setSubPartTags({});
+      setSubPartResetKey(k => k + 1);
+
+      if (!concept || !schemaTree || schemaTree.stages.length === 0) {
+        setStageAssignments([]);
+        setActiveStageId(null);
+        return;
+      }
+      setStageAssignments(prev => {
+        if (prev.length === 0) {
+          return selectionRange
+            ? prePopulateStages(schemaTree.stages, selectionRange)
+            : [];
+        }
+        return reconcileWithNewConcept(prev, schemaTree.stages, selectionRange);
+      });
+    },
+    [selectionRange],
+  );
+
+  /**
+   * Called from FormPanel when a Type Refinement option is selected or cleared.
+   * Fetches the child concept's schema tree and reconciles stage assignments
+   * with the child's CONTAINS structure (ADR-011 §7).
+   * Passing null clears refinement and re-applies the parent concept's stages.
+   */
+  const handleRefinementChange = useCallback(
+    async (option: TypeRefinementChild | null) => {
+      // A refinement change can alter the stage structure, so clear sub-part
+      // tags and reset all SubPartForms to avoid stale concept/property data.
+      setSubPartTags({});
+      setSubPartResetKey(k => k + 1);
+
+      if (!option) {
+        // No refinement selected — fall back to the parent concept's stages.
+        const parentTree = activeSchemaTreeRef.current;
+        if (!parentTree || parentTree.stages.length === 0) {
+          setStageAssignments([]);
+          return;
+        }
+        setStageAssignments(prev =>
+          reconcileWithNewConcept(prev, parentTree.stages, selectionRange),
+        );
+        return;
+      }
+      try {
+        const childTree = await getConceptSchemas(option.id);
+        activeSchemaTreeRef.current = childTree;
+        if (childTree.stages.length === 0) {
+          setStageAssignments([]);
+          return;
+        }
+        setStageAssignments(prev => {
+          if (prev.length === 0) {
+            return selectionRange
+              ? prePopulateStages(childTree.stages, selectionRange)
+              : [];
+          }
+          return reconcileWithNewConcept(prev, childTree.stages, selectionRange);
+        });
+      } catch {
+        // Schema fetch failure: keep existing assignments unchanged.
+      }
+    },
+    [selectionRange],
+  );
+
+  /** Called by StageBrackets on every split handle drag tick. */
+  const handleSplitHandleMove = useCallback((updated: StageAssignment[]) => {
+    setStageAssignments(updated);
+  }, []);
+
+  /** Called by StageList and StageBrackets for bidirectional linking. */
+  const handleStageActivate = useCallback((stageId: string | null) => {
+    setActiveStageId(stageId);
+  }, []);
+
+  /** Called by StageList absent toggle. */
+  const handleToggleAbsent = useCallback((stageId: string, absent: boolean) => {
+    setStageAssignments(prev => toggleStageAbsent(prev, stageId, absent));
+  }, []);
+
+  /** Called by SubPartForm when a stage's sub-part tag is created or updated. */
+  const handleSubPartTagUpdate = useCallback(
+    (stageId: string, tag: SubPartTag | null) => {
+      setSubPartTags(prev => ({ ...prev, [stageId]: tag }));
+    },
+    [],
+  );
+
+  // ── Delete fragment handler (G1.2) ──────────────────────────────────────
+  /**
+   * Full reset of the current in-progress annotation. Clears selection, all
+   * four concurrent flags, stage assignments, sub-part tags, prose annotation,
+   * and remounts FormPanel to a blank concept/property state.
+   *
+   * This is the single reset path after fragmentSet is true — there is no
+   * partial "clear selection only" (tagging-tool-design.md §6).
+   *
+   * Any previously saved draft persists on the backend (no DELETE request is
+   * made); it becomes an orphaned draft until a future delete endpoint removes it.
+   */
+  const handleDeleteFragment = useCallback(() => {
+    annotationSessionRef.current?.reset();
+    setSelectionRange(null);
+    setCommittedSelection(null);
+    setStageAssignments([]);
+    setActiveStageId(null);
+    setSubPartTags({});
+    setSubPartResetKey(k => k + 1);
+    setProseAnnotation('');
+    setFragmentDraftId(null);
+    activeSchemaTreeRef.current = null;
+    setFragmentResetKey(k => k + 1);
+  }, []);
+
+  // ── Submission handlers (Step 18) ────────────────────────────────────────
+
+  /**
+   * Resolve a bar number (MEI @n) to its 1-based document-order mc position.
+   * Falls back to the plain barN key when no ending context is needed, which
+   * covers the vast majority of sub-part bounds (within the main selection).
+   */
+  const resolveBarToMc = useCallback(
+    (barN: number): number | null => {
+      const idx = mcIndexRef.current;
+      if (!idx) return null;
+      // Try with no ending context first; sub-parts inherit the parent's
+      // ending context indirectly through their bar range.
+      const mc = idx.get(measureGhostKey(barN, null));
+      return mc ?? null;
+    },
+    [],
+  );
+
+  /**
+   * Build the mutable fragment fields from the current UI state.
+   *
+   * Returns a FragmentUpdatePayload (no movement_id) so it can be used
+   * directly for PATCH requests. The create handler spreads movement_id
+   * in when constructing the FragmentCreatePayload.
+   *
+   * Returns null when required coordinates or concept data are missing.
+   */
+  const buildPayload = useCallback(
+    (formData: FormSubmitData, meiText: string): FragmentUpdatePayload | null => {
+      if (!committedSelection) return null;
+
+      const key   = parseMeiKey(meiText);
+      const meter = parseMeiMeter(meiText);
+
+      // Serialize property values: omit nulls, booleans become "true"/"false".
+      const properties: Record<string, string | string[]> = {};
+      for (const [schemaId, val] of Object.entries(formData.propertyValues)) {
+        if (val === null || val === undefined) continue;
+        if (typeof val === 'boolean') {
+          properties[schemaId] = val ? 'true' : 'false';
+        } else {
+          properties[schemaId] = val;
+        }
+      }
+
+      // Build sub-parts from non-absent, non-orphaned, non-error stages that
+      // have committed bounds (Step 15, atomic parent+child write).
+      const subParts: SubPartPayload[] = [];
+      for (const a of stageAssignments) {
+        if (a.absent || a.orphaned || a.error || !a.bounds) continue;
+
+        const mcStart = resolveBarToMc(a.bounds.barStart);
+        const mcEnd   = resolveBarToMc(a.bounds.barEnd);
+        if (mcStart === null || mcEnd === null) continue;
+
+        const stageProps: Record<string, string | string[]> = {};
+        const tag = subPartTags[a.stageId];
+        if (tag) {
+          for (const [sid, val] of Object.entries(tag.propertyValues)) {
+            if (val === null || val === undefined) continue;
+            stageProps[sid] = typeof val === 'boolean' ? (val ? 'true' : 'false') : val;
+          }
+        }
+
+        subParts.push({
+          bar_start:      a.bounds.barStart,
+          bar_end:        a.bounds.barEnd,
+          mc_start:       mcStart,
+          mc_end:         mcEnd,
+          beat_start:     a.bounds.beatStart ?? null,
+          beat_end:       a.bounds.beatEnd   ?? null,
+          repeat_context: committedSelection.repeat_context,
+          summary: {
+            version:            1,
+            key,
+            meter,
+            music21_version:    null,
+            concepts:           [a.stageId],
+            properties:         stageProps,
+            concept_extensions: {},
+          },
+          concept_tags: [{ concept_id: a.stageId, is_primary: true }],
+        });
+      }
+
+      return {
+        bar_start:       committedSelection.bar_start,
+        bar_end:         committedSelection.bar_end,
+        mc_start:        committedSelection.mc_start,
+        mc_end:          committedSelection.mc_end,
+        beat_start:      committedSelection.beat_start,
+        beat_end:        committedSelection.beat_end,
+        repeat_context:  committedSelection.repeat_context,
+        summary: {
+          version:            1,
+          key,
+          meter,
+          music21_version:    null,
+          concepts:           [formData.conceptId],
+          properties,
+          concept_extensions: {},
+        },
+        prose_annotation: proseAnnotation || null,
+        concept_tags: [{ concept_id: formData.conceptId, is_primary: true }],
+        sub_parts:       subParts,
+      };
+    },
+    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc],
+  );
+
+  /** Save the current annotation as a draft (incompleteness allowed). */
+  const handleSaveDraft = useCallback(
+    async (formData: FormSubmitData) => {
+      const mei = meiTextRef.current;
+      if (!mei || !committedSelection || !movementId) return;
+
+      setIsSavingDraft(true);
+      setSubmitError(null);
+
+      try {
+        const fields = buildPayload(formData, mei);
+        if (!fields) throw new Error('Incomplete annotation — cannot save yet.');
+
+        if (fragmentDraftId) {
+          await updateFragment(fragmentDraftId, fields);
+        } else {
+          const response = await createFragment({ ...fields, movement_id: movementId });
+          setFragmentDraftId(response.id);
+        }
+      } catch (err) {
+        setSubmitError(err instanceof ApiError ? err.message : 'Failed to save draft.');
+      } finally {
+        setIsSavingDraft(false);
+      }
+    },
+    [committedSelection, movementId, fragmentDraftId, buildPayload],
+  );
+
+  /**
+   * Save the annotation and transition it to submitted status.
+   * Creates or updates the draft first, then calls POST .../submit.
+   * The server re-validates before accepting (never trust the client).
+   */
+  const handleSubmitFragment = useCallback(
+    async (formData: FormSubmitData) => {
+      const mei = meiTextRef.current;
+      if (!mei || !committedSelection || !movementId) return;
+
+      setIsSubmitting(true);
+      setSubmitError(null);
+
+      try {
+        const fields = buildPayload(formData, mei);
+        if (!fields) throw new Error('Incomplete annotation — cannot submit.');
+
+        let draftId = fragmentDraftId;
+        if (draftId) {
+          await updateFragment(draftId, fields);
+        } else {
+          const response = await createFragment({ ...fields, movement_id: movementId });
+          draftId = response.id;
+          setFragmentDraftId(response.id);
+        }
+
+        await submitFragment(draftId);
+        // Reset draft ID on success — the submitted fragment is immutable
+        // until a reviewer rejects it; a new annotation starts clean.
+        setFragmentDraftId(null);
+      } catch (err) {
+        setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [committedSelection, movementId, fragmentDraftId, buildPayload],
+  );
+
+  // Keep stagesComplete in sync with assignments and session.
+  useEffect(() => {
+    const session = annotationSessionRef.current;
+    if (!session) return;
+    const complete = computeStagesComplete(stageAssignments);
+    session.setStagesComplete(complete);
+  }, [stageAssignments]);
+
+  // When the committed selection changes, reconcile stage assignments with
+  // the new main bracket bounds.
+  useEffect(() => {
+    if (!selectionRange) return;
+    setStageAssignments(prev => {
+      if (prev.length === 0 && activeSchemaTreeRef.current?.stages.length) {
+        // First selection after concept was already chosen: pre-populate now.
+        return prePopulateStages(activeSchemaTreeRef.current.stages, selectionRange);
+      }
+      if (prev.length === 0) return prev;
+      return reconcileWithSelection(prev, selectionRange);
+    });
+  }, [selectionRange]);
+
+  // ── Ghost layer + annotation session lifecycle (Step 11) ─────────────────
+  //
+  // Rebuilt on every svgPages change so ghost positions stay aligned with the
+  // rendered SVG geometry. On each rebuild the previous session and layer are
+  // destroyed first, then new ones are built over the fresh SVG.
+  //
+  // G1.3 — re-projection: when the rebuild is a re-render of the same score
+  // (zoom / resize / font change), any committed selection and its associated
+  // state survive. The new session is seeded with the logical coordinates from
+  // the old session so it re-highlights the ghosts on the new geometry and
+  // MainBracket / StageBrackets re-derive their pixel bounds automatically.
+  // A full reset happens only when the score changes (movementId or tagMode).
+  //
+  // The effect depends on `svgPages` (array reference changes on each update)
+  // rather than `svgPages.length` because the final page addition produces a
+  // new array instance that triggers the correct rebuild. Intermediate pages
+  // during progressive load produce wasted rebuilds (N−1 extra for N pages),
+  // but are correct and acceptable for Phase 1 Mozart scores (2–4 pages).
+  useEffect(() => {
+    // Require a fully rendered, ready score and all the data it needs.
+    if (
+      status !== 'ready' ||
+      svgPages.length === 0 ||
+      !scorePanelRef.current ||
+      !meiTextRef.current ||
+      !tkRef.current
+    ) {
+      return;
+    }
+
+    const mei       = meiTextRef.current;
+    const container = scorePanelRef.current;
+
+    // Determine whether this rebuild is a re-render of the same score
+    // (same movementId AND same tagMode → SVG-only change) or a context
+    // change (new score, or tagging mode entered/exited).
+    const scoreKey      = `${movementId ?? ''}:${tagMode}`;
+    const isSameContext = prevScoreKeyRef.current === scoreKey;
+    prevScoreKeyRef.current = scoreKey;
+
+    // Read committed selection state from the React state closure.
+    // We deliberately do NOT snapshot from annotationSessionRef.current here
+    // because React runs the previous effect's cleanup (which nulls the ref)
+    // BEFORE this effect body executes. For re-renders that add SVG pages
+    // progressively the cleanup destroys the session from the previous page
+    // before this run can read it. The closure values (selectionRange,
+    // annotationFlags) are captured at the render that triggered this effect
+    // and are unaffected by cleanup — they remain the committed selection until
+    // setSelectionRange(null) is explicitly called.
+    const hadFragment     = annotationFlags.fragmentSet;
+    const prevSelection   = selectionRange;
+    const prevFlags       = annotationFlags;
+    const shouldReproject = isSameContext && hadFragment;
+
+    // Teardown: destroy the previous session and layer.
+    annotationSessionRef.current?.destroy();
+    ghostLayerRef.current?.destroy();
+    annotationSessionRef.current = null;
+    ghostLayerRef.current        = null;
+
+    if (!shouldReproject) {
+      // Full reset — new score, tagMode change, or no committed fragment.
+      // State resets are batched with the subsequent setGhostLayer call so
+      // MainBracket sees a single coherent update.
+      setSelectionRange(null);
+      setCommittedSelection(null);
+      setAnnotationFlags({
+        fragmentSet: false, conceptSet: false,
+        stagesComplete: false, propertiesComplete: false,
+      });
+      setStageAssignments([]);
+      setActiveStageId(null);
+      setSubPartTags({});
+      setSubPartResetKey(k => k + 1);
+      setFragmentDraftId(null);
+    }
+    // When shouldReproject is true the following state all survives the rebuild:
+    //   selectionRange / committedSelection — logical bar/beat coordinates
+    //   annotationFlags — concept, stage, property completion state
+    //   stageAssignments — StageBounds are logical barN coords, not pixels
+    //   subPartTags — keyed by stageId (stable strings)
+    //   proseAnnotation — free text, independent of geometry
+    //   fragmentDraftId — API draft UUID, still valid for the same fragment
+    // MainBracket and StageBrackets re-derive pixel positions from the fresh
+    // ghostLayer on the next render automatically.
+
+    // Build the new ghost layer over the currently rendered SVG.
+    const layer = buildGhosts(container, mei);
+    ghostLayerRef.current = layer;
+    setGhostLayer(layer);
+
+    // Precompute the barN → mc index for the current MEI (used by
+    // commitSelection to derive mc_start / mc_end at commit time).
+    const mcIdx = buildMcIndex(mei);
+    mcIndexRef.current = mcIdx;
+
+    // Create the annotation session only in tag mode. In view mode the ghost
+    // layer is built but all layers keep pointer-events: none (their initial
+    // state), so the score remains fully interactive for reading and MIDI
+    // playback with no selection affordances.
+    if (tagMode === 'tag') {
+      const barriers    = buildRepeatBarriers(mei);
+      const sessionOpts: AnnotationSessionOptions = {
+        closeRepeatMeasures: barriers,
+        resolution: resolutionRef.current,
+      };
+
+      // G1.3: seed the new session with the logical selection so ghosts are
+      // re-highlighted on the fresh geometry without firing React callbacks.
+      if (shouldReproject && prevSelection && prevFlags) {
+        sessionOpts.initialSelection = prevSelection;
+        sessionOpts.initialFlags = {
+          conceptSet:         prevFlags.conceptSet,
+          stagesComplete:     prevFlags.stagesComplete,
+          propertiesComplete: prevFlags.propertiesComplete,
+        };
+      }
+
+      const session = new AnnotationSession(layer, sessionOpts);
+      annotationSessionRef.current = session;
+
+      // Subscribe: resolve mc coordinates at commit time and surface to React.
+      session.onSelectionChange((sel) => {
+        setSelectionRange(sel);
+        setCommittedSelection(sel ? commitSelection(sel, mcIdx) : null);
+      });
+
+      session.onFlagsChange((flags) => {
+        setAnnotationFlags({ ...flags });
+      });
+
+      // Restore the active resolution so the correct ghost layer accepts
+      // pointer events (resolutionRef mirrors the resolution state without
+      // needing resolution itself in this effect's dependency array).
+      session.setResolution(resolutionRef.current);
+    }
+
+    return () => {
+      // DOM cleanup only — setState calls on unmounted components are
+      // ignored by React 18 without warning, but avoiding them keeps
+      // intent clear. The refs are nulled to prevent stale-closure access.
+      annotationSessionRef.current?.destroy();
+      ghostLayerRef.current?.destroy();
+      annotationSessionRef.current = null;
+      ghostLayerRef.current        = null;
+    };
+  // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
+  // tagMode entering 'tag' creates the session; leaving destroys it.
+  // status gates the effect from running during loading.
+  // movementId is intentionally read from the closure (not the dep array):
+  // route changes always co-occur with status/tagMode/svgPages changes, so
+  // adding movementId would fire the effect before the new SVG is ready.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, svgPages, tagMode]);
+
+  // Forward resolution changes to the active annotation session (Step 10).
+  // The session handles the no-op case when the mode is unchanged, and cancels
+  // any in-progress drag so a mid-drag toggle does not leave highlight state.
+  useEffect(() => {
+    annotationSessionRef.current?.setResolution(resolution);
+  }, [resolution]);
+
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!movementId) return;
+    setTagMode('view');
     let cancelled = false;
 
     const load = async () => {
       setStatus('loading');
       setLoadingLabel('Loading score…');
       setSvgPages([]);
+      setScoreTitle(null);
       setErrorMessage(null);
       setMidiBase64(null);
       // Reset note info map so stale data from a previous score is not used
@@ -521,8 +1126,10 @@ export default function ScoreViewer() {
 
       try {
         // 1. Resolve MEI object key → signed URL → MEI text.
-        const { url } = await fetchMeiUrl(movementId);
+        // Title metadata arrives in the same response, no extra round-trip.
+        const { url, ...titleData } = await fetchMeiUrl(movementId);
         if (cancelled) return;
+        setScoreTitle(titleData);
 
         const meiResponse = await fetch(url);
         if (!meiResponse.ok) {
@@ -531,6 +1138,7 @@ export default function ScoreViewer() {
         const meiText = await meiResponse.text();
         if (cancelled) return;
         meiTextRef.current = meiText;
+        setGlobalMeter(parseMeiMeterParts(meiText));
         // Build note info map synchronously from MEI (DOMParser, no toolkit needed).
         // Built once per score load; does not need rebuilding on options re-renders.
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
@@ -714,7 +1322,76 @@ export default function ScoreViewer() {
               ))}
             </select>
           </div>
+          {/* Resolution toggle — visible only in tag mode (G1.1) */}
+          {tagMode === 'tag' && (
+            <div
+              className={styles.resolutionControl}
+              role="group"
+              aria-label="Selection resolution"
+            >
+              <Type
+                variant="label-md"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                Select
+              </Type>
+              {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
+                const ARIA_LABELS: Record<ResolutionMode, string> = {
+                  measure: 'Measure resolution',
+                  beat: 'Beat resolution',
+                  subbeat: 'Sub-beat resolution',
+                };
+                return (
+                  <button
+                    key={resMode}
+                    type="button"
+                    className={[
+                      styles.resolutionButton,
+                      resolution === resMode ? styles.resolutionButtonActive : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() => {
+                      resolutionRef.current = resMode;
+                      setResolution(resMode);
+                    }}
+                    aria-pressed={resolution === resMode}
+                    aria-label={ARIA_LABELS[resMode]}
+                    title={ARIA_LABELS[resMode]}
+                  >
+                    <ResolutionIcon
+                      mode={resMode}
+                      beatCount={globalMeter[0]}
+                      beatUnit={globalMeter[1]}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
+
+        {/* TAG / Done button — enters and exits annotation mode (G1.1).
+            Hidden while the score is loading so it can't be clicked before
+            the ghost layer is ready. */}
+        {status === 'ready' && (
+          <div className={styles.toolbarRight}>
+            <button
+              type="button"
+              className={[
+                styles.tagButton,
+                tagMode === 'tag' ? styles.tagButtonActive : '',
+              ].filter(Boolean).join(' ')}
+              onClick={() => setTagMode(tagMode === 'view' ? 'tag' : 'view')}
+              aria-pressed={tagMode === 'tag'}
+            >
+              <Type variant="label-sm" as="span">
+                {tagMode === 'tag' ? 'Done' : 'Tag'}
+              </Type>
+            </button>
+          </div>
+        )}
 
       </Surface>
 
@@ -731,9 +1408,9 @@ export default function ScoreViewer() {
         </div>
       )}
 
-      {/* ── Score panel ─────────────────────────────────────────────────── */}
+      {/* ── Score panel + Form panel ─────────────────────────────────────── */}
       <div className={styles.scorePanelWrapper}>
-        {/* Status overlays: sit above the score panel during loading/error.
+        {/* Status overlays: sit above both panels during loading/error.
             The score panel itself stays in the DOM so scorePanelRef can
             measure the container width even before the first render. */}
         {status === 'loading' && (
@@ -757,6 +1434,38 @@ export default function ScoreViewer() {
               Its offsetWidth (≤ 1200px via max-width) is what we pass to
               Verovio as pageWidth, so the SVG fills the container exactly. */}
           <div ref={scorePanelRef} className={styles.scoreContent}>
+            {/* G7: HTML title block sourced from the DB via the mei-url response.
+                Replaces Verovio's suppressed <pgHead> output. Rendered here
+                so the score SVG starts at the top of the container and the
+                main bracket's systemTop is anchored to music, not the title.
+                Three lines (all centered): composer → work title → movement. */}
+            {scoreTitle && (
+              <div className={styles.scoreTitle}>
+                <Type
+                  variant="label-md"
+                  as="p"
+                  className={styles.scoreTitleComposer}
+                >
+                  {scoreTitle.composer_name}
+                </Type>
+                <Type
+                  variant="headline"
+                  as="h2"
+                  className={styles.scoreTitleWork}
+                >
+                  {scoreTitle.work_title}
+                </Type>
+                {scoreTitle.movement_title && (
+                  <Type
+                    variant="title"
+                    as="p"
+                    className={styles.scoreTitleMovement}
+                  >
+                    {`${scoreTitle.movement_number}. ${scoreTitle.movement_title}`}
+                  </Type>
+                )}
+              </div>
+            )}
             {svgPages.map((svg, i) => (
               <div
                 key={i}
@@ -767,14 +1476,66 @@ export default function ScoreViewer() {
                 dangerouslySetInnerHTML={{ __html: svg }}
               />
             ))}
-            {/* Step 13: fragment overlay slot — empty until Components 7/8.
+            {/* Fragment overlay: houses all annotation visuals (brackets, labels).
                 Overlays are always HTML elements above the SVG, never injected
-                into Verovio's SVG output (see CLAUDE.md §"Verovio SVG overlay rule"). */}
-            <FragmentOverlay />
+                into Verovio's SVG output (CLAUDE.md §"Verovio SVG overlay rule").
+                Step 11: MainBracket (Layer 3) renders once fragmentSet is true.
+                Step 14: StageBrackets (Layer 4) renders once conceptSet is true
+                         and the concept has CONTAINS edges. */}
+            <FragmentOverlay>
+              <MainBracket
+                selection={selectionRange}
+                layer={ghostLayer}
+                fragmentSet={annotationFlags.fragmentSet}
+                resolution={resolution}
+              />
+              <StageBrackets
+                assignments={stageAssignments}
+                selection={selectionRange}
+                layer={ghostLayer}
+                visible={annotationFlags.conceptSet && stageAssignments.length > 0}
+                resolution={resolution}
+                activeStageId={activeStageId}
+                onStageActivate={handleStageActivate}
+                onSplitHandleMove={handleSplitHandleMove}
+              />
+            </FragmentOverlay>
           </div>
         </div>
 
-        {/* Re-render overlay: sits above SVG pages while options change */}
+        {/* Form panel — mounted only in tag mode (G1.1).
+            Mounting is gated so the score is fully usable for reading and
+            MIDI playback without the sidebar. The concurrent-flag model
+            still applies within the mounted panel. */}
+        {tagMode === 'tag' && (
+          <FormPanel
+            key={fragmentResetKey}
+            session={annotationSessionRef.current}
+            onDeleteFragment={handleDeleteFragment}
+            flags={annotationFlags}
+            onConceptChange={handleConceptChange}
+            onRefinementChange={handleRefinementChange}
+            assignments={stageAssignments}
+            activeStageId={activeStageId}
+            onStageActivate={handleStageActivate}
+            onToggleAbsent={handleToggleAbsent}
+            subPartTags={subPartTags}
+            onSubPartTagUpdate={handleSubPartTagUpdate}
+            subPartResetKey={subPartResetKey}
+            movementId={movementId}
+            selectionRange={selectionRange}
+            proseAnnotation={proseAnnotation}
+            onProseChange={setProseAnnotation}
+            onSaveDraft={handleSaveDraft}
+            onSubmitFragment={handleSubmitFragment}
+            isSavingDraft={isSavingDraft}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            draftId={fragmentDraftId}
+          />
+        )}
+
+        {/* Re-render overlay: sits above both panels while options change */}
         {isRerendering && (
           <div className={styles.rerenderOverlay} role="status" aria-live="polite">
             <Type variant="label-md" as="span">Re-rendering…</Type>

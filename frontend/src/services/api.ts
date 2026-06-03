@@ -98,6 +98,11 @@ export async function apiFetch<T>(
     throw new ApiError(code, message, response.status, detail);
   }
 
+  // 204 No Content — skip JSON parsing (e.g. delete endpoints)
+  if (response.status === 204) {
+    return undefined as unknown as T;
+  }
+
   const json = await response.json();
   return schema ? schema.parse(json) : (json as T);
 }

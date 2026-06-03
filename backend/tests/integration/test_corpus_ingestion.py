@@ -219,7 +219,7 @@ class TestCorpusIngestion:
             response = await integration_test_client.post(
                 f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
-                headers={"Authorization": "Bearer dev-token"},
+                headers={"Authorization": "Bearer admin-token"},
             )
 
         # ── Assert 201 report ─────────────────────────────────────────
@@ -466,7 +466,7 @@ class TestCorpusIngestion:
                 resp = await integration_test_client.post(
                     f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                     files={"archive": ("corpus.zip", archive, "application/zip")},
-                    headers={"Authorization": "Bearer dev-token"},
+                    headers={"Authorization": "Bearer admin-token"},
                 )
             assert resp.status_code == 201, resp.text
             call = dispatch_calls[0]
@@ -611,7 +611,7 @@ class TestCorpusIngestion:
             response = await integration_test_client.post(
                 f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
-                headers={"Authorization": "Bearer dev-token"},
+                headers={"Authorization": "Bearer admin-token"},
             )
 
         assert response.status_code == 201, response.text
@@ -682,7 +682,7 @@ class TestIngestionErrorEnvelopes:
         """Uploading a non-ZIP body returns 422 with INVALID_ZIP code."""
         resp = await integration_test_client.post(
             f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
-            headers={"Authorization": "Bearer dev-token"},
+            headers={"Authorization": "Bearer admin-token"},
             files={"archive": ("bad.zip", b"not a zip file", "application/zip")},
         )
         assert resp.status_code == 422
@@ -706,7 +706,7 @@ class TestIngestionErrorEnvelopes:
 
         resp = await integration_test_client.post(
             f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
-            headers={"Authorization": "Bearer dev-token"},
+            headers={"Authorization": "Bearer admin-token"},
             files={"archive": ("no_metadata.zip", archive_bytes, "application/zip")},
         )
         assert resp.status_code == 422
@@ -729,7 +729,7 @@ class TestIngestionErrorEnvelopes:
 
         resp = await integration_test_client.post(
             f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
-            headers={"Authorization": "Bearer dev-token"},
+            headers={"Authorization": "Bearer admin-token"},
             files={"archive": ("mismatch.zip", archive_bytes, "application/zip")},
         )
         assert resp.status_code == 422

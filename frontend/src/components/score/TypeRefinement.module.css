@@ -1,0 +1,63 @@
+/* TypeRefinement — tagging-tool-design.md §7.2
+   Design system: DESIGN.md — 0px border-radius, tonal layering. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3);
+  background-color: var(--color-surface-container-low);
+}
+
+.label {
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+/* ── Radio group ─────────────────────────────────────────────────────────── */
+
+.radioGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.radioLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-surface-container);
+  cursor: pointer;
+}
+
+.radioLabel:hover {
+  background-color: var(--color-surface-container-high);
+}
+
+.radioLabelSelected {
+  background-color: var(--color-primary);
+}
+
+.radioLabelSelected:hover {
+  background-color: var(--color-primary);
+}
+
+/* Hide the native radio dot — the background colour provides the selection cue. */
+.radioInput {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.optionName {
+  color: var(--color-on-surface);
+}
+
+.radioLabelSelected .optionName {
+  color: var(--color-on-primary);
+}

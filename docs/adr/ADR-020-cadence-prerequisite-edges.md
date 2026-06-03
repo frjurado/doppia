@@ -88,6 +88,10 @@ Applying the realised-anchor principle exposed a latent inconsistency in `cadenc
 - First consumer of `PREREQUISITE_FOR`. Establishes the realised-anchor precedent for later domains.
 - Six edges to seed — trivial YAML once the cadence concepts exist.
 
+### Picker sort order (G5.3 addendum)
+
+`PREREQUISITE_FOR` edges are used as a secondary sort key in the concept-search query (`backend/graph/queries/concepts.py` `_SEARCH_CONCEPTS`). For each search result, the query counts the distinct ancestor concepts that have a `PREREQUISITE_FOR*1..` path leading to it (`prereq_depth`). The full sort key is `(complexity_rank ASC, prereq_depth ASC, score DESC, name ASC)`. Within a complexity band, a concept with fewer prerequisites (smaller `prereq_depth`) sorts first — i.e. concepts that *are* prerequisites for others appear above their dependents. This means PAC (prereq_depth=0) appears before IAC (prereq_depth=1) in any "cadence" or "authentic" search, matching natural pedagogical reading order. See `docs/architecture/tagging-tool-design.md` §7.1.
+
 ---
 
 ## Alternatives Considered

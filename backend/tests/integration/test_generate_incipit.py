@@ -292,7 +292,7 @@ class TestGenerateIncipit:
             resp = await integration_test_client.post(
                 "/api/v1/composers/test-mozart/corpora/piano-sonatas/upload",
                 files={"archive": ("corpus.zip", archive, "application/zip")},
-                headers={"Authorization": "Bearer dev-token"},
+                headers={"Authorization": "Bearer admin-token"},
             )
         assert resp.status_code == 201, resp.text
 

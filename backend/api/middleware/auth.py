@@ -34,8 +34,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-_DEV_TOKEN = "dev-token"
-_DEV_USER = AppUser(id="dev-user", role="admin", email="dev@local")
+_DEV_TOKENS: dict[str, AppUser] = {
+    "dev-token": AppUser(
+        id="00000000-0000-0000-0000-000000000001", role="editor", email="dev@local"
+    ),
+    "admin-token": AppUser(
+        id="00000000-0000-0000-0000-000000000002", role="admin", email="admin@local"
+    ),
+}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -96,9 +102,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return _make_401(
                     "AUTH_MODE=local is not permitted outside ENVIRONMENT=local."
                 )
-            if token != _DEV_TOKEN:
+            user = _DEV_TOKENS.get(token)
+            if user is None:
                 return _make_401("Invalid dev token.")
-            request.state.user = _DEV_USER
+            request.state.user = user
             return await call_next(request)
 
         # Production / staging: full Supabase JWT validation.

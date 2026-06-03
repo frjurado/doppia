@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from neo4j import AsyncDriver
 from services.object_storage import StorageClient, make_storage_client
 
 _ROLE_HIERARCHY: dict[str, int] = {"editor": 1, "admin": 2}
@@ -102,6 +103,22 @@ def require_role(role: str) -> Annotated[AppUser, Depends]:
         return user
 
     return Depends(_check)
+
+
+async def get_neo4j(request: Request) -> AsyncDriver:
+    """FastAPI dependency that returns the application Neo4j async driver.
+
+    The driver is stored on ``app.state.neo4j_driver`` by the lifespan hook in
+    ``main.py``.  Override this dependency in tests to inject a mock driver
+    without touching application state.
+
+    Args:
+        request: The incoming FastAPI request.
+
+    Returns:
+        The application-scoped :class:`neo4j.AsyncDriver` instance.
+    """
+    return request.app.state.neo4j_driver
 
 
 def get_storage() -> StorageClient:

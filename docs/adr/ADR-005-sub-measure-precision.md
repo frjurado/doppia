@@ -196,3 +196,21 @@ The tied-note fix, compound-meter correction, and meter-change fix must all be i
 **Store sub-beat positions as integer tuples `(beat, subbeat, subdivisions)` rather than floats.** Rejected because the float representation is simpler to query, sort, and compare on the server, and because the resolution-independence of the float encoding is a useful property. The tuple representation would require the server to normalise before comparison.
 
 **Always require sub-beat selection; remove the measure-only and beat-only modes.** Rejected because most annotation concepts (formal sections, phrase boundaries) do not have meaningful sub-measure extents, and forcing annotators to specify sub-beat precision for every tag would add friction with no analytical benefit.
+
+---
+
+## Implementation addendum — G2 remediation (2026-06-01)
+
+The following edge cases listed as "Not handled" at initial acceptance have since been implemented. The table is not rewritten; this addendum records the resolutions.
+
+| Case | Prior status | Resolution |
+|---|---|---|
+| **Compound meter beat count** | Not handled | Implemented in `ghosts.ts`: `isCompoundMeter()`, `beatSlotCount()`, and compound-correction in `computeBeatBoundaries()`. 6/8 allocates 2 beat slots; 9/8 allocates 3; etc. |
+| **Mid-piece meter changes** | Not handled | Implemented in `ghosts.ts` as `getMeterForMeasure()`, which reads `<meterSig count unit>` on each measure element before falling back to the global `scoreDef`. |
+| **Tied notes across barlines** | Not handled | Handled by the `beatIdx < 0 \|\| beatIdx >= numBeats` range-check in `computeBeatBoundaries()`. Tied continuations produce a negative `measureLocalOnset` → negative `beatIdx`, which is silently skipped. |
+| **Repeat sections — ghost index collision** | Not handled | Implemented in `ghosts.ts` as `measureGhostKey(barN, endingN)`, which produces `m${n}-e${endingN}` for ending measures. `getEndingN()` walks the MEI DOM during `buildGhosts()` to detect the containing `<ending @n>`. |
+| **Repeat sections — ending-boundary crossing** | (new; not in original table) | Implemented in `annotator.ts` as `buildEndingBarriers()`. A crossing from one non-null ending into a different non-null ending (e.g. ending 1 → ending 2) is a hard gate. The `AnnotationSession` constructor calls `buildEndingBarriers()` automatically and merges the result with any caller-supplied close-repeat barriers. |
+
+| **Repeat sections — partial barlines (G2.3)** | (new; not in original table) | Three concurrent fixes in `ghosts.ts` and `annotator.ts`: (1) **Measure ghost key collision**: `buildGhosts` now tracks seen base keys; when two measures share `@n` due to section-reset numbering the second gets a `#N` suffix (`"m1#1"`, etc.). `buildRepeatBarriers` uses the same deduplication logic so barrier keys remain consistent. (2) **Beat/sub-beat ghost key collision**: `encodeBeat`/`encodeSubBeat` now use the measure's *render-order index* (0-based document position among SVG-matched measures) as the measure component instead of `@n`, guaranteeing unique integer keys. (3) **Barrier not enforced at beat/sub-beat resolution**: `_updateBeatDrag` and `_updateSubBeatDrag` now call `measureKeyRange` on the anchor and current beat entries' `measureKey` fields, then filter the `numericKeyRange` result to measures in the allowed set. Both `BeatGhostEntry` and `SubBeatGhostEntry` carry a `measureKey` field for this purpose. |
+
+**Incomplete measures at repeat boundaries** remains "Likely handled"; corpus verification is deferred to Component 9.

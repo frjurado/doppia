@@ -24,6 +24,7 @@ See ``models/errors.py`` for the full ``ErrorCode`` vocabulary and
 
 from __future__ import annotations
 
+import json
 import logging
 
 from errors import DoppiaError, InfrastructureError, NotFoundError
@@ -52,13 +53,16 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         CorpusNotFoundError,
         FragmentAlreadyApprovedError,
         FragmentNotFoundError,
+        FragmentValidationError,
         GraphIntegrityError,
+        HarmonyEventNotFoundError,
         HarmonyNotReviewedError,
         IngestionError,
         MovementNotFoundError,
         Neo4jUnavailableError,
         PostgresUnavailableError,
         RedisUnavailableError,
+        SelfReviewForbiddenError,
         UserNotFoundError,
         WorkNotFoundError,
     )
@@ -77,11 +81,14 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         ConceptNotFoundError: 404,
         CollectionNotFoundError: 404,
         UserNotFoundError: 404,
+        HarmonyEventNotFoundError: 404,
         # Conflict — 409
         FragmentAlreadyApprovedError: 409,
         # Unprocessable — 422
         HarmonyNotReviewedError: 422,
         IngestionError: 422,
+        FragmentValidationError: 422,
+        SelfReviewForbiddenError: 422,
         # Auth — 403
         AuthorizationError: 403,
         # Integrity — 500
@@ -216,10 +223,13 @@ async def validation_exception_handler(
     Returns:
         A 422 ``JSONResponse`` with ``VALIDATION_ERROR`` code and field-level details.
     """
+    # Pydantic v2 puts the raw exception object in ctx["error"]; strip it to
+    # strings so JSONResponse can serialize the error list.
+    serializable_errors = json.loads(json.dumps(exc.errors(), default=str))
     body = ErrorResponse.make(
         code=ErrorCode.VALIDATION_ERROR,
         message="Request validation failed.",
-        detail={"errors": exc.errors()},
+        detail={"errors": serializable_errors},
     )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

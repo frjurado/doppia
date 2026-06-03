@@ -31,10 +31,13 @@ property_schemas:
     values:
       - id: LimitedScope
         name: "Limited Scope"
+        order: 1
       - id: WayStation
         name: "Way Station"
+        order: 2
       - id: Independent
         name: "Independent"
+        order: 3
 
   - id: PhraseClosure
     name: "Phrase Closure"
@@ -49,22 +52,28 @@ property_schemas:
     values:
       - id: ClosesSentence
         name: "Closes a Sentence"
+        order: 1
         references: Sentence
       - id: ClosesPeriod
         name: "Closes a Period"
+        order: 2
         references: Period
       - id: ClosesHybridTheme
         name: "Closes a Hybrid Theme"
+        order: 3
         references: HybridTheme
+      - id: ClosesContinuation
+        name: "Closes a Continuation"
+        order: 4
+        references: Continuation
       - id: ClosesAntecedent
         name: "Closes an Antecedent"
+        order: 5
         references: Antecedent
       - id: ClosesConsequent
         name: "Closes a Consequent"
+        order: 6
         references: Consequent
-      - id: ClosesContinuation
-        name: "Closes a Continuation"
-        references: Continuation
 
   - id: ThemeClosure
     name: "Theme Closure"
@@ -79,15 +88,19 @@ property_schemas:
     values:
       - id: ClosesMainTheme
         name: "Closes a Main Theme"
+        order: 1
         references: MainTheme
       - id: ClosesTransition
         name: "Closes a Transition"
+        order: 2
         references: Transition
       - id: ClosesSubordinateTheme
         name: "Closes a Subordinate Theme"
+        order: 3
         references: SubordinateTheme
       - id: ClosesCoda
         name: "Closes a Coda"
+        order: 4
         references: Coda
 
   - id: ECP
@@ -138,8 +151,10 @@ property_schemas:
     values:
       - id: SD3
         name: "Scale Degree 3"
+        order: 1
       - id: SD5
         name: "Scale Degree 5"
+        order: 2
 
   - id: HalfCadenceShape
     name: "Half Cadence Shape"
@@ -151,10 +166,13 @@ property_schemas:
     values:
       - id: Basic
         name: "Basic"
+        order: 1
       - id: Converging
         name: "Converging"
+        order: 2
       - id: Expanding
         name: "Expanding"
+        order: 3
 
   - id: Premature
     name: "Premature"
@@ -176,9 +194,11 @@ property_schemas:
     values:
       - id: Stage1Tonic
         name: "Tonic"
+        order: 1
         references: Tonic
       - id: Stage1AppliedDominant
         name: "Applied Dominant of Pre-Dominant"
+        order: 2
         references: AppliedDominant
 
   - id: Stage2Components
@@ -191,9 +211,11 @@ property_schemas:
     values:
       - id: Stage2SD4
         name: "Predominant on Scale Degree 4 (IV, ii, ii6, …)"
+        order: 1
         references: SD4Predominant
       - id: Stage2SDSharp4
         name: "Predominant on Raised Scale Degree 4 (applied V, +6, …)"
+        order: 2
         references: SDSharp4Predominant
 
   - id: Cadential64
@@ -264,12 +286,21 @@ concepts:
         containment_mode: contiguous
         default_weight: 1.0
     property_schemas:
-      - CadenceFunction
-      - PhraseClosure
-      - ThemeClosure
-      - ECP
-      - Covered
-      - Unison
+      - schema: CadenceFunction
+        order: 1
+        group: "closure"
+      - schema: PhraseClosure
+        order: 2
+        group: "closure"
+      - schema: ThemeClosure
+        order: 3
+        group: "closure"
+      - schema: ECP
+        order: 11
+      - schema: Covered
+        order: 12
+      - schema: Unison
+        order: 13
 
   # ── Authentic-cadence branch ───────────────────────────────────────────────
 
@@ -317,7 +348,8 @@ concepts:
       - type: PREREQUISITE_FOR
         target: AbandonedCadence
     property_schemas:
-      - ReinterpretedAsHC
+      - schema: ReinterpretedAsHC
+        order: 4
 
   - id: PerfectAuthenticCadence
     name: "Perfect Authentic Cadence"
@@ -354,7 +386,8 @@ concepts:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadenceRealised
     property_schemas:
-      - IACSopranoDegree
+      - schema: IACSopranoDegree
+        order: 4
 
   - id: DeceptiveCadence
     name: "Deceptive Cadence"
@@ -445,7 +478,8 @@ concepts:
       - type: PREREQUISITE_FOR
         target: DominantArrival
     property_schemas:
-      - HalfCadenceShape
+      - schema: HalfCadenceShape
+        order: 4
 
   - id: ReopeningHalfCadence
     name: "Reopening Half Cadence"
@@ -491,7 +525,8 @@ concepts:
       - type: IS_SUBTYPE_OF
         target: HalfCadence
     property_schemas:
-      - Premature
+      - schema: Premature
+        order: 4
 
   # ── Stage leaf concepts ────────────────────────────────────────────────────
   # Stage concepts are CONTAINS children of Cadence/AuthenticCadence. They are
@@ -509,7 +544,8 @@ concepts:
       motion departs. May consist of a tonic harmony alone, an applied dominant
       of the pre-dominant, or both in succession.
     property_schemas:
-      - Stage1Components
+      - schema: Stage1Components
+        order: 1
 
   - id: CadentialPreDominant
     name: "Pre-Dominant"
@@ -521,7 +557,8 @@ concepts:
       family: IV, ii, ii6, …), raised scale degree 4 (applied dominants of V,
       augmented sixths), or both in succession.
     property_schemas:
-      - Stage2Components
+      - schema: Stage2Components
+        order: 1
 
   - id: CadentialDominant
     name: "Dominant"
@@ -533,7 +570,8 @@ concepts:
       elaboration. The dominant of a half cadence is the arrival point and must
       be a triad; the dominant of an authentic cadence prepares Stage 4.
     property_schemas:
-      - Cadential64
+      - schema: Cadential64
+        order: 1
 
   - id: CadentialFinalTonic
     name: "Final Tonic"

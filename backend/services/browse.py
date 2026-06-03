@@ -162,23 +162,40 @@ async def get_movement_mei_url(
 ) -> MeiUrlResponse | None:
     """Resolve the MEI object key for a movement to a signed URL.
 
+    Also joins through Work → Corpus → Composer to include the work title,
+    composer name, movement number, and movement title in the response so
+    the score viewer can render a title block without a second round-trip.
+
     Args:
         movement_id: UUID primary key of the movement.
         db: Async database session.
         storage: Object storage client for generating signed URLs.
 
     Returns:
-        :class:`~models.browse.MeiUrlResponse` with the signed URL, or
-        ``None`` if the movement is not found.
+        :class:`~models.browse.MeiUrlResponse` with the signed URL and
+        title metadata, or ``None`` if the movement is not found.
     """
-    row = await db.execute(select(Movement).where(Movement.id == movement_id))
-    movement = row.scalar_one_or_none()
-    if movement is None:
+    row = await db.execute(
+        select(Movement, Work, Composer)
+        .join(Work, Movement.work_id == Work.id)
+        .join(Corpus, Work.corpus_id == Corpus.id)
+        .join(Composer, Corpus.composer_id == Composer.id)
+        .where(Movement.id == movement_id)
+    )
+    result = row.one_or_none()
+    if result is None:
         return None
+    movement, work, composer = result
     url = await storage.signed_url(
         movement.mei_object_key, expires_in=CLIENT_FACING_URL_TTL
     )
-    return MeiUrlResponse(url=url)
+    return MeiUrlResponse(
+        url=url,
+        work_title=work.title,
+        composer_name=composer.name,
+        movement_number=movement.movement_number,
+        movement_title=movement.title,
+    )
 
 
 async def list_movements(

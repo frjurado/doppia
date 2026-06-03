@@ -111,6 +111,12 @@ class FragmentNotFoundError(NotFoundError):
     code = ErrorCode.FRAGMENT_NOT_FOUND
 
 
+class HarmonyEventNotFoundError(NotFoundError):
+    """The specified harmony event does not exist in the movement's analysis."""
+
+    code = ErrorCode.HARMONY_EVENT_NOT_FOUND
+
+
 class ConceptNotFoundError(NotFoundError):
     """The requested concept does not exist in the knowledge graph."""
 
@@ -170,6 +176,38 @@ class GraphIntegrityError(DoppiaError):
     """
 
     code = ErrorCode.GRAPH_INTEGRITY_ERROR
+
+
+# ── Review errors ─────────────────────────────────────────────────────────────
+
+
+class SelfReviewForbiddenError(DoppiaError):
+    """A fragment creator attempted to review their own work.
+
+    Distinct from ``AuthorizationError`` (role check) — the caller has the
+    correct role but is prohibited from reviewing this specific fragment
+    because they created it.  Maps to HTTP 422.
+    """
+
+    code = ErrorCode.SELF_REVIEW_FORBIDDEN
+
+
+# ── Fragment write validation errors ─────────────────────────────────────────
+
+
+class FragmentValidationError(DoppiaError):
+    """A fragment write payload failed semantic validation.
+
+    Raised when the write payload is structurally valid (passes Pydantic) but
+    fails cross-database or schema-level checks: a concept_id that does not
+    exist in Neo4j, a required property missing from summary.properties, an
+    out-of-range sub-part, or any other invariant the service layer enforces.
+
+    Distinct from Pydantic ``RequestValidationError`` (field-type mismatch).
+    Maps to HTTP 422 Unprocessable Entity.
+    """
+
+    code = ErrorCode.FRAGMENT_VALIDATION_ERROR
 
 
 # ── Corpus ingestion errors ───────────────────────────────────────────────────
