@@ -504,6 +504,71 @@ class TestUpdateFragment:
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "FRAGMENT_NOT_FOUND"
 
+    async def test_non_creator_edit_draft_returns_422(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """A non-creator editor cannot update another user's draft (Step 6 spec).
+
+        The admin user (00...0002) owns the draft; the dev-token user (00...0001)
+        is an editor who is neither the creator nor an admin, so their PATCH must
+        be rejected with FRAGMENT_VALIDATION_ERROR.
+        """
+        import json as _json
+
+        # The admin user id seeded by the integration conftest.
+        admin_user_id = "00000000-0000-0000-0000-000000000002"
+        fragment_id = str(uuid.uuid4())
+
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment "
+                "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
+                "summary, status, created_by) "
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), "
+                "'draft', :creator)"
+            ),
+            {
+                "id": fragment_id,
+                "mid": seeded_movement,
+                "summary": _json.dumps(_min_summary()),
+                "creator": admin_user_id,
+            },
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_concept_tag (fragment_id, concept_id, is_primary) "
+                "VALUES (:fid, 'PerfectAuthenticCadence', true)"
+            ),
+            {"fid": fragment_id},
+        )
+        await db_session.commit()
+
+        # dev-token user (editor, not admin, not the creator) tries to edit.
+        resp = await fragments_client.patch(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+            json={
+                "bar_start": 5,
+                "bar_end": 8,
+                "mc_start": 5,
+                "mc_end": 8,
+                "summary": _min_summary(),
+                "concept_tags": [_min_tag()],
+                "sub_parts": [],
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["error"]["code"] == "FRAGMENT_VALIDATION_ERROR"
+
+        # Cleanup.
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": fragment_id}
+        )
+        await db_session.commit()
+
 
 @pytest.mark.asyncio(loop_scope="session")
 class TestSubmitFragment:
