@@ -11,9 +11,9 @@
  *
  *  computeStagesComplete:
  *    - True for empty (stageless concept).
- *    - True when all required have bounds + optional confirmed or absent.
+ *    - True when all required stages have bounds (pre-populated or dragged).
+ *    - True when optional stage is pre-populated (bounds set; confirmed irrelevant).
  *    - False when required stage lacks bounds.
- *    - False when optional stage is in limbo (not confirmed, not absent).
  *    - False when any stage has error = true.
  *    - Orphaned stages are ignored.
  *
@@ -189,18 +189,12 @@ describe('computeStagesComplete', () => {
     expect(computeStagesComplete(broken)).toBe(false);
   });
 
-  it('false when optional stage is in limbo (not confirmed, not absent)', () => {
+  it('true when optional stage is pre-populated (bounds set, not absent)', () => {
     const stage = makeStage('Opt', 1, 1, /* required= */ false);
     const result = prePopulateStages([stage], makeSelection(1, 4));
-    // Default: confirmed=false, absent=false → limbo.
-    expect(computeStagesComplete(result)).toBe(false);
-  });
-
-  it('true when optional stage is confirmed', () => {
-    const stage = makeStage('Opt', 1, 1, false);
-    const result = prePopulateStages([stage], makeSelection(1, 4));
-    const confirmed = result.map(a => ({ ...a, confirmed: true }));
-    expect(computeStagesComplete(confirmed)).toBe(true);
+    // Pre-populated positions are valid data; confirmed flag is irrelevant.
+    expect(result[0]!.confirmed).toBe(false);
+    expect(computeStagesComplete(result)).toBe(true);
   });
 
   it('true when optional stage is absent', () => {

@@ -476,6 +476,7 @@ export default function FormPanel({
           flags={flags}
           typeRefinementRequired={typeRefinements.length > 0}
           typeRefinementSet={selectedRefinement !== null}
+          conceptHasStages={schemaTree !== null && schemaTree.stages.length > 0}
           isSavingDraft={isSavingDraft}
           isSubmitting={isSubmitting}
           submitError={submitError}

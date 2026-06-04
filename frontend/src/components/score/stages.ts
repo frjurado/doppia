@@ -471,10 +471,12 @@ export function toggleStageAbsent(
 
 /**
  * True when all stage submission conditions are satisfied:
- *  - All required stages have bounds set.
- *  - All optional stages are either confirmed (dragged) or absent.
+ *  - All non-absent, non-orphaned stages have bounds set.
  *  - No stage has an error flag set.
  *  - Trivially true when there are no non-orphaned stages (stageless concepts).
+ *
+ * Pre-populated positions are valid data; the `confirmed` flag (whether the
+ * annotator dragged the bracket) is NOT required. See tagging-tool-design.md §7.5.
  */
 export function computeStagesComplete(assignments: StageAssignment[]): boolean {
   const active = assignments.filter(a => !a.orphaned);
@@ -483,13 +485,7 @@ export function computeStagesComplete(assignments: StageAssignment[]): boolean {
   for (const a of active) {
     if (a.absent) continue;
     if (a.error) return false;
-
-    if (a.required) {
-      if (!a.bounds) return false;
-    } else {
-      // Optional, not absent → must be confirmed (not in limbo).
-      if (!a.confirmed) return false;
-    }
+    if (!a.bounds) return false;
   }
 
   return true;

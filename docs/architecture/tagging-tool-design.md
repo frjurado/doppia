@@ -95,7 +95,7 @@ An **absent toggle** in the stage list in the form panel (§7.3) lets the user e
 - In `contiguous` mode, the absent stage's proportional share is redistributed to its neighbours, shifting the split handle between them.
 - The bracket reappears (at its neighbours' current boundary) if the user re-enables the stage, and the neighbours' shared boundary shifts back to accommodate it.
 
-An optional stage that has not been explicitly marked absent and has not been dragged from its default position is in a limbo state — neither confirmed present nor absent. **Submission is blocked while any optional stage is in this limbo state.** The submission checklist (§7.5) flags this explicitly. The user must either drag the bracket (confirming presence and refining its bounds) or toggle it absent.
+An optional stage at its pre-populated default position is valid data and counts toward submission — the annotator is not required to drag it. The user can refine the bounds by dragging (which sets `confirmed = true` on the stage assignment) or toggle it absent; both are optional actions. The only way an optional stage blocks submission is if it has an error state (bounds outside the main bracket). See §7.5.
 
 ### Compound stages and segmentation
 
@@ -264,13 +264,25 @@ A small, always-visible checklist at the bottom of the form panel. Updates live:
 | Fragment drawn | Yes |
 | Concept selected | Yes |
 | Type Refinement set (if applicable) | Yes |
-| Required stages all assigned | Yes |
-| Optional stages all confirmed present or absent | Yes |
+| Stages complete (if applicable — see note) | Yes |
 | Required properties all set | Yes |
 | Stage bounds within main bracket | Yes |
 | Stage gaps / overlaps (free containment mode only) | Warning only |
 
 Items with warnings (non-blocking) are listed with a ⚠ icon. Items blocking submission show ✗. The Submit button is disabled until all blocking items are resolved.
+
+**Stages row conditionality.** The "Stages complete" row is shown only when **both** of these are true:
+1. The selected concept has `CONTAINS` edges (`conceptHasStages = schemaTree.stages.length > 0`).
+2. The main fragment bracket has been drawn (`flags.fragmentSet = true`), meaning stages have been pre-populated.
+
+Before a concept is selected, for stageless concepts, or before a fragment bracket is drawn (stages not yet pre-populated), the row is suppressed entirely.
+
+**Semantics of "Stages complete."** The row is checked when all non-orphaned, non-absent stages have valid bounds and no error flag:
+- **Required stages**: auto-satisfied by `prePopulateStages()` — they always get bounds.
+- **Optional stages**: pre-populated positions are valid data; dragging to refine is optional, not required for submission. Toggling absent is the way to mark a stage not present.
+- **Error state** (`bounds` outside the main bracket): blocks the row regardless of stage type.
+
+In practice the row is checked immediately after pre-population unless a stage has been dragged outside the main bracket. Implemented via `computeStagesComplete()` in `stages.ts`; the `confirmed` flag on a stage assignment is preserved for visual/tracking purposes but does not gate the checklist item. See Component 7 Step 1.
 
 ---
 
