@@ -9,10 +9,12 @@ import { AnnotationSession, buildRepeatBarriers } from '../components/score/anno
 import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
-import type { StageAssignment, SubPartTag } from '../components/score/stages';
+import type { BeatSlot, StageAssignment, SubPartTag } from '../components/score/stages';
 import {
+  chooseStageGrid,
   computeStagesComplete,
   prePopulateStages,
+  prePopulateStagesAtGrid,
   reconcileWithNewConcept,
   reconcileWithSelection,
   toggleStageAbsent,
@@ -29,7 +31,7 @@ import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioTo
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 import { transposeKey } from '../utils/transposeKey';
-import type { ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
+import type { ContainsStage, ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
 import { getConceptSchemas } from '../services/conceptApi';
 import {
   createFragment,
@@ -220,6 +222,72 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
   );
 }
 
+// ---------------------------------------------------------------------------
+// Auto-grid pre-population helpers (Component 7 Step 2)
+// ---------------------------------------------------------------------------
+
+/** True when entry falls within the selection bounds (beat-precision aware). */
+function _inSelectionBounds(
+  entry: { barN: number; beatFloat: number },
+  sel: SelectionRange,
+): boolean {
+  if (entry.barN < sel.barStart || entry.barN > sel.barEnd) return false;
+  if (sel.beatStart !== null && entry.barN === sel.barStart && entry.beatFloat < sel.beatStart) return false;
+  if (sel.beatEnd   !== null && entry.barN === sel.barEnd   && entry.beatFloat >= sel.beatEnd) return false;
+  return true;
+}
+
+/**
+ * Choose the finest grid that fits stageCount stages, compute beat/sub-beat
+ * positions from the ghost layer, and return the pre-populated assignments.
+ *
+ * blocked is true when the selection cannot fit stages even at sub-beat
+ * resolution — the caller should surface a UI note and keep assignments empty.
+ */
+function computeAutoPrePopulate(
+  stages: ContainsStage[],
+  selection: SelectionRange,
+  ghostLayer: GhostLayer | null,
+): { assignments: StageAssignment[]; grid: ResolutionMode; blocked: boolean } {
+  // Collect beat and sub-beat positions within the selection from the ghost layer.
+  const beatPositions: BeatSlot[] = [];
+  const subBeatPositions: BeatSlot[] = [];
+
+  if (ghostLayer) {
+    for (const entry of ghostLayer.beatIndex.values()) {
+      if (_inSelectionBounds(entry, selection)) beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    }
+    beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+
+    for (const entry of ghostLayer.subBeatIndex.values()) {
+      if (_inSelectionBounds(entry, selection)) subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    }
+    subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+  }
+
+  const grid = chooseStageGrid(selection, stages.length, beatPositions.length, subBeatPositions.length);
+
+  const measureSlots = selection.barEnd - selection.barStart + 1;
+  const blocked =
+    stages.length > 0 &&
+    measureSlots < stages.length &&
+    beatPositions.length < stages.length &&
+    subBeatPositions.length < stages.length;
+
+  if (blocked) return { assignments: [], grid, blocked: true };
+
+  let assignments: StageAssignment[];
+  if (grid === 'measure') {
+    assignments = prePopulateStages(stages, selection);
+  } else if (grid === 'beat') {
+    assignments = prePopulateStagesAtGrid(stages, selection, beatPositions);
+  } else {
+    assignments = prePopulateStagesAtGrid(stages, selection, subBeatPositions);
+  }
+
+  return { assignments, grid, blocked: false };
+}
+
 export default function ScoreViewer() {
   const { movementId } = useParams<{ movementId: string }>();
   const [searchParams] = useSearchParams();
@@ -359,6 +427,16 @@ export default function ScoreViewer() {
   // The schema tree for the currently active concept (or its refinement child).
   // Cached so reconcileWithNewConcept can compute brand-new default placements.
   const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
+
+  // Mirrors stageAssignments in a ref so callbacks can check current length
+  // without adding stageAssignments to their dependency arrays.
+  const stageAssignmentsRef = useRef<StageAssignment[]>([]);
+  // True when the committed selection is too short for the chosen concept's
+  // stages even at sub-beat resolution (Step 2 auto-grid; Step 3 will clamp).
+  const [stageGridBlocked, setStageGridBlocked] = useState(false);
+  // Brief inline note shown when pre-population auto-switches the resolution.
+  const [gridAutoSwitchNote, setGridAutoSwitchNote] = useState<string | null>(null);
+  const gridNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Sub-part tags (Step 15) ───────────────────────────────────────────────
   // Keyed by stageId; null means the stage has no sub-part tag yet.
@@ -608,6 +686,22 @@ export default function ScoreViewer() {
     };
   }, [scheduleRerender]);
 
+  // Mirror stageAssignments into a ref so callbacks can read .length without
+  // adding stageAssignments to their dependency arrays.
+  useEffect(() => {
+    stageAssignmentsRef.current = stageAssignments;
+  }, [stageAssignments]);
+
+  // Show a brief inline note when pre-population auto-drops the resolution.
+  const showGridNote = useCallback((grid: ResolutionMode, stageCount: number) => {
+    if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
+    const label = grid === 'beat' ? 'beat' : 'sub-beat';
+    setGridAutoSwitchNote(`Switched to ${label} resolution to fit ${stageCount} stage${stageCount === 1 ? '' : 's'}`);
+    gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
+  }, []);
+  // Clear the timer on unmount.
+  useEffect(() => () => { if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current); }, []);
+
   // ── Stage handlers (Step 14) ─────────────────────────────────────────────
 
   /**
@@ -626,19 +720,35 @@ export default function ScoreViewer() {
 
       if (!concept || !schemaTree || schemaTree.stages.length === 0) {
         setStageAssignments([]);
+        setStageGridBlocked(false);
         setActiveStageId(null);
         return;
       }
-      setStageAssignments(prev => {
-        if (prev.length === 0) {
-          return selectionRange
-            ? prePopulateStages(schemaTree.stages, selectionRange)
-            : [];
+
+      if (stageAssignmentsRef.current.length === 0) {
+        if (!selectionRange) {
+          setStageAssignments([]);
+          setStageGridBlocked(false);
+          return;
         }
-        return reconcileWithNewConcept(prev, schemaTree.stages, selectionRange);
-      });
+        const { assignments, grid, blocked } = computeAutoPrePopulate(
+          schemaTree.stages, selectionRange, ghostLayerRef.current,
+        );
+        setStageAssignments(assignments);
+        setStageGridBlocked(blocked);
+        if (!blocked && grid !== resolutionRef.current) {
+          resolutionRef.current = grid;
+          setResolution(grid);
+          showGridNote(grid, schemaTree.stages.length);
+        }
+      } else {
+        setStageGridBlocked(false);
+        setStageAssignments(prev =>
+          reconcileWithNewConcept(prev, schemaTree.stages, selectionRange),
+        );
+      }
     },
-    [selectionRange],
+    [selectionRange, showGridNote],
   );
 
   /**
@@ -659,8 +769,10 @@ export default function ScoreViewer() {
         const parentTree = activeSchemaTreeRef.current;
         if (!parentTree || parentTree.stages.length === 0) {
           setStageAssignments([]);
+          setStageGridBlocked(false);
           return;
         }
+        setStageGridBlocked(false);
         setStageAssignments(prev =>
           reconcileWithNewConcept(prev, parentTree.stages, selectionRange),
         );
@@ -671,21 +783,37 @@ export default function ScoreViewer() {
         activeSchemaTreeRef.current = childTree;
         if (childTree.stages.length === 0) {
           setStageAssignments([]);
+          setStageGridBlocked(false);
           return;
         }
-        setStageAssignments(prev => {
-          if (prev.length === 0) {
-            return selectionRange
-              ? prePopulateStages(childTree.stages, selectionRange)
-              : [];
+
+        if (stageAssignmentsRef.current.length === 0) {
+          if (!selectionRange) {
+            setStageAssignments([]);
+            setStageGridBlocked(false);
+            return;
           }
-          return reconcileWithNewConcept(prev, childTree.stages, selectionRange);
-        });
+          const { assignments, grid, blocked } = computeAutoPrePopulate(
+            childTree.stages, selectionRange, ghostLayerRef.current,
+          );
+          setStageAssignments(assignments);
+          setStageGridBlocked(blocked);
+          if (!blocked && grid !== resolutionRef.current) {
+            resolutionRef.current = grid;
+            setResolution(grid);
+            showGridNote(grid, childTree.stages.length);
+          }
+        } else {
+          setStageGridBlocked(false);
+          setStageAssignments(prev =>
+            reconcileWithNewConcept(prev, childTree.stages, selectionRange),
+          );
+        }
       } catch {
         // Schema fetch failure: keep existing assignments unchanged.
       }
     },
-    [selectionRange],
+    [selectionRange, showGridNote],
   );
 
   /** Called by StageBrackets on every split handle drag tick. */
@@ -728,6 +856,9 @@ export default function ScoreViewer() {
     setSelectionRange(null);
     setCommittedSelection(null);
     setStageAssignments([]);
+    setStageGridBlocked(false);
+    if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
+    setGridAutoSwitchNote(null);
     setActiveStageId(null);
     setSubPartTags({});
     setSubPartResetKey(k => k + 1);
@@ -915,27 +1046,42 @@ export default function ScoreViewer() {
     [committedSelection, movementId, fragmentDraftId, buildPayload],
   );
 
+  // Mirror stageAssignments into a ref so callbacks can read .length without
   // Keep stagesComplete in sync with assignments and session.
+  // Blocked state overrides: if the selection cannot fit the concept's stages,
+  // stagesComplete is false regardless of the (empty) assignment list.
   useEffect(() => {
     const session = annotationSessionRef.current;
     if (!session) return;
-    const complete = computeStagesComplete(stageAssignments);
+    const complete = stageGridBlocked ? false : computeStagesComplete(stageAssignments);
     session.setStagesComplete(complete);
-  }, [stageAssignments]);
+  }, [stageAssignments, stageGridBlocked]);
 
   // When the committed selection changes, reconcile stage assignments with
-  // the new main bracket bounds.
+  // the new main bracket bounds or (re-)attempt auto-grid pre-population.
   useEffect(() => {
     if (!selectionRange) return;
-    setStageAssignments(prev => {
-      if (prev.length === 0 && activeSchemaTreeRef.current?.stages.length) {
-        // First selection after concept was already chosen: pre-populate now.
-        return prePopulateStages(activeSchemaTreeRef.current.stages, selectionRange);
+    const stages = activeSchemaTreeRef.current?.stages;
+    if (stageAssignmentsRef.current.length === 0 && stages?.length) {
+      // First selection after concept chosen, or retry after a blocked selection
+      // was extended — attempt auto-grid pre-population.
+      const { assignments, grid, blocked } = computeAutoPrePopulate(
+        stages, selectionRange, ghostLayerRef.current,
+      );
+      setStageAssignments(assignments);
+      setStageGridBlocked(blocked);
+      if (!blocked && grid !== resolutionRef.current) {
+        resolutionRef.current = grid;
+        setResolution(grid);
+        showGridNote(grid, stages.length);
       }
-      if (prev.length === 0) return prev;
-      return reconcileWithSelection(prev, selectionRange);
-    });
-  }, [selectionRange]);
+    } else {
+      if (stageAssignmentsRef.current.length === 0) return;
+      setStageGridBlocked(false);
+      setStageAssignments(prev => reconcileWithSelection(prev, selectionRange));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionRange, showGridNote]);
 
   // ── Ghost layer + annotation session lifecycle (Step 11) ─────────────────
   //
@@ -1369,6 +1515,17 @@ export default function ScoreViewer() {
                 );
               })}
             </div>
+          )}
+          {/* Brief note shown when pre-population auto-drops the resolution grid. */}
+          {gridAutoSwitchNote && tagMode === 'tag' && (
+            <Type
+              variant="label-sm"
+              as="span"
+              className={styles.gridAutoSwitchNote}
+              aria-live="polite"
+            >
+              {gridAutoSwitchNote}
+            </Type>
           )}
         </div>
 

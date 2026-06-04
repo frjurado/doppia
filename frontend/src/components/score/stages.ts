@@ -14,6 +14,7 @@
 import type { ContainsStage, ConceptSchemaTree } from '../../services/conceptApi';
 import type { SelectionRange } from './annotator';
 import type { PropertyFormValues } from './PropertyForm';
+import type { ResolutionMode } from './ghosts';
 
 // ---------------------------------------------------------------------------
 // Sub-part tagging (Component 5 Step 15)
@@ -116,6 +117,141 @@ export const STAGE_PALETTE = [
 /** Return the bracket colour for the stage at the given 0-indexed order. */
 export function stageColor(orderIndex: number): string {
   return STAGE_PALETTE[orderIndex % STAGE_PALETTE.length]!;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-grid selection (tagging-tool-design.md §4, Component 7 Step 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * A logical beat or sub-beat position extracted from the ghost layer index.
+ * Used when the selection is too short for measure-level stage distribution
+ * and pre-population auto-drops to beat or sub-beat resolution.
+ */
+export interface BeatSlot {
+  barN: number;
+  beatFloat: number;
+}
+
+/**
+ * Return the coarsest resolution at which stageCount stages can each occupy
+ * at least one grid slot in the selection.
+ *
+ * Tries Measure → Beat → Sub-beat in order, falling through to 'subbeat'
+ * even when all counts are below stageCount. The caller is responsible for
+ * detecting and surfacing the blocking case (stageCount exceeds all tiers).
+ *
+ * beatSlots and subBeatSlots are counts of available ghost positions in the
+ * selection at each finer resolution, computed by the caller from the ghost
+ * layer. If omitted, those tiers are treated as having zero capacity.
+ */
+export function chooseStageGrid(
+  selection: SelectionRange,
+  stageCount: number,
+  beatSlots = 0,
+  subBeatSlots = 0,
+): ResolutionMode {
+  if (stageCount <= 0) return 'measure';
+  const measureSlots = selection.barEnd - selection.barStart + 1;
+  if (measureSlots >= stageCount) return 'measure';
+  if (beatSlots >= stageCount) return 'beat';
+  return 'subbeat';
+}
+
+/**
+ * Distribute stage brackets over beat or sub-beat grid positions by
+ * default_weight. Called when chooseStageGrid returns 'beat' or 'subbeat' —
+ * i.e. when the selection is too short for measure-level placement.
+ *
+ * positions must be ordered (barN ASC, beatFloat ASC) and cover only the
+ * slots inside the committed selection (respecting its beat precision if any).
+ *
+ * Outer-edge pinning (tagging-tool-design.md §4): the first stage's left edge
+ * is pinned to the selection boundary (selection.barStart / selection.beatStart),
+ * and the last stage's right edge is pinned to the selection end (selection.barEnd
+ * / selection.beatEnd). Only the internal split-handle boundaries are distributed
+ * across the supplied grid slots.
+ *
+ * Falls back to measure-level prePopulateStages when positions.length <
+ * stages.length (caller is responsible for blocking detection before calling).
+ */
+export function prePopulateStagesAtGrid(
+  stages: ContainsStage[],
+  selection: SelectionRange,
+  positions: BeatSlot[],
+): StageAssignment[] {
+  if (stages.length === 0) return [];
+  if (positions.length < stages.length) {
+    // Not enough beat/sub-beat slots; fall back to measure-level so output is
+    // at least consistent — the caller handles the blocked indicator separately.
+    return prePopulateStages(stages, selection);
+  }
+
+  const sorted = [...stages].sort((a, b) => a.order - b.order);
+  const totalWeight = sorted.reduce((s, st) => s + st.default_weight, 0) || 1;
+  const N = positions.length;
+
+  const assignments: StageAssignment[] = [];
+  let slotIdx = 0;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const stage = sorted[i]!;
+    const isFirst = i === 0;
+    const isLast = i === sorted.length - 1;
+
+    // Distribute slots proportionally; last stage absorbs the remainder.
+    let endSlotIdx: number;
+    if (isLast) {
+      endSlotIdx = N - 1;
+    } else {
+      const remaining = sorted.length - 1 - i;
+      const maxEndSlot = N - remaining - 1;
+      const rawSlots = N * stage.default_weight / totalWeight;
+      const slotCount = Math.max(1, Math.round(rawSlots));
+      endSlotIdx = Math.min(slotIdx + slotCount - 1, maxEndSlot);
+    }
+
+    // The stage that starts immediately after this one marks the right boundary.
+    const nextSlot: BeatSlot | undefined = isLast ? undefined : positions[endSlotIdx + 1];
+
+    // Left boundary: first stage is pinned to the selection's start (outer-edge
+    // pinning); others start at their first slot position.
+    const barStart = isFirst ? selection.barStart : positions[slotIdx]!.barN;
+    const beatStart: number | null = isFirst
+      ? (selection.beatStart ?? null)
+      : positions[slotIdx]!.beatFloat;
+
+    // Right boundary: last stage is pinned to the selection's end (outer-edge
+    // pinning); others end just before where the next stage starts.
+    let barEnd: number;
+    let beatEnd: number | null;
+    if (isLast) {
+      barEnd = selection.barEnd;
+      beatEnd = selection.beatEnd ?? null;
+    } else {
+      barEnd = nextSlot!.barN;
+      beatEnd = nextSlot!.beatFloat;
+    }
+
+    assignments.push({
+      stageId: stage.target_id,
+      stageName: stage.target_name,
+      order: stage.order,
+      required: stage.required,
+      displayMode: stage.display_mode,
+      containmentMode: stage.containment_mode,
+      defaultWeight: stage.default_weight,
+      bounds: { barStart, beatStart, barEnd, beatEnd },
+      confirmed: false,
+      absent: false,
+      orphaned: false,
+      error: false,
+    });
+
+    slotIdx = endSlotIdx + 1;
+  }
+
+  return assignments;
 }
 
 // ---------------------------------------------------------------------------

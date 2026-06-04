@@ -75,11 +75,21 @@ stage_width = (stage.default_weight / sum_of_weights) × main_bracket_width
 
 If no `default_weight` is set on any sibling edge, equal distribution applies (all weights implicitly 1.0).
 
-### Grid snapping
+### Grid snapping and auto-resolution drop
 
-Default positions are computed in score-space coordinates and then **snapped to the currently active selection grid** (see §5). The stage bracket boundaries align to the nearest grid position — beat boundaries if the grid is at beat resolution, eighth-note boundaries if at sub-beat resolution. This means a stage that by raw proportion would end at beat 2.3 snaps to beat 2 or beat 2.5 depending on the active grid.
+Default positions are distributed by `default_weight` and snapped to the active selection grid (see §5).
 
-Snapping resolves left-to-right: each stage is snapped in sequence, with the right boundary of stage N becoming the left boundary of stage N+1. The rightmost stage's right boundary is pinned to the main bracket's right boundary, absorbing any rounding remainder.
+**Auto-drop when the selection is too short for measure-level placement.** If the committed selection cannot accommodate N stages at measure resolution (fewer bars than stages), pre-population automatically selects the finest resolution at which the stages fit — Measure → Beat → Sub-beat — and switches the resolution toggle to match. The annotator is shown a brief inline note ("switched to beat resolution to fit 4 stages") so the grid change is not silent.
+
+If even sub-beat resolution cannot fit the required number of stages (e.g. a one-beat selection for a four-stage concept), no brackets are placed; submission remains blocked until the annotator extends the main selection or reduces the stage count.
+
+Snapping resolves left-to-right: each stage is snapped in sequence, with the right boundary of stage N becoming the left boundary of stage N+1.
+
+### Outer-edge pinning in contiguous mode
+
+In `contiguous` mode the **first stage's left edge is always the main bracket's left edge**, and the **last stage's right edge is always the main bracket's right edge**. These outer boundaries are not independently draggable — they are by design fixed to the main selection. The only draggable boundaries are the internal split handles between adjacent stages.
+
+Changing the outer extent of the stage group is done by resizing the main bracket (§6, "Main bracket change after stages are committed").
 
 ### Required stages
 

@@ -42,10 +42,13 @@ import { describe, expect, it } from 'vitest';
 import type { ContainsStage } from '../../../services/conceptApi';
 import type { SelectionRange } from '../annotator';
 import type { StageBeatBoundary, StageAssignment } from '../stages';
+import type { BeatSlot } from '../stages';
 import {
+  chooseStageGrid,
   computeStagesComplete,
   moveSplitHandle,
   prePopulateStages,
+  prePopulateStagesAtGrid,
   reconcileWithNewConcept,
   reconcileWithSelection,
   toggleStageAbsent,
@@ -471,5 +474,165 @@ describe('reconcileWithNewConcept', () => {
     const reconciled = reconcileWithNewConcept(assignments, newStages, null);
     const brandNew = reconciled.find(a => a.stageId === 'BrandNew');
     expect(brandNew).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chooseStageGrid
+// ---------------------------------------------------------------------------
+
+describe('chooseStageGrid', () => {
+  it('returns measure when selection has enough bars', () => {
+    const sel = makeSelection(1, 4); // 4 bars, 4 stages
+    expect(chooseStageGrid(sel, 4)).toBe('measure');
+  });
+
+  it('returns measure when selection has more bars than stages', () => {
+    const sel = makeSelection(1, 8);
+    expect(chooseStageGrid(sel, 4)).toBe('measure');
+  });
+
+  it('returns beat when bars insufficient but beatSlots sufficient', () => {
+    const sel = makeSelection(1, 2); // 2 bars, 4 stages — too few at measure level
+    expect(chooseStageGrid(sel, 4, 8 /* 8 beats in 2 bars */)).toBe('beat');
+  });
+
+  it('returns subbeat when beat insufficient but subBeatSlots sufficient', () => {
+    const sel = makeSelection(1, 1); // 1 bar, 4 stages
+    expect(chooseStageGrid(sel, 4, 2 /* only 2 beats */, 16 /* 16 sub-beats */)).toBe('subbeat');
+  });
+
+  it('falls through to subbeat even when no resolution fits (blocking case)', () => {
+    const sel = makeSelection(1, 1); // 1 bar, 4 stages — none fit
+    expect(chooseStageGrid(sel, 4, 2, 3)).toBe('subbeat');
+  });
+
+  it('returns measure for stageCount 0', () => {
+    expect(chooseStageGrid(makeSelection(1, 2), 0)).toBe('measure');
+  });
+
+  it('returns measure for stageCount 1 (single bar selection)', () => {
+    expect(chooseStageGrid(makeSelection(1, 1), 1)).toBe('measure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// prePopulateStagesAtGrid
+// ---------------------------------------------------------------------------
+
+/** Build an ordered list of {barN, beatFloat} positions simulating 4/4 time. */
+function makeBeatPositions(barStart: number, barEnd: number, beatsPerBar = 4): BeatSlot[] {
+  const positions: BeatSlot[] = [];
+  for (let bar = barStart; bar <= barEnd; bar++) {
+    for (let b = 1; b <= beatsPerBar; b++) {
+      positions.push({ barN: bar, beatFloat: b });
+    }
+  }
+  return positions;
+}
+
+describe('prePopulateStagesAtGrid', () => {
+  it('returns empty array for zero stages', () => {
+    expect(prePopulateStagesAtGrid([], makeSelection(1, 2), makeBeatPositions(1, 2))).toEqual([]);
+  });
+
+  it('4 equal-weight stages over 8 beat slots distribute 2 beats each', () => {
+    const stages = [
+      makeStage('A', 1, 1),
+      makeStage('B', 2, 1),
+      makeStage('C', 3, 1),
+      makeStage('D', 4, 1),
+    ];
+    // 2 bars × 4 beats = 8 slots; 4 stages → 2 slots each
+    const positions = makeBeatPositions(1, 2, 4);
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 2), positions);
+    expect(result).toHaveLength(4);
+  });
+
+  it('first stage left edge is pinned to selection.barStart with null beatStart', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1)];
+    const positions = makeBeatPositions(1, 2, 4);
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 2), positions);
+    expect(result[0]!.bounds!.barStart).toBe(1);
+    expect(result[0]!.bounds!.beatStart).toBeNull(); // measure-level selection → null
+  });
+
+  it('last stage right edge is pinned to selection.barEnd with null beatEnd', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1)];
+    const positions = makeBeatPositions(1, 2, 4);
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 2), positions);
+    const last = result[result.length - 1]!;
+    expect(last.bounds!.barEnd).toBe(2);
+    expect(last.bounds!.beatEnd).toBeNull();
+  });
+
+  it('internal boundary: left stage beatEnd equals right stage beatStart', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1)];
+    const positions = makeBeatPositions(1, 2, 4);
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 2), positions);
+    // A ends at the slot where B starts
+    expect(result[0]!.bounds!.beatEnd).toBe(result[1]!.bounds!.beatStart);
+  });
+
+  it('all stage bounds are contiguous with no gap', () => {
+    const stages = [
+      makeStage('A', 1, 1),
+      makeStage('B', 2, 1),
+      makeStage('C', 3, 1),
+      makeStage('D', 4, 1),
+    ];
+    const positions = makeBeatPositions(1, 2, 4); // bar1:1-4, bar2:1-4
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 2), positions);
+    for (let i = 0; i < result.length - 1; i++) {
+      // Right edge of stage i equals left edge of stage i+1
+      const rBarEnd = result[i]!.bounds!.barEnd;
+      const rBeatEnd = result[i]!.bounds!.beatEnd;
+      const lBarStart = result[i + 1]!.bounds!.barStart;
+      const lBeatStart = result[i + 1]!.bounds!.beatStart;
+      expect(rBarEnd).toBe(lBarStart);
+      expect(rBeatEnd).toBe(lBeatStart);
+    }
+  });
+
+  it('falls back to measure-level when positions < stages (blocking safeguard)', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1), makeStage('C', 3, 1)];
+    // Only 2 positions for 3 stages — too few
+    const positions: BeatSlot[] = [{ barN: 1, beatFloat: 1 }, { barN: 1, beatFloat: 2 }];
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 4), positions);
+    // Falls back to measure-level: all have null beat coords
+    for (const a of result) {
+      expect(a.bounds!.beatStart).toBeNull();
+      expect(a.bounds!.beatEnd).toBeNull();
+    }
+  });
+
+  it('initialises confirmed=false, absent=false, orphaned=false, error=false', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1)];
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 2), makeBeatPositions(1, 2, 4));
+    for (const a of result) {
+      expect(a.confirmed).toBe(false);
+      expect(a.absent).toBe(false);
+      expect(a.orphaned).toBe(false);
+      expect(a.error).toBe(false);
+    }
+  });
+
+  it('verifying 2-bar 4-stage PAC scenario: 4 stages × 2 beats from 8 beat slots', () => {
+    const pac = [
+      makeStage('Predominant', 1, 2),
+      makeStage('Dominant', 2, 3),
+      makeStage('PreTonic', 3, 1),
+      makeStage('Tonic', 4, 2),
+    ];
+    const positions = makeBeatPositions(1, 2, 4); // 8 slots for 8 total weight
+    const result = prePopulateStagesAtGrid(pac, makeSelection(1, 2), positions);
+    expect(result).toHaveLength(4);
+    // First stage pinned to barStart=1
+    expect(result[0]!.bounds!.barStart).toBe(1);
+    // Last stage pinned to barEnd=2
+    expect(result[3]!.bounds!.barEnd).toBe(2);
+    // All assignments have non-null beat coords for internal stages
+    expect(result[1]!.bounds!.beatStart).not.toBeNull();
+    expect(result[2]!.bounds!.beatStart).not.toBeNull();
   });
 });
