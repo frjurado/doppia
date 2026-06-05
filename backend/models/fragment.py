@@ -249,6 +249,92 @@ class FragmentResponse(BaseModel):
     updated_at: datetime
 
 
+# ---------------------------------------------------------------------------
+# Read response models (Component 7 Step 7)
+# ---------------------------------------------------------------------------
+
+
+class ConceptTagDetail(BaseModel):
+    """A hydrated concept tag returned by single-fragment and list reads.
+
+    The ``name``, ``alias``, and ``hierarchy_path`` are resolved from Neo4j at
+    read time.  The base ``concept_id`` and ``is_primary`` come from PostgreSQL.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    concept_id: str
+    is_primary: bool
+    name: str
+    alias: str | None
+    hierarchy_path: list[str]
+
+
+class FragmentDetailResponse(BaseModel):
+    """Full fragment record for ``GET /api/v1/fragments/{id}``.
+
+    Includes concept tags hydrated with Neo4j metadata, harmony events sliced
+    from ``movement_analysis`` over the fragment's bar range, and nested
+    sub-parts one level deep (ADR-011 two-level display limit).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    parent_fragment_id: uuid.UUID | None
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    summary: dict
+    prose_annotation: str | None
+    data_licence: str | None
+    status: str
+    created_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    concept_tags: list[ConceptTagDetail]
+    harmony_events: list[dict]
+    sub_parts: list["FragmentDetailResponse"]
+
+
+class FragmentListItem(BaseModel):
+    """Lightweight fragment entry for ``GET /api/v1/movements/{id}/fragments``.
+
+    Carries only what the on-score overlay needs: coordinates, status, the
+    primary concept alias for the bracket label, and nested sub-parts one
+    level deep (ADR-011 two-level display limit).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    parent_fragment_id: uuid.UUID | None
+    mc_start: int
+    mc_end: int
+    bar_start: int
+    bar_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    status: str
+    primary_concept_id: str | None
+    primary_concept_alias: str | None
+    sub_parts: list["FragmentListItem"]
+
+
+class FragmentListResponse(BaseModel):
+    """Cursor-paginated list of top-level fragments for a movement."""
+
+    items: list[FragmentListItem]
+    next_cursor: str | None
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 

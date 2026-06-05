@@ -327,6 +327,59 @@ Returns exactly one row: ``{has_harmony_gate: true/false}``.
 """
 
 
+# ---------------------------------------------------------------------------
+# Bulk concept hydration  (async — used by fragment read endpoints, Step 7)
+# ---------------------------------------------------------------------------
+
+_GET_CONCEPTS_BY_IDS = """\
+UNWIND $concept_ids AS concept_id
+MATCH (c:Concept {id: concept_id})
+CALL {
+  WITH c
+  MATCH p = (c)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
+  WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
+  WITH p ORDER BY length(p) DESC LIMIT 1
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+}
+RETURN c.id                        AS id,
+       c.name                      AS name,
+       coalesce(c.aliases, [])     AS aliases,
+       hierarchy_path
+"""
+"""Return name, aliases, and hierarchy path for each concept id in one round-trip.
+
+Uses UNWIND so a single session fetches all requested concepts.  Concepts
+not found in the graph are silently omitted from the result set.  The
+hierarchy_path subquery picks the longest IS_SUBTYPE_OF path to a root,
+matching the pattern used by _SEARCH_CONCEPTS.
+
+Parameters:
+    concept_ids — list of concept id strings
+"""
+
+
+async def get_concepts_by_ids(
+    session: _AsyncSession,
+    concept_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Return name, aliases, and hierarchy path for each concept id.
+
+    Each dict has keys: ``id``, ``name``, ``aliases`` (list), ``hierarchy_path`` (list).
+    Concepts not found in the graph are silently omitted.
+
+    Args:
+        session: An open async Neo4j session.
+        concept_ids: Concept ids to hydrate; empty list returns ``[]``.
+
+    Returns:
+        List of concept dicts, one per found concept.
+    """
+    if not concept_ids:
+        return []
+    result = await session.run(_GET_CONCEPTS_BY_IDS, concept_ids=concept_ids)
+    return await result.data()
+
+
 async def check_concepts_have_harmony_gate(
     session: _AsyncSession,
     concept_ids: list[str],

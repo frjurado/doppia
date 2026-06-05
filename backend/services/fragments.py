@@ -17,6 +17,7 @@ See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from datetime import datetime, timezone
 
@@ -26,12 +27,16 @@ from errors import (
     HarmonyNotReviewedError,
     SelfReviewForbiddenError,
 )
-from graph.queries.concepts import check_concepts_have_harmony_gate
+from graph.queries.concepts import check_concepts_have_harmony_gate, get_concepts_by_ids
 from models.analysis import MovementAnalysis
 from models.fragment import (
+    ConceptTagDetail,
     Fragment,
     FragmentConceptTag,
     FragmentCreate,
+    FragmentDetailResponse,
+    FragmentListItem,
+    FragmentListResponse,
     FragmentReview,
     FragmentUpdate,
     SubPartFragmentCreate,
@@ -41,7 +46,7 @@ from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
 )
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,6 +59,25 @@ _REPEAT_CONTEXT_TO_VOLTA: dict[str, int] = {
     "second_ending": 2,
     "third_ending": 3,
 }
+
+
+def _encode_cursor(mc_start: int, fragment_id: uuid.UUID) -> str:
+    """Encode an (mc_start, id) pair as a URL-safe base64 pagination cursor."""
+    return base64.urlsafe_b64encode(f"{mc_start}:{fragment_id}".encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> tuple[int, uuid.UUID]:
+    """Decode a pagination cursor back to (mc_start, fragment_id).
+
+    Raises:
+        ValueError: Cursor string is malformed or cannot be decoded.
+    """
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        mc_str, id_str = raw.split(":", 1)
+        return int(mc_str), uuid.UUID(id_str)
+    except Exception as exc:
+        raise ValueError(f"Invalid pagination cursor: {cursor!r}") from exc
 
 
 class FragmentService:
@@ -259,6 +283,347 @@ class FragmentService:
             self._db.add(fragment)
 
         return fragment
+
+    # ------------------------------------------------------------------
+    # Public interface — read path (Component 7 Step 7)
+    # ------------------------------------------------------------------
+
+    async def get(
+        self,
+        fragment_id: uuid.UUID,
+        caller_id: str,
+        caller_role: str,
+    ) -> FragmentDetailResponse:
+        """Return the full fragment record with hydrated concept tags, harmony
+        events, and nested sub-parts.
+
+        Visibility rule: draft fragments are visible only to their creator or
+        an admin. All other statuses are visible to any editor.  A draft owned
+        by another annotator is returned as a 404 to avoid leaking its
+        existence.
+
+        Args:
+            fragment_id: UUID of the fragment to read.
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller.
+
+        Returns:
+            :class:`~models.fragment.FragmentDetailResponse` with concept tags
+            hydrated from Neo4j, harmony events sliced from
+            ``movement_analysis``, and sub-parts nested one level deep.
+
+        Raises:
+            FragmentNotFoundError: Fragment does not exist or is a draft not
+                owned by the caller (non-admin).
+        """
+        result = await self._db.execute(
+            select(Fragment).where(Fragment.id == fragment_id)
+        )
+        fragment = result.scalar_one_or_none()
+        if fragment is None:
+            raise FragmentNotFoundError(
+                f"No fragment with id '{fragment_id}' exists.",
+                detail={"fragment_id": str(fragment_id)},
+            )
+
+        # Draft visibility: only the creator or an admin may read a draft.
+        if fragment.status == "draft" and caller_role != "admin":
+            is_creator = (
+                fragment.created_by is not None
+                and str(fragment.created_by) == caller_id
+            )
+            if not is_creator:
+                raise FragmentNotFoundError(
+                    f"No fragment with id '{fragment_id}' exists.",
+                    detail={"fragment_id": str(fragment_id)},
+                )
+
+        # Load concept tags for the parent.
+        tags_result = await self._db.execute(
+            select(FragmentConceptTag).where(
+                FragmentConceptTag.fragment_id == fragment_id
+            )
+        )
+        parent_tags = list(tags_result.scalars().all())
+
+        # Load sub-parts (top-level only — ADR-011 two-level limit).
+        sub_result = await self._db.execute(
+            select(Fragment)
+            .where(Fragment.parent_fragment_id == fragment_id)
+            .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+        )
+        sub_parts = list(sub_result.scalars().all())
+
+        # Load concept tags for all sub-parts in one query.
+        sub_tags_by_fragment: dict[uuid.UUID, list[FragmentConceptTag]] = {}
+        if sub_parts:
+            sub_ids = [sp.id for sp in sub_parts]
+            sub_tags_result = await self._db.execute(
+                select(FragmentConceptTag).where(
+                    FragmentConceptTag.fragment_id.in_(sub_ids)
+                )
+            )
+            for tag in sub_tags_result.scalars().all():
+                sub_tags_by_fragment.setdefault(tag.fragment_id, []).append(tag)
+
+        # Batch Neo4j hydration — collect all unique concept IDs at once.
+        all_concept_ids = list(
+            {t.concept_id for t in parent_tags}
+            | {t.concept_id for tags in sub_tags_by_fragment.values() for t in tags}
+        )
+        concept_map: dict[str, dict] = {}
+        if all_concept_ids:
+            async with self._driver.session() as neo_session:
+                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
+                    concept_map[c["id"]] = c
+
+        def _hydrate_tag(tag: FragmentConceptTag) -> ConceptTagDetail:
+            data = concept_map.get(tag.concept_id, {})
+            aliases: list[str] = data.get("aliases", [])
+            return ConceptTagDetail(
+                concept_id=tag.concept_id,
+                is_primary=tag.is_primary,
+                name=data.get("name", tag.concept_id),
+                alias=aliases[0] if aliases else None,
+                hierarchy_path=data.get("hierarchy_path", []),
+            )
+
+        # Slice harmony events from movement_analysis.
+        harmony_events = await self._slice_harmony_events(
+            fragment.movement_id,
+            fragment.bar_start,
+            fragment.bar_end,
+            fragment.repeat_context,
+        )
+
+        # Assemble sub-part responses (no harmony events on sub-parts;
+        # two-level limit means sub-parts have no further sub_parts).
+        sub_part_responses = [
+            FragmentDetailResponse(
+                id=sp.id,
+                movement_id=sp.movement_id,
+                parent_fragment_id=sp.parent_fragment_id,
+                bar_start=sp.bar_start,
+                bar_end=sp.bar_end,
+                mc_start=sp.mc_start,
+                mc_end=sp.mc_end,
+                beat_start=sp.beat_start,
+                beat_end=sp.beat_end,
+                repeat_context=sp.repeat_context,
+                summary=sp.summary,
+                prose_annotation=sp.prose_annotation,
+                data_licence=sp.data_licence,
+                status=sp.status,
+                created_by=sp.created_by,
+                created_at=sp.created_at,
+                updated_at=sp.updated_at,
+                concept_tags=[
+                    _hydrate_tag(t) for t in sub_tags_by_fragment.get(sp.id, [])
+                ],
+                harmony_events=[],
+                sub_parts=[],
+            )
+            for sp in sub_parts
+        ]
+
+        return FragmentDetailResponse(
+            id=fragment.id,
+            movement_id=fragment.movement_id,
+            parent_fragment_id=fragment.parent_fragment_id,
+            bar_start=fragment.bar_start,
+            bar_end=fragment.bar_end,
+            mc_start=fragment.mc_start,
+            mc_end=fragment.mc_end,
+            beat_start=fragment.beat_start,
+            beat_end=fragment.beat_end,
+            repeat_context=fragment.repeat_context,
+            summary=fragment.summary,
+            prose_annotation=fragment.prose_annotation,
+            data_licence=fragment.data_licence,
+            status=fragment.status,
+            created_by=fragment.created_by,
+            created_at=fragment.created_at,
+            updated_at=fragment.updated_at,
+            concept_tags=[_hydrate_tag(t) for t in parent_tags],
+            harmony_events=harmony_events,
+            sub_parts=sub_part_responses,
+        )
+
+    async def list_for_movement(
+        self,
+        movement_id: uuid.UUID,
+        caller_id: str,
+        caller_role: str,
+        cursor: str | None = None,
+        page_size: int = 100,
+    ) -> FragmentListResponse:
+        """Return a cursor-paginated list of top-level fragments for a movement.
+
+        Visibility rule (enforced at the service layer):
+        - Editors see their own drafts plus all submitted/approved/rejected.
+        - Admins see all fragments regardless of status.
+
+        Sub-parts are nested one level deep inside each top-level item (ADR-011
+        two-level display limit).  Sub-parts are not separately paginated;
+        all sub-parts of each page's top-level fragments are returned.
+
+        The cursor encodes ``(mc_start, id)``; results are ordered by
+        ``(mc_start ASC, id ASC)`` for stable, position-ordered pagination.
+
+        Args:
+            movement_id: UUID of the movement to query.
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller.
+            cursor: Opaque pagination cursor from a prior response.
+            page_size: Maximum top-level fragments per page (1–500).
+
+        Returns:
+            :class:`~models.fragment.FragmentListResponse` with items and an
+            optional ``next_cursor`` for the following page.
+
+        Raises:
+            ValueError: Cursor string is malformed.
+        """
+        stmt = (
+            select(Fragment)
+            .where(
+                Fragment.movement_id == movement_id,
+                Fragment.parent_fragment_id.is_(None),
+            )
+            .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+        )
+
+        # Status visibility — enforced at the service layer, not in the route.
+        if caller_role != "admin":
+            caller_uuid = uuid.UUID(caller_id)
+            stmt = stmt.where(
+                or_(
+                    Fragment.status.in_(["submitted", "approved", "rejected"]),
+                    and_(
+                        Fragment.status == "draft",
+                        Fragment.created_by == caller_uuid,
+                    ),
+                )
+            )
+
+        # Cursor: filter to rows after (mc_start, id).
+        if cursor is not None:
+            cursor_mc, cursor_id = _decode_cursor(cursor)
+            stmt = stmt.where(
+                or_(
+                    Fragment.mc_start > cursor_mc,
+                    and_(
+                        Fragment.mc_start == cursor_mc,
+                        Fragment.id > cursor_id,
+                    ),
+                )
+            )
+
+        # Fetch one extra to detect whether a next page exists.
+        result = await self._db.execute(stmt.limit(page_size + 1))
+        rows = list(result.scalars().all())
+
+        has_next = len(rows) > page_size
+        page = rows[:page_size]
+
+        if not page:
+            return FragmentListResponse(items=[], next_cursor=None)
+
+        page_ids = [f.id for f in page]
+
+        # Load concept tags for all top-level fragments in one query.
+        tags_result = await self._db.execute(
+            select(FragmentConceptTag).where(
+                FragmentConceptTag.fragment_id.in_(page_ids)
+            )
+        )
+        tags_by_frag: dict[uuid.UUID, list[FragmentConceptTag]] = {}
+        for tag in tags_result.scalars().all():
+            tags_by_frag.setdefault(tag.fragment_id, []).append(tag)
+
+        # Load all sub-parts for this page in one query.
+        sub_result = await self._db.execute(
+            select(Fragment)
+            .where(Fragment.parent_fragment_id.in_(page_ids))
+            .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+        )
+        sub_by_parent: dict[uuid.UUID, list[Fragment]] = {}
+        for sp in sub_result.scalars().all():
+            sub_by_parent.setdefault(sp.parent_fragment_id, []).append(sp)
+
+        # Load concept tags for all sub-parts in one query.
+        all_sub_ids = [sp.id for sps in sub_by_parent.values() for sp in sps]
+        sub_tags_by_frag: dict[uuid.UUID, list[FragmentConceptTag]] = {}
+        if all_sub_ids:
+            sub_tags_result = await self._db.execute(
+                select(FragmentConceptTag).where(
+                    FragmentConceptTag.fragment_id.in_(all_sub_ids)
+                )
+            )
+            for tag in sub_tags_result.scalars().all():
+                sub_tags_by_frag.setdefault(tag.fragment_id, []).append(tag)
+
+        # Batch Neo4j hydration for all concept IDs on this page.
+        all_concept_ids = list(
+            {t.concept_id for tags in tags_by_frag.values() for t in tags}
+            | {t.concept_id for tags in sub_tags_by_frag.values() for t in tags}
+        )
+        alias_map: dict[str, str | None] = {}
+        if all_concept_ids:
+            async with self._driver.session() as neo_session:
+                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
+                    aliases: list[str] = c.get("aliases", [])
+                    alias_map[c["id"]] = aliases[0] if aliases else None
+
+        def _primary(frag_id: uuid.UUID, tmap: dict) -> tuple[str | None, str | None]:
+            for tag in tmap.get(frag_id, []):
+                if tag.is_primary:
+                    return tag.concept_id, alias_map.get(tag.concept_id)
+            return None, None
+
+        def _list_item(f: Fragment, tmap: dict, sp_tmap: dict) -> FragmentListItem:
+            p_id, p_alias = _primary(f.id, tmap)
+            return FragmentListItem(
+                id=f.id,
+                movement_id=f.movement_id,
+                parent_fragment_id=f.parent_fragment_id,
+                mc_start=f.mc_start,
+                mc_end=f.mc_end,
+                bar_start=f.bar_start,
+                bar_end=f.bar_end,
+                beat_start=f.beat_start,
+                beat_end=f.beat_end,
+                repeat_context=f.repeat_context,
+                status=f.status,
+                primary_concept_id=p_id,
+                primary_concept_alias=p_alias,
+                sub_parts=[
+                    FragmentListItem(
+                        id=sp.id,
+                        movement_id=sp.movement_id,
+                        parent_fragment_id=sp.parent_fragment_id,
+                        mc_start=sp.mc_start,
+                        mc_end=sp.mc_end,
+                        bar_start=sp.bar_start,
+                        bar_end=sp.bar_end,
+                        beat_start=sp.beat_start,
+                        beat_end=sp.beat_end,
+                        repeat_context=sp.repeat_context,
+                        status=sp.status,
+                        primary_concept_id=_primary(sp.id, sp_tmap)[0],
+                        primary_concept_alias=_primary(sp.id, sp_tmap)[1],
+                        sub_parts=[],
+                    )
+                    for sp in sub_by_parent.get(f.id, [])
+                ],
+            )
+
+        items = [_list_item(f, tags_by_frag, sub_tags_by_frag) for f in page]
+
+        next_cursor = (
+            _encode_cursor(page[-1].mc_start, page[-1].id) if has_next else None
+        )
+        return FragmentListResponse(items=items, next_cursor=next_cursor)
 
     # ------------------------------------------------------------------
     # Public interface — review state machine
@@ -558,6 +923,50 @@ class FragmentService:
         result = await self._db.execute(stmt)
         return result.scalar_one()
 
+    async def _slice_harmony_events(
+        self,
+        movement_id: uuid.UUID,
+        bar_start: int,
+        bar_end: int,
+        repeat_context: str | None,
+    ) -> list[dict]:
+        """Slice harmony events from movement_analysis for a fragment's bar range.
+
+        Applies volta filtering when ``repeat_context`` names a specific ending.
+        Events with a null ``mn`` are skipped.
+
+        Args:
+            movement_id: The movement whose analysis to query.
+            bar_start: Inclusive lower bound (notated bar number).
+            bar_end: Inclusive upper bound (notated bar number).
+            repeat_context: Fragment repeat context string (e.g. ``"first_ending"``),
+                or ``None`` for no volta filter.
+
+        Returns:
+            Subset of event dicts in the fragment's bar range, in their original
+            ``movement_analysis.events`` array order.
+        """
+        result = await self._db.execute(
+            select(MovementAnalysis.events).where(
+                MovementAnalysis.movement_id == movement_id
+            )
+        )
+        events = result.scalar_one_or_none()
+        if not events:
+            return []
+        volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(repeat_context or "", None)
+        sliced: list[dict] = []
+        for ev in events:
+            mn = ev.get("mn")
+            if mn is None:
+                continue
+            if not (bar_start <= int(mn) <= bar_end):
+                continue
+            if volta_filter is not None and ev.get("volta") != volta_filter:
+                continue
+            sliced.append(ev)
+        return sliced
+
     async def _run_approval_gate(self, fragment: Fragment) -> dict:
         """Check all approval gate conditions and return a dict of failures.
 
@@ -598,29 +1007,15 @@ class FragmentService:
             has_gate = await check_concepts_have_harmony_gate(neo_session, concept_ids)
 
         if has_gate:
-            result = await self._db.execute(
-                select(MovementAnalysis.events).where(
-                    MovementAnalysis.movement_id == fragment.movement_id
-                )
+            in_range = await self._slice_harmony_events(
+                fragment.movement_id,
+                fragment.bar_start,
+                fragment.bar_end,
+                fragment.repeat_context,
             )
-            events = result.scalar_one_or_none()
-            if events:
-                volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(
-                    fragment.repeat_context or "", None
-                )
-                unreviewed = []
-                for ev in events:
-                    mn = ev.get("mn")
-                    if mn is None:
-                        continue
-                    if not (fragment.bar_start <= int(mn) <= fragment.bar_end):
-                        continue
-                    if volta_filter is not None and ev.get("volta") != volta_filter:
-                        continue
-                    if not ev.get("reviewed"):
-                        unreviewed.append(ev)
-                if unreviewed:
-                    failures["unreviewed_harmony_events"] = unreviewed
+            unreviewed = [ev for ev in in_range if not ev.get("reviewed")]
+            if unreviewed:
+                failures["unreviewed_harmony_events"] = unreviewed
 
         return failures
 

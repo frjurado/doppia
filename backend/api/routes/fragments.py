@@ -1,16 +1,18 @@
-"""Fragment API routes: create, update, submit, and review fragment records.
+"""Fragment API routes: create, read, update, submit, and review fragment records.
 
 Routes:
+    GET   /api/v1/fragments/{id}             — read one fragment (full detail)
     POST  /api/v1/fragments                  — create a draft fragment
     PATCH /api/v1/fragments/{id}             — update a draft or rejected fragment
     POST  /api/v1/fragments/{id}/submit      — transition draft → submitted
     POST  /api/v1/fragments/{id}/approve     — record an approval; gate → approved
     POST  /api/v1/fragments/{id}/reject      — record a rejection → rejected
 
-All routes require the ``editor`` role. List/read/delete endpoints are
-out of scope for Component 5 and will be added in Component 7.
+All routes require the ``editor`` role. The movement-scoped list endpoint
+(GET /api/v1/movements/{id}/fragments) is registered on the movements router.
 
 See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
+See docs/roadmap/component-7-fragment-database.md § Step 7.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from fastapi import APIRouter, Depends, Path
 from models.base import get_db
 from models.fragment import (
     FragmentCreate,
+    FragmentDetailResponse,
     FragmentResponse,
     FragmentUpdate,
     ReviewRequest,
@@ -51,6 +54,44 @@ def get_fragment_service(
         A :class:`~services.fragments.FragmentService` bound to both databases.
     """
     return FragmentService(db, driver)
+
+
+@router.get(
+    "/{fragment_id}",
+    response_model=FragmentDetailResponse,
+    dependencies=[require_role("editor")],
+    summary="Read one fragment (full detail)",
+    response_description=(
+        "Full fragment record: coordinates, concept tags hydrated with Neo4j "
+        "name/alias/hierarchy, harmony events sliced from movement_analysis, "
+        "and nested sub-parts one level deep."
+    ),
+)
+async def get_fragment(
+    fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to read"),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentDetailResponse:
+    """Return the full record for one fragment.
+
+    Draft fragments are visible only to their creator and admins.  All other
+    statuses (submitted, approved, rejected) are visible to any editor.
+    Requesting a draft that belongs to a different annotator returns 404.
+
+    Args:
+        fragment_id: UUID of the fragment to read.
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        :class:`~models.fragment.FragmentDetailResponse` with concept tags,
+        sliced harmony events, and nested sub-parts.
+
+    Raises:
+        404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist or is a
+            draft not owned by the caller.
+    """
+    return await service.get(fragment_id, caller_id=user.id, caller_role=user.role)
 
 
 @router.post(
