@@ -1033,3 +1033,172 @@ describe('respondToMainResize', () => {
     expect(a.confirmed).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Step 4 — beat/sub-beat geometry (collapse-to-absent + stop-at-minimum)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify the Step 4 fixes for moveSplitHandle:
+ *
+ *  - Optional left/right stage collapses to absent when a beat boundary is
+ *    dragged past the stage's zero-width threshold (no bounce-back).
+ *  - Required stage at minimum width returns assignments unchanged (the
+ *    StageBrackets drag handler uses lastValidAssignments to prevent the
+ *    visual bounce; stages.ts itself returns the unchanged reference so the
+ *    caller can detect the clamp).
+ *  - Measure-level boundary: same collapse vs. stop semantics.
+ *  - beatFloat <= 1.0 (measure-boundary conversion): collapse optional stage.
+ */
+describe('moveSplitHandle — Step 4 beat/sub-beat geometry', () => {
+  /** Two-stage setup: optional left (A) and required right (B) over bars 1–4. */
+  function makeOptLeft() {
+    const stages = [
+      makeStage('A', 1, 1, false), // optional left
+      makeStage('B', 2, 1, true),  // required right
+    ];
+    // A: bars 1–2, B: bars 3–4 (measure-level, null beats)
+    return prePopulateStages(stages, makeSelection(1, 4));
+  }
+
+  /** Two-stage setup: required left (A) and optional right (B) over bars 1–4. */
+  function makeOptRight() {
+    const stages = [
+      makeStage('A', 1, 1, true),  // required left
+      makeStage('B', 2, 1, false), // optional right
+    ];
+    return prePopulateStages(stages, makeSelection(1, 4));
+  }
+
+  /** Give A beat-precision bounds so the beat path is exercised. */
+  function withBeatBounds(
+    assignments: StageAssignment[],
+    stageId: string,
+    beatStart: number | null,
+    beatEnd: number | null,
+  ): StageAssignment[] {
+    return assignments.map(a =>
+      a.stageId === stageId
+        ? { ...a, bounds: { ...a.bounds!, beatStart, beatEnd } }
+        : a,
+    );
+  }
+
+  // ── Beat boundary: optional left stage collapses ────────────────────────
+
+  it('beat boundary: optional left stage collapses when dragged past its beatStart', () => {
+    // A starts at bar 1, beatStart=null (→ floor 1.0). Drag to (bar 1, beat 1.0)
+    // → beatFloat <= leftBeatStart(1.0) → A should collapse.
+    const assignments = makeOptLeft();
+    const updated = moveSplitHandle(assignments, 0, bBoundary(1, 1.0));
+    const a = updated.find(x => x.stageId === 'A')!;
+    expect(a.absent).toBe(true);
+    expect(a.bounds).toBeNull();
+  });
+
+  it('beat boundary: optional left stage collapses when dragged before its beatStart', () => {
+    // A has beatStart=2.0. Drag to beat 2.0 → beatFloat <= leftBeatStart → collapse.
+    const base = withBeatBounds(makeOptLeft(), 'A', 2.0, null);
+    const updated = moveSplitHandle(base, 0, bBoundary(1, 2.0));
+    const a = updated.find(x => x.stageId === 'A')!;
+    expect(a.absent).toBe(true);
+  });
+
+  it('beat boundary: left stage collapses → right stage absorbs the space', () => {
+    const assignments = makeOptLeft();
+    // A (bars 1–2) collapses; B (bars 3–4) should extend to cover bars 1–4.
+    const updated = moveSplitHandle(assignments, 0, bBoundary(1, 1.0));
+    const b = updated.find(x => x.stageId === 'B')!;
+    expect(b.absent).toBe(false);
+    expect(b.bounds).not.toBeNull();
+    // B now starts where A started.
+    expect(b.bounds!.barStart).toBe(assignments.find(x => x.stageId === 'A')!.bounds!.barStart);
+  });
+
+  it('beat boundary: required left stage returns unchanged at minimum (no collapse)', () => {
+    // All stages are required in makeOptRight() for left.
+    const assignments = makeOptRight(); // A required, B optional
+    const beforeABounds = assignments.find(x => x.stageId === 'A')!.bounds!;
+    // Drag to A's barStart, at or before its beatStart floor → required, must not collapse.
+    const updated = moveSplitHandle(assignments, 0, bBoundary(beforeABounds.barStart, 1.0));
+    // Reference equality: moveSplitHandle returned the same array (clamped).
+    expect(updated).toBe(assignments);
+  });
+
+  // ── Beat boundary: optional right stage collapses ───────────────────────
+
+  it('beat boundary: optional right stage collapses when dragged past its beatEnd', () => {
+    // B ends at bar 4 with beatEnd=3.0. Drag handle to (bar 4, beat 3.0) → beatFloat >=
+    // rightStage.beatEnd → B collapses.
+    const base = withBeatBounds(makeOptRight(), 'B', null, 3.0);
+    const updated = moveSplitHandle(base, 0, bBoundary(4, 3.0));
+    const b = updated.find(x => x.stageId === 'B')!;
+    expect(b.absent).toBe(true);
+    expect(b.bounds).toBeNull();
+  });
+
+  it('beat boundary: right stage collapses → left stage absorbs the space', () => {
+    const base = withBeatBounds(makeOptRight(), 'B', null, 3.0);
+    const bOriginalEnd = base.find(x => x.stageId === 'B')!.bounds!.barEnd;
+    const updated = moveSplitHandle(base, 0, bBoundary(4, 3.0));
+    const a = updated.find(x => x.stageId === 'A')!;
+    expect(a.bounds!.barEnd).toBe(bOriginalEnd);
+  });
+
+  it('beat boundary: required right stage returns unchanged at minimum (no collapse)', () => {
+    // In makeOptLeft() B is required. Give B a beatEnd so the guard triggers.
+    const base = withBeatBounds(makeOptLeft(), 'B', null, 3.0);
+    const updated = moveSplitHandle(base, 0, bBoundary(4, 3.0));
+    expect(updated).toBe(base);
+  });
+
+  // ── Measure boundary: collapse semantics ───────────────────────────────
+
+  it('measure boundary: optional left stage collapses when barN < barStart', () => {
+    // A.barStart=1. barN=0 < 1 → collapse A.
+    const assignments = makeOptLeft();
+    const updated = moveSplitHandle(assignments, 0, mBoundary(0));
+    const a = updated.find(x => x.stageId === 'A')!;
+    expect(a.absent).toBe(true);
+  });
+
+  it('measure boundary: required left stage clamps (no collapse) when barN < barStart', () => {
+    const assignments = makeOptRight(); // A required
+    const updated = moveSplitHandle(assignments, 0, mBoundary(0));
+    // Required stage A should NOT collapse; the handle should clamp.
+    const a = updated.find(x => x.stageId === 'A')!;
+    expect(a.absent).toBe(false);
+    expect(a.bounds!.barEnd).toBeGreaterThanOrEqual(a.bounds!.barStart);
+  });
+
+  it('measure boundary: optional right stage collapses when barN > maxBarN', () => {
+    // B.barEnd=4. maxBarN=3.  barN=4 > 3 → collapse B.
+    const assignments = makeOptRight();
+    const updated = moveSplitHandle(assignments, 0, mBoundary(4));
+    const b = updated.find(x => x.stageId === 'B')!;
+    expect(b.absent).toBe(true);
+  });
+
+  // ── beatFloat <= 1.0 (measure-boundary conversion path) ────────────────
+
+  it('beat<=1.0 path: optional left stage collapses when measureBarN < barStart', () => {
+    // beatFloat=1.0 triggers the measure-boundary conversion path.
+    // clampedBarN=1 → measureBarN = clampedBarN-1 = 0 < leftStage.barStart(1) → collapse A.
+    const assignments = makeOptLeft();
+    const updated = moveSplitHandle(assignments, 0, bBoundary(1, 1.0));
+    const a = updated.find(x => x.stageId === 'A')!;
+    expect(a.absent).toBe(true);
+  });
+
+  it('beat<=1.0 path: required left stage returns unchanged when measureBarN < barStart', () => {
+    // Both stages required in makePacAssignments-style setup.
+    const stages = [
+      makeStage('A', 1, 1, true),
+      makeStage('B', 2, 1, true),
+    ];
+    const assignments = prePopulateStages(stages, makeSelection(1, 4));
+    // A.barStart=1. bBoundary(1, 1.0) → measureBarN=0 < 1. Required → unchanged.
+    const updated = moveSplitHandle(assignments, 0, bBoundary(1, 1.0));
+    expect(updated).toBe(assignments);
+  });
+});

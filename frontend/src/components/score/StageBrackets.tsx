@@ -161,7 +161,12 @@ function resolveSegments(
 ): BracketSegment[] {
   const { barStart, barEnd, beatStart, beatEnd } = bounds;
 
-  const useBeat = resolution !== 'measure' && (beatStart !== null || beatEnd !== null);
+  // At beat/sub-beat resolution, always derive pixel extents from the beat or
+  // sub-beat ghost index — never from the enclosing measure ghost.  Null
+  // beatStart/beatEnd default to -Infinity/+Infinity below, which includes the
+  // full bar range so measure-level bounds render at the same pixel positions
+  // while staying consistent with the beat ghost coordinate system.
+  const useBeat = resolution !== 'measure';
 
   if (!useBeat) {
     return resolveSegmentsMeasure(barStart, barEnd, layer);
@@ -300,6 +305,10 @@ export default function StageBrackets({
     sortedIdx: number;
     systemBottom: number;
     initialAssignments: StageAssignment[];
+    /** Last result that actually moved a boundary (not a clamp or no-op).
+     *  Used to stop the bracket at the minimum-width floor rather than bouncing
+     *  back to the drag-start position when a required stage hits its minimum. */
+    lastValidAssignments: StageAssignment[] | null;
   } | null>(null);
 
   const handleContainerRef = useRef<HTMLDivElement | null>(null);
@@ -327,6 +336,29 @@ export default function StageBrackets({
       dragRef.current.sortedIdx,
       splitBoundary,
     );
+
+    if (updated === dragRef.current.initialAssignments) {
+      // moveSplitHandle returned unchanged — a required stage hit its minimum-width
+      // floor.  Show the last valid position to prevent a visual bounce-back to
+      // the drag-start position.
+      const stable = dragRef.current.lastValidAssignments ?? dragRef.current.initialAssignments;
+      onSplitHandleMove(stable);
+      return;
+    }
+
+    // Detect whether a stage was collapsed (absent count increased).  If so,
+    // null the drag ref so subsequent mousemove events are no-ops — the handle
+    // no longer exists between the remaining active stages.  handleMouseUp will
+    // remove the event listeners on the next mouseup.
+    const prevAbsent = dragRef.current.initialAssignments.filter(a => a.absent).length;
+    const nextAbsent = updated.filter(a => a.absent).length;
+    if (nextAbsent > prevAbsent) {
+      onSplitHandleMove(updated);
+      dragRef.current = null;
+      return;
+    }
+
+    dragRef.current.lastValidAssignments = updated;
     onSplitHandleMove(updated);
   }, [layer, resolution, onSplitHandleMove]);
 
@@ -340,7 +372,7 @@ export default function StageBrackets({
     (e: React.MouseEvent, sortedIdx: number, systemBottom: number) => {
       e.stopPropagation();
       e.preventDefault();
-      dragRef.current = { sortedIdx, systemBottom, initialAssignments: assignments };
+      dragRef.current = { sortedIdx, systemBottom, initialAssignments: assignments, lastValidAssignments: null };
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     },

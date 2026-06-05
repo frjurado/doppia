@@ -406,7 +406,19 @@ export function moveSplitHandle(
       const measureBarN = clampedBarN - 1;
       const minMeasureBarN = leftStage.bounds.barStart;     // 1-bar minimum left
       const maxMeasureBarN = rightStage.bounds.barEnd - 1;  // 1-bar minimum right
-      if (measureBarN < minMeasureBarN || measureBarN > maxMeasureBarN) return assignments;
+      if (measureBarN < minMeasureBarN) {
+        // Left stage would get 0 bars. Collapse if optional, refuse if required.
+        if (!leftStage.required) {
+          return toggleStageAbsent(assignments, leftStage.stageId, true);
+        }
+        return assignments;
+      }
+      if (measureBarN > maxMeasureBarN) {
+        if (!rightStage.required) {
+          return toggleStageAbsent(assignments, rightStage.stageId, true);
+        }
+        return assignments;
+      }
 
       return assignments.map(a => {
         if (a.stageId === leftStage.stageId) {
@@ -433,6 +445,12 @@ export function moveSplitHandle(
     // beatStart = null means the stage starts at the bar beginning (beat 1.0).
     const leftBeatStart = leftStage.bounds.beatStart ?? 1.0;
     if (clampedBarN === leftStage.bounds.barStart && beatFloat <= leftBeatStart) {
+      // Zero-width threshold reached for the left stage.
+      // Optional stages collapse to absent; required stages stop at minimum (caller
+      // uses lastValidAssignments to prevent visual bounce-back).
+      if (!leftStage.required) {
+        return toggleStageAbsent(assignments, leftStage.stageId, true);
+      }
       return assignments;
     }
     // Same guard for rightStage: block if boundary lands at or after its beat end.
@@ -442,6 +460,9 @@ export function moveSplitHandle(
       rightStage.bounds.beatEnd !== null &&
       beatFloat >= rightStage.bounds.beatEnd
     ) {
+      if (!rightStage.required) {
+        return toggleStageAbsent(assignments, rightStage.stageId, true);
+      }
       return assignments;
     }
 
@@ -464,10 +485,24 @@ export function moveSplitHandle(
     });
   }
 
-  // Measure-level boundary: enforce 1-bar minimum for all stages (required and optional).
-  // Sidebar toggle is the only mechanism for marking stages absent.
+  // Measure-level boundary: enforce 1-bar minimum for required stages.
+  // Optional stages collapse to absent when dragged past their zero-width threshold.
   const minBarN = leftStage.bounds.barStart;     // barEnd ≥ barStart always
   const maxBarN = rightStage.bounds.barEnd - 1;  // barStart ≤ barEnd always
+
+  // Collapse checks: dragging past a stage's zero-width point.
+  if (barN < minBarN) {
+    if (!leftStage.required) {
+      return toggleStageAbsent(assignments, leftStage.stageId, true);
+    }
+    // Required: fall through to clamp (handle stops at minimum-width floor).
+  }
+  if (barN > maxBarN) {
+    if (!rightStage.required) {
+      return toggleStageAbsent(assignments, rightStage.stageId, true);
+    }
+    // Required: fall through to clamp.
+  }
 
   // No valid split position (fewer bars than stages need) — leave unchanged.
   if (minBarN > maxBarN) return assignments;
