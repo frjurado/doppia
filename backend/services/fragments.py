@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from errors import (
@@ -38,6 +39,7 @@ from models.fragment import (
     FragmentListItem,
     FragmentListResponse,
     FragmentReview,
+    FragmentSummary,
     FragmentUpdate,
     SubPartFragmentCreate,
 )
@@ -49,6 +51,25 @@ from services.fragment_validation import (
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+@dataclass
+class FragmentUpdateResult:
+    """Result of :meth:`FragmentService.update` carrying revision metadata.
+
+    The route handler uses ``previous_status`` and ``status_changed`` to
+    populate :class:`~models.fragment.FragmentUpdateResponse` so the UI can
+    surface 'this edit re-opened review' without comparing states itself.
+    """
+
+    fragment: Fragment
+    previous_status: str
+
+    @property
+    def status_changed(self) -> bool:
+        """True when the edit triggered a status transition."""
+        return self.fragment.status != self.previous_status
+
 
 # Phase 1 approval threshold: one non-creator approving review is sufficient.
 _APPROVAL_THRESHOLD: int = 1
@@ -246,6 +267,168 @@ class FragmentService:
             ) from exc
 
         return fragment
+
+    async def update(
+        self,
+        fragment_id: uuid.UUID,
+        payload: FragmentUpdate,
+        caller_id: str,
+        caller_role: str,
+    ) -> FragmentUpdateResult:
+        """Update a fragment at any status with revision semantics.
+
+        The revision behaviour is decided per-status and per-field type:
+
+        * **draft**: update all fields, keep ``draft`` status.
+        * **rejected**: update all fields, transition ``rejected → draft``.
+        * **submitted** (analytic edit): replace fields, keep ``submitted``,
+          clear all ``fragment_review`` rows (the thing reviewed has changed).
+        * **approved** (analytic edit): replace fields, transition
+          ``approved → submitted``, clear ``fragment_review`` rows.
+        * **submitted / approved** (prose-only edit): update only
+          ``prose_annotation`` in place; status and reviews are untouched.
+
+        An edit is *prose-only* when the payload's analytic fields (coordinates,
+        summary, concept tags, sub-part coordinates and tags) are identical to
+        the stored state and only ``prose_annotation`` differs.
+
+        The atomic parent+child write is reused for analytic edits so that a
+        stage change rewrites child fragments transactionally.
+
+        Args:
+            fragment_id: UUID of the fragment to update.
+            payload: Validated :class:`~models.fragment.FragmentUpdate` payload.
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller (``"editor"`` or
+                ``"admin"``).
+
+        Returns:
+            :class:`FragmentUpdateResult` with the updated fragment and the
+            status it held before the edit.
+
+        Raises:
+            FragmentNotFoundError: Fragment does not exist.
+            FragmentValidationError: Caller lacks permission, concept id
+                missing from the graph, or sub-part out of range.
+        """
+        validate_containment_for_update(payload)
+        await self._check_all_concepts_for_update(payload)
+
+        try:
+            async with self._db.begin():
+                # Load the fragment at any status; revision logic handles transitions.
+                result = await self._db.execute(
+                    select(Fragment).where(Fragment.id == fragment_id)
+                )
+                fragment = result.scalar_one_or_none()
+                if fragment is None:
+                    raise FragmentNotFoundError(
+                        f"No fragment with id '{fragment_id}' exists.",
+                        detail={"fragment_id": str(fragment_id)},
+                    )
+
+                self._check_edit_permission(fragment, caller_id, caller_role)
+                previous_status = fragment.status
+
+                # Load existing concept tags for analytic comparison.
+                tags_result = await self._db.execute(
+                    select(FragmentConceptTag).where(
+                        FragmentConceptTag.fragment_id == fragment_id
+                    )
+                )
+                existing_tags = list(tags_result.scalars().all())
+
+                # Load existing sub-parts and their concept tags.
+                subs_result = await self._db.execute(
+                    select(Fragment)
+                    .where(Fragment.parent_fragment_id == fragment_id)
+                    .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+                )
+                existing_subs = list(subs_result.scalars().all())
+
+                existing_sub_tags: dict[uuid.UUID, list[FragmentConceptTag]] = {}
+                if existing_subs:
+                    sub_ids = [sp.id for sp in existing_subs]
+                    sub_tags_result = await self._db.execute(
+                        select(FragmentConceptTag).where(
+                            FragmentConceptTag.fragment_id.in_(sub_ids)
+                        )
+                    )
+                    for tag in sub_tags_result.scalars().all():
+                        existing_sub_tags.setdefault(tag.fragment_id, []).append(tag)
+
+                analytic_changed = self._analytic_fields_changed(
+                    fragment, existing_tags, existing_subs, existing_sub_tags, payload
+                )
+
+                if not analytic_changed:
+                    # Prose-only edit: update annotation in place; reviews unchanged.
+                    fragment.prose_annotation = payload.prose_annotation
+                    fragment.updated_at = datetime.now(tz=timezone.utc)
+                    self._db.add(fragment)
+                else:
+                    # Analytic edit: full field replacement with revision semantics.
+                    data_licence = await self._derive_data_licence(
+                        fragment.movement_id, payload.bar_start, payload.bar_end
+                    )
+
+                    fragment.bar_start = payload.bar_start
+                    fragment.bar_end = payload.bar_end
+                    fragment.mc_start = payload.mc_start
+                    fragment.mc_end = payload.mc_end
+                    fragment.beat_start = payload.beat_start
+                    fragment.beat_end = payload.beat_end
+                    fragment.repeat_context = payload.repeat_context
+                    fragment.summary = payload.summary.model_dump()
+                    fragment.prose_annotation = payload.prose_annotation
+                    fragment.data_licence = data_licence
+                    fragment.updated_at = datetime.now(tz=timezone.utc)
+
+                    # Status transition and review-row clearing.
+                    if fragment.status == "rejected":
+                        fragment.status = "draft"
+                    elif fragment.status in ("submitted", "approved"):
+                        if fragment.status == "approved":
+                            fragment.status = "submitted"
+                        # Clear prior reviews — the content they approved has changed.
+                        await self._db.execute(
+                            delete(FragmentReview).where(
+                                FragmentReview.fragment_id == fragment_id
+                            )
+                        )
+                    # draft status is unchanged.
+
+                    self._db.add(fragment)
+
+                    # Replace concept tags.
+                    await self._db.execute(
+                        delete(FragmentConceptTag).where(
+                            FragmentConceptTag.fragment_id == fragment_id
+                        )
+                    )
+                    self._add_concept_tags(fragment_id, payload.concept_tags)
+
+                    # Replace sub-parts (cascade deletes their tags via FK).
+                    await self._db.execute(
+                        delete(Fragment).where(
+                            Fragment.parent_fragment_id == fragment_id
+                        )
+                    )
+                    for sp in payload.sub_parts:
+                        child = self._make_subpart_orm(
+                            sp, fragment_id, fragment.movement_id, data_licence
+                        )
+                        self._db.add(child)
+                        await self._db.flush()
+                        self._add_concept_tags(child.id, sp.concept_tags)
+
+        except IntegrityError as exc:
+            raise FragmentValidationError(
+                "Fragment references a missing related record (user or movement).",
+                detail={"integrity_error": str(exc.orig)},
+            ) from exc
+
+        return FragmentUpdateResult(fragment=fragment, previous_status=previous_status)
 
     async def submit(self, fragment_id: uuid.UUID) -> Fragment:
         """Transition a draft fragment to ``submitted``.
@@ -1046,6 +1229,99 @@ class FragmentService:
                     ),
                 },
             )
+
+    # ------------------------------------------------------------------
+    # Internal helpers — analytic change detection (Step 8)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _analytic_fields_changed(
+        fragment: Fragment,
+        existing_tags: list[FragmentConceptTag],
+        existing_subs: list[Fragment],
+        existing_sub_tags: dict[uuid.UUID, list[FragmentConceptTag]],
+        payload: FragmentUpdate,
+    ) -> bool:
+        """Return True if the payload changes any analytic field vs. stored state.
+
+        ``prose_annotation`` is the only non-analytic field — all others
+        (coordinates, summary, concept tags, sub-part coordinates/tags)
+        invalidate prior analytical approval if changed.
+
+        Returns False only when the payload is purely a prose-annotation edit,
+        so the caller may update ``prose_annotation`` in place without clearing
+        reviews or transitioning status.
+
+        Args:
+            fragment: Stored parent fragment ORM row.
+            existing_tags: Stored concept tags for the parent fragment.
+            existing_subs: Stored child (sub-part) fragment rows, ordered by
+                ``(mc_start, id)`` ascending.
+            existing_sub_tags: Stored concept tags keyed by sub-part fragment id.
+            payload: Incoming :class:`~models.fragment.FragmentUpdate` payload.
+
+        Returns:
+            True when at least one analytic field differs; False for prose-only.
+        """
+        if (
+            fragment.bar_start != payload.bar_start
+            or fragment.bar_end != payload.bar_end
+            or fragment.mc_start != payload.mc_start
+            or fragment.mc_end != payload.mc_end
+            or fragment.beat_start != payload.beat_start
+            or fragment.beat_end != payload.beat_end
+            or fragment.repeat_context != payload.repeat_context
+        ):
+            return True
+
+        # Normalize both sides through FragmentSummary so that optional fields
+        # absent from older stored dicts (pre-existing rows missing None-valued
+        # keys) compare equal to a freshly serialised Pydantic model.
+        stored_summary = FragmentSummary.model_validate(fragment.summary).model_dump()
+        if stored_summary != payload.summary.model_dump():
+            return True
+
+        existing_tag_pairs = frozenset(
+            (t.concept_id, t.is_primary) for t in existing_tags
+        )
+        payload_tag_pairs = frozenset(
+            (t.concept_id, t.is_primary) for t in payload.concept_tags
+        )
+        if existing_tag_pairs != payload_tag_pairs:
+            return True
+
+        if len(existing_subs) != len(payload.sub_parts):
+            return True
+
+        # Compare sub-parts pairwise sorted by mc_start (the write path preserves
+        # insertion order by mc_start; ties broken by UUID are stable within a run).
+        for sp, psp in zip(
+            sorted(existing_subs, key=lambda s: (s.mc_start, str(s.id))),
+            sorted(payload.sub_parts, key=lambda p: p.mc_start),
+        ):
+            stored_sp_summary = FragmentSummary.model_validate(sp.summary).model_dump()
+            if (
+                sp.bar_start != psp.bar_start
+                or sp.bar_end != psp.bar_end
+                or sp.mc_start != psp.mc_start
+                or sp.mc_end != psp.mc_end
+                or sp.beat_start != psp.beat_start
+                or sp.beat_end != psp.beat_end
+                or sp.repeat_context != psp.repeat_context
+                or stored_sp_summary != psp.summary.model_dump()
+            ):
+                return True
+
+            sp_tag_pairs = frozenset(
+                (t.concept_id, t.is_primary) for t in existing_sub_tags.get(sp.id, [])
+            )
+            psp_tag_pairs = frozenset(
+                (t.concept_id, t.is_primary) for t in psp.concept_tags
+            )
+            if sp_tag_pairs != psp_tag_pairs:
+                return True
+
+        return False
 
     # ------------------------------------------------------------------
     # Internal helpers — concept validation

@@ -784,3 +784,288 @@ class TestRunApprovalGate:
             failures = await service._run_approval_gate(fragment)
 
         assert failures == {}
+
+
+# ---------------------------------------------------------------------------
+# TestAnalyticFieldsChanged
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyticFieldsChanged:
+    """FragmentService._analytic_fields_changed — analytic vs prose-only detection.
+
+    The helper returns True when any analytic field (coordinates, summary,
+    concept tags, sub-part coordinates/tags) differs between the stored fragment
+    and the payload.  It returns False only when prose_annotation is the sole
+    change — in which case the caller may update in place without clearing
+    reviews or transitioning status.
+    """
+
+    def _make_payload(self, **overrides: Any) -> Any:
+        """Minimal valid FragmentUpdate using the same values as _make_fragment."""
+        from models.fragment import FragmentUpdate
+
+        base = {
+            "bar_start": 1,
+            "bar_end": 4,
+            "mc_start": 1,
+            "mc_end": 4,
+            "summary": _min_summary(),
+            "concept_tags": [
+                {"concept_id": "PerfectAuthenticCadence", "is_primary": True}
+            ],
+            "sub_parts": [],
+        }
+        base.update(overrides)
+        return FragmentUpdate.model_validate(base)
+
+    def _make_stored_fragment(self, **overrides: Any) -> Any:
+        """Fragment row matching the default _make_payload values."""
+        fragment = _make_fragment(bar_start=1, bar_end=4, status="approved")
+        fragment.mc_start = 1
+        fragment.mc_end = 4
+        fragment.beat_start = None
+        fragment.beat_end = None
+        fragment.repeat_context = None
+        fragment.summary = _min_summary()
+        fragment.prose_annotation = "original prose"
+        for k, v in overrides.items():
+            setattr(fragment, k, v)
+        return fragment
+
+    def _tag(
+        self, concept_id: str = "PerfectAuthenticCadence", primary: bool = True
+    ) -> Any:
+        from models.fragment import FragmentConceptTag
+
+        t = FragmentConceptTag()
+        t.fragment_id = uuid.uuid4()
+        t.concept_id = concept_id
+        t.is_primary = primary
+        return t
+
+    # -- Returns False (prose-only) --
+
+    def test_identical_payload_returns_false(self) -> None:
+        """Payload with all analytic fields matching stored state returns False."""
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]
+        payload = self._make_payload()
+
+        result = FragmentService._analytic_fields_changed(
+            fragment, tags, [], {}, payload
+        )
+        assert result is False
+
+    def test_only_prose_annotation_changed_returns_false(self) -> None:
+        """Changing prose_annotation alone does not trigger an analytic change."""
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment(prose_annotation="original prose")
+        tags = [self._tag()]
+        payload = self._make_payload(prose_annotation="revised prose")
+
+        result = FragmentService._analytic_fields_changed(
+            fragment, tags, [], {}, payload
+        )
+        assert result is False
+
+    # -- Returns True (analytic change) --
+
+    def test_bar_start_change_returns_true(self) -> None:
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment(bar_start=1)
+        tags = [self._tag()]
+        payload = self._make_payload(bar_start=2)
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_mc_end_change_returns_true(self) -> None:
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]
+        payload = self._make_payload(mc_end=8)  # stored is 4
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_beat_start_added_returns_true(self) -> None:
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment(beat_start=None, beat_end=None)
+        tags = [self._tag()]
+        payload = self._make_payload(beat_start=1.0, beat_end=3.0)
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_summary_change_returns_true(self) -> None:
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment(summary=_min_summary(key="G major"))
+        tags = [self._tag()]
+        payload = self._make_payload(summary={**_min_summary(), "key": "D major"})
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_concept_tag_added_returns_true(self) -> None:
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]  # one tag stored
+        payload = self._make_payload(
+            concept_tags=[
+                {"concept_id": "PerfectAuthenticCadence", "is_primary": True},
+                {"concept_id": "Hemiola", "is_primary": False},
+            ]
+        )
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_concept_tag_replaced_returns_true(self) -> None:
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag("PerfectAuthenticCadence")]
+        payload = self._make_payload(
+            concept_tags=[{"concept_id": "HalfCadence", "is_primary": True}]
+        )
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_sub_part_added_returns_true(self) -> None:
+        """Adding a sub-part when none existed is an analytic change."""
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]
+        payload = self._make_payload(sub_parts=[_sub_part(bar_start=1, bar_end=2)])
+
+        assert (
+            FragmentService._analytic_fields_changed(fragment, tags, [], {}, payload)
+            is True
+        )
+
+    def test_sub_part_removed_returns_true(self) -> None:
+        """Removing an existing sub-part is an analytic change."""
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]
+        # One existing sub-part
+        sp = _make_fragment(bar_start=1, bar_end=2, status="draft")
+        sp.mc_start = 1
+        sp.mc_end = 2
+        sp.beat_start = None
+        sp.beat_end = None
+        sp.repeat_context = None
+        sp.summary = _min_summary()
+        sp_tag = self._tag()
+        sp_tag.fragment_id = sp.id
+        existing_sub_tags = {sp.id: [sp_tag]}
+
+        payload = self._make_payload(sub_parts=[])  # removed
+
+        assert (
+            FragmentService._analytic_fields_changed(
+                fragment, tags, [sp], existing_sub_tags, payload
+            )
+            is True
+        )
+
+    def test_sub_part_coordinate_change_returns_true(self) -> None:
+        """Changing a sub-part's coordinates is an analytic change."""
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]
+        sp = _make_fragment(bar_start=1, bar_end=2, status="draft")
+        sp.mc_start = 1
+        sp.mc_end = 2
+        sp.beat_start = None
+        sp.beat_end = None
+        sp.repeat_context = None
+        sp.summary = _min_summary()
+        sp_tag = self._tag()
+        sp_tag.fragment_id = sp.id
+        existing_sub_tags = {sp.id: [sp_tag]}
+
+        payload = self._make_payload(
+            sub_parts=[_sub_part(bar_start=1, bar_end=3)]  # bar_end changed
+        )
+
+        assert (
+            FragmentService._analytic_fields_changed(
+                fragment, tags, [sp], existing_sub_tags, payload
+            )
+            is True
+        )
+
+    def test_identical_sub_parts_return_false(self) -> None:
+        """A payload with identical sub-parts is not an analytic change."""
+        from services.fragments import FragmentService
+
+        fragment = self._make_stored_fragment()
+        tags = [self._tag()]
+        sp = _make_fragment(bar_start=1, bar_end=2, status="draft")
+        sp.mc_start = 1
+        sp.mc_end = 2
+        sp.beat_start = None
+        sp.beat_end = None
+        sp.repeat_context = None
+        sp.summary = _min_summary()
+        sp_tag = self._tag()
+        sp_tag.fragment_id = sp.id
+        existing_sub_tags = {sp.id: [sp_tag]}
+
+        payload = self._make_payload(sub_parts=[_sub_part(bar_start=1, bar_end=2)])
+
+        assert (
+            FragmentService._analytic_fields_changed(
+                fragment, tags, [sp], existing_sub_tags, payload
+            )
+            is False
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestFragmentUpdateResult
+# ---------------------------------------------------------------------------
+
+
+class TestFragmentUpdateResult:
+    """FragmentUpdateResult.status_changed — derived property correctness."""
+
+    def test_status_changed_true_when_statuses_differ(self) -> None:
+        from services.fragments import FragmentUpdateResult
+
+        fragment = _make_fragment(status="submitted")
+        result = FragmentUpdateResult(fragment=fragment, previous_status="approved")
+        assert result.status_changed is True
+
+    def test_status_changed_false_when_statuses_match(self) -> None:
+        from services.fragments import FragmentUpdateResult
+
+        fragment = _make_fragment(status="draft")
+        result = FragmentUpdateResult(fragment=fragment, previous_status="draft")
+        assert result.status_changed is False

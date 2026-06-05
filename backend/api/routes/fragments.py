@@ -3,7 +3,7 @@
 Routes:
     GET   /api/v1/fragments/{id}             — read one fragment (full detail)
     POST  /api/v1/fragments                  — create a draft fragment
-    PATCH /api/v1/fragments/{id}             — update a draft or rejected fragment
+    PATCH /api/v1/fragments/{id}             — update at any status (revision semantics)
     POST  /api/v1/fragments/{id}/submit      — transition draft → submitted
     POST  /api/v1/fragments/{id}/approve     — record an approval; gate → approved
     POST  /api/v1/fragments/{id}/reject      — record a rejection → rejected
@@ -12,7 +12,7 @@ All routes require the ``editor`` role. The movement-scoped list endpoint
 (GET /api/v1/movements/{id}/fragments) is registered on the movements router.
 
 See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
-See docs/roadmap/component-7-fragment-database.md § Step 7.
+See docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from models.fragment import (
     FragmentDetailResponse,
     FragmentResponse,
     FragmentUpdate,
+    FragmentUpdateResponse,
     ReviewRequest,
 )
 from neo4j import AsyncDriver
@@ -134,41 +135,72 @@ async def create_fragment(
 
 @router.patch(
     "/{fragment_id}",
-    response_model=FragmentResponse,
+    response_model=FragmentUpdateResponse,
     dependencies=[require_role("editor")],
-    summary="Update a draft fragment",
-    response_description="The updated fragment.",
+    summary="Update a fragment (draft, submitted, or approved)",
+    response_description=(
+        "The updated fragment with revision metadata. "
+        "``status_changed=true`` means the edit triggered a status transition "
+        "(e.g. ``approved`` → ``submitted``); ``previous_status`` names the "
+        "status before the edit so the UI can surface 'this edit re-opened review'."
+    ),
 )
 async def update_fragment(
     payload: FragmentUpdate,
-    fragment_id: uuid.UUID = Path(
-        ..., description="UUID of the draft fragment to update"
-    ),
+    fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to update"),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
-) -> FragmentResponse:
-    """Replace all mutable fields of a ``draft`` fragment.
+) -> FragmentUpdateResponse:
+    """Replace mutable fields of a fragment at any status.
 
-    Only the annotator who created the draft (or an admin) may call this
-    endpoint. The ``movement_id`` cannot change after creation. All concept
-    tags and sub-parts in the payload replace any previously stored values.
+    The endpoint accepts fragments in ``draft``, ``rejected``, ``submitted``,
+    or ``approved`` status. The creator and admins may edit; non-creators are
+    rejected with a 422.
+
+    **Revision semantics (analytic edit — coordinates, summary, concept tags,
+    or sub-parts changed):**
+
+    * ``draft`` → stays ``draft``.
+    * ``rejected`` → transitions to ``draft``.
+    * ``submitted`` → stays ``submitted``; all prior ``fragment_review`` rows
+      are cleared (the thing reviewed has changed).
+    * ``approved`` → transitions to ``submitted``; all prior
+      ``fragment_review`` rows are cleared.
+
+    **Prose-only edit** (only ``prose_annotation`` changed, all analytic fields
+    identical to stored state): update is applied in place with no status
+    change and no review-row clearing.
+
+    The ``movement_id`` is immutable after creation. All concept tags and
+    sub-parts in the payload replace any previously stored values atomically.
 
     Args:
         payload: Replacement payload (all mutable fields; no ``movement_id``).
-        fragment_id: UUID of the draft to update.
+        fragment_id: UUID of the fragment to update.
         service: Fragment service (injected).
         user: Authenticated caller (injected).
 
     Returns:
-        The updated :class:`~models.fragment.FragmentResponse`.
+        :class:`~models.fragment.FragmentUpdateResponse` with the updated
+        fragment and ``status_changed`` / ``previous_status`` revision fields.
+
+    Raises:
+        404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist.
+        422 ``FRAGMENT_VALIDATION_ERROR``: Caller is not the creator/admin,
+            a concept id is missing from the graph, or a sub-part is out of range.
     """
-    fragment = await service.update_draft(
+    result = await service.update(
         fragment_id=fragment_id,
         payload=payload,
         caller_id=user.id,
         caller_role=user.role,
     )
-    return FragmentResponse.model_validate(fragment)
+    base = FragmentResponse.model_validate(result.fragment)
+    return FragmentUpdateResponse(
+        **base.model_dump(),
+        previous_status=result.previous_status,
+        status_changed=result.status_changed,
+    )
 
 
 @router.post(

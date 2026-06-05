@@ -335,6 +335,21 @@ class FragmentListResponse(BaseModel):
     next_cursor: str | None
 
 
+class FragmentUpdateResponse(FragmentResponse):
+    """Response for PATCH /api/v1/fragments/{id}.
+
+    Extends FragmentResponse with revision metadata so the UI can reflect
+    'this edit re-opened review' when an approved fragment transitions back
+    to submitted, or when a submitted fragment's prior reviews are cleared.
+    """
+
+    previous_status: str
+    """The fragment's status before this edit was applied."""
+
+    status_changed: bool
+    """True when the edit triggered a status transition (e.g. approved → submitted)."""
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 

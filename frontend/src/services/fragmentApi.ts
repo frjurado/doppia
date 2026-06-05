@@ -3,7 +3,7 @@
  *
  * Write endpoints (Step 6, Component 5):
  *   POST   /api/v1/fragments             — create draft
- *   PATCH  /api/v1/fragments/{id}        — update draft
+ *   PATCH  /api/v1/fragments/{id}        — update at any status (revision semantics)
  *   POST   /api/v1/fragments/{id}/submit — draft → submitted
  *
  * Read endpoints (Step 7, Component 7):
@@ -16,7 +16,7 @@
  *
  * References:
  *   docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 18
- *   docs/roadmap/component-7-fragment-database.md § Step 7
+ *   docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8
  *   docs/architecture/fragment-schema.md §"The summary JSONB schema"
  *   backend/models/fragment.py
  */
@@ -104,7 +104,7 @@ export interface FragmentUpdatePayload {
   sub_parts?: SubPartPayload[];
 }
 
-/** Response shape from all fragment write endpoints. */
+/** Response shape from create, submit, approve, and reject endpoints. */
 export interface FragmentApiResponse {
   id: string;
   movement_id: string;
@@ -123,6 +123,23 @@ export interface FragmentApiResponse {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Response shape for PATCH /api/v1/fragments/{id}.
+ *
+ * Extends the base response with revision metadata so the UI can surface
+ * "this edit re-opened review" when an approved fragment transitions back to
+ * submitted, or when a submitted fragment's prior reviews are cleared.
+ */
+export interface FragmentUpdateApiResponse extends FragmentApiResponse {
+  /** The fragment's status before this edit was applied. */
+  previous_status: string;
+  /**
+   * True when the edit triggered a status transition
+   * (e.g. approved → submitted). False for prose-only edits and draft edits.
+   */
+  status_changed: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,17 +233,27 @@ export async function createFragment(
 }
 
 /**
- * Replace all mutable fields of a draft fragment.
+ * Replace mutable fields of a fragment at any status (revision semantics).
  *
- * @param id UUID of the draft to update.
- * @throws ApiError when the fragment is not found, not in draft status,
- *         or the caller is not the creator.
+ * The server applies revision semantics based on the current status:
+ * - draft/rejected: update in place (rejected transitions to draft).
+ * - submitted/approved (analytic edit): clears prior reviews; approved
+ *   transitions back to submitted.
+ * - submitted/approved (prose-only): updates prose_annotation in place with
+ *   no status change and no review clearing.
+ *
+ * Check `status_changed` in the response to surface "this edit re-opened
+ * review" in the UI.
+ *
+ * @param id UUID of the fragment to update.
+ * @throws ApiError when the fragment is not found, the caller lacks
+ *         permission, or a concept id is missing from the graph.
  */
 export async function updateFragment(
   id: string,
   payload: FragmentUpdatePayload,
-): Promise<FragmentApiResponse> {
-  return apiFetch<FragmentApiResponse>(`/api/v1/fragments/${id}`, {
+): Promise<FragmentUpdateApiResponse> {
+  return apiFetch<FragmentUpdateApiResponse>(`/api/v1/fragments/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
