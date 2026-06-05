@@ -43,6 +43,7 @@ import type { FragmentUpdatePayload, SubPartPayload } from '../services/fragment
 import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
 import { ApiError } from '../services/api';
+import { useStoredFragments } from '../hooks/useStoredFragments';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -470,6 +471,15 @@ export default function ScoreViewer() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ── Stored-fragment overlay (Component 7 Step 10) ─────────────────────────
+  // Fetches all stored fragments for the current movement so the overlay can
+  // project and display them.  refresh() is called after a successful submit
+  // so the newly submitted fragment appears immediately.
+  const {
+    fragments: storedFragments,
+    refresh: refreshStoredFragments,
+  } = useStoredFragments(movementId);
 
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
@@ -1046,13 +1056,16 @@ export default function ScoreViewer() {
         // Reset draft ID on success — the submitted fragment is immutable
         // until a reviewer rejects it; a new annotation starts clean.
         setFragmentDraftId(null);
+        // Refresh stored-fragment overlay so the newly submitted fragment
+        // appears immediately (Component 7 Step 10).
+        refreshStoredFragments();
       } catch (err) {
         setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
       } finally {
         setIsSubmitting(false);
       }
     },
-    [committedSelection, movementId, fragmentDraftId, buildPayload],
+    [committedSelection, movementId, fragmentDraftId, buildPayload, refreshStoredFragments],
   );
 
   // Mirror stageAssignments into a ref so callbacks can read .length without
@@ -1692,7 +1705,10 @@ export default function ScoreViewer() {
                 Step 11: MainBracket (Layer 3) renders once fragmentSet is true.
                 Step 14: StageBrackets (Layer 4) renders once conceptSet is true
                          and the concept has CONTAINS edges. */}
-            <FragmentOverlay>
+            <FragmentOverlay
+              fragments={storedFragments}
+              ghostLayer={ghostLayer}
+            >
               <MainBracket
                 selection={selectionRange}
                 layer={ghostLayer}

@@ -1,0 +1,65 @@
+/* Stored-fragment bracket overlays (Layer 5 — Step 10 / 11).
+   All brackets use position: absolute; the containing block is .scoreContent
+   in ScoreViewer (position: relative).
+
+   pointer-events: none on the bracket bar so ghost drag-select passes through.
+   The .clickTarget child overrides to auto for the hit region (Step 12).
+
+   Status colours are Step 11 placeholders using tonal layering per DESIGN.md:
+   depth through opacity/tint, 0px border-radius, no borders.
+
+   Step 10 ships the colour classes as stubs so Step 11 can fill them in
+   without touching the component interface. */
+
+/* ── Bracket bar ─────────────────────────────────────────────────────────── */
+
+.storedBracket {
+  position: absolute;
+  pointer-events: none;
+
+  /* No border-radius — 0px everywhere (DESIGN.md). */
+}
+
+/* ── Per-status colours (Step 11 fills in the final values) ─────────────── */
+
+/* draft: muted, low contrast — not yet reviewed. */
+.statusDraft {
+  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 35%, transparent);
+}
+
+/* submitted: moderate emphasis — awaiting review. */
+.statusSubmitted {
+  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 60%, transparent);
+}
+
+/* approved: full weight — accepted analysis. */
+.statusApproved {
+  background-color: var(--color-primary, #3f5f77);
+}
+
+/* rejected: warm tint — flagged for revision. */
+.statusRejected {
+  background-color: color-mix(in srgb, #a0522d 55%, transparent);
+}
+
+/* ── Click target (Step 12) ─────────────────────────────────────────────── */
+
+/* Small interactive area at the bracket's left edge.
+   pointer-events: auto so clicks reach the handler.
+   Visually invisible in Step 10; Step 12 may add an affordance icon. */
+.clickTarget {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 100%;
+  pointer-events: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  /* Extend the click zone slightly above and below the bracket bar for
+     easier targeting without covering note heads meaningfully. */
+  margin-top: -4px;
+  height: calc(100% + 8px);
+}
