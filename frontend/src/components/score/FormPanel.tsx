@@ -159,6 +159,17 @@ export interface FormPanelProps {
    * reset of the session and all annotation state (G1.2).
    */
   onDeleteFragment?: () => void;
+  /**
+   * Edit-prefill data for the fragment edit flow (Component 7 Step 12).
+   * When set, FormPanel initialises with this concept and property values on
+   * mount instead of starting blank. Consumed once via the prefillConsumedRef;
+   * the fragmentResetKey on the parent gates remounting so this fires once
+   * per edit session.
+   */
+  editPrefill?: {
+    concept: ConceptSearchHit;
+    propertyValues: PropertyFormValues;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +251,7 @@ export default function FormPanel({
   submitError = null,
   draftId = null,
   onDeleteFragment,
+  editPrefill = null,
 }: FormPanelProps) {
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
@@ -248,6 +260,24 @@ export default function FormPanel({
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [selectedRefinement, setSelectedRefinement] = useState<TypeRefinementChild | null>(null);
   const [propertyValues, setPropertyValues] = useState<PropertyFormValues>({});
+
+  // ── Edit prefill (Component 7 Step 12) ────────────────────────────────────
+  // When this FormPanel is remounted with an editPrefill (fragment edit flow),
+  // consume it once on mount: store the property values in a ref so the async
+  // schema fetch inside handleConceptSelect can apply them, then call
+  // handleConceptSelect to load the concept and schema tree.
+  const prefillConsumedRef = useRef(false);
+  const prefillPropertyValuesRef = useRef<PropertyFormValues | null>(null);
+
+  // Consume editPrefill once on mount.  fragmentResetKey on the parent gates
+  // remounting so this fires at most once per edit session.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!editPrefill || prefillConsumedRef.current) return;
+    prefillConsumedRef.current = true;
+    prefillPropertyValuesRef.current = editPrefill.propertyValues;
+    handleConceptSelect(editPrefill.concept);
+  }, []); // intentionally mount-only; editPrefill is stable at mount time
 
   // When the session rebuilds (ghost layer re-render), re-apply conceptSet so
   // the checklist stays coherent.
@@ -289,9 +319,15 @@ export default function FormPanel({
       try {
         const tree = await getConceptSchemas(concept.id);
         setSchemaTree(tree);
-        // Carry over values for schemas shared with the previous concept;
-        // discard values for schemas that no longer apply (Step 13).
-        setPropertyValues(prev => carryOverValues(prev, tree.schemas));
+        // If a prefill was stored (edit flow), use those values directly.
+        // Otherwise carry over values for schemas shared with the previous concept.
+        const prefillVals = prefillPropertyValuesRef.current;
+        if (prefillVals !== null) {
+          prefillPropertyValuesRef.current = null; // consumed
+          setPropertyValues(prefillVals);
+        } else {
+          setPropertyValues(prev => carryOverValues(prev, tree.schemas));
+        }
         onConceptChange?.(concept, tree);
       } catch {
         setSchemaError('Could not load concept schema. Try again.');
