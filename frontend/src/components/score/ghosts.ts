@@ -1094,12 +1094,12 @@ export function buildGhosts(
     const ghostHeight = sBounds.bottom - sBounds.top;
 
     // systemTop: bracket anchor above the system. Raw measure tops include high
-    // ledger lines and accidentals, which is correct. But metronome marks with
-    // note figures (e.g. ♩=120) extend 50–80px above the staff and would push
-    // the bracket absurdly high. Cap at 40px above the top staff line — enough
-    // to cover two ledger lines but immune to tall tempo-mark notation.
+    // ledger lines and accidentals, which is correct. Metronome marks with note
+    // figures (e.g. ♩=120) extend 50–80px above the staff — use rawSystemTop so
+    // the bracket clears their bottom edge, but cap at 60px to prevent absurdly
+    // tall decorations from pushing the bracket off-screen (Step 6, Component 7).
     const rawSystemTop = system.reduce((mn, m) => Math.min(mn, m.rawTop), Infinity);
-    const systemTop    = Math.max(rawSystemTop, sBounds.top - 40);
+    const systemTop    = Math.max(rawSystemTop, sBounds.top - 60);
 
     for (const info of system) {
       const { mLeft, mRight, barN, endingN, key: mKey, renderOrder,
