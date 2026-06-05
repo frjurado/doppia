@@ -1,8 +1,7 @@
 /**
  * Fragment overlay — data layer, projection, and stored-bracket rendering.
  *
- * This component is the Step 10 data-layer upgrade of the earlier static
- * container stub.  It combines two distinct overlay layers:
+ * Combines two distinct overlay layers:
  *
  *  1. **Live annotation overlays** (children) — MainBracket and StageBrackets
  *     are passed from ScoreViewer and rendered inside this component unchanged.
@@ -10,28 +9,36 @@
  *  2. **Stored-fragment brackets** — fetched fragments are projected from
  *     logical bar/beat coordinates onto the ghost spatial index at render time
  *     (same approach as MainBracket/StageBrackets) so they survive zoom,
- *     resize, and font changes without any extra wiring.  Step 11 adds the
- *     full visual treatment (alias labels, per-status colour, collapse/expand
- *     interaction); Step 10 renders projection-correct bracket bars.
+ *     resize, and font changes without any extra wiring.
+ *
+ * Step 11 adds the full visual treatment:
+ *  - Alias labels (e.g. "PAC") at the left edge of each parent bracket.
+ *  - Collapse/expand: clicking a bracket shows/hides its sub-part brackets.
+ *  - Sub-part brackets rendered below the staff when the parent is expanded,
+ *    reusing the ghost system-bottom for y-placement (same as StageBrackets).
+ *  - Per-status colour classes distinguish draft / submitted / approved / rejected.
  *
  * Architecture rules (CLAUDE.md §"Verovio SVG overlay rule"):
  *  - All overlays are absolutely-positioned HTML elements above the SVG; never
  *    modify Verovio's SVG output.
- *  - pointer-events: none on the container; the per-bracket click target
- *    (Step 12) sets pointer-events: auto on itself alone so ghost drag-select
- *    still reaches the ghost layer.
+ *  - pointer-events: none on the container; individual children re-enable it.
  *  - Re-projection is automatic: pixel bounds are derived from ghostLayer at
- *    render time, so when ScoreViewer rebuilds the ghost layer after any SVG
- *    re-render the next React render automatically picks up fresh pixel bounds.
+ *    render time, so when ScoreViewer rebuilds ghostLayer after any SVG
+ *    re-render the next React render picks up fresh pixel bounds.
  *
  * Filter-ready architecture (Phase 2):
  *  Per-fragment `show` and `category_filter` fields are tracked in
  *  `displayState` from day one.  The Phase 2 filter UI will update that state
  *  without touching the projection or rendering paths.
  *
+ * Two-level display limit (ADR-011):
+ *  Only `fragment.sub_parts` are rendered when expanded; sub_parts.sub_parts
+ *  are not shown even though the data model preserves full depth.
+ *
  * References:
  *  docs/roadmap/component-7-fragment-database.md §Step 10, §Step 11
  *  docs/architecture/tagging-tool-design.md §"Overlay layers"
+ *  docs/adr/ADR-011-multi-level-tagging-design.md §"Two-level display limit"
  */
 
 import { useMemo, useState } from 'react';
@@ -47,7 +54,7 @@ import bracketStyles from './StoredBrackets.module.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Stored bracket height in pixels (thinner than the live bracket at 5px). */
+/** Stored parent-bracket height in pixels (thinner than the live bracket at 5px). */
 const STORED_BRACKET_H = 4;
 
 /**
@@ -56,6 +63,23 @@ const STORED_BRACKET_H = 4;
  * selection bracket are visually distinct layers and do not overlap.
  */
 const STORED_BRACKET_ABOVE_SYSTEM_PX = 16;
+
+/** Sub-part bracket height in pixels. */
+const SUB_BRACKET_H = 4;
+
+/** Gap below the last staff-line bottom before the sub-part bracket top (px).
+ *  Matches StageBrackets.tsx BELOW_STAFF_GAP so stored sub-parts sit in the
+ *  same lane as live stage brackets. */
+const SUB_BRACKET_BELOW_STAFF_GAP = 6;
+
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
+
+/** BracketSegment extended with systemBottom for below-staff y-placement. */
+interface SubPartSegment extends BracketSegment {
+  systemBottom: number;
+}
 
 // ---------------------------------------------------------------------------
 // Per-fragment display state
@@ -66,7 +90,7 @@ const STORED_BRACKET_ABOVE_SYSTEM_PX = 16;
  *
  * `show` and `category_filter` are Phase 2 hooks: the Phase 2 filter UI will
  * flip `show` to false for fragments that don't match the active filter.
- * `collapsed` is the Step 11 collapse/expand toggle: true = top-level only.
+ * `collapsed` drives the Step 11 expand/collapse interaction: true = top-level only.
  *
  * Defaults: { show: true, category_filter: [], collapsed: true }.
  */
@@ -97,9 +121,8 @@ export interface FragmentOverlayProps {
   ghostLayer?: GhostLayer | null;
   /**
    * Called when a stored bracket's click target is activated (Step 12 side
-   * panel).  id is the fragment UUID.  Not yet wired to a side panel in
-   * Step 10; the target is rendered so Step 12 can connect it without
-   * changing the component interface.
+   * panel).  id is the fragment UUID.  When provided, clicking the bracket
+   * both toggles collapse (if the fragment has sub-parts) and opens the panel.
    */
   onBracketClick?: (fragmentId: string) => void;
   /** Test hook. Defaults to 'fragment-overlay'. */
@@ -125,8 +148,7 @@ function toSelectionRange(item: FragmentListItem): SelectionRange {
 }
 
 /**
- * Return a CSS module class name for a fragment status (Step 11 colours).
- * Step 10 provides the hook; Step 11 fills in the actual colour rules.
+ * Return a CSS module class name for a fragment status.
  */
 function statusClass(status: FragmentListItem['status']): string {
   switch (status) {
@@ -135,6 +157,29 @@ function statusClass(status: FragmentListItem['status']): string {
     case 'approved':  return bracketStyles.statusApproved;
     case 'rejected':  return bracketStyles.statusRejected;
   }
+}
+
+/**
+ * Return the pixel y-coordinate of the bottom of the staff system whose
+ * systemTop matches the given value.
+ *
+ * Derived from the measure ghost entries: each entry's bounds.top + height
+ * is the staff bottom for its system.  When no entry matches (should not
+ * happen in practice) a 60px fallback keeps rendering consistent.
+ */
+function getSystemBottom(systemTop: number, layer: GhostLayer): number {
+  let bottom = systemTop + 60;
+  let found = false;
+  for (const entry of layer.measureIndex.values()) {
+    if (entry.systemTop === systemTop) {
+      const entryBottom = entry.bounds.top + entry.bounds.height;
+      if (!found || entryBottom > bottom) {
+        bottom = entryBottom;
+        found = true;
+      }
+    }
+  }
+  return bottom;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,12 +196,24 @@ export default function FragmentOverlay({
 
   // ── Per-fragment display state (filter-ready + collapse) ─────────────────
   //
-  // Keyed by fragment id.  Entries are written when the user interacts (Step
-  // 11 collapse toggle; Phase 2 filter panel).  Missing entries fall back to
-  // the default shown below, so newly fetched fragments are always visible
-  // without an initialisation step.
+  // Keyed by fragment id.  Entries are written when the user interacts
+  // (collapse toggle; Phase 2 filter panel).  Missing entries fall back to
+  // the default below, so newly fetched fragments are always visible without
+  // an initialisation step.
   const [displayState, setDisplayState] =
     useState<Map<string, StoredFragmentDisplayState>>(new Map());
+
+  // ── Collapse toggle ───────────────────────────────────────────────────────
+
+  const toggleCollapsed = (id: string) => {
+    setDisplayState(prev => {
+      const current = prev.get(id) ??
+        { show: true, category_filter: [], collapsed: true };
+      const next = new Map(prev);
+      next.set(id, { ...current, collapsed: !current.collapsed });
+      return next;
+    });
+  };
 
   // ── Projection ────────────────────────────────────────────────────────────
   //
@@ -171,7 +228,15 @@ export default function FragmentOverlay({
     Array<{
       id: string;
       status: FragmentListItem['status'];
+      alias: string | null;
+      hasSubParts: boolean;
       segments: BracketSegment[];
+      subPartProjections: Array<{
+        id: string;
+        status: FragmentListItem['status'];
+        alias: string | null;
+        segments: SubPartSegment[];
+      }>;
     }>
   >(() => {
     if (!ghostLayer || fragments.length === 0) return [];
@@ -179,7 +244,15 @@ export default function FragmentOverlay({
     const result: Array<{
       id: string;
       status: FragmentListItem['status'];
+      alias: string | null;
+      hasSubParts: boolean;
       segments: BracketSegment[];
+      subPartProjections: Array<{
+        id: string;
+        status: FragmentListItem['status'];
+        alias: string | null;
+        segments: SubPartSegment[];
+      }>;
     }> = [];
 
     for (const frag of fragments) {
@@ -193,35 +266,43 @@ export default function FragmentOverlay({
       // selection bracket at the same precision (G3.2).
       const resolution = frag.beat_start !== null ? 'beat' : 'measure';
       const segments = resolveSegments(sel, ghostLayer, resolution);
-      if (segments) {
-        result.push({ id: frag.id, status: frag.status, segments });
-      }
+      if (!segments) continue;
+
+      // Two-level display limit (ADR-011): render frag.sub_parts but not
+      // sub_parts.sub_parts.  The data model preserves the full depth; only
+      // the display is flattened at one visible level.
+      const subPartProjections = frag.sub_parts
+        .map(sp => {
+          const spSel = toSelectionRange(sp);
+          const spRes = sp.beat_start !== null ? 'beat' : 'measure';
+          const spSegments = resolveSegments(spSel, ghostLayer, spRes);
+          if (!spSegments) return null;
+          // Augment with systemBottom so sub-parts can be placed below the staff.
+          const augmented: SubPartSegment[] = spSegments.map(seg => ({
+            ...seg,
+            systemBottom: getSystemBottom(seg.systemTop, ghostLayer),
+          }));
+          return {
+            id: sp.id,
+            status: sp.status,
+            alias: sp.primary_concept_alias,
+            segments: augmented,
+          };
+        })
+        .filter((sp): sp is NonNullable<typeof sp> => sp !== null);
+
+      result.push({
+        id: frag.id,
+        status: frag.status,
+        alias: frag.primary_concept_alias,
+        hasSubParts: frag.sub_parts.length > 0,
+        segments,
+        subPartProjections,
+      });
     }
 
     return result;
   }, [fragments, ghostLayer, displayState]);
-
-  // ── Phase 2 / Step 11 toggle helpers (wired in later steps) ──────────────
-
-  /**
-   * Toggle the collapsed state for one fragment.  Called by the bracket click
-   * handler in Step 11 once sub-part rendering is in place.
-   *
-   * Exported via the ref pattern if needed by a parent, but the primary
-   * surface in Step 11 is the per-bracket onClick.
-   */
-  const _toggleCollapsed = (id: string) => {
-    setDisplayState(prev => {
-      const current = prev.get(id) ??
-        { show: true, category_filter: [], collapsed: true };
-      const next = new Map(prev);
-      next.set(id, { ...current, collapsed: !current.collapsed });
-      return next;
-    });
-  };
-
-  // Keep the lint warning at bay — _toggleCollapsed is used in Step 11.
-  void _toggleCollapsed;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -236,10 +317,13 @@ export default function FragmentOverlay({
 
       {/* Layer 5: stored-fragment brackets.
           Each fragment projects to one bracket segment per SVG system row.
-          Step 10: projection-correct bars with click targets.
-          Step 11: alias labels, per-status colour, collapse/expand. */}
-      {projected.map(({ id, status, segments }) =>
-        segments.map((seg, i) => {
+          Sub-part brackets appear below the staff when the fragment is expanded. */}
+      {projected.flatMap(({ id, status, alias, hasSubParts, segments, subPartProjections }) => {
+        const state = displayState.get(id);
+        const collapsed = state?.collapsed ?? true;
+
+        // ── Parent bracket segments ─────────────────────────────────────────
+        const parentElements = segments.map((seg, i) => {
           const top = seg.systemTop - STORED_BRACKET_ABOVE_SYSTEM_PX;
           const width = seg.right - seg.left;
           if (width <= 0) return null;
@@ -251,25 +335,82 @@ export default function FragmentOverlay({
               data-fragment-id={id}
               data-testid={i === 0 ? `stored-bracket-${id}` : `stored-bracket-${id}-${i}`}
             >
-              {/* Click target — only on the first segment (leftmost) and only
-                  when a handler is wired (Step 12 connects it to the side
-                  panel).  pointer-events: auto so it receives clicks without
-                  blocking ghost drag-select on the bracket bar area. */}
-              {seg.isFirst && onBracketClick !== undefined && (
+              {/* Alias label at the left edge of the first segment. */}
+              {seg.isFirst && alias !== null && (
+                <span
+                  className={bracketStyles.aliasLabel}
+                  aria-hidden="true"
+                >
+                  {alias}
+                </span>
+              )}
+
+              {/* Click target: renders when the fragment has sub-parts (collapse
+                  toggle) OR when a side-panel handler is wired (Step 12).
+                  Covers the full bracket width for easy targeting of the thin bar.
+                  A single click both toggles collapse (if sub-parts exist) and
+                  opens the side panel (if onBracketClick is provided). */}
+              {seg.isFirst && (hasSubParts || onBracketClick !== undefined) && (
                 <button
                   type="button"
                   className={bracketStyles.clickTarget}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onBracketClick(id);
+                    if (hasSubParts) toggleCollapsed(id);
+                    if (onBracketClick !== undefined) onBracketClick(id);
                   }}
-                  aria-label="Open fragment details"
+                  aria-label={
+                    hasSubParts
+                      ? collapsed
+                        ? 'Expand fragment'
+                        : 'Collapse fragment'
+                      : 'Open fragment details'
+                  }
                 />
               )}
             </div>
           );
-        }),
-      )}
+        });
+
+        // ── Sub-part brackets (below staff, visible only when expanded) ─────
+        //
+        // Two-level limit enforced here: subPartProjections only contains the
+        // direct children of this fragment, never grandchildren (ADR-011).
+        const subPartElements = collapsed
+          ? []
+          : subPartProjections.flatMap(
+              ({ id: spId, status: spStatus, alias: spAlias, segments: spSegs }) =>
+                spSegs.map((seg, i) => {
+                  const top = seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP;
+                  const width = seg.right - seg.left;
+                  if (width <= 0) return null;
+                  return (
+                    <div
+                      key={`${spId}-sub-seg${i}`}
+                      className={`${bracketStyles.subPartBracket} ${statusClass(spStatus)}`}
+                      style={{ left: seg.left, top, width, height: SUB_BRACKET_H }}
+                      data-fragment-id={spId}
+                      data-testid={
+                        i === 0
+                          ? `stored-bracket-${spId}`
+                          : `stored-bracket-${spId}-${i}`
+                      }
+                    >
+                      {seg.isFirst && spAlias !== null && (
+                        <span
+                          className={bracketStyles.aliasLabel}
+                          aria-hidden="true"
+                        >
+                          {spAlias}
+                        </span>
+                      )}
+                    </div>
+                  );
+                }),
+            );
+
+        return [...parentElements, ...subPartElements];
+      })}
     </div>
   );
 }

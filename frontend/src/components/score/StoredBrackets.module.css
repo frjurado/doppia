@@ -2,16 +2,13 @@
    All brackets use position: absolute; the containing block is .scoreContent
    in ScoreViewer (position: relative).
 
-   pointer-events: none on the bracket bar so ghost drag-select passes through.
-   The .clickTarget child overrides to auto for the hit region (Step 12).
+   pointer-events: none on the bracket bars so ghost drag-select passes through.
+   The .clickTarget child overrides to auto for the hit region (Step 11/12).
 
-   Status colours are Step 11 placeholders using tonal layering per DESIGN.md:
-   depth through opacity/tint, 0px border-radius, no borders.
+   Status colours use tonal layering per DESIGN.md:
+   depth through opacity/tint, 0px border-radius, no borders. */
 
-   Step 10 ships the colour classes as stubs so Step 11 can fill them in
-   without touching the component interface. */
-
-/* ── Bracket bar ─────────────────────────────────────────────────────────── */
+/* ── Parent bracket bar ──────────────────────────────────────────────────── */
 
 .storedBracket {
   position: absolute;
@@ -20,7 +17,21 @@
   /* No border-radius — 0px everywhere (DESIGN.md). */
 }
 
-/* ── Per-status colours (Step 11 fills in the final values) ─────────────── */
+/* ── Sub-part bracket bar ─────────────────────────────────────────────────── */
+
+/* Stored sub-part bracket, rendered below the staff when the parent is
+   expanded.  Sits in the same lane as live stage brackets (StageBrackets.tsx).
+   Uses the same status colour classes as .storedBracket.
+   Slightly reduced opacity to visually distinguish sub-parts from parents. */
+.subPartBracket {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0.85;
+
+  /* No border-radius — 0px everywhere (DESIGN.md). */
+}
+
+/* ── Per-status colours ──────────────────────────────────────────────────── */
 
 /* draft: muted, low contrast — not yet reviewed. */
 .statusDraft {
@@ -42,24 +53,45 @@
   background-color: color-mix(in srgb, #a0522d 55%, transparent);
 }
 
-/* ── Click target (Step 12) ─────────────────────────────────────────────── */
+/* ── Alias label ─────────────────────────────────────────────────────────── */
 
-/* Small interactive area at the bracket's left edge.
-   pointer-events: auto so clicks reach the handler.
-   Visually invisible in Step 10; Step 12 may add an affordance icon. */
+/* Concept alias text (e.g. "PAC") rendered below the bracket bar at its left
+   edge.  Uses Public Sans label-sm (11px) to match stage labels (StageBrackets.
+   module.css).  pointer-events: none — decorative, does not capture clicks. */
+.aliasLabel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  font-family: var(--font-label, 'Public Sans', sans-serif);
+  font-size: 0.6875rem; /* 11px — label-sm */
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 1;
+  color: var(--color-primary, #3f5f77);
+}
+
+/* ── Click target (Step 11 / Step 12) ───────────────────────────────────── */
+
+/* Full-bracket-width interactive hit area that handles:
+     - collapse/expand toggle (Step 11) for fragments with sub-parts;
+     - side-panel opening (Step 12) when onBracketClick is wired.
+   pointer-events: auto overrides the pointer-events: none on .storedBracket
+   so only this button receives clicks; the rest of the bracket bar remains
+   non-interactive, preserving ghost drag-select below the staff.
+
+   Extends 4px above and below the 4px bracket bar (total hit height 12px)
+   while staying within the above-staff zone, above ghost drag targets. */
 .clickTarget {
   position: absolute;
-  top: 0;
+  top: -4px;
   left: 0;
-  width: 16px;
-  height: 100%;
+  right: 0;
+  bottom: -4px;
   pointer-events: auto;
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
-  /* Extend the click zone slightly above and below the bracket bar for
-     easier targeting without covering note heads meaningfully. */
-  margin-top: -4px;
-  height: calc(100% + 8px);
 }
