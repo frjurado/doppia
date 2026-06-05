@@ -12,11 +12,12 @@ import type { CommittedSelection } from '../components/score/selection';
 import type { BeatSlot, StageAssignment, SubPartTag } from '../components/score/stages';
 import {
   chooseStageGrid,
+  computeResizeClamp,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
   reconcileWithNewConcept,
-  reconcileWithSelection,
+  respondToMainResize,
   toggleStageAbsent,
 } from '../components/score/stages';
 import FormPanel from '../components/score/FormPanel';
@@ -98,6 +99,14 @@ const DEFAULT_PAGE_WIDTH = 1200;
  * scrolls horizontally rather than compressing notation further.
  */
 const MIN_PAGE_WIDTH = 480;
+
+/**
+ * Numeric rank for each resolution mode (higher = finer).
+ * Used to decide whether a pre-population grid change is a genuine
+ * auto-drop to a finer resolution or an unwanted coarsening of a
+ * resolution the annotator already set (Step 3 / Component 7).
+ */
+const GRID_RANK: Record<ResolutionMode, number> = { measure: 0, beat: 1, subbeat: 2 };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -695,7 +704,7 @@ export default function ScoreViewer() {
   // Show a brief inline note when pre-population auto-drops the resolution.
   const showGridNote = useCallback((grid: ResolutionMode, stageCount: number) => {
     if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
-    const label = grid === 'beat' ? 'beat' : 'sub-beat';
+    const label = grid === 'beat' ? 'beat' : grid === 'subbeat' ? 'sub-beat' : 'measure';
     setGridAutoSwitchNote(`Switched to ${label} resolution to fit ${stageCount} stage${stageCount === 1 ? '' : 's'}`);
     gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
   }, []);
@@ -736,7 +745,7 @@ export default function ScoreViewer() {
         );
         setStageAssignments(assignments);
         setStageGridBlocked(blocked);
-        if (!blocked && grid !== resolutionRef.current) {
+        if (!blocked && (GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
           resolutionRef.current = grid;
           setResolution(grid);
           showGridNote(grid, schemaTree.stages.length);
@@ -798,7 +807,7 @@ export default function ScoreViewer() {
           );
           setStageAssignments(assignments);
           setStageGridBlocked(blocked);
-          if (!blocked && grid !== resolutionRef.current) {
+          if (!blocked && (GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
             resolutionRef.current = grid;
             setResolution(grid);
             showGridNote(grid, childTree.stages.length);
@@ -1057,6 +1066,15 @@ export default function ScoreViewer() {
     session.setStagesComplete(complete);
   }, [stageAssignments, stageGridBlocked]);
 
+  // Component 7 Step 3 — keep the annotator's hard-clamp in sync with the
+  // current confirmed stage bounds.  Fires whenever assignments change so
+  // the clamp is always up to date (e.g. after a split-handle drag confirms
+  // a stage or after an absent-toggle frees space).
+  useEffect(() => {
+    const clamp = computeResizeClamp(stageAssignments);
+    annotationSessionRef.current?.setMinBarRange(clamp);
+  }, [stageAssignments]);
+
   // When the committed selection changes, reconcile stage assignments with
   // the new main bracket bounds or (re-)attempt auto-grid pre-population.
   useEffect(() => {
@@ -1070,17 +1088,52 @@ export default function ScoreViewer() {
       );
       setStageAssignments(assignments);
       setStageGridBlocked(blocked);
-      if (!blocked && grid !== resolutionRef.current) {
+      if (!blocked && (GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
         resolutionRef.current = grid;
         setResolution(grid);
         showGridNote(grid, stages.length);
       }
     } else {
       if (stageAssignmentsRef.current.length === 0) return;
-      setStageGridBlocked(false);
-      setStageAssignments(prev => reconcileWithSelection(prev, selectionRange));
+
+      // Component 7 Step 3 — hybrid resize response.
+      // Collect beat/sub-beat positions within the new selection for the grid
+      // auto-drop (same approach as computeAutoPrePopulate in Step 2).
+      const beatPositions: BeatSlot[] = [];
+      const subBeatPositions: BeatSlot[] = [];
+      if (ghostLayerRef.current) {
+        for (const entry of ghostLayerRef.current.beatIndex.values()) {
+          if (_inSelectionBounds(entry, selectionRange)) {
+            beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+          }
+        }
+        beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+        for (const entry of ghostLayerRef.current.subBeatIndex.values()) {
+          if (_inSelectionBounds(entry, selectionRange)) {
+            subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+          }
+        }
+        subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+      }
+
+      const { assignments, droppedGrid, blocked } = respondToMainResize(
+        stageAssignmentsRef.current,
+        selectionRange,
+        resolutionRef.current,
+        beatPositions,
+        subBeatPositions,
+      );
+
+      setStageAssignments(assignments);
+      setStageGridBlocked(blocked);
+
+      if (!blocked && droppedGrid && droppedGrid !== resolutionRef.current) {
+        resolutionRef.current = droppedGrid;
+        setResolution(droppedGrid);
+        const total = assignments.filter(a => !a.absent && !a.orphaned).length;
+        showGridNote(droppedGrid, total);
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionRange, showGridNote]);
 
   // ── Ghost layer + annotation session lifecycle (Step 11) ─────────────────

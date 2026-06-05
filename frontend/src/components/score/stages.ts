@@ -149,7 +149,8 @@ export function chooseStageGrid(
   selection: SelectionRange,
   stageCount: number,
   beatSlots = 0,
-  subBeatSlots = 0,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _subBeatSlots = 0,
 ): ResolutionMode {
   if (stageCount <= 0) return 'measure';
   const measureSlots = selection.barEnd - selection.barStart + 1;
@@ -710,5 +711,312 @@ export function reconcileWithNewConcept(
   }
 
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Main-bracket resize response (Component 7 Step 3)
+// ---------------------------------------------------------------------------
+
+/** Result returned by respondToMainResize. */
+export interface MainResizeResult {
+  /** Updated stage assignments — default stages redistributed; active preserved. */
+  assignments: StageAssignment[];
+  /**
+   * If the resize required switching to a finer grid to fit all stages, this
+   * is the new grid. Null when the current grid already works.
+   */
+  droppedGrid: ResolutionMode | null;
+  /**
+   * True when even sub-beat resolution cannot fit all active stages in the
+   * new selection. The caller should surface a blocking checklist message.
+   */
+  blocked: boolean;
+}
+
+/**
+ * Return the tightest bar range that contains all confirmed (active) stage
+ * bounds.  Null when no confirmed stages exist, meaning no clamp is needed.
+ *
+ * The caller should pass this to AnnotationSession.setMinBarRange() so that
+ * the main-bracket drag cannot shrink below the point that would force a
+ * confirmed stage outside the selection
+ * (tagging-tool-design.md §4, Component 7 Step 3).
+ */
+export function computeResizeClamp(
+  assignments: StageAssignment[],
+): { minBarStart: number; maxBarEnd: number } | null {
+  const confirmed = assignments.filter(
+    a => a.confirmed && !a.absent && !a.orphaned && a.bounds !== null,
+  );
+  if (confirmed.length === 0) return null;
+
+  const minBarStart = Math.min(...confirmed.map(a => a.bounds!.barStart));
+  const maxBarEnd   = Math.max(...confirmed.map(a => a.bounds!.barEnd));
+  return { minBarStart, maxBarEnd };
+}
+
+/** Rebuild ContainsStage metadata from a StageAssignment so prePopulate can reuse it. */
+function _toContainsStage(a: StageAssignment): ContainsStage {
+  return {
+    target_id:        a.stageId,
+    target_name:      a.stageName,
+    order:            a.order,
+    required:         a.required,
+    display_mode:     a.displayMode,
+    containment_mode: a.containmentMode,
+    default_weight:   a.defaultWeight,
+  };
+}
+
+/** A SelectionRange covering a bare bar interval (no beat precision). */
+function _barRange(barStart: number, barEnd: number): SelectionRange {
+  return { barStart, barEnd, beatStart: null, beatEnd: null, repeatContext: null };
+}
+
+/**
+ * Respond to a main bracket resize.
+ *
+ * - **Default stages** (confirmed=false, not absent, not orphaned) are
+ *   re-laid out by default_weight across the available space in the new
+ *   selection, at the finest grid that fits all stages.
+ * - **Active stages** (confirmed=true) keep their bounds unchanged.
+ * - Absent and orphaned stages are returned unchanged.
+ *
+ * The auto-drop escape valve: if all stages fit at a finer resolution,
+ * droppedGrid is set so the caller can update the resolution toggle before
+ * redistributing (matching the Step 2 pre-population logic).
+ *
+ * Caller responsibility: enforce the hard-clamp by passing
+ * computeResizeClamp(assignments) to AnnotationSession.setMinBarRange()
+ * so that confirmed stages are never forced outside the selection by a drag.
+ *
+ * beatPositions / subBeatPositions must cover only slots inside newSelection,
+ * ordered (barN ASC, beatFloat ASC).
+ */
+export function respondToMainResize(
+  assignments: StageAssignment[],
+  newSelection: SelectionRange,
+  currentResolution: ResolutionMode,
+  beatPositions: BeatSlot[],
+  subBeatPositions: BeatSlot[],
+): MainResizeResult {
+  if (assignments.length === 0) {
+    return { assignments, droppedGrid: null, blocked: false };
+  }
+
+  const sortedActive = assignments
+    .filter(a => !a.absent && !a.orphaned)
+    .sort((a, b) => a.order - b.order);
+
+  if (sortedActive.length === 0) {
+    return { assignments, droppedGrid: null, blocked: false };
+  }
+
+  // Choose the finest grid that fits the total active stage count.
+  const totalStages = sortedActive.length;
+  const chosenGrid = chooseStageGrid(
+    newSelection, totalStages, beatPositions.length, subBeatPositions.length,
+  );
+
+  const measureSlots = newSelection.barEnd - newSelection.barStart + 1;
+  const blocked =
+    totalStages > 0 &&
+    measureSlots  < totalStages &&
+    beatPositions.length  < totalStages &&
+    subBeatPositions.length < totalStages;
+
+  if (blocked) {
+    return { assignments, droppedGrid: null, blocked: true };
+  }
+
+  // Never coarsen the user's chosen resolution — only drop to a finer grid
+  // when the current grid genuinely cannot fit all stages.
+  const GRID_RANK: Record<ResolutionMode, number> = { measure: 0, beat: 1, subbeat: 2 };
+  const droppedGrid =
+    (GRID_RANK[chosenGrid] ?? 0) > (GRID_RANK[currentResolution] ?? 0)
+      ? chosenGrid
+      : null;
+  // Use the finer of chosen vs. current so stages are placed at the resolution
+  // the annotator already set when it still fits.
+  const effectiveGrid: ResolutionMode =
+    (GRID_RANK[currentResolution] ?? 0) >= (GRID_RANK[chosenGrid] ?? 0)
+      ? currentResolution
+      : chosenGrid;
+
+  const confirmedActive = sortedActive.filter(a => a.confirmed);
+  const defaultActive   = sortedActive.filter(a => !a.confirmed);
+
+  // When all stages are confirmed there is nothing to redistribute, but we
+  // still need outer-edge sync (see below) — fall through to the else branch.
+
+  // Helper: redistribute a group of unconfirmed assignments within [lo, hi] bars.
+  const redistributeRun = (
+    run: StageAssignment[],
+    lo: number,
+    hi: number,
+  ): Map<string, StageAssignment> => {
+    const result = new Map<string, StageAssignment>();
+
+    if (lo > hi) {
+      // No space in this interval.  Optional stages become absent; required
+      // stages are left with their pre-resize bounds so the annotator can
+      // see the stale state and adjust.
+      for (const a of run) {
+        if (!a.required) {
+          result.set(a.stageId, { ...a, absent: true, bounds: null });
+        }
+        // Required: keep unchanged (caller's clamp should prevent this).
+      }
+      return result;
+    }
+
+    const rangeSelection = _barRange(lo, hi);
+    const posns = effectiveGrid === 'beat'
+      ? beatPositions.filter(p => p.barN >= lo && p.barN <= hi)
+      : effectiveGrid === 'subbeat'
+        ? subBeatPositions.filter(p => p.barN >= lo && p.barN <= hi)
+        : [];
+
+    const fresh = effectiveGrid === 'measure'
+      ? prePopulateStages(run.map(_toContainsStage), rangeSelection)
+      : prePopulateStagesAtGrid(run.map(_toContainsStage), rangeSelection, posns);
+
+    for (const a of fresh) result.set(a.stageId, a);
+    return result;
+  };
+
+  const updatedMap = new Map<string, StageAssignment>();
+
+  // All stages unconfirmed.
+  if (confirmedActive.length === 0) {
+    // If all stage bounds already fit in the new selection, only extend the
+    // outer edges (grow / small shrink case) — no redistribution.  This keeps
+    // pre-populated positions stable until the user actually drags stages.
+    // If any stage falls outside the new selection, full redistribution is
+    // needed so every stage ends up within the new range.
+    const allFit = defaultActive.every(
+      a => a.bounds !== null
+        && a.bounds.barStart >= newSelection.barStart
+        && a.bounds.barEnd   <= newSelection.barEnd,
+    );
+
+    if (allFit) {
+      const firstId = sortedActive[0]!.stageId;
+      const lastId  = sortedActive[sortedActive.length - 1]!.stageId;
+      for (const a of defaultActive) {
+        if (a.stageId === firstId) {
+          updatedMap.set(a.stageId, {
+            ...a,
+            bounds: {
+              ...a.bounds!,
+              barStart:  newSelection.barStart,
+              beatStart: newSelection.beatStart ?? null,
+            },
+          });
+        } else if (a.stageId === lastId) {
+          updatedMap.set(a.stageId, {
+            ...a,
+            bounds: {
+              ...a.bounds!,
+              barEnd:  newSelection.barEnd,
+              beatEnd: newSelection.beatEnd ?? null,
+            },
+          });
+        } else {
+          updatedMap.set(a.stageId, a);
+        }
+      }
+    } else {
+      // Shrink past at least one stage — redistribute across the full new range.
+      const repopulated = redistributeRun(
+        defaultActive, newSelection.barStart, newSelection.barEnd,
+      );
+      for (const [id, a] of repopulated) updatedMap.set(id, a);
+    }
+  } else {
+    // Mixed (or all-confirmed): walk sortedActive in order, grouping
+    // consecutive unconfirmed stages between confirmed anchors.  Each
+    // confirmed stage pins a segment boundary; unconfirmed groups fill the gaps.
+    let runLo = newSelection.barStart;
+    let currentRun: StageAssignment[] = [];
+
+    for (const stage of sortedActive) {
+      if (!stage.confirmed) {
+        currentRun.push(stage);
+      } else {
+        // Flush any accumulated unconfirmed stages before this anchor.
+        if (currentRun.length > 0) {
+          const hi = stage.bounds!.barStart - 1;
+          for (const [id, a] of redistributeRun(currentRun, runLo, hi)) {
+            updatedMap.set(id, a);
+          }
+          currentRun = [];
+        }
+        // Confirmed stage: preserve in place.
+        updatedMap.set(stage.stageId, stage);
+        runLo = stage.bounds!.barEnd + 1;
+      }
+    }
+    // Flush trailing unconfirmed stages (after the last confirmed anchor).
+    if (currentRun.length > 0) {
+      for (const [id, a] of redistributeRun(currentRun, runLo, newSelection.barEnd)) {
+        updatedMap.set(id, a);
+      }
+    }
+
+    // Outer-edge sync: the first and last active stages must always be flush
+    // with the selection boundaries — both at bar AND beat precision.
+    // Confirmed stages' INTERNAL split points are preserved; only the
+    // outward-facing edge of the boundary stages is updated.
+    //
+    // Bar-only comparison is insufficient: a fragment resize within the same
+    // bar (e.g., changing beatEnd from 5.0 to 3.0 while barEnd stays at 8)
+    // would not be caught and would leave the stage bracket extending past the
+    // fragment at beat/sub-beat resolution.
+    const firstActive = sortedActive[0]!;
+    const lastActive  = sortedActive[sortedActive.length - 1]!;
+
+    const firstInMap = updatedMap.get(firstActive.stageId);
+    if (firstInMap?.bounds) {
+      const bsDiffers =
+        firstInMap.bounds.barStart !== newSelection.barStart ||
+        (firstInMap.bounds.beatStart ?? null) !== (newSelection.beatStart ?? null);
+      if (bsDiffers) {
+        updatedMap.set(firstActive.stageId, {
+          ...firstInMap,
+          bounds: {
+            ...firstInMap.bounds,
+            barStart:  newSelection.barStart,
+            beatStart: newSelection.beatStart ?? null,
+          },
+        });
+      }
+    }
+
+    const lastInMap = updatedMap.get(lastActive.stageId);
+    if (lastInMap?.bounds) {
+      const beDiffers =
+        lastInMap.bounds.barEnd !== newSelection.barEnd ||
+        (lastInMap.bounds.beatEnd ?? null) !== (newSelection.beatEnd ?? null);
+      if (beDiffers) {
+        updatedMap.set(lastActive.stageId, {
+          ...lastInMap,
+          bounds: {
+            ...lastInMap.bounds,
+            barEnd:  newSelection.barEnd,
+            beatEnd: newSelection.beatEnd ?? null,
+          },
+        });
+      }
+    }
+  }
+
+  // Merge: keep absent/orphaned as-is; replace active stages from updatedMap.
+  const updatedAssignments = assignments.map(a => {
+    const upd = updatedMap.get(a.stageId);
+    return upd !== undefined ? upd : a;
+  });
+
+  return { assignments: updatedAssignments, droppedGrid, blocked: false };
 }
 

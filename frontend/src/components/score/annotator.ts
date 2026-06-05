@@ -113,6 +113,14 @@ export interface AnnotationSessionOptions {
     stagesComplete?: boolean;
     propertiesComplete?: boolean;
   };
+  /**
+   * Component 7 Step 3 — minimum bar range derived from confirmed stage bounds
+   * (computeResizeClamp).  When set, the main-bracket drag is hard-clamped so
+   * the selection barStart cannot rise above minBarStart and barEnd cannot fall
+   * below maxBarEnd.  Update dynamically via setMinBarRange() when stage
+   * assignments change.
+   */
+  minBarRange?: { minBarStart: number; maxBarEnd: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +417,14 @@ export class AnnotationSession {
   // _handleMouseOver knows it is safe to call showHandles() on hover.
   private _handlesReady = false;
 
+  /**
+   * Component 7 Step 3 — hard-clamp derived from confirmed stage bounds.
+   * Null when no confirmed stages exist (no minimum enforced).
+   * The selection barStart must stay ≤ minBarStart; barEnd must stay ≥ maxBarEnd.
+   * Set/updated via setMinBarRange(); the lock fires during live handle drags.
+   */
+  private _minBarRange: { minBarStart: number; maxBarEnd: number } | null = null;
+
   // Current committed selection (updated on mouseup).
   private _selection: SelectionRange | null = null;
 
@@ -442,6 +458,7 @@ export class AnnotationSession {
         : new Set([...closeRepeat, ...endingBarriers]);
 
     this._resolution = options.resolution ?? 'measure';
+    this._minBarRange = options.minBarRange ?? null;
 
     this._orderedMeasureKeys = [...layer.measureIndex.keys()];
     this._orderedBeatKeys = [...layer.beatIndex.keys()].sort((a, b) => a - b);
@@ -512,6 +529,18 @@ export class AnnotationSession {
   /** Mark all required properties as filled (or unfilled). */
   setPropertiesComplete(value: boolean): void {
     this._setFlag('propertiesComplete', value);
+  }
+
+  /**
+   * Component 7 Step 3 — update the hard-clamp for the main-bracket drag.
+   *
+   * Pass the result of computeResizeClamp(stageAssignments) here whenever
+   * confirmed stage bounds change.  While a drag is in progress the new
+   * range takes effect on the next mouseover tick.  Passing null removes the
+   * clamp (e.g. when all stages are unconfirmed).
+   */
+  setMinBarRange(range: { minBarStart: number; maxBarEnd: number } | null): void {
+    this._minBarRange = range;
   }
 
   /** Subscribe to selection changes. Replaces any prior subscriber. */
@@ -603,13 +632,19 @@ export class AnnotationSession {
     } else {
       // Beat / sub-beat: highlight the fine-grained ghosts for the selection
       // range using the currently active resolution index.
+      //
+      // beatStart/beatEnd are bar-relative beat positions that apply only to
+      // the FIRST and LAST bar respectively. Middle bars include all positions.
+      // (Applying them uniformly to all bars is wrong for multi-bar selections
+      // with a partial start or end — it truncates every bar to the partial range.)
       const beatStart = sel.beatStart;
-      const beatEnd   = sel.beatEnd ?? Infinity;
+      const beatEnd   = sel.beatEnd;
       if (this._resolution === 'beat') {
         for (const entry of this._layer.beatIndex.values()) {
           if (
             entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
+            (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
+            (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
           ) {
             addClass(entry.el, 'dark');
             this._darkGhosts.add(entry.el);
@@ -620,7 +655,8 @@ export class AnnotationSession {
         for (const entry of this._layer.subBeatIndex.values()) {
           if (
             entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
+            (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
+            (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
           ) {
             addClass(entry.el, 'dark');
             this._darkGhosts.add(entry.el);
@@ -656,48 +692,121 @@ export class AnnotationSession {
         }
       }
     } else if (this._resolution === 'beat') {
-      if (sel.beatStart !== null && sel.beatEnd !== null) {
-        const beatStart = sel.beatStart;
-        const beatEnd   = sel.beatEnd;
-        for (const entry of this._layer.beatIndex.values()) {
-          if (
-            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
-          ) {
-            addClass(entry.el, 'dark');
-            this._darkGhosts.add(entry.el);
-          }
-        }
-      } else {
-        for (const entry of this._layer.beatIndex.values()) {
-          if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
-            addClass(entry.el, 'dark');
-            this._darkGhosts.add(entry.el);
-          }
+      // Per-bar beat filter: beatStart applies only to the first bar, beatEnd
+      // only to the last bar. Middle bars include all positions. Null beatStart
+      // or beatEnd means the selection spans full bar boundaries at that end.
+      const beatStart = sel.beatStart;
+      const beatEnd   = sel.beatEnd;
+      for (const entry of this._layer.beatIndex.values()) {
+        if (
+          entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
+          (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
+          (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
+        ) {
+          addClass(entry.el, 'dark');
+          this._darkGhosts.add(entry.el);
         }
       }
     } else {
-      if (sel.beatStart !== null && sel.beatEnd !== null) {
-        const beatStart = sel.beatStart;
-        const beatEnd   = sel.beatEnd;
-        for (const entry of this._layer.subBeatIndex.values()) {
-          if (
-            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-            entry.beatFloat >= beatStart && entry.beatFloat < beatEnd
-          ) {
-            addClass(entry.el, 'dark');
-            this._darkGhosts.add(entry.el);
-          }
-        }
-      } else {
-        for (const entry of this._layer.subBeatIndex.values()) {
-          if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
-            addClass(entry.el, 'dark');
-            this._darkGhosts.add(entry.el);
-          }
+      const beatStart = sel.beatStart;
+      const beatEnd   = sel.beatEnd;
+      for (const entry of this._layer.subBeatIndex.values()) {
+        if (
+          entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
+          (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
+          (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
+        ) {
+          addClass(entry.el, 'dark');
+          this._darkGhosts.add(entry.el);
         }
       }
     }
+  }
+
+  // ── Private: min-bar-range clamp helpers (Component 7 Step 3) ───────────
+
+  /**
+   * Given a target measureKey being dragged toward, return the clamped key
+   * that respects _minBarRange.
+   *
+   * For a shrink-from-the-left drag (anchor is the rightmost key): the
+   * resulting barStart must stay ≤ minBarStart, so the current key cannot
+   * move to a barN > minBarStart.
+   *
+   * For a shrink-from-the-right drag (anchor is the leftmost key): the
+   * resulting barEnd must stay ≥ maxBarEnd, so the current key cannot move
+   * to a barN < maxBarEnd.
+   */
+  private _clampMeasureKey(currentKey: string, anchorKey: string): string {
+    if (!this._minBarRange) return currentKey;
+
+    const { minBarStart, maxBarEnd } = this._minBarRange;
+    const anchorEntry  = this._layer.measureIndex.get(anchorKey);
+    const currentEntry = this._layer.measureIndex.get(currentKey);
+    if (!anchorEntry || !currentEntry) return currentKey;
+
+    // Dragging left (shrinking from the left): anchor is to the right.
+    if (currentEntry.barN < anchorEntry.barN) {
+      if (currentEntry.barN > minBarStart) {
+        // Clamp: find the key with barN = minBarStart.
+        for (const [k, e] of this._layer.measureIndex) {
+          if (e.barN === minBarStart) return k;
+        }
+      }
+      return currentKey;
+    }
+
+    // Dragging right (shrinking from the right): anchor is to the left.
+    if (currentEntry.barN > anchorEntry.barN) {
+      if (currentEntry.barN < maxBarEnd) {
+        // Clamp: find the key with barN = maxBarEnd.
+        for (const [k, e] of this._layer.measureIndex) {
+          if (e.barN === maxBarEnd) return k;
+        }
+      }
+      return currentKey;
+    }
+
+    return currentKey;
+  }
+
+  /**
+   * Clamp a beat/sub-beat key to respect _minBarRange.
+   * Uses the numeric key index to resolve bar membership.
+   */
+  private _clampBeatKey(
+    currentKey: number,
+    anchorKey: number,
+    index: Map<number, { barN: number }>,
+  ): number {
+    if (!this._minBarRange) return currentKey;
+
+    const { minBarStart, maxBarEnd } = this._minBarRange;
+    const anchorEntry  = index.get(anchorKey);
+    const currentEntry = index.get(currentKey);
+    if (!anchorEntry || !currentEntry) return currentKey;
+
+    // Dragging left (anchor barN > current barN): clamp barStart ≤ minBarStart.
+    if (currentEntry.barN < anchorEntry.barN && currentEntry.barN > minBarStart) {
+      // Find the numerically smallest key whose barN === minBarStart.
+      let bestKey: number | null = null;
+      for (const [k, e] of index) {
+        if (e.barN === minBarStart && (bestKey === null || k < bestKey)) bestKey = k;
+      }
+      if (bestKey !== null) return bestKey;
+    }
+
+    // Dragging right (anchor barN < current barN): clamp barEnd ≥ maxBarEnd.
+    if (currentEntry.barN > anchorEntry.barN && currentEntry.barN < maxBarEnd) {
+      // Find the numerically largest key whose barN === maxBarEnd.
+      let bestKey: number | null = null;
+      for (const [k, e] of index) {
+        if (e.barN === maxBarEnd && (bestKey === null || k > bestKey)) bestKey = k;
+      }
+      if (bestKey !== null) return bestKey;
+    }
+
+    return currentKey;
   }
 
   // ── Private: listener attachment ──────────────────────────────────────────
@@ -864,9 +973,13 @@ export class AnnotationSession {
   private _updateMeasureDrag(currentKey: string): void {
     if (!this._anchorMeasureKey) return;
 
+    // Component 7 Step 3: hard-clamp the drag so confirmed stage bounds
+    // are never forced outside the resulting selection.
+    const effectiveKey = this._clampMeasureKey(currentKey, this._anchorMeasureKey);
+
     const range = measureKeyRange(
       this._anchorMeasureKey,
-      currentKey,
+      effectiveKey,
       this._orderedMeasureKeys,
       this._barriers,
     );
@@ -965,6 +1078,9 @@ export class AnnotationSession {
   private _updateBeatDrag(currentKey: number): void {
     if (this._anchorBeatKey === null) return;
 
+    // Component 7 Step 3: clamp beat drag to the min-bar-range.
+    const effectiveBeatKey = this._clampBeatKey(currentKey, this._anchorBeatKey, this._layer.beatIndex);
+
     // G2.3: Enforce measure-level barriers at beat resolution. The close-repeat
     // barline is a hard gate in all resolution modes, not just measure mode.
     // Resolve which measure keys are reachable from the anchor under the active
@@ -975,7 +1091,7 @@ export class AnnotationSession {
     // signals a test fixture or a score where ghost building was not run, so
     // there is no barrier information to apply.
     const anchorEntry  = this._layer.beatIndex.get(this._anchorBeatKey);
-    const currentEntry = this._layer.beatIndex.get(currentKey);
+    const currentEntry = this._layer.beatIndex.get(effectiveBeatKey);
     const allowedMeasureRange =
       anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
         ? measureKeyRange(
@@ -992,7 +1108,7 @@ export class AnnotationSession {
 
     const range = numericKeyRange(
       this._anchorBeatKey,
-      currentKey,
+      effectiveBeatKey,
       this._orderedBeatKeys,
     );
 
@@ -1095,9 +1211,12 @@ export class AnnotationSession {
   private _updateSubBeatDrag(currentKey: number): void {
     if (this._anchorSubBeatKey === null) return;
 
+    // Component 7 Step 3: clamp sub-beat drag to the min-bar-range.
+    const effectiveSubBeatKey = this._clampBeatKey(currentKey, this._anchorSubBeatKey, this._layer.subBeatIndex);
+
     // G2.3: same barrier enforcement as beat resolution.
     const anchorEntry  = this._layer.subBeatIndex.get(this._anchorSubBeatKey);
-    const currentEntry = this._layer.subBeatIndex.get(currentKey);
+    const currentEntry = this._layer.subBeatIndex.get(effectiveSubBeatKey);
     const allowedMeasureRange =
       anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
         ? measureKeyRange(
@@ -1114,7 +1233,7 @@ export class AnnotationSession {
 
     const range = numericKeyRange(
       this._anchorSubBeatKey,
-      currentKey,
+      effectiveSubBeatKey,
       this._orderedSubBeatKeys,
     );
 

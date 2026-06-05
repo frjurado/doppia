@@ -45,12 +45,14 @@ import type { StageBeatBoundary, StageAssignment } from '../stages';
 import type { BeatSlot } from '../stages';
 import {
   chooseStageGrid,
+  computeResizeClamp,
   computeStagesComplete,
   moveSplitHandle,
   prePopulateStages,
   prePopulateStagesAtGrid,
   reconcileWithNewConcept,
   reconcileWithSelection,
+  respondToMainResize,
   toggleStageAbsent,
 } from '../stages';
 
@@ -634,5 +636,400 @@ describe('prePopulateStagesAtGrid', () => {
     // All assignments have non-null beat coords for internal stages
     expect(result[1]!.bounds!.beatStart).not.toBeNull();
     expect(result[2]!.bounds!.beatStart).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeResizeClamp
+// ---------------------------------------------------------------------------
+
+describe('computeResizeClamp', () => {
+  it('returns null when no confirmed stages exist', () => {
+    const assignments = makePacAssignments(); // all confirmed=false
+    expect(computeResizeClamp(assignments)).toBeNull();
+  });
+
+  it('returns null for empty assignments', () => {
+    expect(computeResizeClamp([])).toBeNull();
+  });
+
+  it('single confirmed stage: minBarStart = barStart, maxBarEnd = barEnd', () => {
+    const assignments = makePacAssignments().map((a, i) =>
+      i === 1 ? { ...a, confirmed: true } : a,
+    );
+    const clamp = computeResizeClamp(assignments);
+    const stage = assignments.find(a => a.confirmed)!;
+    expect(clamp).not.toBeNull();
+    expect(clamp!.minBarStart).toBe(stage.bounds!.barStart);
+    expect(clamp!.maxBarEnd).toBe(stage.bounds!.barEnd);
+  });
+
+  it('multiple confirmed stages: min of barStarts and max of barEnds', () => {
+    const assignments = makePacAssignments().map(a =>
+      a.order === 1 || a.order === 4 ? { ...a, confirmed: true } : a,
+    );
+    const first = assignments.find(a => a.order === 1)!;
+    const last  = assignments.find(a => a.order === 4)!;
+    const clamp = computeResizeClamp(assignments);
+    expect(clamp!.minBarStart).toBe(first.bounds!.barStart);
+    expect(clamp!.maxBarEnd).toBe(last.bounds!.barEnd);
+  });
+
+  it('ignores absent confirmed stages', () => {
+    const assignments = makePacAssignments().map((a, i) =>
+      i === 0 ? { ...a, confirmed: true, absent: true, bounds: null } : a,
+    );
+    // Only the absent+confirmed stage exists → null (no non-absent confirmed)
+    expect(computeResizeClamp(assignments)).toBeNull();
+  });
+
+  it('ignores orphaned confirmed stages', () => {
+    const assignments = makePacAssignments().map((a, i) =>
+      i === 0 ? { ...a, confirmed: true, orphaned: true } : a,
+    );
+    expect(computeResizeClamp(assignments)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// respondToMainResize
+// ---------------------------------------------------------------------------
+
+describe('respondToMainResize', () => {
+  // Convenience: build a set of unconfirmed PAC assignments over bars 1–8.
+  function makePac() { return makePacAssignments(); }
+
+  // Convenience: confirm one stage by stageId, leaving others unconfirmed.
+  function confirmStage(assignments: StageAssignment[], stageId: string) {
+    return assignments.map(a => a.stageId === stageId ? { ...a, confirmed: true } : a);
+  }
+
+  // ── All-unconfirmed, grow (extend first/last, no redistribution) ─────────────
+
+  it('growing the bracket extends first/last stage edges; middle stages stay put', () => {
+    const before = makePac(); // stages at bars 1-2, 3-5, 6-6, 7-8
+    const middleBefore = before.find(a => a.stageId === 'Dominant')!.bounds!;
+    const { assignments, blocked } = respondToMainResize(
+      before, makeSelection(1, 12), 'measure', [], [],
+    );
+    expect(blocked).toBe(false);
+    // First stage extends to selection left edge (already at bar 1 — no change).
+    expect(assignments[0]!.bounds!.barStart).toBe(1);
+    // Last stage extends to new barEnd.
+    expect(assignments[assignments.length - 1]!.bounds!.barEnd).toBe(12);
+    // Middle stage (Dominant) is unchanged.
+    expect(assignments.find(a => a.stageId === 'Dominant')!.bounds).toEqual(middleBefore);
+    // confirmed flag untouched.
+    for (const a of assignments.filter(x => !x.absent && !x.orphaned)) {
+      expect(a.confirmed).toBe(false);
+    }
+  });
+
+  it('small shrink (all stages still fit): extends first/last edges only', () => {
+    // Stages at 1-2, 3-5, 6-6, 7-8.  Shrink right edge from 8 to 8 (no-op case)
+    // then verify with a real small shrink: 1-8 → 1-8 (identical range).
+    // For a real small-shrink, make a custom layout where last stage fits at new end.
+    const stages = [
+      makeStage('A', 1, 1, true),
+      makeStage('B', 2, 1, true),
+      makeStage('C', 3, 1, true),
+    ];
+    const before = prePopulateStages(stages, makeSelection(1, 9)); // A:1-3, B:4-6, C:7-9
+    const middleBefore = before.find(a => a.stageId === 'B')!.bounds!;
+
+    // Shrink to 1-9 (same — trivially all fit) and verify first/last edge logic.
+    const { assignments } = respondToMainResize(before, makeSelection(1, 9), 'measure', [], []);
+    expect(assignments.find(a => a.stageId === 'B')!.bounds).toEqual(middleBefore);
+
+    // Grow to 1-12: C extends, B unchanged.
+    const { assignments: grown } = respondToMainResize(before, makeSelection(1, 12), 'measure', [], []);
+    expect(grown.find(a => a.stageId === 'B')!.bounds).toEqual(middleBefore);
+    expect(grown.find(a => a.stageId === 'C')!.bounds!.barEnd).toBe(12);
+    expect(grown.find(a => a.stageId === 'A')!.bounds!.barStart).toBe(1);
+  });
+
+  // ── All-unconfirmed, shrink past a stage (full redistribution) ──────────────
+
+  it('shrinking so that last stage falls outside triggers full redistribution', () => {
+    const before = makePac(); // last stage Tonic at bars 7-8
+    const { assignments, blocked } = respondToMainResize(
+      before, makeSelection(1, 4), 'measure', [], [],
+    );
+    expect(blocked).toBe(false);
+    // All stages now within the new range.
+    for (const a of assignments.filter(x => !x.absent && !x.orphaned)) {
+      expect(a.bounds!.barStart).toBeGreaterThanOrEqual(1);
+      expect(a.bounds!.barEnd).toBeLessThanOrEqual(4);
+    }
+    // Full redistribution: last stage ends at barEnd 4.
+    expect(assignments[assignments.length - 1]!.bounds!.barEnd).toBe(4);
+  });
+
+  // ── droppedGrid: no downgrade when user is at a finer resolution ────────────
+
+  it('droppedGrid is null when current resolution is finer than the coarsest fitting grid', () => {
+    // 4 stages over 4 bars → measure fits. Current = beat. Must NOT downgrade.
+    const before = makePac();
+    const { droppedGrid } = respondToMainResize(
+      before, makeSelection(1, 4), 'beat', [], [],
+    );
+    expect(droppedGrid).toBeNull();
+  });
+
+  it('droppedGrid is null when at subbeat and stages fit at measure', () => {
+    const before = makePac();
+    const { droppedGrid } = respondToMainResize(
+      before, makeSelection(1, 8), 'subbeat', [], [],
+    );
+    expect(droppedGrid).toBeNull();
+  });
+
+  it('returns droppedGrid=null when the current grid (measure) still fits after resize', () => {
+    const before = makePac(); // 4 stages over 8 bars; measure fits
+    const { droppedGrid } = respondToMainResize(
+      before, makeSelection(1, 4), 'measure', [], [],
+    );
+    expect(droppedGrid).toBeNull(); // 4 bars ≥ 4 stages → measure still works
+  });
+
+  it('returns droppedGrid=beat when at measure and selection is too short for measure', () => {
+    // 4 stages, shrink to 2 bars → measure no longer fits; need beat resolution.
+    const before = makePac();
+    const beatPos = makeBeatPositions(1, 2, 4); // 8 beat slots
+    const { droppedGrid, blocked } = respondToMainResize(
+      before, makeSelection(1, 2), 'measure', beatPos, [],
+    );
+    expect(blocked).toBe(false);
+    expect(droppedGrid).toBe('beat');
+  });
+
+  it('returns blocked=true when no resolution can fit the stages', () => {
+    // 4 stages, selection is 1 bar with 2 beats → not enough at any grid.
+    const before = makePac();
+    const { blocked } = respondToMainResize(
+      before, makeSelection(1, 1), 'measure', [{ barN: 1, beatFloat: 1 }, { barN: 1, beatFloat: 2 }], [],
+    );
+    expect(blocked).toBe(true);
+  });
+
+  // ── With confirmed stages (hybrid) ────────────────────────────────────────
+
+  it('confirmed stage bounds are preserved after a grow', () => {
+    const before = confirmStage(makePac(), 'Dominant');
+    const dominantBefore = before.find(a => a.stageId === 'Dominant')!;
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 12), 'measure', [], [],
+    );
+    const dominant = assignments.find(a => a.stageId === 'Dominant')!;
+    expect(dominant.bounds).toEqual(dominantBefore.bounds);
+    expect(dominant.confirmed).toBe(true);
+  });
+
+  it('confirmed stage bounds are preserved after a shrink', () => {
+    // Dominant is at bars 3–5 (approx) in the default layout.
+    const before = confirmStage(makePac(), 'Dominant');
+    const dominantBefore = before.find(a => a.stageId === 'Dominant')!;
+    // Shrink to a range that still contains the confirmed stage.
+    const newEnd = dominantBefore.bounds!.barEnd;
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, newEnd), 'measure', [], [],
+    );
+    const dominant = assignments.find(a => a.stageId === 'Dominant')!;
+    expect(dominant.bounds).toEqual(dominantBefore.bounds);
+  });
+
+  it('unconfirmed stages before a confirmed anchor fill the leading gap', () => {
+    // Confirm Dominant (order 2); Predominant (order 1) should fill barStart..Dominant.barStart-1.
+    const before = confirmStage(makePac(), 'Dominant');
+    const dominantBefore = before.find(a => a.stageId === 'Dominant')!;
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 8), 'measure', [], [],
+    );
+    const predominant = assignments.find(a => a.stageId === 'Predominant')!;
+    expect(predominant.bounds!.barStart).toBe(1);
+    expect(predominant.bounds!.barEnd).toBe(dominantBefore.bounds!.barStart - 1);
+  });
+
+  it('unconfirmed stages after the last confirmed anchor fill the trailing gap', () => {
+    const before = confirmStage(makePac(), 'Dominant');
+    const dominantBefore = before.find(a => a.stageId === 'Dominant')!;
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 8), 'measure', [], [],
+    );
+    const preTonicIdx = assignments.findIndex(a => a.stageId === 'PreTonic');
+    const tonicIdx    = assignments.findIndex(a => a.stageId === 'Tonic');
+    expect(preTonicIdx).toBeGreaterThanOrEqual(0);
+    expect(tonicIdx).toBeGreaterThanOrEqual(0);
+    const lastActive = assignments
+      .filter(a => !a.absent && !a.orphaned)
+      .sort((a, b) => b.order - a.order)[0]!;
+    expect(lastActive.bounds!.barEnd).toBe(8);
+    // Confirmed stage is still in place.
+    expect(assignments.find(a => a.stageId === 'Dominant')!.bounds).toEqual(dominantBefore.bounds);
+  });
+
+  it('absent and orphaned stages are passed through unchanged', () => {
+    const before = makePac().map((a, i) =>
+      i === 2 ? { ...a, absent: true, bounds: null } : a,
+    );
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 10), 'measure', [], [],
+    );
+    const absentStage = assignments.find(a => a.absent)!;
+    expect(absentStage).toBeDefined();
+    expect(absentStage.bounds).toBeNull();
+  });
+
+  it('optional unconfirmed stage with no room in its gap is marked absent', () => {
+    // Arrange: two adjacent confirmed stages that leave zero room for an
+    // optional unconfirmed stage between them.
+    // Build a 3-stage concept with B (optional, order 2) between A (order 1)
+    // and C (order 3).  Confirm A and C so they are adjacent (A.barEnd+1 = C.barStart).
+    const stages = [
+      makeStage('A', 1, 1, true),
+      makeStage('B', 2, 1, false), // optional
+      makeStage('C', 3, 1, true),
+    ];
+    const assignments = prePopulateStages(stages, makeSelection(1, 3));
+    // A: bar 1, B: bar 2, C: bar 3 — confirm A and C adjacent.
+    const withConfirmed = assignments.map(a => {
+      if (a.stageId === 'A') return { ...a, confirmed: true, bounds: { barStart: 1, beatStart: null, barEnd: 1, beatEnd: null } };
+      if (a.stageId === 'C') return { ...a, confirmed: true, bounds: { barStart: 2, beatStart: null, barEnd: 3, beatEnd: null } };
+      return a;
+    });
+    // Resize — B's gap is bars 2–1 (empty, lo > hi) because C starts at bar 2.
+    const { assignments: result } = respondToMainResize(
+      withConfirmed, makeSelection(1, 3), 'measure', [], [],
+    );
+    const b = result.find(a => a.stageId === 'B')!;
+    expect(b.absent).toBe(true);
+    expect(b.bounds).toBeNull();
+  });
+
+  it('returns assignments unchanged when blocked', () => {
+    const before = makePac();
+    const { assignments, blocked } = respondToMainResize(
+      before, makeSelection(1, 1), 'measure', [{ barN: 1, beatFloat: 1 }], [],
+    );
+    expect(blocked).toBe(true);
+    expect(assignments).toBe(before); // reference equality — unchanged
+  });
+
+  // ── Active optional stage clamp scenario (Step 3 verification) ────────────
+
+  it('shrinking toward an active optional stage: droppedGrid fires before blocked', () => {
+    // Optional confirmed stage at bars 3-4 (in an 8-bar selection).
+    // Shrink to 2 bars — measure can no longer fit 4 stages, but beat can.
+    const stages = [
+      makeStage('Predominant', 1, 2, true),
+      makeStage('Dominant',    2, 3, true),
+      makeStage('PreTonic',    3, 1, false), // optional
+      makeStage('Tonic',       4, 2, true),
+    ];
+    let assignments = prePopulateStages(stages, makeSelection(1, 8));
+    // Confirm the optional PreTonic stage.
+    assignments = confirmStage(assignments, 'PreTonic');
+    const preTonicBounds = assignments.find(a => a.stageId === 'PreTonic')!.bounds!;
+
+    // Shrink to 2 bars but provide enough beats to fit (4 stages × 1 beat each).
+    const beatPos = makeBeatPositions(1, 2, 4); // 8 beat positions
+    const { droppedGrid, blocked, assignments: result } = respondToMainResize(
+      assignments, makeSelection(1, 2), 'measure', beatPos, [],
+    );
+    expect(blocked).toBe(false);
+    expect(droppedGrid).toBe('beat'); // auto-dropped to beat resolution
+
+    // The confirmed optional stage is preserved.
+    const preTonic = result.find(a => a.stageId === 'PreTonic')!;
+    expect(preTonic.bounds).toEqual(preTonicBounds);
+    expect(preTonic.confirmed).toBe(true);
+  });
+
+  // ── Outer-edge sync: last/first confirmed stage tracks fragment boundary ────
+
+  it('last confirmed stage: outer barEnd tracks fragment when it grows', () => {
+    // Confirm Tonic (the last stage). When the fragment grows, Tonic's barEnd
+    // must extend to the new selection end. Its barStart (the split point set
+    // by the confirmed drag) must be preserved unchanged.
+    const before = confirmStage(makePac(), 'Tonic');
+    const tonicBefore = before.find(a => a.stageId === 'Tonic')!;
+
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 12), 'measure', [], [],
+    );
+    const tonic = assignments.find(a => a.stageId === 'Tonic')!;
+    expect(tonic.bounds!.barEnd).toBe(12);
+    expect(tonic.confirmed).toBe(true);
+    // Internal split point (barStart) must be unchanged.
+    expect(tonic.bounds!.barStart).toBe(tonicBefore.bounds!.barStart);
+  });
+
+  it('all stages confirmed: last stage outer edge tracks fragment grow', () => {
+    // When every stage is confirmed the function previously returned early
+    // without syncing outer edges. Verify it now extends the last stage.
+    const before = makePac().map(a => ({ ...a, confirmed: true }));
+    const tonicBefore = before.find(a => a.stageId === 'Tonic')!;
+    const dominantBefore = before.find(a => a.stageId === 'Dominant')!;
+
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 12), 'measure', [], [],
+    );
+    const tonic = assignments.find(a => a.stageId === 'Tonic')!;
+    expect(tonic.bounds!.barEnd).toBe(12);
+    expect(tonic.confirmed).toBe(true);
+    expect(tonic.bounds!.barStart).toBe(tonicBefore.bounds!.barStart);
+
+    // Middle stage bounds are untouched.
+    const dominant = assignments.find(a => a.stageId === 'Dominant')!;
+    expect(dominant.bounds).toEqual(dominantBefore.bounds);
+  });
+
+  it('both flanking stages confirmed (drag-split scenario): last stage tracks grow', () => {
+    // Exact user scenario: drag the split handle between stage N-1 and N,
+    // confirming both. Then grow the fragment. Last stage's barEnd must follow.
+    const before = confirmStage(confirmStage(makePac(), 'PreTonic'), 'Tonic');
+    const tonicBefore = before.find(a => a.stageId === 'Tonic')!;
+
+    const { assignments } = respondToMainResize(
+      before, makeSelection(1, 12), 'measure', [], [],
+    );
+    const tonic = assignments.find(a => a.stageId === 'Tonic')!;
+    expect(tonic.bounds!.barEnd).toBe(12);
+    expect(tonic.bounds!.barStart).toBe(tonicBefore.bounds!.barStart);
+    expect(tonic.confirmed).toBe(true);
+  });
+
+  it('last confirmed stage: beatEnd syncs when fragment shrinks within last bar', () => {
+    // Beat-precision shrink: fragment shrinks from barEnd=8 (full bar) to
+    // barEnd=8 beatEnd=3.0 (partial bar 8). The bar number is unchanged but
+    // beatEnd differs — the stage must update to avoid extending past the fragment.
+    const before = confirmStage(makePac(), 'Tonic');
+    const sel: SelectionRange = { barStart: 1, barEnd: 8, beatStart: 1.0, beatEnd: 3.0, repeatContext: null };
+    const { assignments } = respondToMainResize(before, sel, 'beat', [], []);
+    const tonic = assignments.find(a => a.stageId === 'Tonic')!;
+    expect(tonic.bounds!.barEnd).toBe(8);
+    expect(tonic.bounds!.beatEnd).toBe(3.0);
+  });
+
+  it('first confirmed stage: beatStart syncs when fragment grows into first bar', () => {
+    // Beat-precision grow: fragment starts at barStart=1 beatStart=2.5, then
+    // extends to barStart=1 beatStart=1.0 (earlier beat in same first bar).
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1), makeStage('C', 3, 1)];
+    const initSel: SelectionRange = { barStart: 1, barEnd: 3, beatStart: 2.5, beatEnd: 5.0, repeatContext: null };
+    const baseBeatPositions = [
+      { barN: 1, beatFloat: 2.5 }, { barN: 1, beatFloat: 3.5 }, { barN: 1, beatFloat: 4.5 },
+      { barN: 2, beatFloat: 1.5 }, { barN: 2, beatFloat: 2.5 }, { barN: 2, beatFloat: 3.5 },
+      { barN: 3, beatFloat: 1.5 }, { barN: 3, beatFloat: 2.5 }, { barN: 3, beatFloat: 3.5 },
+    ];
+    const base = prePopulateStagesAtGrid(stages, initSel, baseBeatPositions);
+    const withConfirmed = base.map(a => a.stageId === 'A' ? { ...a, confirmed: true } : a);
+
+    // Grow leftward within bar 1: beatStart moves from 2.5 to 1.0.
+    const newSel: SelectionRange = { barStart: 1, barEnd: 3, beatStart: 1.0, beatEnd: 5.0, repeatContext: null };
+    const { assignments } = respondToMainResize(withConfirmed, newSel, 'beat', baseBeatPositions, []);
+    const a = assignments.find(x => x.stageId === 'A')!;
+    expect(a.bounds!.barStart).toBe(1);
+    expect(a.bounds!.beatStart).toBe(1.0);
+    expect(a.confirmed).toBe(true);
   });
 });
