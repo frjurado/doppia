@@ -1069,3 +1069,101 @@ class TestFragmentUpdateResult:
         fragment = _make_fragment(status="draft")
         result = FragmentUpdateResult(fragment=fragment, previous_status="draft")
         assert result.status_changed is False
+
+
+# ---------------------------------------------------------------------------
+# TestCheckDeletePermission
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDeletePermission:
+    """FragmentService._check_delete_permission — delete permission matrix.
+
+    +-----------+----------+--------------------+-------+
+    | Status    | Creator  | Non-creator editor | Admin |
+    +-----------+----------+--------------------+-------+
+    | draft     | allowed  | denied             | allowed |
+    | submitted | allowed  | denied             | allowed |
+    | rejected  | allowed  | denied             | allowed |
+    | approved  | denied   | denied             | allowed |
+    +-----------+----------+--------------------+-------+
+    """
+
+    def test_creator_may_delete_own_draft(self) -> None:
+        from services.fragments import FragmentService
+
+        creator_id = uuid.uuid4()
+        fragment = _make_fragment(created_by=creator_id, status="draft")
+        FragmentService._check_delete_permission(fragment, str(creator_id), "editor")
+
+    def test_creator_may_delete_own_submitted(self) -> None:
+        from services.fragments import FragmentService
+
+        creator_id = uuid.uuid4()
+        fragment = _make_fragment(created_by=creator_id, status="submitted")
+        FragmentService._check_delete_permission(fragment, str(creator_id), "editor")
+
+    def test_creator_may_delete_own_rejected(self) -> None:
+        from services.fragments import FragmentService
+
+        creator_id = uuid.uuid4()
+        fragment = _make_fragment(created_by=creator_id, status="rejected")
+        FragmentService._check_delete_permission(fragment, str(creator_id), "editor")
+
+    def test_creator_cannot_delete_approved(self) -> None:
+        """Creator may not delete their own approved fragment."""
+        from errors import FragmentValidationError
+        from services.fragments import FragmentService
+
+        creator_id = uuid.uuid4()
+        fragment = _make_fragment(created_by=creator_id, status="approved")
+
+        with pytest.raises(FragmentValidationError) as exc_info:
+            FragmentService._check_delete_permission(
+                fragment, str(creator_id), "editor"
+            )
+
+        assert "approved" in exc_info.value.message
+        assert exc_info.value.detail["status"] == "approved"
+
+    def test_non_creator_cannot_delete(self) -> None:
+        """A non-creator editor may not delete any fragment."""
+        from errors import FragmentValidationError
+        from services.fragments import FragmentService
+
+        creator_id = uuid.uuid4()
+        other_caller = str(uuid.uuid4())
+        fragment = _make_fragment(created_by=creator_id, status="draft")
+
+        with pytest.raises(FragmentValidationError) as exc_info:
+            FragmentService._check_delete_permission(fragment, other_caller, "editor")
+
+        assert str(creator_id) in str(exc_info.value.detail)
+
+    def test_admin_may_delete_any_status(self) -> None:
+        """An admin may delete a fragment at any status."""
+        from services.fragments import FragmentService
+
+        creator_id = uuid.uuid4()
+        other_caller = str(uuid.uuid4())
+        for status in ("draft", "submitted", "rejected", "approved"):
+            fragment = _make_fragment(created_by=creator_id, status=status)
+            FragmentService._check_delete_permission(fragment, other_caller, "admin")
+
+    def test_admin_may_delete_fragment_with_no_creator(self) -> None:
+        """An admin may delete a fragment with no creator recorded."""
+        from services.fragments import FragmentService
+
+        fragment = _make_fragment(created_by=None, status="approved")
+        FragmentService._check_delete_permission(fragment, str(uuid.uuid4()), "admin")
+
+    def test_no_creator_blocks_non_admin(self) -> None:
+        """A fragment with no creator blocks non-admin callers."""
+        from errors import FragmentValidationError
+        from services.fragments import FragmentService
+
+        fragment = _make_fragment(created_by=None, status="draft")
+        with pytest.raises(FragmentValidationError):
+            FragmentService._check_delete_permission(
+                fragment, str(uuid.uuid4()), "editor"
+            )

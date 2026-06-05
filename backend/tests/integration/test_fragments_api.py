@@ -656,3 +656,337 @@ class TestSubmitFragment:
         )
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "FRAGMENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestDeleteFragment:
+    """DELETE /api/v1/fragments/{id} — delete with permission checks and cascade.
+
+    Verification spec (Step 9):
+    - Creator deletes their own draft → 200
+    - Creator cannot delete an approved fragment → 422
+    - Admin can delete an approved fragment → 200
+    - Non-creator cannot delete → 422
+    - Parent with sub-parts without confirm_cascade is refused + reports child count
+    - dry_run=true returns child count without deleting
+    - Deleting with confirm_cascade removes parent + children
+    - movement_analysis is untouched after delete
+    """
+
+    async def _create_draft(self, client: AsyncClient, movement_id: str) -> str:
+        """Helper: create a draft and return its UUID string."""
+        resp = await client.post(
+            "/api/v1/fragments",
+            headers={"Authorization": "Bearer dev-token"},
+            json=_fragment_payload(movement_id),
+        )
+        assert resp.status_code == 201
+        return resp.json()["id"]
+
+    async def _insert_fragment_with_status(
+        self,
+        db_session: AsyncSession,
+        movement_id: str,
+        status: str,
+        creator_id: str,
+    ) -> str:
+        """Insert a fragment row directly with a given status and creator."""
+        import json as _json
+
+        fragment_id = str(uuid.uuid4())
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment "
+                "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
+                "summary, status, created_by) "
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), "
+                ":status, :creator)"
+            ),
+            {
+                "id": fragment_id,
+                "mid": movement_id,
+                "summary": _json.dumps(_min_summary()),
+                "status": status,
+                "creator": creator_id,
+            },
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_concept_tag (fragment_id, concept_id, is_primary) "
+                "VALUES (:fid, 'PerfectAuthenticCadence', true)"
+            ),
+            {"fid": fragment_id},
+        )
+        await db_session.commit()
+        return fragment_id
+
+    async def _insert_child_fragment(
+        self,
+        db_session: AsyncSession,
+        movement_id: str,
+        parent_id: str,
+    ) -> str:
+        """Insert a sub-part child fragment row."""
+        import json as _json
+
+        child_id = str(uuid.uuid4())
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment "
+                "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
+                "summary, status, parent_fragment_id) "
+                "VALUES (:id, :mid, 1, 2, 1, 2, CAST(:summary AS jsonb), "
+                "'draft', :parent)"
+            ),
+            {
+                "id": child_id,
+                "mid": movement_id,
+                "summary": _json.dumps(_min_summary(concepts=["CadentialDominant"])),
+                "parent": parent_id,
+            },
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_concept_tag (fragment_id, concept_id, is_primary) "
+                "VALUES (:fid, 'CadentialDominant', true)"
+            ),
+            {"fid": child_id},
+        )
+        await db_session.commit()
+        return child_id
+
+    async def test_creator_deletes_own_draft(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """The creating annotator can delete their own draft fragment."""
+        fragment_id = await self._create_draft(fragments_client, seeded_movement)
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["fragment_id"] == fragment_id
+        assert body["child_count"] == 0
+        assert body["dry_run"] is False
+
+        # Row must be gone.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment WHERE id = :fid"),
+            {"fid": fragment_id},
+        )
+        assert result.scalar_one() == 0
+
+    async def test_creator_cannot_delete_approved_fragment(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """The creator may not delete an approved fragment (admin-only)."""
+        # The dev-token user is the creator.
+        dev_user_id = "00000000-0000-0000-0000-000000000001"
+        fragment_id = await self._insert_fragment_with_status(
+            db_session, seeded_movement, "approved", dev_user_id
+        )
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "FRAGMENT_VALIDATION_ERROR"
+        assert "approved" in body["error"]["message"]
+
+        # Fragment must still exist.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment WHERE id = :fid"),
+            {"fid": fragment_id},
+        )
+        assert result.scalar_one() == 1
+
+        # Cleanup.
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": fragment_id}
+        )
+        await db_session.commit()
+
+    async def test_admin_can_delete_approved_fragment(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """An admin can delete an approved fragment."""
+        # Approved fragment owned by the dev user.
+        dev_user_id = "00000000-0000-0000-0000-000000000001"
+        fragment_id = await self._insert_fragment_with_status(
+            db_session, seeded_movement, "approved", dev_user_id
+        )
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["fragment_id"] == fragment_id
+        assert body["dry_run"] is False
+
+        # Row must be gone.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment WHERE id = :fid"),
+            {"fid": fragment_id},
+        )
+        assert result.scalar_one() == 0
+
+    async def test_non_creator_cannot_delete(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """A non-creator editor cannot delete another annotator's fragment."""
+        # admin user owns the draft; dev-token user tries to delete it.
+        admin_user_id = "00000000-0000-0000-0000-000000000002"
+        fragment_id = await self._insert_fragment_with_status(
+            db_session, seeded_movement, "draft", admin_user_id
+        )
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["error"]["code"] == "FRAGMENT_VALIDATION_ERROR"
+
+        # Cleanup.
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": fragment_id}
+        )
+        await db_session.commit()
+
+    async def test_delete_parent_without_confirm_cascade_refused(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """Deleting a parent with sub-parts without confirm_cascade returns 422."""
+        fragment_id = await self._create_draft(fragments_client, seeded_movement)
+        await self._insert_child_fragment(db_session, seeded_movement, fragment_id)
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["error"]["code"] == "FRAGMENT_VALIDATION_ERROR"
+        assert body["error"]["detail"]["child_count"] == 1
+        assert body["error"]["detail"]["requires_confirm_cascade"] is True
+
+        # Parent must still exist.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment WHERE id = :fid"),
+            {"fid": fragment_id},
+        )
+        assert result.scalar_one() == 1
+
+        # Cleanup.
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid OR parent_fragment_id = :fid"),
+            {"fid": fragment_id},
+        )
+        await db_session.commit()
+
+    async def test_dry_run_returns_child_count_without_deleting(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """dry_run=true returns child_count and does not delete anything."""
+        fragment_id = await self._create_draft(fragments_client, seeded_movement)
+        await self._insert_child_fragment(db_session, seeded_movement, fragment_id)
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}?dry_run=true",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["child_count"] == 1
+        assert body["dry_run"] is True
+
+        # Rows must still exist.
+        result = await db_session.execute(
+            text(
+                "SELECT COUNT(*) FROM fragment "
+                "WHERE id = :fid OR parent_fragment_id = :fid"
+            ),
+            {"fid": fragment_id},
+        )
+        assert result.scalar_one() == 2
+
+        # Cleanup.
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid OR parent_fragment_id = :fid"),
+            {"fid": fragment_id},
+        )
+        await db_session.commit()
+
+    async def test_confirm_cascade_deletes_parent_and_children(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """confirm_cascade=true deletes the parent and all sub-part children."""
+        fragment_id = await self._create_draft(fragments_client, seeded_movement)
+        child_id = await self._insert_child_fragment(
+            db_session, seeded_movement, fragment_id
+        )
+
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}?confirm_cascade=true",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["child_count"] == 1
+        assert body["dry_run"] is False
+
+        # Both parent and child must be gone.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment WHERE id IN (:pid, :cid)"),
+            {"pid": fragment_id, "cid": child_id},
+        )
+        assert result.scalar_one() == 0
+
+    async def test_delete_unknown_fragment_returns_404(
+        self,
+        fragments_client: AsyncClient,
+    ) -> None:
+        """Deleting a non-existent fragment_id returns 404."""
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{uuid.uuid4()}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "FRAGMENT_NOT_FOUND"
+
+    async def test_delete_requires_auth(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """Unauthenticated delete request returns 401."""
+        fragment_id = await self._create_draft(fragments_client, seeded_movement)
+        resp = await fragments_client.delete(f"/api/v1/fragments/{fragment_id}")
+        assert resp.status_code == 401

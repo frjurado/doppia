@@ -350,6 +350,22 @@ class FragmentUpdateResponse(FragmentResponse):
     """True when the edit triggered a status transition (e.g. approved → submitted)."""
 
 
+class FragmentDeleteResponse(BaseModel):
+    """Response body for DELETE /api/v1/fragments/{id}.
+
+    ``child_count`` is the number of sub-part (stage) children removed by the
+    cascade delete (or that *would* be removed when ``dry_run=True``).
+    ``movement_analysis`` rows are never deleted — they are movement-level,
+    not fragment-owned (fragment-schema.md).
+    """
+
+    model_config = ConfigDict(from_attributes=False)
+
+    fragment_id: uuid.UUID
+    child_count: int
+    dry_run: bool
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 

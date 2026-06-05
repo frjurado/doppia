@@ -1,18 +1,19 @@
-"""Fragment API routes: create, read, update, submit, and review fragment records.
+"""Fragment API routes: create, read, update, submit, review, and delete.
 
 Routes:
-    GET   /api/v1/fragments/{id}             — read one fragment (full detail)
-    POST  /api/v1/fragments                  — create a draft fragment
-    PATCH /api/v1/fragments/{id}             — update at any status (revision semantics)
-    POST  /api/v1/fragments/{id}/submit      — transition draft → submitted
-    POST  /api/v1/fragments/{id}/approve     — record an approval; gate → approved
-    POST  /api/v1/fragments/{id}/reject      — record a rejection → rejected
+    GET    /api/v1/fragments/{id}             — read one fragment (full detail)
+    POST   /api/v1/fragments                  — create a draft fragment
+    PATCH  /api/v1/fragments/{id}             — update at any status (revision semantics)
+    DELETE /api/v1/fragments/{id}             — delete with permission checks and cascade
+    POST   /api/v1/fragments/{id}/submit      — transition draft → submitted
+    POST   /api/v1/fragments/{id}/approve     — record an approval; gate → approved
+    POST   /api/v1/fragments/{id}/reject      — record a rejection → rejected
 
 All routes require the ``editor`` role. The movement-scoped list endpoint
 (GET /api/v1/movements/{id}/fragments) is registered on the movements router.
 
 See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
-See docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8.
+See docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9.
 """
 
 from __future__ import annotations
@@ -21,10 +22,11 @@ import uuid
 from typing import Annotated
 
 from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from models.base import get_db
 from models.fragment import (
     FragmentCreate,
+    FragmentDeleteResponse,
     FragmentDetailResponse,
     FragmentResponse,
     FragmentUpdate,
@@ -200,6 +202,87 @@ async def update_fragment(
         **base.model_dump(),
         previous_status=result.previous_status,
         status_changed=result.status_changed,
+    )
+
+
+@router.delete(
+    "/{fragment_id}",
+    response_model=FragmentDeleteResponse,
+    dependencies=[require_role("editor")],
+    summary="Delete a fragment with permission checks and cascade to sub-parts",
+    response_description=(
+        "The deleted fragment's UUID, the number of sub-part children removed "
+        "(or would-be-removed when ``dry_run=true``), and the ``dry_run`` flag."
+    ),
+)
+async def delete_fragment(
+    fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to delete"),
+    confirm_cascade: bool = Query(
+        False,
+        description=(
+            "Set to true to authorise deleting the parent and all its sub-parts. "
+            "Required when the fragment has sub-parts; ignored when it has none. "
+            "The request is refused (422) with the child count when this is false "
+            "and sub-parts exist."
+        ),
+    ),
+    dry_run: bool = Query(
+        False,
+        description=(
+            "If true, return the cascade child_count without executing any delete. "
+            "Use this to preview the cascade before confirming."
+        ),
+    ),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentDeleteResponse:
+    """Delete a fragment, its sub-parts, and their concept tags.
+
+    **Permission matrix:**
+
+    * Creators may delete their own ``draft``, ``submitted``, or ``rejected``
+      fragments.
+    * ``approved`` fragments cannot be deleted by annotators — only admins
+      may delete them.
+    * Non-creators (other than admins) cannot delete any fragment.
+
+    **Cascade guard:** if the fragment has sub-parts and ``confirm_cascade``
+    is ``false``, the request is refused (422) with the child count in
+    ``detail.child_count``. Pass ``confirm_cascade=true`` to proceed.
+
+    **Dry run:** pass ``dry_run=true`` to preview the cascade count without
+    deleting anything. Permission checks still run.
+
+    ``movement_analysis`` rows are never removed — they are movement-level,
+    not fragment-owned.
+
+    Args:
+        fragment_id: UUID of the fragment to delete.
+        confirm_cascade: Authorise the cascade deletion when sub-parts exist.
+        dry_run: Return child_count without deleting.
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        :class:`~models.fragment.FragmentDeleteResponse` with the fragment UUID,
+        the child count, and the ``dry_run`` flag.
+
+    Raises:
+        404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist.
+        422 ``FRAGMENT_VALIDATION_ERROR``: Caller lacks delete permission, or
+            the fragment has sub-parts and ``confirm_cascade=false``.
+    """
+    result = await service.delete(
+        fragment_id=fragment_id,
+        caller_id=user.id,
+        caller_role=user.role,
+        confirm_cascade=confirm_cascade,
+        dry_run=dry_run,
+    )
+    return FragmentDeleteResponse(
+        fragment_id=result.fragment_id,
+        child_count=result.child_count,
+        dry_run=result.dry_run,
     )
 
 

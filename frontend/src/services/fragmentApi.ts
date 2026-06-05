@@ -10,13 +10,16 @@
  *   GET    /api/v1/fragments/{id}                      — full fragment detail
  *   GET    /api/v1/movements/{id}/fragments            — movement-scoped list
  *
+ * Delete endpoint (Step 9, Component 7):
+ *   DELETE /api/v1/fragments/{id}        — delete with permission checks and cascade
+ *
  * Type definitions mirror the Python Pydantic models in
  * backend/models/fragment.py. The summary JSONB schema follows
  * fragment-schema.md version 1.
  *
  * References:
  *   docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 18
- *   docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8
+ *   docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9
  *   docs/architecture/fragment-schema.md §"The summary JSONB schema"
  *   backend/models/fragment.py
  */
@@ -315,4 +318,69 @@ export async function listMovementFragments(
   return apiFetch<FragmentListResponse>(
     `/api/v1/movements/${movementId}/fragments${qs}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Delete (Component 7 Step 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Response from DELETE /api/v1/fragments/{id}.
+ *
+ * ``child_count`` is the number of sub-part children removed by the cascade
+ * (or that *would* be removed when ``dry_run`` is true).
+ * ``movement_analysis`` rows are never deleted.
+ */
+export interface FragmentDeleteResponse {
+  fragment_id: string;
+  child_count: number;
+  dry_run: boolean;
+}
+
+/**
+ * Preview how many sub-parts would be deleted without deleting anything.
+ *
+ * Calls DELETE with ``dry_run=true``. Permission checks still run — a 403/422
+ * is thrown if the caller lacks delete permission.
+ *
+ * @param id UUID of the fragment to preview.
+ * @throws ApiError on auth errors or permission failure.
+ */
+export async function previewFragmentDelete(
+  id: string,
+): Promise<FragmentDeleteResponse> {
+  return apiFetch<FragmentDeleteResponse>(
+    `/api/v1/fragments/${id}?dry_run=true`,
+    { method: 'DELETE' },
+  );
+}
+
+/**
+ * Delete a fragment, its sub-parts, and their concept tags.
+ *
+ * The server enforces the delete permission matrix:
+ * - Creators may delete their own draft / submitted / rejected fragments.
+ * - Approved fragments can only be deleted by admins.
+ * - Non-creators cannot delete any fragment.
+ *
+ * When the fragment has sub-parts, pass ``confirmCascade: true`` to authorise
+ * the cascade deletion. Without it the server returns 422 with
+ * ``detail.child_count`` — use ``previewFragmentDelete`` first if you need
+ * the count before prompting the user.
+ *
+ * @param id UUID of the fragment to delete.
+ * @param confirmCascade Set true to authorise deleting sub-parts as well.
+ * @throws ApiError on 404 (not found), 422 (permission denied or cascade
+ *   confirmation missing), or auth errors.
+ */
+export async function deleteFragment(
+  id: string,
+  confirmCascade = false,
+): Promise<FragmentDeleteResponse> {
+  const params = new URLSearchParams();
+  if (confirmCascade) params.set('confirm_cascade', 'true');
+  const qs = params.size > 0 ? `?${params}` : '';
+  return apiFetch<FragmentDeleteResponse>(`/api/v1/fragments/${id}${qs}`, {
+    method: 'DELETE',
+  });
 }

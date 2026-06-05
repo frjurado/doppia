@@ -71,6 +71,19 @@ class FragmentUpdateResult:
         return self.fragment.status != self.previous_status
 
 
+@dataclass
+class FragmentDeleteResult:
+    """Result of :meth:`FragmentService.delete`.
+
+    ``child_count`` is the number of sub-part children removed by the cascade
+    (or that *would* be removed when ``dry_run=True``).
+    """
+
+    fragment_id: uuid.UUID
+    child_count: int
+    dry_run: bool
+
+
 # Phase 1 approval threshold: one non-creator approving review is sufficient.
 _APPROVAL_THRESHOLD: int = 1
 
@@ -809,6 +822,100 @@ class FragmentService:
         return FragmentListResponse(items=items, next_cursor=next_cursor)
 
     # ------------------------------------------------------------------
+    # Public interface — delete
+    # ------------------------------------------------------------------
+
+    async def delete(
+        self,
+        fragment_id: uuid.UUID,
+        caller_id: str,
+        caller_role: str,
+        confirm_cascade: bool = False,
+        dry_run: bool = False,
+    ) -> FragmentDeleteResult:
+        """Delete a fragment and its sub-part children via ON DELETE CASCADE.
+
+        Permission matrix (fragment-schema.md § "Delete Permissions"):
+
+        +-----------+----------+--------------------+-------+
+        | Status    | Creator  | Non-creator editor | Admin |
+        +-----------+----------+--------------------+-------+
+        | draft     | allowed  | denied             | allowed |
+        | submitted | allowed  | denied             | allowed |
+        | rejected  | allowed  | denied             | allowed |
+        | approved  | denied   | denied             | allowed |
+        +-----------+----------+--------------------+-------+
+
+        Cascade guard: if the parent has sub-parts and ``confirm_cascade`` is
+        ``False``, the delete is refused and the child count is reported.
+        Pass ``dry_run=True`` to get the child count without deleting.
+
+        ``movement_analysis`` rows are never deleted — they are movement-level,
+        not fragment-owned.
+
+        Args:
+            fragment_id: UUID of the fragment to delete.
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller.
+            confirm_cascade: Set ``True`` to authorise deleting parent + all
+                sub-parts when sub-parts exist.
+            dry_run: If ``True``, return the cascade child count without
+                executing any delete.
+
+        Returns:
+            :class:`FragmentDeleteResult` with the fragment UUID, the child
+            count (deleted or would-be-deleted), and the ``dry_run`` flag.
+
+        Raises:
+            FragmentNotFoundError: Fragment does not exist.
+            FragmentValidationError: Caller lacks delete permission, or the
+                fragment has sub-parts and ``confirm_cascade=False``.
+        """
+        # Reads use the session's implicit autobegin transaction.
+        result = await self._db.execute(
+            select(Fragment).where(Fragment.id == fragment_id)
+        )
+        fragment = result.scalar_one_or_none()
+        if fragment is None:
+            raise FragmentNotFoundError(
+                f"No fragment with id '{fragment_id}' exists.",
+                detail={"fragment_id": str(fragment_id)},
+            )
+
+        self._check_delete_permission(fragment, caller_id, caller_role)
+
+        count_result = await self._db.execute(
+            select(func.count()).where(Fragment.parent_fragment_id == fragment_id)
+        )
+        child_count = count_result.scalar_one()
+
+        if dry_run:
+            return FragmentDeleteResult(
+                fragment_id=fragment_id, child_count=child_count, dry_run=True
+            )
+
+        if child_count > 0 and not confirm_cascade:
+            raise FragmentValidationError(
+                f"Fragment '{fragment_id}' has {child_count} sub-part(s). "
+                "Pass confirm_cascade=true to delete the parent and all its sub-parts, "
+                "or use dry_run=true to preview the cascade without deleting.",
+                detail={
+                    "fragment_id": str(fragment_id),
+                    "child_count": child_count,
+                    "requires_confirm_cascade": True,
+                },
+            )
+
+        # Delete the parent; ON DELETE CASCADE on parent_fragment_id removes children.
+        # fragment_concept_tag and fragment_review rows cascade via their own FKs.
+        await self._db.execute(delete(Fragment).where(Fragment.id == fragment_id))
+        await self._db.commit()
+
+        return FragmentDeleteResult(
+            fragment_id=fragment_id, child_count=child_count, dry_run=False
+        )
+
+    # ------------------------------------------------------------------
     # Public interface — review state machine
     # ------------------------------------------------------------------
 
@@ -1205,6 +1312,42 @@ class FragmentService:
     # ------------------------------------------------------------------
     # Internal helpers — permission check
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_delete_permission(
+        fragment: Fragment, caller_id: str, caller_role: str
+    ) -> None:
+        """Assert that the caller may delete this fragment.
+
+        Raises:
+            FragmentValidationError: Caller is not the creator and not an admin,
+                or caller is the creator but the fragment is ``approved``.
+        """
+        if caller_role == "admin":
+            return
+        is_creator = (
+            fragment.created_by is not None and str(fragment.created_by) == caller_id
+        )
+        if not is_creator:
+            raise FragmentValidationError(
+                "Only the creating annotator or an admin may delete this fragment.",
+                detail={
+                    "fragment_id": str(fragment.id),
+                    "caller_id": caller_id,
+                    "creator_id": (
+                        str(fragment.created_by) if fragment.created_by else None
+                    ),
+                },
+            )
+        if fragment.status == "approved":
+            raise FragmentValidationError(
+                "Approved fragments cannot be deleted by annotators. "
+                "Only an admin may delete an approved fragment.",
+                detail={
+                    "fragment_id": str(fragment.id),
+                    "status": fragment.status,
+                },
+            )
 
     @staticmethod
     def _check_edit_permission(
