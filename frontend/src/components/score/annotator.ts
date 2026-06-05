@@ -425,6 +425,14 @@ export class AnnotationSession {
    */
   private _minBarRange: { minBarStart: number; maxBarEnd: number } | null = null;
 
+  /**
+   * Component 7 Step 5 — modal lock while a stage split-handle drag is active.
+   * When true, the main-ghost hover handler does not show the handle affordance
+   * (the handles sit right next to stage brackets and the affordance is
+   * distracting mid-stage-drag). Re-enabled the instant the stage drag ends.
+   */
+  private _stageDragActive = false;
+
   // Current committed selection (updated on mouseup).
   private _selection: SelectionRange | null = null;
 
@@ -541,6 +549,24 @@ export class AnnotationSession {
    */
   setMinBarRange(range: { minBarStart: number; maxBarEnd: number } | null): void {
     this._minBarRange = range;
+  }
+
+  /**
+   * Component 7 Step 5 — notify the session that a stage split-handle drag is
+   * starting (active=true) or has ended (active=false).
+   *
+   * While active, the main-ghost hover handler suppresses its handle-show
+   * affordance so the handles do not flicker while the cursor passes over
+   * the main ghost during a stage resize. Re-enabling (active=false) restores
+   * the affordance immediately on the next mouseover tick.
+   */
+  setStageDragActive(active: boolean): void {
+    this._stageDragActive = active;
+    if (!active) {
+      // Eagerly hide handles — they will be re-shown on the next valid hover
+      // rather than appearing abruptly at the cursor's current position.
+      this._layer.hideHandles();
+    }
   }
 
   /** Subscribe to selection changes. Replaces any prior subscriber. */
@@ -888,7 +914,9 @@ export class AnnotationSession {
       }
       // Handles are hover-only: show when over a dark ghost or a handle element;
       // hide otherwise so they don't clutter a non-hovered committed selection.
-      if (this._handlesReady) {
+      // Step 5: suppress during an active stage split-handle drag — the cursor
+      // frequently crosses the main ghost mid-drag and the affordance is distracting.
+      if (this._handlesReady && !this._stageDragActive) {
         const overDark = ghost !== null && this._darkGhosts.has(ghost);
         const overHandle = handleFromTarget(e.target) !== null;
         if (overDark || overHandle) {

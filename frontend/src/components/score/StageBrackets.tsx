@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import type { GhostLayer, MeasureGhostEntry, ResolutionMode } from './ghosts';
-import type { SelectionRange } from './annotator';
+import type { AnnotationSession, SelectionRange } from './annotator';
 import type { StageBounds, StageAssignment } from './stages';
 import { moveSplitHandle, stageColor } from './stages';
 import type { StageBeatBoundary } from './stages';
@@ -71,6 +71,12 @@ export interface StageBracketsProps {
    * Receives the full updated assignments array after moveSplitHandle().
    */
   onSplitHandleMove: (updatedAssignments: StageAssignment[]) => void;
+  /**
+   * Component 7 Step 5 — the active annotation session.
+   * When provided, a split-handle drag sets the session's stageDragActive lock
+   * so the main-ghost handle affordance is suppressed during the drag.
+   */
+  session?: AnnotationSession | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +304,7 @@ export default function StageBrackets({
   activeStageId,
   onStageActivate,
   onSplitHandleMove,
+  session,
 }: StageBracketsProps) {
   // Drag state for split handles: tracked in a ref to avoid re-renders during
   // the drag — only onSplitHandleMove triggers a React state update.
@@ -364,19 +371,21 @@ export default function StageBrackets({
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = null;
+    session?.setStageDragActive(false);
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
-  }, [handleMouseMove]);
+  }, [handleMouseMove, session]);
 
   const startSplitDrag = useCallback(
     (e: React.MouseEvent, sortedIdx: number, systemBottom: number) => {
       e.stopPropagation();
       e.preventDefault();
       dragRef.current = { sortedIdx, systemBottom, initialAssignments: assignments, lastValidAssignments: null };
+      session?.setStageDragActive(true);
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     },
-    [assignments, handleMouseMove, handleMouseUp],
+    [assignments, handleMouseMove, handleMouseUp, session],
   );
 
   // Cleanup on unmount.

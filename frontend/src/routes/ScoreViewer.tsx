@@ -1708,6 +1708,7 @@ export default function ScoreViewer() {
                 activeStageId={activeStageId}
                 onStageActivate={handleStageActivate}
                 onSplitHandleMove={handleSplitHandleMove}
+                session={annotationSessionRef.current}
               />
             </FragmentOverlay>
           </div>
