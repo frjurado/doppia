@@ -96,6 +96,25 @@ export interface StageAssignment {
 }
 
 // ---------------------------------------------------------------------------
+// Beat-bounds invariant (ADR-005)
+// ---------------------------------------------------------------------------
+
+/**
+ * Enforce ADR-005: beat_start and beat_end must both be null (measure-level)
+ * or both be non-null numbers (beat-level). If either is null the pair is
+ * normalised to both-null.
+ */
+function normalizeBeatBounds(
+  beatStart: number | null,
+  beatEnd: number | null,
+): { beatStart: number | null; beatEnd: number | null } {
+  if (beatStart === null || beatEnd === null) {
+    return { beatStart: null, beatEnd: null };
+  }
+  return { beatStart, beatEnd };
+}
+
+// ---------------------------------------------------------------------------
 // Stage palette (one colour per stage order, cycling)
 // ---------------------------------------------------------------------------
 
@@ -233,6 +252,11 @@ export function prePopulateStagesAtGrid(
       barEnd = nextSlot!.barN;
       beatEnd = nextSlot!.beatFloat;
     }
+
+    // Outer-boundary asymmetry (null beatStart on first stage, null beatEnd on
+    // last stage) is left as-is so the visual tiling stays contiguous.  The
+    // ScoreViewer.tsx payload builder normalises both to null before submission
+    // so the backend's ADR-005 validator never sees an asymmetric pair.
 
     assignments.push({
       stageId: stage.target_id,
@@ -424,14 +448,14 @@ export function moveSplitHandle(
         if (a.stageId === leftStage.stageId) {
           return {
             ...a,
-            bounds: { ...a.bounds!, barEnd: measureBarN, beatEnd: null },
+            bounds: { ...a.bounds!, barEnd: measureBarN, beatStart: null, beatEnd: null },
             confirmed: true,
           };
         }
         if (a.stageId === rightStage.stageId) {
           return {
             ...a,
-            bounds: { ...a.bounds!, barStart: measureBarN + 1, beatStart: null },
+            bounds: { ...a.bounds!, barStart: measureBarN + 1, beatStart: null, beatEnd: null },
             confirmed: true,
           };
         }
@@ -576,10 +600,10 @@ export function toggleStageAbsent(
         return { ...a, absent: true, bounds: null };
       }
       if (prevActive && a.stageId === prevActive.stageId && absentBounds && a.bounds) {
-        return { ...a, bounds: { ...a.bounds, barEnd: absentBounds.barEnd, beatEnd: null } };
+        return { ...a, bounds: { ...a.bounds, barEnd: absentBounds.barEnd, beatStart: null, beatEnd: null } };
       }
       if (!prevActive && nextActive && a.stageId === nextActive.stageId && absentBounds && a.bounds) {
-        return { ...a, bounds: { ...a.bounds, barStart: absentBounds.barStart, beatStart: null } };
+        return { ...a, bounds: { ...a.bounds, barStart: absentBounds.barStart, beatStart: null, beatEnd: null } };
       }
       return a;
     });
@@ -695,10 +719,10 @@ export function reconcileWithSelection(
     const b = a.bounds;
 
     if (a.stageId === firstId && b.barStart !== selection.barStart) {
-      return { ...a, bounds: { ...b, barStart: selection.barStart, beatStart: null }, error: false };
+      return { ...a, bounds: { ...b, barStart: selection.barStart, beatStart: null, beatEnd: null }, error: false };
     }
     if (a.stageId === lastId && b.barEnd !== selection.barEnd) {
-      return { ...a, bounds: { ...b, barEnd: selection.barEnd, beatEnd: null }, error: false };
+      return { ...a, bounds: { ...b, barEnd: selection.barEnd, beatStart: null, beatEnd: null }, error: false };
     }
 
     const outside = b.barStart < selection.barStart || b.barEnd > selection.barEnd;

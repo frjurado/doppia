@@ -1202,3 +1202,131 @@ describe('moveSplitHandle — Step 4 beat/sub-beat geometry', () => {
     expect(updated).toBe(assignments);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR-005 beat-symmetry invariant — regression tests for the four root causes
+// of 422 "Request validation failed" errors.
+//
+// The invariant: StageBounds.beatStart and StageBounds.beatEnd must both be
+// null (measure-level) or both be non-null with beatStart < beatEnd.
+// Any pair that violates this causes the backend Pydantic validator to reject
+// the sub-part fragment with a 422.
+// ---------------------------------------------------------------------------
+
+describe('ADR-005 beat-symmetry invariant', () => {
+  // Helper: build two stages with beat-level split so both have non-null beats.
+  function makeBeatSplitAssignments(): StageAssignment[] {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1)];
+    const base = prePopulateStages(stages, makeSelection(1, 4));
+    // Drag split handle to beat 2.5 of bar 2 — now A.beatEnd=2.5, B.beatStart=2.5.
+    return moveSplitHandle(base, 0, bBoundary(2, 2.5));
+  }
+
+  // ── Root cause 1: prePopulateStagesAtGrid outer boundaries ───────────────
+  // prePopulateStagesAtGrid intentionally leaves the outer boundary asymmetric
+  // (first stage: beatStart=null / beatEnd=<number>; last stage: beatStart=<number>
+  // / beatEnd=null) so the visual tiling stays contiguous.  The ScoreViewer.tsx
+  // payload builder is the safety net: it normalises any pair where
+  // beatStart is null OR beatEnd is null OR beatStart >= beatEnd to both-null
+  // before submission, so the backend ADR-005 validator never sees a bad pair.
+
+  it('prePopulateStagesAtGrid: outer boundaries — first stage has null beatStart, last has null beatEnd', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1), makeStage('C', 3, 1)];
+    const positions = makeBeatPositions(1, 1, 4); // single bar, 4 beat slots
+    const result = prePopulateStagesAtGrid(stages, makeSelection(1, 1), positions);
+    const first = result[0]!;
+    const last  = result[result.length - 1]!;
+    // Outer-edge asymmetry: the selection is measure-level so the outer boundaries
+    // inherit null.  beatEnd of first and beatStart of last are set by the inner
+    // split positions and are non-null — that is intentional (visual tiling).
+    expect(first.bounds!.beatStart).toBeNull();   // outer left edge: measure-level
+    expect(last.bounds!.beatEnd).toBeNull();       // outer right edge: measure-level
+    // The inner split boundaries are non-null (beat-level distribution).
+    expect(first.bounds!.beatEnd).not.toBeNull();  // inner right boundary of first stage
+    expect(last.bounds!.beatStart).not.toBeNull(); // inner left boundary of last stage
+  });
+
+  // ── Root cause 2: reconcileWithSelection outer-edge reset ────────────────
+
+  it('reconcileWithSelection: first stage with non-null beatEnd gets both beats cleared', () => {
+    const assignments = makeBeatSplitAssignments();
+    // A currently has beatStart=null, beatEnd=2.5 (asymmetric after split).
+    // Expanding the bracket (barStart stays at 1) should clear both beats on A.
+    const reconciled = reconcileWithSelection(assignments, makeSelection(0, 4));
+    const a = reconciled.find(x => x.stageId === 'A')!;
+    expect(a.bounds!.beatStart).toBeNull();
+    expect(a.bounds!.beatEnd).toBeNull();
+    expect(a.error).toBe(false);
+  });
+
+  it('reconcileWithSelection: last stage with non-null beatStart gets both beats cleared', () => {
+    const assignments = makeBeatSplitAssignments();
+    // B currently has beatStart=2.5, beatEnd=null (asymmetric after split).
+    // Expanding the bracket on the right should clear both beats on B.
+    const reconciled = reconcileWithSelection(assignments, makeSelection(1, 6));
+    const b = reconciled.find(x => x.stageId === 'B')!;
+    expect(b.bounds!.beatStart).toBeNull();
+    expect(b.bounds!.beatEnd).toBeNull();
+    expect(b.error).toBe(false);
+  });
+
+  // ── Root cause 3: toggleStageAbsent absorber beat clearing ───────────────
+
+  it('toggleStageAbsent: left absorber with non-null beatStart gets both beats cleared', () => {
+    const stages = [
+      makeStage('A', 1, 1, true),
+      makeStage('B', 2, 1, false), // optional — will go absent
+      makeStage('C', 3, 1, true),
+    ];
+    const base = prePopulateStages(stages, makeSelection(1, 6));
+    // Give A a beat-level split so it has non-null beatEnd.
+    const withBeat = base.map(a =>
+      a.stageId === 'A' ? { ...a, bounds: { ...a.bounds!, beatStart: 1.0, beatEnd: 2.5 } } : a,
+    );
+    const updated = toggleStageAbsent(withBeat, 'B', true);
+    const a = updated.find(x => x.stageId === 'A')!;
+    // A absorbed B's space (extended barEnd). Both beats must be null.
+    expect(a.bounds!.beatStart).toBeNull();
+    expect(a.bounds!.beatEnd).toBeNull();
+  });
+
+  it('toggleStageAbsent: right absorber with non-null beatEnd gets both beats cleared', () => {
+    const stages = [
+      makeStage('First', 1, 1, false), // optional — will go absent, no left neighbour
+      makeStage('Second', 2, 1, true),
+    ];
+    const base = prePopulateStages(stages, makeSelection(1, 6));
+    // Give Second a beat-level split so it has non-null beatEnd.
+    const withBeat = base.map(a =>
+      a.stageId === 'Second' ? { ...a, bounds: { ...a.bounds!, beatStart: 1.5, beatEnd: 3.0 } } : a,
+    );
+    const updated = toggleStageAbsent(withBeat, 'First', true);
+    const second = updated.find(x => x.stageId === 'Second')!;
+    // Second absorbed First's space (extended barStart). Both beats must be null.
+    expect(second.bounds!.beatStart).toBeNull();
+    expect(second.bounds!.beatEnd).toBeNull();
+  });
+
+  // ── Root cause 4: moveSplitHandle beatFloat ≤ 1.0 conversion ─────────────
+
+  it('moveSplitHandle beat<=1.0: both flanking stages get both beats cleared', () => {
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1)];
+    const base = prePopulateStages(stages, makeSelection(1, 4));
+    // Give both stages beat-precision bounds so beatStart/beatEnd are non-null.
+    const withBeat = base.map(a => {
+      if (a.stageId === 'A') return { ...a, bounds: { barStart: 1, beatStart: 1.0, barEnd: 2, beatEnd: 2.5 } };
+      if (a.stageId === 'B') return { ...a, bounds: { barStart: 2, beatStart: 2.5, barEnd: 4, beatEnd: 4.0 } };
+      return a;
+    });
+    // bBoundary(2, 1.0) → beatFloat=1.0 ≤ 1.0 → triggers measure-level conversion.
+    // measureBarN = clampedBarN - 1 = 2 - 1 = 1 (valid: ≥ leftStage.barStart=1, ≤ rightStage.barEnd-1=3).
+    const updated = moveSplitHandle(withBeat, 0, bBoundary(2, 1.0));
+    const a = updated.find(x => x.stageId === 'A')!;
+    const b = updated.find(x => x.stageId === 'B')!;
+    // Both flanking stages must have both beats null after the measure conversion.
+    expect(a.bounds!.beatStart).toBeNull();
+    expect(a.bounds!.beatEnd).toBeNull();
+    expect(b.bounds!.beatStart).toBeNull();
+    expect(b.bounds!.beatEnd).toBeNull();
+  });
+});

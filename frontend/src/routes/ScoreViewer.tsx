@@ -1105,8 +1105,11 @@ export default function ScoreViewer() {
           bar_end:        a.bounds.barEnd,
           mc_start:       mcStart,
           mc_end:         mcEnd,
-          beat_start:     a.bounds.beatStart ?? null,
-          beat_end:       a.bounds.beatEnd   ?? null,
+          // ADR-005: both beats null (measure-level) or both non-null with
+          // beatStart < beatEnd.  Normalize any invalid pair to both-null here
+          // so backend validation never receives an asymmetric or inverted pair.
+          beat_start:     (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatStart : null,
+          beat_end:       (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatEnd   : null,
           repeat_context: committedSelection.repeat_context,
           summary: {
             version:            1,
