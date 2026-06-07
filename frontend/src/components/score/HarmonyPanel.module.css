@@ -106,6 +106,13 @@
   margin-top: 1px; /* tonal separation without divider lines */
 }
 
+/* Brief highlight applied by click-to-focus (in-score label click, Step 16) */
+.eventCardFocused {
+  outline: 2px solid var(--color-primary, #3f5f77);
+  outline-offset: -2px;
+  transition: outline 0.1s ease;
+}
+
 /* ── Event row: beat | chord block | badge | actions ─────────────────────── */
 
 .eventRow {

@@ -126,6 +126,16 @@ export interface FormPanelProps {
   movementId?: string | null;
   /** Committed selection range; used to slice harmony events by bar range. */
   selectionRange?: SelectionRange | null;
+  /**
+   * Called after any successful harmony mutation so the in-score overlay
+   * (Step 16 / G6.3) can refresh its cached event list.
+   */
+  onHarmonyUpdated?: () => void;
+  /**
+   * Event key to scroll/focus in HarmonyPanel — set by ScoreViewer when the
+   * annotator clicks an in-score chord label (click-to-focus, Step 16).
+   */
+  harmonyFocusKey?: string | null;
 
   // ── Step 17: Prose annotation ────────────────────────────────────────────
 
@@ -252,6 +262,8 @@ export default function FormPanel({
   draftId = null,
   onDeleteFragment,
   editPrefill = null,
+  onHarmonyUpdated,
+  harmonyFocusKey,
 }: FormPanelProps) {
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
@@ -472,6 +484,8 @@ export default function FormPanel({
           <HarmonyPanel
             movementId={movementId}
             selectionRange={selectionRange ?? null}
+            onHarmonyUpdated={onHarmonyUpdated}
+            focusedEventKey={harmonyFocusKey}
           />
         </section>
       )}

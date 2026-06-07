@@ -27,7 +27,7 @@
  * docs/roadmap/component-7-fragment-database.md § Step 15.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SelectionRange } from './annotator';
 import {
   confirmHarmonyEvent,
@@ -128,6 +128,17 @@ interface InsertForm {
 export interface HarmonyPanelProps {
   movementId: string;
   selectionRange: SelectionRange | null;
+  /**
+   * Called after any successful mutation (confirm, edit, insert, delete) so
+   * the in-score overlay can refresh its cached event list (Step 16 / G6.3).
+   */
+  onHarmonyUpdated?: () => void;
+  /**
+   * Event key to scroll into view and briefly highlight — set by ScoreViewer
+   * when the annotator clicks an in-score label (click-to-focus, Step 16).
+   * Format: "${mn}:${volta ?? ''}:${beat}" — matches eventKey().
+   */
+  focusedEventKey?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +218,12 @@ function emptyInsertForm(defaultMn?: number): InsertForm {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPanelProps) {
+export default function HarmonyPanel({
+  movementId,
+  selectionRange,
+  onHarmonyUpdated,
+  focusedEventKey,
+}: HarmonyPanelProps) {
   const [events, setEvents] = useState<HarmonyEventOut[]>([]);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -225,6 +241,24 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
   const [insertError, setInsertError] = useState<string | null>(null);
 
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
+
+  // Ref on the outer panel div used by click-to-focus to querySelector event cards.
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // ── Click-to-focus (Step 16 / G6.3) ─────────────────────────────────────
+  // When ScoreViewer emits a focusedEventKey (from an in-score label click),
+  // scroll the matching event card into view and apply a brief highlight.
+  useEffect(() => {
+    if (!focusedEventKey || !panelRef.current) return;
+    const el = panelRef.current.querySelector<HTMLElement>(
+      `[data-event-key="${focusedEventKey}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    el.classList.add(styles.eventCardFocused!);
+    const t = setTimeout(() => el.classList.remove(styles.eventCardFocused!), 1200);
+    return () => clearTimeout(t);
+  }, [focusedEventKey]);
 
   // ── Fetch events ─────────────────────────────────────────────────────────
 
@@ -274,6 +308,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
           mc: event.mc ?? null,
         });
         setEvents(prev => prev.map(e => eventKey(e) === key ? updated : e));
+        onHarmonyUpdated?.();
       } catch {
         // Fall back to full refetch on failure
         await fetchEvents();
@@ -281,7 +316,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
         setBusyKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
       }
     },
-    [movementId, fetchEvents],
+    [movementId, fetchEvents, onHarmonyUpdated],
   );
 
   const handleConfirmAll = useCallback(async () => {
@@ -310,7 +345,8 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
       prev.map(e => updates.find(u => eventKey(u) === eventKey(e)) ?? e),
     );
     setBusyKeys(new Set());
-  }, [events, movementId]);
+    onHarmonyUpdated?.();
+  }, [events, movementId, onHarmonyUpdated]);
 
   // ── Edit ─────────────────────────────────────────────────────────────────
 
@@ -391,12 +427,13 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
       setEditingKey(null);
       setEditForm(null);
       await fetchEvents();
+      onHarmonyUpdated?.();
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setEditSaving(false);
     }
-  }, [editForm, movementId, fetchEvents]);
+  }, [editForm, movementId, fetchEvents, onHarmonyUpdated]);
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
@@ -412,13 +449,14 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
           mc: event.mc ?? null,
         });
         await fetchEvents();
+        onHarmonyUpdated?.();
       } catch {
         // Keep event in list on failure
       } finally {
         setBusyKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
       }
     },
-    [movementId, fetchEvents],
+    [movementId, fetchEvents, onHarmonyUpdated],
   );
 
   // ── Insert ────────────────────────────────────────────────────────────────
@@ -463,12 +501,13 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
       setInsertOpen(false);
       setInsertForm(emptyInsertForm(selectionRange?.barStart));
       await fetchEvents();
+      onHarmonyUpdated?.();
     } catch (err) {
       setInsertError(err instanceof Error ? err.message : 'Insert failed');
     } finally {
       setInsertSaving(false);
     }
-  }, [insertForm, movementId, selectionRange, fetchEvents]);
+  }, [insertForm, movementId, selectionRange, fetchEvents, onHarmonyUpdated]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -496,7 +535,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
   if (!selectionRange) return null;
 
   return (
-    <div className={styles.panel}>
+    <div ref={panelRef} className={styles.panel}>
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className={styles.header}>
         {inferredKey && (
@@ -556,7 +595,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
                   const secondary = secondaryDetail(event);
 
                   return (
-                    <li key={key} className={styles.eventCard}>
+                    <li key={key} className={styles.eventCard} data-event-key={key}>
                       {/* ── Event row ────────────────────────────────── */}
                       <div className={styles.eventRow}>
                         <span className={styles.beat}>

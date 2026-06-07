@@ -41,6 +41,9 @@ import {
   updateFragment,
   submitFragment,
 } from '../services/fragmentApi';
+import { getHarmonyEvents } from '../services/analysisApi';
+import type { HarmonyEventOut } from '../services/analysisApi';
+import { HarmonyOverlay } from '../components/score/harmonyOverlay';
 import type { FragmentDetailResponse, FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
 import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
@@ -445,6 +448,13 @@ export default function ScoreViewer() {
   // ghost positions match the currently rendered score geometry.
   const ghostLayerRef = useRef<GhostLayer | null>(null);
   const annotationSessionRef = useRef<AnnotationSession | null>(null);
+  // ── Harmony overlay (Component 7 Step 16 / G6.3) ─────────────────────────
+  // Imperative overlay; lifecycle mirrors ghost layer (rebuilt on reproject).
+  const harmonyOverlayRef = useRef<HarmonyOverlay | null>(null);
+  // Cached full-movement events for the overlay. Updated by fetchAllHarmonyEvents
+  // and pushed to the overlay via setEvents(); also seed new HarmonyOverlay on
+  // every ghost rebuild so the overlay starts populated, not blank.
+  const allHarmonyEventsRef = useRef<HarmonyEventOut[]>([]);
   // Precomputed barN → mc mapping for the currently loaded MEI.
   const mcIndexRef = useRef<Map<string, number> | null>(null);
   // G1.3: tracks the (movementId, tagMode) context of the last ghost build so
@@ -517,6 +527,10 @@ export default function ScoreViewer() {
   // fragmentDraftId: UUID of the in-progress draft, set after the first
   // successful create. Subsequent saves use PATCH; null = not yet saved.
   const [fragmentDraftId, setFragmentDraftId] = useState<string | null>(null);
+  // ── Harmony click-to-focus (Step 16 / G6.3) ──────────────────────────────
+  // Set when the annotator clicks an in-score chord label; forwarded to
+  // FormPanel → HarmonyPanel to scroll/focus the matching event card.
+  const [harmonyFocusKey, setHarmonyFocusKey] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -1386,11 +1400,13 @@ export default function ScoreViewer() {
     // The new session is then seeded with the stored fragment's selection.
     const shouldReproject = editFragment === null && isSameContext && hadFragment;
 
-    // Teardown: destroy the previous session and layer.
+    // Teardown: destroy the previous session, ghost layer, and harmony overlay.
     annotationSessionRef.current?.destroy();
     ghostLayerRef.current?.destroy();
+    harmonyOverlayRef.current?.destroy();
     annotationSessionRef.current = null;
     ghostLayerRef.current        = null;
+    harmonyOverlayRef.current    = null;
 
     if (!shouldReproject) {
       // Full reset — new score, tagMode change, no committed fragment, or edit.
@@ -1489,6 +1505,18 @@ export default function ScoreViewer() {
       // pointer events (resolutionRef mirrors the resolution state without
       // needing resolution itself in this effect's dependency array).
       session.setResolution(resolutionRef.current);
+
+      // G6.3: mount the in-score harmony overlay. Seeded with the most recently
+      // fetched full-movement events so it starts populated on re-renders.
+      harmonyOverlayRef.current = new HarmonyOverlay({
+        container,
+        ghostLayer: layer,
+        mcIndex: mcIdx,
+        events: allHarmonyEventsRef.current,
+        onLabelClick: (mn, volta, beat) => {
+          setHarmonyFocusKey(`${mn}:${volta ?? ''}:${beat}`);
+        },
+      });
     }
 
     return () => {
@@ -1497,8 +1525,10 @@ export default function ScoreViewer() {
       // intent clear. The refs are nulled to prevent stale-closure access.
       annotationSessionRef.current?.destroy();
       ghostLayerRef.current?.destroy();
+      harmonyOverlayRef.current?.destroy();
       annotationSessionRef.current = null;
       ghostLayerRef.current        = null;
+      harmonyOverlayRef.current    = null;
     };
   // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
   // tagMode entering 'tag' creates the session; leaving destroys it.
@@ -1517,6 +1547,43 @@ export default function ScoreViewer() {
   useEffect(() => {
     annotationSessionRef.current?.setResolution(resolution);
   }, [resolution]);
+
+  // ── Harmony overlay event data (Step 16 / G6.3) ───────────────────────────
+  // Fetch all movement events (unfenced — not selection-scoped) whenever the
+  // viewer enters tag mode for a loaded movement.  The overlay needs the full
+  // movement so it can label every visible system, not just the selection range.
+  useEffect(() => {
+    if (tagMode !== 'tag' || !movementId) {
+      allHarmonyEventsRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    getHarmonyEvents(movementId, 1, 99999)
+      .then((evs) => {
+        if (cancelled) return;
+        allHarmonyEventsRef.current = evs;
+        harmonyOverlayRef.current?.setEvents(evs);
+      })
+      .catch(() => {
+        // Non-fatal: overlay stays empty until the next successful fetch.
+      });
+    return () => { cancelled = true; };
+  }, [tagMode, movementId]);
+
+  /**
+   * Called by FormPanel → HarmonyPanel after any successful harmony mutation
+   * (confirm, edit, insert, delete). Re-fetches the full movement event list
+   * and pushes it to the in-score overlay so labels stay in sync.
+   */
+  const handleHarmonyUpdated = useCallback(() => {
+    if (!movementId || tagMode !== 'tag') return;
+    getHarmonyEvents(movementId, 1, 99999)
+      .then((evs) => {
+        allHarmonyEventsRef.current = evs;
+        harmonyOverlayRef.current?.setEvents(evs);
+      })
+      .catch(() => {});
+  }, [movementId, tagMode]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1981,6 +2048,8 @@ export default function ScoreViewer() {
             submitError={submitError}
             draftId={fragmentDraftId}
             editPrefill={editPrefillFormData}
+            onHarmonyUpdated={handleHarmonyUpdated}
+            harmonyFocusKey={harmonyFocusKey}
           />
         )}
 
