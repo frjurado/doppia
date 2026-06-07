@@ -350,6 +350,8 @@ export default function ScoreViewer() {
   const [searchParams] = useSearchParams();
   /** Source key from the ?key= query param, e.g. "G major". Null if not provided. */
   const sourceKey = searchParams.get('key');
+  /** Fragment UUID from ?fragmentId= — set by the review queue to auto-open a fragment. */
+  const focusFragmentId = searchParams.get('fragmentId');
   usePageTitle('Score Viewer — Doppia');
 
   // ── Viewer state ────────────────────────────────────────────────────────
@@ -532,6 +534,14 @@ export default function ScoreViewer() {
   // selectedFragmentId: UUID of the stored fragment whose detail panel is open.
   // Clicking a stored bracket sets this; close button / Edit clears it.
   const [selectedFragmentId, setSelectedFragmentId] = useState<string | null>(null);
+
+  // Auto-open detail panel when ?fragmentId= is present (Step 13: review queue navigation).
+  // Fires once storedFragments resolves so the fragment is known to exist on this movement.
+  useEffect(() => {
+    if (focusFragmentId && storedFragments.some((f) => f.id === focusFragmentId)) {
+      setSelectedFragmentId(focusFragmentId);
+    }
+  }, [focusFragmentId, storedFragments]);
   // Incremented to force a session rebuild when the edit flow is triggered
   // while already in tag mode (tagMode change alone wouldn't fire the effect).
   const [sessionRebuildKey, setSessionRebuildKey] = useState(0);

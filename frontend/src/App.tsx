@@ -3,6 +3,7 @@ import RequireAuth from './components/auth/RequireAuth';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import CorpusBrowser from './routes/CorpusBrowser';
+import ReviewQueue from './routes/ReviewQueue';
 import ScoreViewer from './routes/ScoreViewer';
 
 /**
@@ -25,6 +26,16 @@ export default function App() {
             <RequireAuth>
               <ErrorBoundary>
                 <CorpusBrowser />
+              </ErrorBoundary>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/review-queue"
+          element={
+            <RequireAuth>
+              <ErrorBoundary>
+                <ReviewQueue />
               </ErrorBoundary>
             </RequireAuth>
           }

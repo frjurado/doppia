@@ -13,6 +13,9 @@
  * Delete endpoint (Step 9, Component 7):
  *   DELETE /api/v1/fragments/{id}        — delete with permission checks and cascade
  *
+ * Review queue (Step 13, Component 7):
+ *   GET    /api/v1/reviews/queue         — submitted fragments awaiting review
+ *
  * Type definitions mirror the Python Pydantic models in
  * backend/models/fragment.py. The summary JSONB schema follows
  * fragment-schema.md version 1.
@@ -217,6 +220,43 @@ export interface FragmentListResponse {
   next_cursor: string | null;
 }
 
+/**
+ * One row in the reviewer work-queue (GET /api/v1/reviews/queue).
+ *
+ * Includes movement context so a reviewer can triage without fetching each
+ * fragment individually. `submitted_at` is `fragment.updated_at` at read time
+ * (the last write transitioned the fragment to submitted).
+ */
+export interface ReviewQueueItem {
+  id: string;
+  movement_id: string;
+  bar_start: number;
+  bar_end: number;
+  mc_start: number;
+  mc_end: number;
+  beat_start: number | null;
+  beat_end: number | null;
+  repeat_context: string | null;
+  status: 'submitted';
+  primary_concept_id: string | null;
+  /** Abbreviated concept label, e.g. "PAC". Null when no alias is set. */
+  primary_concept_alias: string | null;
+  created_by: string | null;
+  /** ISO datetime of the last status transition (approximates submission time). */
+  submitted_at: string;
+  composer_name: string;
+  work_title: string;
+  work_catalogue_number: string | null;
+  movement_number: number;
+  movement_title: string | null;
+}
+
+/** Cursor-paginated response for GET /api/v1/reviews/queue. */
+export interface ReviewQueueResponse {
+  items: ReviewQueueItem[];
+  next_cursor: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
@@ -383,4 +423,23 @@ export async function deleteFragment(
   return apiFetch<FragmentDeleteResponse>(`/api/v1/fragments/${id}${qs}`, {
     method: 'DELETE',
   });
+}
+
+/**
+ * Fetch the reviewer work-queue: submitted fragments the caller is eligible
+ * to review (creator-excluded; admins see all).
+ *
+ * Results are ordered by submission time descending (most recent first).
+ * Pass the `next_cursor` from a prior response to paginate.
+ *
+ * @throws ApiError on auth errors or network failure.
+ */
+export async function listReviewQueue(
+  cursor?: string,
+  pageSize = 50,
+): Promise<ReviewQueueResponse> {
+  const params = new URLSearchParams();
+  if (cursor) params.set('cursor', cursor);
+  params.set('page_size', String(pageSize));
+  return apiFetch<ReviewQueueResponse>(`/api/v1/reviews/queue?${params}`);
 }

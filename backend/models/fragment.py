@@ -8,6 +8,8 @@ Covers:
 - ConceptTagCreate      — write model for a single concept tag
 - SubPartFragmentCreate — write model for a sub-part (child) fragment
 - FragmentCreate        — write model for a top-level fragment create request
+- ReviewQueueItem       — one row in the reviewer work-queue (with movement context)
+- ReviewQueueResponse   — cursor-paginated work-queue response
 
 The summary JSONB schema is versioned and documented in
 docs/architecture/fragment-schema.md. The ``version`` field inside ``summary``
@@ -332,6 +334,50 @@ class FragmentListResponse(BaseModel):
     """Cursor-paginated list of top-level fragments for a movement."""
 
     items: list[FragmentListItem]
+    next_cursor: str | None
+
+
+class ReviewQueueItem(BaseModel):
+    """One row in the reviewer work-queue (GET /api/v1/reviews/queue).
+
+    Extends the lightweight fragment fields with movement context (composer,
+    work, movement label) and submission metadata so a reviewer can triage
+    without fetching each fragment individually.
+
+    ``submitted_at`` is ``fragment.updated_at`` at the time the row is read —
+    the last write transitioned status to ``submitted``, so ``updated_at``
+    approximates the submission time.
+    """
+
+    model_config = ConfigDict(from_attributes=False)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    status: str
+    primary_concept_id: str | None
+    primary_concept_alias: str | None
+    created_by: uuid.UUID | None
+    submitted_at: datetime
+
+    # Movement context resolved by JOIN in the service layer
+    composer_name: str
+    work_title: str
+    work_catalogue_number: str | None
+    movement_number: int
+    movement_title: str | None
+
+
+class ReviewQueueResponse(BaseModel):
+    """Cursor-paginated list of submitted fragments awaiting review."""
+
+    items: list[ReviewQueueItem]
     next_cursor: str | None
 
 

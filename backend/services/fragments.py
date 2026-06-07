@@ -41,8 +41,11 @@ from models.fragment import (
     FragmentReview,
     FragmentSummary,
     FragmentUpdate,
+    ReviewQueueItem,
+    ReviewQueueResponse,
     SubPartFragmentCreate,
 )
+from models.music import Composer, Corpus, Movement, Work
 from neo4j import AsyncDriver
 from services.fragment_validation import (
     validate_concept_existence,
@@ -110,6 +113,27 @@ def _decode_cursor(cursor: str) -> tuple[int, uuid.UUID]:
         raw = base64.urlsafe_b64decode(cursor.encode()).decode()
         mc_str, id_str = raw.split(":", 1)
         return int(mc_str), uuid.UUID(id_str)
+    except Exception as exc:
+        raise ValueError(f"Invalid pagination cursor: {cursor!r}") from exc
+
+
+def _encode_time_cursor(updated_at: datetime, fragment_id: uuid.UUID) -> str:
+    """Encode a (updated_at ISO, id) pair as a cursor for time-ordered pagination."""
+    return base64.urlsafe_b64encode(
+        f"{updated_at.isoformat()}|{fragment_id}".encode()
+    ).decode()
+
+
+def _decode_time_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
+    """Decode a time-ordered pagination cursor back to (updated_at, fragment_id).
+
+    Raises:
+        ValueError: Cursor string is malformed or cannot be decoded.
+    """
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        ts_str, id_str = raw.split("|", 1)
+        return datetime.fromisoformat(ts_str), uuid.UUID(id_str)
     except Exception as exc:
         raise ValueError(f"Invalid pagination cursor: {cursor!r}") from exc
 
@@ -820,6 +844,165 @@ class FragmentService:
             _encode_cursor(page[-1].mc_start, page[-1].id) if has_next else None
         )
         return FragmentListResponse(items=items, next_cursor=next_cursor)
+
+    async def list_for_review(
+        self,
+        caller_id: str,
+        caller_role: str,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> ReviewQueueResponse:
+        """Return a cursor-paginated list of submitted fragments awaiting review.
+
+        Visibility rules (enforced at the service layer):
+        - Status filter: only ``submitted`` top-level fragments are returned.
+        - Creator exclusion: editors do not see their own submissions (a
+          creator cannot approve their own work — the approval gate enforces
+          this, and the queue should not surface what the viewer cannot action).
+        - Admins see all ``submitted`` fragments regardless of creator.
+
+        Results are ordered ``(updated_at DESC, id ASC)`` — most recently
+        submitted first, with a stable tie-break on fragment id.  The cursor
+        encodes ``(updated_at ISO, id)`` to support time-ordered pagination.
+
+        Movement context (composer, work, movement label) is resolved by
+        a single batch JOIN query after the page is fetched, so the caller
+        can triage without fetching each fragment individually.
+
+        This method is designed for reuse in Component 8: the caller can apply
+        additional filters (e.g. concept_id) before calling this method by
+        extending the service or passing extra ``where`` clauses.
+
+        Args:
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller.
+            cursor: Opaque pagination cursor from a prior response.
+            page_size: Maximum fragments per page (1–200).
+
+        Returns:
+            :class:`~models.fragment.ReviewQueueResponse` with items and an
+            optional ``next_cursor`` for the following page.
+
+        Raises:
+            ValueError: Cursor string is malformed.
+        """
+        stmt = (
+            select(Fragment)
+            .where(
+                Fragment.parent_fragment_id.is_(None),
+                Fragment.status == "submitted",
+            )
+            .order_by(Fragment.updated_at.desc(), Fragment.id.asc())
+        )
+
+        # Creator exclusion: editors do not see their own submitted fragments.
+        if caller_role != "admin":
+            caller_uuid = uuid.UUID(caller_id)
+            stmt = stmt.where(Fragment.created_by != caller_uuid)
+
+        # Time-ordered cursor: filter to rows strictly older than the cursor.
+        if cursor is not None:
+            cursor_ts, cursor_id = _decode_time_cursor(cursor)
+            stmt = stmt.where(
+                or_(
+                    Fragment.updated_at < cursor_ts,
+                    and_(
+                        Fragment.updated_at == cursor_ts,
+                        Fragment.id > cursor_id,
+                    ),
+                )
+            )
+
+        result = await self._db.execute(stmt.limit(page_size + 1))
+        rows = list(result.scalars().all())
+
+        has_next = len(rows) > page_size
+        page = rows[:page_size]
+
+        if not page:
+            return ReviewQueueResponse(items=[], next_cursor=None)
+
+        page_ids = [f.id for f in page]
+        movement_ids = list({f.movement_id for f in page})
+
+        # Load concept tags for the page.
+        tags_result = await self._db.execute(
+            select(FragmentConceptTag).where(
+                FragmentConceptTag.fragment_id.in_(page_ids)
+            )
+        )
+        tags_by_frag: dict[uuid.UUID, list[FragmentConceptTag]] = {}
+        for tag in tags_result.scalars().all():
+            tags_by_frag.setdefault(tag.fragment_id, []).append(tag)
+
+        # Batch Neo4j concept hydration.
+        all_concept_ids = list(
+            {t.concept_id for tags in tags_by_frag.values() for t in tags}
+        )
+        alias_map: dict[str, str | None] = {}
+        if all_concept_ids:
+            async with self._driver.session() as neo_session:
+                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
+                    aliases: list[str] = c.get("aliases", [])
+                    alias_map[c["id"]] = aliases[0] if aliases else None
+
+        # Batch movement context: one JOIN query for all unique movement_ids.
+        ctx_result = await self._db.execute(
+            select(
+                Movement.id.label("movement_id"),
+                Movement.movement_number,
+                Movement.title.label("movement_title"),
+                Work.title.label("work_title"),
+                Work.catalogue_number.label("work_catalogue_number"),
+                Composer.name.label("composer_name"),
+            )
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .join(Composer, Corpus.composer_id == Composer.id)
+            .where(Movement.id.in_(movement_ids))
+        )
+        movement_ctx: dict[uuid.UUID, dict] = {}
+        for row in ctx_result.mappings().all():
+            movement_ctx[row["movement_id"]] = dict(row)
+
+        def _primary_for(frag_id: uuid.UUID) -> tuple[str | None, str | None]:
+            for tag in tags_by_frag.get(frag_id, []):
+                if tag.is_primary:
+                    return tag.concept_id, alias_map.get(tag.concept_id)
+            return None, None
+
+        items: list[ReviewQueueItem] = []
+        for f in page:
+            p_id, p_alias = _primary_for(f.id)
+            ctx = movement_ctx.get(f.movement_id, {})
+            items.append(
+                ReviewQueueItem(
+                    id=f.id,
+                    movement_id=f.movement_id,
+                    bar_start=f.bar_start,
+                    bar_end=f.bar_end,
+                    mc_start=f.mc_start,
+                    mc_end=f.mc_end,
+                    beat_start=f.beat_start,
+                    beat_end=f.beat_end,
+                    repeat_context=f.repeat_context,
+                    status=f.status,
+                    primary_concept_id=p_id,
+                    primary_concept_alias=p_alias,
+                    created_by=f.created_by,
+                    submitted_at=f.updated_at,
+                    composer_name=ctx.get("composer_name", ""),
+                    work_title=ctx.get("work_title", ""),
+                    work_catalogue_number=ctx.get("work_catalogue_number"),
+                    movement_number=ctx.get("movement_number", 0),
+                    movement_title=ctx.get("movement_title"),
+                )
+            )
+
+        next_cursor = (
+            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+        )
+        return ReviewQueueResponse(items=items, next_cursor=next_cursor)
 
     # ------------------------------------------------------------------
     # Public interface — delete

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import BrowseAccordion from '../components/browse/BrowseAccordion';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
@@ -64,6 +64,15 @@ export default function CorpusBrowser() {
 
   return (
     <Surface layer="base" className={styles.page} data-has-footer={selectedMovement ? 'true' : 'false'}>
+      {/* Page-level nav strip */}
+      <Surface layer="container-lowest" className={styles.pageNav}>
+        <Type variant="label-md" as="span" className={styles.pageNavTitle}>Browse</Type>
+        <Link to="/review-queue" className={styles.pageNavLink}>
+          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+            Review Queue →
+          </Type>
+        </Link>
+      </Surface>
       {isMobile ? (
         <BrowseAccordion selection={selection} />
       ) : (
