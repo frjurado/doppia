@@ -570,6 +570,174 @@ class TestUpdateFragment:
         )
         await db_session.commit()
 
+    async def test_update_approved_transitions_to_submitted_and_clears_reviews(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """Editing an approved fragment's analytic content returns it to submitted
+        and removes prior fragment_review rows (Step 8 revision semantics).
+        """
+        import json as _json
+
+        dev_user_id = "00000000-0000-0000-0000-000000000001"
+        admin_user_id = "00000000-0000-0000-0000-000000000002"
+        fragment_id = str(uuid.uuid4())
+
+        # Insert an approved fragment owned by the dev user.
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment "
+                "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
+                "summary, status, created_by) "
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), "
+                "'approved', :creator)"
+            ),
+            {
+                "id": fragment_id,
+                "mid": seeded_movement,
+                "summary": _json.dumps(_min_summary()),
+                "creator": dev_user_id,
+            },
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_concept_tag (fragment_id, concept_id, is_primary) "
+                "VALUES (:fid, 'PerfectAuthenticCadence', true)"
+            ),
+            {"fid": fragment_id},
+        )
+        # Seed a prior review row (as if the admin had previously approved it).
+        review_id = str(uuid.uuid4())
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_review "
+                "(id, fragment_id, reviewer_id, decision, reviewed_at) "
+                "VALUES (:rid, :fid, :reviewer, 'approved', NOW())"
+            ),
+            {"rid": review_id, "fid": fragment_id, "reviewer": admin_user_id},
+        )
+        await db_session.commit()
+
+        # Dev user PATCHes the approved fragment — analytic change (key in summary).
+        resp = await fragments_client.patch(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+            json={
+                "bar_start": 1,
+                "bar_end": 4,
+                "mc_start": 1,
+                "mc_end": 4,
+                "summary": _min_summary(key="D major"),  # analytic change
+                "concept_tags": [_min_tag()],
+                "sub_parts": [],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "submitted", "approved→submitted on analytic edit"
+        assert body["previous_status"] == "approved"
+        assert body["status_changed"] is True
+
+        # fragment_review rows must have been cleared.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment_review WHERE fragment_id = :fid"),
+            {"fid": fragment_id},
+        )
+        assert result.scalar_one() == 0, "Prior review rows must be cleared"
+
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": fragment_id}
+        )
+        await db_session.commit()
+
+    async def test_update_prose_only_keeps_status_and_reviews(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """A prose-only edit on a submitted fragment keeps the status and does not
+        clear prior fragment_review rows.
+        """
+        import json as _json
+
+        dev_user_id = "00000000-0000-0000-0000-000000000001"
+        admin_user_id = "00000000-0000-0000-0000-000000000002"
+        fragment_id = str(uuid.uuid4())
+
+        # Insert a submitted fragment owned by the dev user.
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment "
+                "(id, movement_id, bar_start, bar_end, mc_start, mc_end, "
+                "summary, status, created_by) "
+                "VALUES (:id, :mid, 1, 4, 1, 4, CAST(:summary AS jsonb), "
+                "'submitted', :creator)"
+            ),
+            {
+                "id": fragment_id,
+                "mid": seeded_movement,
+                "summary": _json.dumps(_min_summary()),
+                "creator": dev_user_id,
+            },
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_concept_tag (fragment_id, concept_id, is_primary) "
+                "VALUES (:fid, 'PerfectAuthenticCadence', true)"
+            ),
+            {"fid": fragment_id},
+        )
+        # Seed a review row.
+        review_id = str(uuid.uuid4())
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_review "
+                "(id, fragment_id, reviewer_id, decision, reviewed_at) "
+                "VALUES (:rid, :fid, :reviewer, 'approved', NOW())"
+            ),
+            {"rid": review_id, "fid": fragment_id, "reviewer": admin_user_id},
+        )
+        await db_session.commit()
+
+        # Prose-only PATCH: all analytic fields identical to stored state.
+        resp = await fragments_client.patch(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+            json={
+                "bar_start": 1,
+                "bar_end": 4,
+                "mc_start": 1,
+                "mc_end": 4,
+                "summary": _min_summary(),  # no analytic change
+                "concept_tags": [_min_tag()],
+                "sub_parts": [],
+                "prose_annotation": "Revised prose only.",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert (
+            body["status"] == "submitted"
+        ), "Status must not change on prose-only edit"
+        assert body["status_changed"] is False
+
+        # Review rows must be preserved.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM fragment_review WHERE fragment_id = :fid"),
+            {"fid": fragment_id},
+        )
+        assert (
+            result.scalar_one() == 1
+        ), "Review row must be preserved on prose-only edit"
+
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": fragment_id}
+        )
+        await db_session.commit()
+
 
 @pytest.mark.asyncio(loop_scope="session")
 class TestSubmitFragment:
@@ -991,3 +1159,69 @@ class TestDeleteFragment:
         fragment_id = await self._create_draft(fragments_client, seeded_movement)
         resp = await fragments_client.delete(f"/api/v1/fragments/{fragment_id}")
         assert resp.status_code == 401
+
+    async def test_delete_leaves_movement_analysis_untouched(
+        self,
+        fragments_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """Deleting a fragment does not remove movement_analysis rows (per fragment-schema.md).
+
+        Harmony events are movement-level, not fragment-owned; the delete must
+        leave them intact.
+        """
+        import json as _json
+
+        fragment_id = await self._create_draft(fragments_client, seeded_movement)
+
+        # Seed a movement_analysis row with an event in the fragment's bar range.
+        analysis_id = str(uuid.uuid4())
+        event = {
+            "mn": 2,
+            "volta": None,
+            "beat": 1.0,
+            "local_key": "G major",
+            "root": 5,
+            "quality": "major",
+            "inversion": 0,
+            "numeral": "V",
+            "source": "DCML",
+            "auto": False,
+            "reviewed": True,
+        }
+        await db_session.execute(
+            text(
+                "INSERT INTO movement_analysis (id, movement_id, events, music21_version) "
+                "VALUES (:id, :mid, CAST(:events AS jsonb), :ver)"
+            ),
+            {
+                "id": analysis_id,
+                "mid": seeded_movement,
+                "events": _json.dumps([event]),
+                "ver": "none",
+            },
+        )
+        await db_session.commit()
+
+        # Delete the fragment.
+        resp = await fragments_client.delete(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        # movement_analysis must still exist.
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM movement_analysis WHERE id = :aid"),
+            {"aid": analysis_id},
+        )
+        assert (
+            result.scalar_one() == 1
+        ), "movement_analysis must not be deleted with the fragment"
+
+        # Cleanup.
+        await db_session.execute(
+            text("DELETE FROM movement_analysis WHERE id = :aid"), {"aid": analysis_id}
+        )
+        await db_session.commit()
