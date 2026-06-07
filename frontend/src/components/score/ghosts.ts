@@ -335,6 +335,14 @@ export interface MeasureGhostEntry {
   /** Min rawTop across the system, including note content above the staff.
    *  Used by MainBracket to anchor the bracket above the highest note. */
   systemTop: number;
+  /**
+   * 0-indexed document-order render position among SVG-matched measures.
+   * This is the measure component used in encodeBeat() / encodeSubBeat() keys
+   * stored in beatIndex / subBeatIndex. Use this (not mcIndex) when looking up
+   * beat ghosts for a known measure — mcIndex is 1-based and intended for DCML
+   * mc resolution, not for ghost index lookups.
+   */
+  renderOrder: number;
 }
 
 /** Entry stored in the beat index. */
@@ -1118,6 +1126,7 @@ export function buildGhosts(
         el: msrEl, barN, endingN, key: mKey,
         bounds: msrBounds,
         systemTop,
+        renderOrder,
       });
 
       const subDiv = subdivisionsPerBeat(beatCount, beatUnit);

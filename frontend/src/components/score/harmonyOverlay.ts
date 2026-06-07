@@ -120,13 +120,25 @@ export class HarmonyOverlay {
       const measureEntry = this._ghostLayer.measureIndex.get(measureKey);
       if (!measureEntry) continue; // system not yet rendered or ending not visible
 
-      // Step 2 — resolve beat ghost via mc (document-order render position, not barN)
+      // Step 2 — resolve beat ghost via measureEntry.renderOrder.
       // harmony-score-overlay.md §"Step 2 — resolve the beat ghost"
-      const mc = this._mcIndex.get(measureKey);
-      if (mc == null) continue;
+      //
+      // beatIndex keys are encodeBeat(renderOrder, beatIdx) where renderOrder is
+      // the 0-indexed position of the measure among all SVG-rendered measures.
+      // mcIndex is 1-based and is NOT used here — using it directly was an
+      // off-by-one that placed every label one measure forward.
+      const renderOrder = measureEntry.renderOrder;
       const beatIdx = Math.floor(event.beat) - 1; // 1-indexed beat → 0-indexed ghost slot
-      const beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(mc, beatIdx));
-      if (!beatEntry) continue; // beat not struck in this measure
+      // Walk back to nearest preceding struck beat if the exact slot is absent
+      // (ghost index only contains beats where notes actually attack).
+      let beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, beatIdx));
+      if (!beatEntry) {
+        for (let b = beatIdx - 1; b >= 0; b--) {
+          beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, b));
+          if (beatEntry) break;
+        }
+      }
+      if (!beatEntry) continue; // unreachable: beat 0 is always anchored at measure start
 
       // Step 3 — pixel position: x from beat ghost, y from system bottom
       const x = beatEntry.bounds.left;

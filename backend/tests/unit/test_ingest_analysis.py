@@ -150,42 +150,70 @@ class TestIsNan:
 
 
 class TestComputeBeat:
+    # mn_onset is in whole-note fractions (DCML standard).
+    # 1/4 = one quarter note from bar start; 3/8 = one dotted quarter, etc.
+
+    # ── 4/4 (simple, beat unit = 1 quarter note = 1/4 whole note) ────────────
+
     def test_4_4_downbeat(self) -> None:
         assert _compute_beat("0", "4/4") == 1.0
 
     def test_4_4_beat_2(self) -> None:
-        assert _compute_beat("1", "4/4") == 2.0
+        # 1 quarter note from start = 1/4 whole note
+        assert _compute_beat("1/4", "4/4") == 2.0
+
+    def test_4_4_beat_3(self) -> None:
+        assert _compute_beat("1/2", "4/4") == 3.0
 
     def test_4_4_beat_4(self) -> None:
-        assert _compute_beat("3", "4/4") == 4.0
+        # 3 quarter notes = 3/4 whole note
+        assert _compute_beat("3/4", "4/4") == 4.0
+
+    # ── 3/4 (simple, beat unit = 1/4 whole note) ─────────────────────────────
 
     def test_3_4_downbeat(self) -> None:
         assert _compute_beat("0", "3/4") == 1.0
 
+    def test_3_4_beat_2(self) -> None:
+        assert _compute_beat("1/4", "3/4") == 2.0
+
     def test_3_4_beat_3(self) -> None:
-        assert _compute_beat("2", "3/4") == 3.0
+        # 2 quarter notes = 1/2 whole note
+        assert _compute_beat("1/2", "3/4") == 3.0
+
+    # ── 6/8 (compound, beat unit = 1 dotted quarter = 3/8 whole note) ────────
 
     def test_6_8_downbeat(self) -> None:
         assert _compute_beat("0", "6/8") == 1.0
 
     def test_6_8_beat_2(self) -> None:
-        # Second dotted-quarter beat in 6/8 is at 3 eighth notes = 1.5 quarter notes.
-        assert _compute_beat("3/2", "6/8") == 2.0
+        # Second dotted-quarter beat in 6/8 is at 3 eighth notes = 3/8 whole note.
+        assert _compute_beat("3/8", "6/8") == 2.0
 
     def test_6_8_string_fraction(self) -> None:
-        # DCML sometimes stores fractions as "3/2" strings.
-        assert _compute_beat("3/2", "6/8") == 2.0
+        # Confirm Fraction("3/8") parses correctly.
+        assert _compute_beat("3/8", "6/8") == 2.0
 
-    def test_6_8_beat_3(self) -> None:
-        # Would be beat 3 if 9/8 has three dotted-quarter beats; 6/8 only has 2.
-        # mn_onset=3.0 (full bar) → beat 3.0
-        assert _compute_beat("3", "6/8") == 3.0
+    # ── 9/8 (compound, beat unit = 3/8 whole note) ───────────────────────────
+
+    def test_9_8_downbeat(self) -> None:
+        assert _compute_beat("0", "9/8") == 1.0
+
+    def test_9_8_beat_2(self) -> None:
+        assert _compute_beat("3/8", "9/8") == 2.0
+
+    def test_9_8_beat_3(self) -> None:
+        # Third dotted-quarter beat = 6/8 whole note.
+        assert _compute_beat("6/8", "9/8") == 3.0
+
+    # ── 2/2 (simple, beat unit = 1/2 whole note) ─────────────────────────────
 
     def test_2_2_downbeat(self) -> None:
         assert _compute_beat("0", "2/2") == 1.0
 
     def test_2_2_beat_2(self) -> None:
-        assert _compute_beat("2", "2/2") == 2.0
+        # 1 half note = 1/2 whole note
+        assert _compute_beat("1/2", "2/2") == 2.0
 
 
 # ===========================================================================
@@ -712,6 +740,37 @@ class TestMergeEvents:
         assert by_mc[3]["numeral"] == "V"  # new
         assert by_mc[10]["numeral"] == "V"  # orphaned
         assert by_mc[10].get("orphaned") is True
+
+    def test_multiple_events_per_mc_first_ingest(self) -> None:
+        """All events in a measure are preserved on first ingest (no existing)."""
+        incoming = [
+            self._ev(2, "I", beat=1.0),
+            self._ev(2, "V", beat=2.0),
+            self._ev(2, "vi", beat=3.0),
+        ]
+        result = _merge_events([], incoming)
+        mc2 = [e for e in result if e["mc"] == 2]
+        assert len(mc2) == 3
+        assert [e["numeral"] for e in mc2] == ["I", "V", "vi"]
+
+    def test_multiple_events_per_mc_reingest_no_duplicates(self) -> None:
+        """Re-ingestion replaces all existing events in a measure with the full
+        incoming set — no duplication of the last event (regression guard)."""
+        existing = [
+            self._ev(2, "I", beat=1.0),
+            self._ev(2, "V", beat=2.0),
+            self._ev(2, "vi", beat=3.0),
+        ]
+        incoming = [
+            self._ev(2, "I", beat=1.0),
+            self._ev(2, "IV", beat=2.0),  # changed
+            self._ev(2, "V", beat=3.0),  # changed
+            self._ev(2, "I", beat=4.0),  # added
+        ]
+        result = _merge_events(existing, incoming)
+        mc2 = [e for e in result if e["mc"] == 2]
+        assert len(mc2) == 4
+        assert [e["numeral"] for e in mc2] == ["I", "IV", "V", "I"]
 
     def test_result_sorted_by_mc(self) -> None:
         incoming = [self._ev(3), self._ev(1), self._ev(2)]

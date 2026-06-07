@@ -36,8 +36,10 @@ import styles from './StageBrackets.module.css';
 
 /** Bracket bar height in pixels. */
 const BRACKET_H = 6;
-/** Gap below the last staff-line bottom before the bracket top (px). */
-const BELOW_STAFF_GAP = 6;
+/** Gap below the last staff-line bottom before the bracket top (px).
+ *  Must be > harmonyOverlay LANE_OFFSET_PX (6) + label height (~12) to avoid
+ *  collision with the harmony label lane. */
+const BELOW_STAFF_GAP = 20;
 /** Width of each gradient handle zone on a bracket endpoint. */
 const HANDLE_W = 20;
 /** Half-width of the split handle hit target. */

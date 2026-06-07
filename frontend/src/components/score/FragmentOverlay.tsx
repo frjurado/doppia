@@ -69,8 +69,8 @@ const SUB_BRACKET_H = 4;
 
 /** Gap below the last staff-line bottom before the sub-part bracket top (px).
  *  Matches StageBrackets.tsx BELOW_STAFF_GAP so stored sub-parts sit in the
- *  same lane as live stage brackets. */
-const SUB_BRACKET_BELOW_STAFF_GAP = 6;
+ *  same lane as live stage brackets (below the harmony label lane at +6px). */
+const SUB_BRACKET_BELOW_STAFF_GAP = 20;
 
 // ---------------------------------------------------------------------------
 // Internal types

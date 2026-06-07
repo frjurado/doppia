@@ -140,15 +140,16 @@ def _is_nan(value: str) -> bool:
 
 
 def _compute_beat(mn_onset: str, timesig: str) -> float:
-    """Convert DCML ``mn_onset`` (quarter-note offset from bar start) to 1-indexed beat.
+    """Convert DCML ``mn_onset`` (whole-note fraction from bar start) to 1-indexed beat.
 
-    DCML stores ``mn_onset`` as a rational number of quarter notes elapsed since
-    the beginning of the notated bar (e.g. ``"3/2"`` for the second dotted-quarter
-    beat in 6/8).  This function converts that to the 1-indexed beat number used
-    in ``movement_analysis.events``.
+    DCML stores ``mn_onset`` as a rational number of **whole notes** elapsed since
+    the beginning of the notated bar (e.g. ``"1/4"`` for beat 2 in 3/4, ``"3/8"``
+    for the second dotted-quarter beat in 6/8).  This function converts that to
+    the 1-indexed metric beat number used in ``movement_analysis.events``.
 
     Args:
-        mn_onset: String offset in quarter notes; may be a fraction like ``"3/2"``.
+        mn_onset: String offset in whole-note fractions; e.g. ``"0"``, ``"1/4"``,
+            ``"3/8"``.
         timesig: DCML time signature string, e.g. ``"4/4"``, ``"6/8"``, ``"3/4"``.
 
     Returns:
@@ -158,7 +159,9 @@ def _compute_beat(mn_onset: str, timesig: str) -> float:
     num, den = (int(x) for x in timesig.split("/"))
     # Compound meter: denominator = 8, numerator divisible by 3 and ≥ 6.
     compound = (num % 3 == 0) and (num >= 6) and (den == 8)
-    beat_unit = Fraction(3, 2) if compound else Fraction(4, den)
+    # beat_unit: size of one metric beat in whole-note fractions.
+    # Compound: dotted-quarter = 3/den whole notes. Simple: 1/den whole notes.
+    beat_unit = Fraction(3, den) if compound else Fraction(1, den)
     return float(onset / beat_unit) + 1.0
 
 
@@ -581,9 +584,12 @@ def _merge_events(
     Returns:
         Merged event list sorted by ``(mc, mn, volta, beat)``.
     """
-    incoming_by_mc: dict[int, dict[str, Any]] = {
-        e["mc"]: e for e in incoming if e.get("mc") is not None
-    }
+    # Group incoming by mc — a single measure can have multiple chord events.
+    incoming_by_mc: dict[int, list[dict[str, Any]]] = {}
+    for e in incoming:
+        mc_val = e.get("mc")
+        if mc_val is not None:
+            incoming_by_mc.setdefault(mc_val, []).append(e)
 
     result: list[dict[str, Any]] = []
     covered_mcs: set[int] = set()
@@ -601,18 +607,22 @@ def _merge_events(
                 covered_mcs.add(mc)
         else:
             if mc is not None and mc in incoming_by_mc:
-                result.append(incoming_by_mc[mc])
-                covered_mcs.add(mc)
+                if mc not in covered_mcs:
+                    # First existing event for this mc: emit ALL incoming events
+                    # for that measure (there may be several mid-measure changes).
+                    result.extend(incoming_by_mc[mc])
+                    covered_mcs.add(mc)
+                # Subsequent existing events for the same mc are dropped — they
+                # are already replaced by the incoming block emitted above.
             elif mc is None:
                 # Manual/non-DCML event without an mc key — keep as-is.
                 result.append(ev)
             # Unreviewed events with no incoming match are dropped.
 
-    # Insert incoming events whose mc was not present in existing.
-    for ev in incoming:
-        mc = ev.get("mc")
-        if mc is not None and mc not in covered_mcs:
-            result.append(ev)
+    # Insert incoming events for any mc not represented in existing.
+    for mc_val, evs in incoming_by_mc.items():
+        if mc_val not in covered_mcs:
+            result.extend(evs)
 
     def _sort_key(e: dict[str, Any]) -> tuple[float, int, float, float]:
         mc_val = e.get("mc")

@@ -40,7 +40,7 @@ function makeMockGhostLayer(
   entries: Array<{ barN: number; left: number; width: number; systemTop: number }>,
 ): GhostLayer {
   const measureIndex = new Map<string, MeasureGhostEntry>();
-  for (const e of entries) {
+  for (const [i, e] of entries.entries()) {
     const key = `m${e.barN}`;
     measureIndex.set(key, {
       el: document.createElement('div'),
@@ -49,6 +49,7 @@ function makeMockGhostLayer(
       key,
       bounds: { left: e.left, top: e.systemTop + 4, width: e.width, height: 40 },
       systemTop: e.systemTop,
+      renderOrder: i,
     });
   }
   return { measureIndex, beatIndex: new Map(), subBeatIndex: new Map() } as unknown as GhostLayer;
@@ -489,9 +490,9 @@ describe('FragmentOverlay — sub-part brackets', () => {
     );
 
     // systemTop=50, bounds.top=54, bounds.height=40 → systemBottom=94
-    // sub-part top = systemBottom + SUB_BRACKET_BELOW_STAFF_GAP = 94 + 6 = 100
+    // sub-part top = systemBottom + SUB_BRACKET_BELOW_STAFF_GAP = 94 + 20 = 114
     const subBracket = screen.getByTestId('stored-bracket-sub');
-    expect(subBracket.style.top).toBe('100px');
+    expect(subBracket.style.top).toBe('114px');
   });
 
   it('sub-part bracket has the correct x-bounds from its own bar range', async () => {
