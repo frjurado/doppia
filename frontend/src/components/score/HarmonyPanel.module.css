@@ -1,4 +1,4 @@
-/* HarmonyPanel — Component 5 Step 16
+/* HarmonyPanel — Component 5 Step 16, G6.2 clarified in Component 7 Step 15.
    Design system: DESIGN.md — tonal layering, no borders, 0px radius. */
 
 /* ── Panel container ──────────────────────────────────────────────────────── */
@@ -67,6 +67,27 @@
   text-decoration: underline;
 }
 
+/* ── Measure groups (G6.2: events grouped by bar for scannability) ────────── */
+
+.measureGroups {
+  display: flex;
+  flex-direction: column;
+}
+
+.measureGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.measureHeader {
+  padding: var(--spacing-1) var(--spacing-3);
+  background-color: var(--color-surface-container-low, #f6f4eb);
+  color: var(--color-on-surface-variant, #41484d);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 1px;
+}
+
 /* ── Event list ──────────────────────────────────────────────────────────── */
 
 .eventList {
@@ -85,35 +106,53 @@
   margin-top: 1px; /* tonal separation without divider lines */
 }
 
-/* ── Event row: position | chord | badge | actions ───────────────────────── */
+/* ── Event row: beat | chord block | badge | actions ─────────────────────── */
 
 .eventRow {
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
   padding: var(--spacing-2) var(--spacing-2) var(--spacing-2) var(--spacing-3);
-  min-height: 36px;
 }
 
-.position {
+/* Beat position (b1, b2.5, etc.) — compact, quiet */
+.beat {
   flex-shrink: 0;
+  min-width: 36px;
   color: var(--color-on-surface-variant, #41484d);
-  min-width: 72px;
 }
 
-.chord {
+/* Chord block: primary label stacked above secondary detail */
+.chordBlock {
   flex: 1;
-  color: var(--color-on-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
+}
+
+/* Primary: numeral + local_key — e.g. "V65/V (G)" */
+.eventPrimary {
+  color: var(--color-on-surface);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* Source / reviewed badges */
+/* Secondary: root · quality · inversion — visually quiet (G6.2) */
+.eventSecondary {
+  color: var(--color-on-surface-variant, #41484d);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Source / reviewed badges — visible but quiet (G6.2) */
 .badgeReviewed {
   flex-shrink: 0;
   color: var(--color-on-surface-variant, #41484d);
+  opacity: 0.6;
   white-space: nowrap;
 }
 
@@ -323,7 +362,7 @@
   background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 8%, transparent);
 }
 
-/* ── DCML note (bass/soprano not computed) ───────────────────────────────── */
+/* ── DCML note (bass/soprano not computed until Component 6) ─────────────── */
 
 .dcmlNote {
   color: var(--color-on-surface-variant, #41484d);
