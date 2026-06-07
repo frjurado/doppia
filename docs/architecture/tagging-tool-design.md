@@ -182,9 +182,17 @@ Type Refinement changes (§7.2) follow the same logic: sub-stage brackets that s
 
 ### Main bracket change after stages are committed
 
-If the user extends the main bracket, the outermost stage brackets (first and last in order) auto-extend to fill the new space.
+When the annotator resizes the main bracket, stage positions update using a **hybrid redistribution + clamp** policy (Component 7 Step 3):
 
-If the user contracts the main bracket so that it no longer fully contains a stage bracket, the affected stage brackets are shown in an error state (a distinct visual style — e.g. red border). Submission is blocked until the user either expands the main bracket to re-contain all stages, or trims the affected stage brackets to fit within the new main bounds.
+- **Default-position stages redistribute proportionally.** Any stage still at its pre-populated default (not manually dragged, not confirmed) is re-laid out by `default_weight` across the new main range, snapped to the active grid.
+- **Active stages are preserved.** A stage the annotator has dragged or confirmed (required, or an activated optional) keeps its position and width through the resize.
+- **Auto-drop to a finer grid is the escape valve.** Before clamping, if the shrunken range can still fit all active stages at a finer resolution, the grid is dropped (reusing `chooseStageGrid`) and stages are re-snapped.
+- **The resize hard-clamps to protect active stages.** The main-bracket drag cannot shrink past the point that would force any active stage below one grid unit. The clamp fires only after the finer-grid escape valve is exhausted.
+- **No silent disappearance.** Active optional stages are never force-disappeared by a resize. The "outside main bracket" error state is reserved for genuine orphaning (e.g. a structural concept change that removes a stage's slot) — not for ordinary resizes.
+
+### Handle-affordance lock during stage resize
+
+While a stage-split-handle drag is in progress, the main-bracket handle hover affordance is suppressed. The main ghost sits immediately adjacent to the stage brackets; without the lock, the cursor routinely crosses the main ghost mid-drag and triggers the show-handles animation, which is distracting and serves no purpose during an active stage resize. The lock is a single `stageDragActive` boolean on the interaction state; it is cleared the instant the drag ends. Normal main-ghost hover behaviour resumes immediately after the stage drag completes.
 
 ### Bidirectional linking (score ↔ form)
 
@@ -357,3 +365,28 @@ This section maps each design section above to the shipped modules. It is update
 | Backend — fragment submission endpoints (Step 6) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
 | Backend — harmony-event correction (Step 7) | `backend/services/analysis.py`, `backend/api/routes/movements.py` |
 | Backend — review state machine (Step 8) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+
+---
+
+## 12. Implemented in Component 7
+
+Component 7 shipped the tagging-tool carry-in fixes (§§4–6 behaviour), the CRUD backend, the on-score stored-fragment display, the review loop UI, and the harmony panel completion (G6.2 / G6.3). The table below maps those additions to their shipped modules.
+
+| Design area / step | Shipped module(s) |
+|---|---|
+| §4 Stage pre-population auto-drop grid (Step 2) | `frontend/src/components/score/stages.ts` (`chooseStageGrid`) |
+| §6 Hybrid main-resize / active-stage clamp (Step 3) | `frontend/src/components/score/stages.ts`, `frontend/src/components/score/StageBrackets.tsx`, `frontend/src/components/score/StageList.tsx` |
+| §6 Beat/sub-beat stage geometry (Step 4) | `frontend/src/components/score/stages.ts`, `frontend/src/components/score/StageBrackets.tsx` |
+| §6 Handle-affordance lock during stage resize (Step 5) | `frontend/src/components/score/annotator.ts`, `frontend/src/components/score/ghosts.ts`, `frontend/src/components/score/StageBrackets.tsx` |
+| §7.5 Stages checklist row conditionality (Step 1) | `frontend/src/components/score/SubmissionChecklist.tsx` |
+| Score-title first-system bracket nudge (Step 6) | `frontend/src/routes/ScoreViewer.tsx` |
+| Backend — fragment read endpoints (Step 7) | `backend/services/fragments.py`, `backend/api/routes/fragments.py`, `backend/api/routes/movements.py` |
+| Backend — fragment update + revision semantics (Step 8) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+| Backend — fragment delete + cascade (Step 9) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+| On-score stored-fragment overlay — projection layer (Step 10) | `frontend/src/components/score/FragmentOverlay.tsx` |
+| On-score stored-fragment overlay — brackets, labels, collapsed/expanded (Step 11) | `frontend/src/components/score/FragmentOverlay.tsx` |
+| Fragment side panel — record view, edit, delete (Step 12) | `frontend/src/routes/ScoreViewer.tsx`, `frontend/src/components/score/FragmentSidePanel.tsx` |
+| Review queue (Step 13) | `backend/api/routes/reviews.py`, `frontend/src/routes/ReviewQueue.tsx` |
+| Approve/reject in side panel + gate feedback (Step 14) | `frontend/src/components/score/FragmentSidePanel.tsx` |
+| G6.2 Harmony panel clarity (Step 15) | `frontend/src/components/score/HarmonyPanel.tsx` |
+| G6.3 In-score chord label overlay (Step 16) | `frontend/src/components/score/harmonyOverlay.ts`, `frontend/src/components/score/harmonyOverlay.module.css` |

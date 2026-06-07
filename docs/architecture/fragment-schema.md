@@ -87,7 +87,7 @@ CREATE INDEX fragment_movement_idx ON fragment (movement_id);
 
 **Stage sub-fragments.** Cadence stage data is stored as child fragments using this mechanism — not as a `stages` key inside the parent's `summary`. Every confirmed stage (required, or optional and not toggled absent) produces one child fragment: `concept_id` is the stage concept's id (`CadentialInitialTonic`, `CadentialPreDominant`, `CadentialDominant`, `CadentialFinalTonic`), spatial bounds match the stage bracket, and `summary.properties` carries whichever stage property values were recorded (`Stage1Components`, `Stage2Components`, `Cadential64` — all optional). A child fragment with an empty `summary.properties` object is valid; the fragment's existence asserts that the stage is present and where it falls.
 
-**`status`** drives the peer review state machine: `draft → submitted → approved` (or `rejected → draft`). Only `approved` fragments are visible in the public fragment browser. The status filter is enforced at the service layer on every query; it is not a UI-only concern. The decisions recorded by individual reviewers live in the `fragment_review` table (below); `status` on the fragment is the aggregate outcome.
+**`status`** drives the peer review state machine: `draft → submitted → approved` (or `rejected → draft`). Only `approved` fragments are visible in the public fragment browser. The status filter is enforced at the service layer on every read — the single-record GET, the movement-scoped list, and the review queue — and cannot be bypassed by a direct API call. The decisions recorded by individual reviewers live in the `fragment_review` table (below); `status` on the fragment is the aggregate outcome.
 
 ---
 
@@ -305,6 +305,45 @@ Which concepts require harmony review is determined by their `capture_extensions
 The service layer endpoint `POST /api/v1/fragments/{id}/approve` returns a 422 with a structured error listing the specific unreviewed entries if either check fails.
 
 **Review at the event level, not the fragment level.** Because review state lives on individual events in `movement_analysis`, a reviewer's work on fragment A satisfies the review gate for any later fragment B that covers overlapping events. This is a feature, not a bug: a reviewer has already made the analytical call on those chords, and the system should not ask for the same call to be made again.
+
+---
+
+## Fragment delete permissions
+
+Who may delete a fragment is enforced exclusively by the service layer (`FragmentService.delete()`), not inline in the route handler:
+
+| Fragment status | Creator | Admin |
+|---|---|---|
+| `draft` | Yes | Yes |
+| `submitted` | Yes | Yes |
+| `rejected` | Yes | Yes |
+| `approved` | **No** | Yes |
+
+Annotators may delete their own `draft`, `submitted`, or `rejected` fragments. `approved` fragments require admin privileges. Non-creator editors cannot delete any fragment regardless of status.
+
+**Cascade confirm guard.** Deleting a parent fragment cascades to all child (sub-part) fragments via the `ON DELETE CASCADE` on `parent_fragment_id`. Because this can remove many sub-parts, the service requires an explicit `confirm_cascade: true` field in the request body (or a `?dry_run=1` query parameter that returns the child count without deleting) and refuses to proceed without it. The response includes the count of child fragments removed.
+
+**`movement_analysis` is not deleted.** Harmony events in `movement_analysis` are movement-level, not fragment-owned. Deleting a fragment removes the `fragment`, `fragment_concept_tag`, and `fragment_review` rows (and cascaded sub-part rows); `movement_analysis` is unaffected.
+
+---
+
+## Fragment edit and revision semantics
+
+Who may edit: the creator and admins. Non-creator editors cannot edit a fragment.
+
+Editing the analytic content of a fragment — concept tags, `summary` fields, properties, stages, bar/beat range, harmony review state — has the following effect on `status`:
+
+| Current status | After analytic content edit | `fragment_review` rows |
+|---|---|---|
+| `draft` | Stays `draft` | Unchanged |
+| `submitted` | Stays `submitted` | **Cleared** |
+| `approved` | Returns to `submitted` | **Cleared** |
+
+Editing non-analytic fields that cannot invalidate a prior review — currently `prose_annotation` only — is permitted on any status without triggering a status change or clearing reviews.
+
+**Rationale.** Prior analytical approval does not survive a change to the analysis. The revised fragment re-enters the review queue at `submitted`, and the cleared `fragment_review` rows ensure the approval threshold is computed against the new state, not the old one. When the service returns the updated fragment it includes the resulting `status` value so the UI can surface "this edit returned the fragment to review" when applicable.
+
+The atomic parent+child write from the submission path is reused for edits that change stage bounds or add/remove sub-parts: the service rewrites all affected child fragments transactionally, and the containment check runs before the transaction begins.
 
 ---
 
