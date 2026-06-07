@@ -40,10 +40,10 @@ export interface HarmonyOverlayOptions {
 }
 
 /** Primary label — kept lexically identical to HarmonyPanel.primaryLabel(). */
-function primaryLabel(e: HarmonyEventOut): string {
+function primaryLabel(e: HarmonyEventOut, includeKey = true): string {
   let chord = e.numeral ?? '';
   if (e.applied_to) chord += `/${e.applied_to}`;
-  const key = e.local_key ? ` (${e.local_key})` : '';
+  const key = includeKey && e.local_key ? ` (${e.local_key})` : '';
   return (chord + key) || '—';
 }
 
@@ -112,6 +112,12 @@ export class HarmonyOverlay {
     const labelCls = styles['label'] ?? 'harmony-label';
     const clickableCls = styles['labelClickable'] ?? 'harmony-label-clickable';
 
+    // Suppress repeated key annotations: show (local_key) only on the first
+    // rendered label and whenever the key changes.  Initialised to `undefined`
+    // (not `null`) so the very first rendered label always shows its key — no
+    // string or null value can equal `undefined`.
+    let lastKey: string | null | undefined = undefined;
+
     for (const event of this._events) {
       const volta = event.volta ?? null;
 
@@ -148,7 +154,8 @@ export class HarmonyOverlay {
       span.className = clickable ? `${labelCls} ${clickableCls}` : labelCls;
       span.style.left = `${x}px`;
       span.style.top = `${y}px`;
-      span.textContent = primaryLabel(event);
+      span.textContent = primaryLabel(event, event.local_key !== lastKey);
+      lastKey = event.local_key;
 
       if (clickable && this._onLabelClick) {
         const { mn, beat } = event;
