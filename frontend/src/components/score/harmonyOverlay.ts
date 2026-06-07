@@ -15,7 +15,7 @@
  */
 
 import type { GhostLayer } from './ghosts';
-import { encodeBeat, measureGhostKey } from './ghosts';
+import { encodeBeat, encodeSubBeat, measureGhostKey } from './ghosts';
 import type { HarmonyEventOut } from '../../services/analysisApi';
 import styles from './harmonyOverlay.module.css';
 
@@ -126,28 +126,51 @@ export class HarmonyOverlay {
       const measureEntry = this._ghostLayer.measureIndex.get(measureKey);
       if (!measureEntry) continue; // system not yet rendered or ending not visible
 
-      // Step 2 — resolve beat ghost via measureEntry.renderOrder.
+      // Step 2 — resolve beat or sub-beat ghost via measureEntry.renderOrder.
       // harmony-score-overlay.md §"Step 2 — resolve the beat ghost"
       //
-      // beatIndex keys are encodeBeat(renderOrder, beatIdx) where renderOrder is
-      // the 0-indexed position of the measure among all SVG-rendered measures.
-      // mcIndex is 1-based and is NOT used here — using it directly was an
-      // off-by-one that placed every label one measure forward.
+      // When event.beat has a fractional part (e.g. 3.5 = the & of beat 3),
+      // we probe subBeatIndex for sb=1 and sb=2 and pick the closest match.
+      // Downbeats (subBeatFrac < 0.01) go straight to beatIndex + walk-back.
       const renderOrder = measureEntry.renderOrder;
       const beatIdx = Math.floor(event.beat) - 1; // 1-indexed beat → 0-indexed ghost slot
-      // Walk back to nearest preceding struck beat if the exact slot is absent
-      // (ghost index only contains beats where notes actually attack).
-      let beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, beatIdx));
-      if (!beatEntry) {
-        for (let b = beatIdx - 1; b >= 0; b--) {
-          beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, b));
-          if (beatEntry) break;
+      const subBeatFrac = event.beat - Math.floor(event.beat);
+
+      let resolvedBounds: { left: number } | undefined;
+
+      if (subBeatFrac >= 0.01) {
+        // Sub-beat event: probe sb=1 and sb=2 (covers simple subDiv=2 and
+        // compound subDiv=3), pick whichever beatFloat is nearest event.beat.
+        let bestDist = Infinity;
+        for (let sb = 1; sb <= 2; sb++) {
+          const sbEntry = this._ghostLayer.subBeatIndex.get(
+            encodeSubBeat(renderOrder, beatIdx, sb),
+          );
+          if (sbEntry) {
+            const dist = Math.abs(sbEntry.beatFloat - event.beat);
+            if (dist < bestDist) {
+              bestDist = dist;
+              resolvedBounds = sbEntry.bounds;
+            }
+          }
         }
       }
-      if (!beatEntry) continue; // unreachable: beat 0 is always anchored at measure start
 
-      // Step 3 — pixel position: x from beat ghost, y from system bottom
-      const x = beatEntry.bounds.left;
+      // Fall back to beat ghost (with walk-back) when no sub-beat slot matched.
+      if (!resolvedBounds) {
+        let beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, beatIdx));
+        if (!beatEntry) {
+          for (let b = beatIdx - 1; b >= 0; b--) {
+            beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, b));
+            if (beatEntry) break;
+          }
+        }
+        if (!beatEntry) continue; // unreachable: beat 0 is always anchored at measure start
+        resolvedBounds = beatEntry.bounds;
+      }
+
+      // Step 3 — pixel position: x from beat/sub-beat ghost, y from system bottom
+      const x = resolvedBounds.left;
       const y = measureEntry.bounds.top + measureEntry.bounds.height + LANE_OFFSET_PX;
 
       const span = document.createElement('span');
