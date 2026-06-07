@@ -450,21 +450,19 @@ class TestUpdateFragment:
         assert body["bar_end"] == 8
         assert body["summary"]["key"] == "D major"
 
-    async def test_update_non_draft_returns_422(
+    async def test_update_submitted_stays_submitted(
         self,
         fragments_client: AsyncClient,
         seeded_movement: str,
     ) -> None:
-        """Updating a submitted fragment returns 422 FRAGMENT_VALIDATION_ERROR."""
+        """Editing a submitted fragment keeps it submitted (Step 8 revision semantics)."""
         fragment_id = await self._create_draft(fragments_client, seeded_movement)
 
-        # Submit it first.
         await fragments_client.post(
             f"/api/v1/fragments/{fragment_id}/submit",
             headers={"Authorization": "Bearer dev-token"},
         )
 
-        # Now try to update — must fail.
         update_payload = {
             "bar_start": 1,
             "bar_end": 4,
@@ -479,8 +477,11 @@ class TestUpdateFragment:
             headers={"Authorization": "Bearer dev-token"},
             json=update_payload,
         )
-        assert resp.status_code == 422
-        assert resp.json()["error"]["code"] == "FRAGMENT_VALIDATION_ERROR"
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "submitted"
+        assert body["previous_status"] == "submitted"
+        assert body["status_changed"] is False
 
     async def test_update_unknown_fragment_returns_404(
         self,

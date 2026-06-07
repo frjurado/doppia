@@ -96,25 +96,6 @@ export interface StageAssignment {
 }
 
 // ---------------------------------------------------------------------------
-// Beat-bounds invariant (ADR-005)
-// ---------------------------------------------------------------------------
-
-/**
- * Enforce ADR-005: beat_start and beat_end must both be null (measure-level)
- * or both be non-null numbers (beat-level). If either is null the pair is
- * normalised to both-null.
- */
-function normalizeBeatBounds(
-  beatStart: number | null,
-  beatEnd: number | null,
-): { beatStart: number | null; beatEnd: number | null } {
-  if (beatStart === null || beatEnd === null) {
-    return { beatStart: null, beatEnd: null };
-  }
-  return { beatStart, beatEnd };
-}
-
-// ---------------------------------------------------------------------------
 // Stage palette (one colour per stage order, cycling)
 // ---------------------------------------------------------------------------
 

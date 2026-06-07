@@ -283,12 +283,12 @@ export default function FormPanel({
 
   // Consume editPrefill once on mount.  fragmentResetKey on the parent gates
   // remounting so this fires at most once per edit session.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!editPrefill || prefillConsumedRef.current) return;
     prefillConsumedRef.current = true;
     prefillPropertyValuesRef.current = editPrefill.propertyValues;
     handleConceptSelect(editPrefill.concept);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally mount-only; editPrefill is stable at mount time
 
   // When the session rebuilds (ghost layer re-render), re-apply conceptSet so

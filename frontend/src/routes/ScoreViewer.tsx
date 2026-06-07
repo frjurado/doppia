@@ -320,7 +320,7 @@ function buildStageAssignmentsFromSubParts(
     if (primary) subPartMap.set(primary.concept_id, sp);
   }
 
-  return stages.map((stage, idx) => {
+  return stages.map((stage) => {
     const sp = subPartMap.get(stage.target_id);
     const bounds: StageBounds | null = sp
       ? {
