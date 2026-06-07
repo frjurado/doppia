@@ -16,6 +16,10 @@
  * Review queue (Step 13, Component 7):
  *   GET    /api/v1/reviews/queue         — submitted fragments awaiting review
  *
+ * Review actions (Step 14, Component 7):
+ *   POST   /api/v1/fragments/{id}/approve — record approval vote + gate check
+ *   POST   /api/v1/fragments/{id}/reject  — reject with optional comment
+ *
  * Type definitions mirror the Python Pydantic models in
  * backend/models/fragment.py. The summary JSONB schema follows
  * fragment-schema.md version 1.
@@ -442,4 +446,78 @@ export async function listReviewQueue(
   if (cursor) params.set('cursor', cursor);
   params.set('page_size', String(pageSize));
   return apiFetch<ReviewQueueResponse>(`/api/v1/reviews/queue?${params}`);
+}
+
+// ---------------------------------------------------------------------------
+// Review actions (Component 7 Step 14)
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured detail returned by 422 HARMONY_NOT_REVIEWED when the approval
+ * gate fails. Both fields are optional — one or both may be present.
+ *
+ * The approval vote is persisted server-side even when the gate fails, so
+ * the reviewer does not need to re-vote after the creator fixes the blocking
+ * items — they simply retry the approve call.
+ *
+ * Maps to the `detail` dict in `HarmonyNotReviewedError` (backend/errors.py).
+ */
+export interface ApprovalGateDetail {
+  /** The actual_key with auto: true and reviewed: false, if any. */
+  unreviewed_actual_key?: {
+    value: string;
+    auto: boolean;
+    reviewed: boolean;
+    confidence?: number | null;
+  };
+  /** Harmony events in the fragment's bar range that have reviewed: false. */
+  unreviewed_harmony_events?: Record<string, unknown>[];
+}
+
+/**
+ * Record an approval vote for a submitted fragment.
+ *
+ * The server persists the vote even when the gate fails (422
+ * HARMONY_NOT_REVIEWED), so the creator can fix blocking items without the
+ * reviewer re-voting. Inspect `ApiError.detail` as `ApprovalGateDetail` when
+ * `err.code === 'HARMONY_NOT_REVIEWED'`.
+ *
+ * On success: returns the fragment in 'approved' status when the gate passed
+ * and the approval threshold was met; still 'submitted' when the threshold
+ * requires additional reviewers.
+ *
+ * @param id UUID of the submitted fragment.
+ * @param comment Optional comment to accompany the approval.
+ * @throws ApiError (HARMONY_NOT_REVIEWED) when gate items block approval.
+ * @throws ApiError (SELF_REVIEW_FORBIDDEN) when the caller is the creator.
+ */
+export async function approveFragment(
+  id: string,
+  comment?: string,
+): Promise<FragmentApiResponse> {
+  return apiFetch<FragmentApiResponse>(`/api/v1/fragments/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ comment: comment ?? null }),
+  });
+}
+
+/**
+ * Reject a submitted fragment, transitioning it to 'rejected'.
+ *
+ * A single rejection immediately flips the status regardless of prior
+ * approval votes. The creator can revise by editing the fragment
+ * (revision semantics transition rejected → draft) and resubmitting.
+ *
+ * @param id UUID of the submitted fragment.
+ * @param comment Optional comment explaining the rejection.
+ * @throws ApiError (SELF_REVIEW_FORBIDDEN) when the caller is the creator.
+ */
+export async function rejectFragment(
+  id: string,
+  comment?: string,
+): Promise<FragmentApiResponse> {
+  return apiFetch<FragmentApiResponse>(`/api/v1/fragments/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ comment: comment ?? null }),
+  });
 }

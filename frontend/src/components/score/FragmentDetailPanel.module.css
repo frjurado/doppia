@@ -283,6 +283,169 @@
   color: var(--color-on-surface-variant);
 }
 
+/* ── Review actions (Step 14) ──────────────────────────────────────────────── */
+
+.reviewSection {
+  padding: var(--spacing-3) var(--spacing-4);
+  padding-left: calc(var(--spacing-4) + 4px);
+  background-color: var(--color-surface-container);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.reviewHeading {
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.reviewActions {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: center;
+}
+
+.approveButton {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-4);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.approveButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.approveButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rejectOpenButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-error, #b3261e);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rejectOpenButton:hover:not(:disabled) {
+  background-color: var(--color-error-container, #f9dedc);
+}
+
+.rejectOpenButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rejectTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  background-color: var(--color-surface-container-high);
+  border: none;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--color-on-background);
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.rejectTextarea:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.rejectSendButton {
+  background-color: var(--color-error, #b3261e);
+  color: var(--color-on-error, #ffffff);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rejectSendButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.rejectSendButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reviewErrorText {
+  margin: 0;
+  color: var(--color-error, #b3261e);
+}
+
+/* ── Approval gate failure (Step 14) ──────────────────────────────────────── */
+
+.gateFailed {
+  padding: var(--spacing-3) var(--spacing-4);
+  padding-left: calc(var(--spacing-4) + 4px);
+  background-color: var(--color-error-container, #f9dedc);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.gateFailedIntro {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+}
+
+.gateItem {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: baseline;
+}
+
+.gateItemLabel {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+  flex-shrink: 0;
+}
+
+.gateEventList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.gateEventItem {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-3);
+  color: var(--color-on-error-container, #410002);
+}
+
+.gateNote {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+  font-style: italic;
+}
+
 /* ── Delete confirmation ─────────────────────────────────────────────────────── */
 
 .deleteConfirm {

@@ -26,10 +26,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PropertySchema } from '../../services/conceptApi';
 import { getConceptSchemas } from '../../services/conceptApi';
 import {
+  approveFragment,
   deleteFragment,
   getFragment,
+  rejectFragment,
 } from '../../services/fragmentApi';
-import type { FragmentDetailResponse } from '../../services/fragmentApi';
+import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
@@ -188,8 +190,15 @@ export interface FragmentDetailPanelProps {
    */
   onDeleteDone: (fragmentId: string) => void;
   /**
+   * Called after a successful approve or reject. ScoreViewer refreshes the
+   * stored-fragment overlay so the bracket status colour updates immediately.
+   * The panel stays open and reflects the new status in the header badge.
+   */
+  onReviewDone?: (fragmentId: string) => void;
+  /**
    * Current viewer mode. Edit and Delete are only shown in tag mode
    * (read-only panel in view mode per tagging-tool-design.md §Step 12).
+   * Approve / Reject are shown in both modes for submitted fragments.
    */
   tagMode: 'view' | 'tag';
   /** Test hook. Defaults to 'fragment-detail-panel'. */
@@ -203,6 +212,17 @@ export interface FragmentDetailPanelProps {
 type DeleteState = 'idle' | 'confirming' | 'deleting';
 
 // ---------------------------------------------------------------------------
+// Review state (Component 7 Step 14)
+// ---------------------------------------------------------------------------
+
+type ReviewPhase =
+  | 'idle'              // Approve + Reject buttons visible
+  | 'rejecting'         // Reject comment textarea visible
+  | 'approving'         // Approve API call in flight
+  | 'rejecting-sending' // Reject API call in flight
+  | 'gate-failed';      // 422 HARMONY_NOT_REVIEWED received; gate detail shown
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -211,6 +231,7 @@ export default function FragmentDetailPanel({
   onClose,
   onEdit,
   onDeleteDone,
+  onReviewDone,
   tagMode,
   'data-testid': testId,
 }: FragmentDetailPanelProps) {
@@ -226,6 +247,13 @@ export default function FragmentDetailPanel({
   const [deleteState, setDeleteState] = useState<DeleteState>('idle');
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // ── Review state (Step 14) ─────────────────────────────────────────────────
+  const [reviewPhase, setReviewPhase] = useState<ReviewPhase>('idle');
+  const [rejectComment, setRejectComment] = useState('');
+  const [gateDetail, setGateDetail] = useState<ApprovalGateDetail | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const harmonySectionRef = useRef<HTMLElement | null>(null);
+
   // ── Fetch on fragmentId change ─────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +263,10 @@ export default function FragmentDetailPanel({
     setSchemas(null);
     setDeleteState('idle');
     setDeleteError(null);
+    setReviewPhase('idle');
+    setRejectComment('');
+    setGateDetail(null);
+    setReviewError(null);
 
     (async () => {
       try {
@@ -289,6 +321,72 @@ export default function FragmentDetailPanel({
   const handleDeleteCancel = useCallback(() => {
     setDeleteState('idle');
     setDeleteError(null);
+  }, []);
+
+  // ── Review handlers (Step 14) ──────────────────────────────────────────────
+
+  const runApprove = useCallback(async () => {
+    if (!fragment) return;
+    setGateDetail(null);
+    setReviewError(null);
+    setReviewPhase('approving');
+    try {
+      const result = await approveFragment(fragment.id);
+      setFragment(prev =>
+        prev ? { ...prev, status: result.status as FragmentDetailResponse['status'] } : prev,
+      );
+      setReviewPhase('idle');
+      onReviewDone?.(fragment.id);
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'HARMONY_NOT_REVIEWED') {
+        setGateDetail(err.detail as ApprovalGateDetail);
+        setReviewPhase('gate-failed');
+        // Scroll the harmony events section into view so the reviewer can
+        // see which events are blocking — the section is already visible in
+        // the panel but may be scrolled out of sight on narrow heights.
+        harmonySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else {
+        setReviewError(
+          err instanceof ApiError ? err.message : 'Failed to record approval.',
+        );
+        setReviewPhase('idle');
+      }
+    }
+  }, [fragment, onReviewDone]);
+
+  const handleRejectClick = useCallback(() => {
+    setReviewPhase('rejecting');
+    setReviewError(null);
+    setRejectComment('');
+  }, []);
+
+  const handleRejectSubmit = useCallback(async () => {
+    if (!fragment) return;
+    setReviewPhase('rejecting-sending');
+    try {
+      const result = await rejectFragment(fragment.id, rejectComment || undefined);
+      setFragment(prev =>
+        prev ? { ...prev, status: result.status as FragmentDetailResponse['status'] } : prev,
+      );
+      setReviewPhase('idle');
+      onReviewDone?.(fragment.id);
+    } catch (err) {
+      setReviewError(
+        err instanceof ApiError ? err.message : 'Failed to record rejection.',
+      );
+      setReviewPhase('rejecting');
+    }
+  }, [fragment, rejectComment, onReviewDone]);
+
+  const handleRejectCancel = useCallback(() => {
+    setReviewPhase('idle');
+    setRejectComment('');
+    setReviewError(null);
+  }, []);
+
+  const handleGateBack = useCallback(() => {
+    setGateDetail(null);
+    setReviewPhase('idle');
   }, []);
 
   // ── Derived display values ─────────────────────────────────────────────────
@@ -444,7 +542,10 @@ export default function FragmentDetailPanel({
 
           {/* ── Harmony events ─────────────────────────────────────────── */}
           {harmonyRows.length > 0 && (
-            <section className={styles.section}>
+            <section
+              className={styles.section}
+              ref={harmonySectionRef as React.RefObject<HTMLElement>}
+            >
               <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
                 Harmony ({harmonyRows.length})
               </Type>
@@ -512,6 +613,154 @@ export default function FragmentDetailPanel({
                 })}
               </ol>
             </section>
+          )}
+
+          {/* ── Review actions (Step 14) — shown for submitted fragments ── */}
+          {fragment.status === 'submitted' && reviewPhase !== 'gate-failed' && (
+            <div className={styles.reviewSection}>
+              <Type variant="label-sm" as="h3" className={styles.reviewHeading}>
+                Review
+              </Type>
+
+              {/* Approve / Reject buttons */}
+              {(reviewPhase === 'idle' || reviewPhase === 'approving') && (
+                <>
+                  <div className={styles.reviewActions}>
+                    <button
+                      type="button"
+                      className={styles.approveButton}
+                      onClick={runApprove}
+                      disabled={reviewPhase === 'approving'}
+                    >
+                      <Type variant="label-sm" as="span">
+                        {reviewPhase === 'approving' ? 'Approving…' : 'Approve'}
+                      </Type>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.rejectOpenButton}
+                      onClick={handleRejectClick}
+                      disabled={reviewPhase === 'approving'}
+                    >
+                      <Type variant="label-sm" as="span">Reject</Type>
+                    </button>
+                  </div>
+                  {reviewError && (
+                    <Type variant="label-sm" as="p" className={styles.reviewErrorText}>
+                      {reviewError}
+                    </Type>
+                  )}
+                </>
+              )}
+
+              {/* Reject comment form */}
+              {(reviewPhase === 'rejecting' || reviewPhase === 'rejecting-sending') && (
+                <>
+                  <textarea
+                    className={styles.rejectTextarea}
+                    value={rejectComment}
+                    onChange={e => setRejectComment(e.target.value)}
+                    placeholder="Reason for rejection (optional)"
+                    rows={3}
+                    disabled={reviewPhase === 'rejecting-sending'}
+                    aria-label="Rejection reason"
+                  />
+                  {reviewError && (
+                    <Type variant="label-sm" as="p" className={styles.reviewErrorText}>
+                      {reviewError}
+                    </Type>
+                  )}
+                  <div className={styles.reviewActions}>
+                    <button
+                      type="button"
+                      className={styles.rejectSendButton}
+                      onClick={handleRejectSubmit}
+                      disabled={reviewPhase === 'rejecting-sending'}
+                    >
+                      <Type variant="label-sm" as="span">
+                        {reviewPhase === 'rejecting-sending' ? 'Sending…' : 'Send rejection'}
+                      </Type>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.cancelButton}
+                      onClick={handleRejectCancel}
+                      disabled={reviewPhase === 'rejecting-sending'}
+                    >
+                      <Type variant="label-sm" as="span">Cancel</Type>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Approval gate failure (Step 14) ───────────────────────────── */}
+          {fragment.status === 'submitted' && reviewPhase === 'gate-failed' && gateDetail && (
+            <div className={styles.gateFailed}>
+              <Type variant="label-sm" as="p" className={styles.gateFailedIntro}>
+                Approval gate: the items below must be confirmed before approval
+                can complete. Your approval vote has been recorded — fix the
+                items and try again.
+              </Type>
+
+              {gateDetail.unreviewed_actual_key && (
+                <div className={styles.gateItem}>
+                  <Type variant="label-sm" as="span" className={styles.gateItemLabel}>
+                    Actual key:
+                  </Type>
+                  <Type variant="body-sm" as="span">
+                    {gateDetail.unreviewed_actual_key.value} — not confirmed.
+                    Confirm it via the Harmony Panel.
+                  </Type>
+                </div>
+              )}
+
+              {gateDetail.unreviewed_harmony_events &&
+                gateDetail.unreviewed_harmony_events.length > 0 && (
+                  <>
+                    <Type variant="label-sm" as="p" className={styles.gateItemLabel}>
+                      Unconfirmed harmony events (confirm via Harmony Panel in Tag mode):
+                    </Type>
+                    <ol className={styles.gateEventList}>
+                      {gateDetail.unreviewed_harmony_events.map((ev, i) => {
+                        const row = toHarmonyRow(ev as Record<string, unknown>);
+                        return (
+                          <li key={i} className={styles.gateEventItem}>
+                            <Type variant="label-sm" as="span" className={styles.harmonyPosition}>
+                              {harmonyPositionLabel(row)}
+                            </Type>
+                            <Type variant="body-sm" as="span">
+                              {harmonyChordLabel(row)}
+                            </Type>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                    <Type variant="label-sm" as="p" className={styles.gateNote}>
+                      Confirming a harmony event applies to the whole movement,
+                      not just this fragment.
+                    </Type>
+                  </>
+                )}
+
+              <div className={styles.reviewActions}>
+                <button
+                  type="button"
+                  className={styles.approveButton}
+                  onClick={runApprove}
+                >
+                  <Type variant="label-sm" as="span">Try again</Type>
+                </button>
+                <button
+                  type="button"
+                  className={styles.cancelButton}
+                  onClick={handleGateBack}
+                >
+                  <Type variant="label-sm" as="span">Back</Type>
+                </button>
+              </div>
+            </div>
           )}
 
           {/* ── Delete confirmation (inline) ───────────────────────────── */}

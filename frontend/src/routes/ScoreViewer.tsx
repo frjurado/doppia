@@ -1045,6 +1045,19 @@ export default function ScoreViewer() {
     [refreshStoredFragments],
   );
 
+  /**
+   * Called when the detail panel's approve or reject flow completes.
+   * Keeps the panel open so the reviewer sees the updated status badge,
+   * and refreshes the overlay so the bracket colour updates immediately.
+   */
+  const handleReviewDone = useCallback(
+    (fragmentId: string) => {
+      void fragmentId;
+      refreshStoredFragments();
+    },
+    [refreshStoredFragments],
+  );
+
   // ── Submission handlers (Step 18) ────────────────────────────────────────
 
   /**
@@ -1933,6 +1946,7 @@ export default function ScoreViewer() {
             onClose={() => setSelectedFragmentId(null)}
             onEdit={handleEditFragment}
             onDeleteDone={handleDeleteStoredFragment}
+            onReviewDone={handleReviewDone}
             tagMode={tagMode}
           />
         )}
