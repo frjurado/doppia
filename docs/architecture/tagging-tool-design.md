@@ -385,8 +385,8 @@ Component 7 shipped the tagging-tool carry-in fixes (§§4–6 behaviour), the C
 | Backend — fragment delete + cascade (Step 9) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
 | On-score stored-fragment overlay — projection layer (Step 10) | `frontend/src/components/score/FragmentOverlay.tsx` |
 | On-score stored-fragment overlay — brackets, labels, collapsed/expanded (Step 11) | `frontend/src/components/score/FragmentOverlay.tsx` |
-| Fragment side panel — record view, edit, delete (Step 12) | `frontend/src/routes/ScoreViewer.tsx`, `frontend/src/components/score/FragmentSidePanel.tsx` |
+| Fragment side panel — record view, edit, delete (Step 12) | `frontend/src/routes/ScoreViewer.tsx`, `frontend/src/components/score/FragmentDetailPanel.tsx` |
 | Review queue (Step 13) | `backend/api/routes/reviews.py`, `frontend/src/routes/ReviewQueue.tsx` |
-| Approve/reject in side panel + gate feedback (Step 14) | `frontend/src/components/score/FragmentSidePanel.tsx` |
+| Approve/reject in side panel + gate feedback (Step 14) | `frontend/src/components/score/FragmentDetailPanel.tsx` |
 | G6.2 Harmony panel clarity (Step 15) | `frontend/src/components/score/HarmonyPanel.tsx` |
 | G6.3 In-score chord label overlay (Step 16) | `frontend/src/components/score/harmonyOverlay.ts`, `frontend/src/components/score/harmonyOverlay.module.css` |
