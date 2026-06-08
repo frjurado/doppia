@@ -85,10 +85,7 @@
    while staying within the above-staff zone, above ghost drag targets. */
 .clickTarget {
   position: absolute;
-  top: -4px;
-  left: 0;
-  right: 0;
-  bottom: -4px;
+  inset: -4px 0;
   pointer-events: auto;
   background: none;
   border: none;

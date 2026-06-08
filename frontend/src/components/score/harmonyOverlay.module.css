@@ -12,10 +12,12 @@
 
 .label {
   position: absolute;
+
   /* Public Sans — label tier per DESIGN.md */
   font-family: 'Public Sans', sans-serif;
   font-size: 10px;
   line-height: 1.2;
+
   /* Henle Blue #3f5f77 at 70% opacity: readable but deferential to notation */
   color: rgba(63, 95, 119, 0.70);
   white-space: nowrap;

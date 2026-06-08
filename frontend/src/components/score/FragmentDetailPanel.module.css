@@ -320,13 +320,13 @@
   letter-spacing: 0.05em;
 }
 
-.approveButton:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
 .approveButton:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.approveButton:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 .rejectOpenButton {
@@ -342,13 +342,13 @@
   letter-spacing: 0.05em;
 }
 
-.rejectOpenButton:hover:not(:disabled) {
-  background-color: var(--color-error-container, #f9dedc);
-}
-
 .rejectOpenButton:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.rejectOpenButton:hover:not(:disabled) {
+  background-color: var(--color-error-container, #f9dedc);
 }
 
 .rejectTextarea {
@@ -382,13 +382,13 @@
   letter-spacing: 0.05em;
 }
 
-.rejectSendButton:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
 .rejectSendButton:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.rejectSendButton:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 .reviewErrorText {
