@@ -24,7 +24,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import type { GhostLayer, MeasureGhostEntry, ResolutionMode } from './ghosts';
-import type { SelectionRange } from './annotator';
+import type { AnnotationSession, SelectionRange } from './annotator';
 import type { StageBounds, StageAssignment } from './stages';
 import { moveSplitHandle, stageColor } from './stages';
 import type { StageBeatBoundary } from './stages';
@@ -36,8 +36,10 @@ import styles from './StageBrackets.module.css';
 
 /** Bracket bar height in pixels. */
 const BRACKET_H = 6;
-/** Gap below the last staff-line bottom before the bracket top (px). */
-const BELOW_STAFF_GAP = 6;
+/** Gap below the last staff-line bottom before the bracket top (px).
+ *  Must be > harmonyOverlay LANE_OFFSET_PX (6) + label height (~12) to avoid
+ *  collision with the harmony label lane. */
+const BELOW_STAFF_GAP = 20;
 /** Width of each gradient handle zone on a bracket endpoint. */
 const HANDLE_W = 20;
 /** Half-width of the split handle hit target. */
@@ -71,6 +73,12 @@ export interface StageBracketsProps {
    * Receives the full updated assignments array after moveSplitHandle().
    */
   onSplitHandleMove: (updatedAssignments: StageAssignment[]) => void;
+  /**
+   * Component 7 Step 5 — the active annotation session.
+   * When provided, a split-handle drag sets the session's stageDragActive lock
+   * so the main-ghost handle affordance is suppressed during the drag.
+   */
+  session?: AnnotationSession | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +169,12 @@ function resolveSegments(
 ): BracketSegment[] {
   const { barStart, barEnd, beatStart, beatEnd } = bounds;
 
-  const useBeat = resolution !== 'measure' && (beatStart !== null || beatEnd !== null);
+  // At beat/sub-beat resolution, always derive pixel extents from the beat or
+  // sub-beat ghost index — never from the enclosing measure ghost.  Null
+  // beatStart/beatEnd default to -Infinity/+Infinity below, which includes the
+  // full bar range so measure-level bounds render at the same pixel positions
+  // while staying consistent with the beat ghost coordinate system.
+  const useBeat = resolution !== 'measure';
 
   if (!useBeat) {
     return resolveSegmentsMeasure(barStart, barEnd, layer);
@@ -293,6 +306,7 @@ export default function StageBrackets({
   activeStageId,
   onStageActivate,
   onSplitHandleMove,
+  session,
 }: StageBracketsProps) {
   // Drag state for split handles: tracked in a ref to avoid re-renders during
   // the drag — only onSplitHandleMove triggers a React state update.
@@ -300,6 +314,10 @@ export default function StageBrackets({
     sortedIdx: number;
     systemBottom: number;
     initialAssignments: StageAssignment[];
+    /** Last result that actually moved a boundary (not a clamp or no-op).
+     *  Used to stop the bracket at the minimum-width floor rather than bouncing
+     *  back to the drag-start position when a required stage hits its minimum. */
+    lastValidAssignments: StageAssignment[] | null;
   } | null>(null);
 
   const handleContainerRef = useRef<HTMLDivElement | null>(null);
@@ -327,24 +345,49 @@ export default function StageBrackets({
       dragRef.current.sortedIdx,
       splitBoundary,
     );
+
+    if (updated === dragRef.current.initialAssignments) {
+      // moveSplitHandle returned unchanged — a required stage hit its minimum-width
+      // floor.  Show the last valid position to prevent a visual bounce-back to
+      // the drag-start position.
+      const stable = dragRef.current.lastValidAssignments ?? dragRef.current.initialAssignments;
+      onSplitHandleMove(stable);
+      return;
+    }
+
+    // Detect whether a stage was collapsed (absent count increased).  If so,
+    // null the drag ref so subsequent mousemove events are no-ops — the handle
+    // no longer exists between the remaining active stages.  handleMouseUp will
+    // remove the event listeners on the next mouseup.
+    const prevAbsent = dragRef.current.initialAssignments.filter(a => a.absent).length;
+    const nextAbsent = updated.filter(a => a.absent).length;
+    if (nextAbsent > prevAbsent) {
+      onSplitHandleMove(updated);
+      dragRef.current = null;
+      return;
+    }
+
+    dragRef.current.lastValidAssignments = updated;
     onSplitHandleMove(updated);
   }, [layer, resolution, onSplitHandleMove]);
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = null;
+    session?.setStageDragActive(false);
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
-  }, [handleMouseMove]);
+  }, [handleMouseMove, session]);
 
   const startSplitDrag = useCallback(
     (e: React.MouseEvent, sortedIdx: number, systemBottom: number) => {
       e.stopPropagation();
       e.preventDefault();
-      dragRef.current = { sortedIdx, systemBottom, initialAssignments: assignments };
+      dragRef.current = { sortedIdx, systemBottom, initialAssignments: assignments, lastValidAssignments: null };
+      session?.setStageDragActive(true);
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     },
-    [assignments, handleMouseMove, handleMouseUp],
+    [assignments, handleMouseMove, handleMouseUp, session],
   );
 
   // Cleanup on unmount.

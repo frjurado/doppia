@@ -8,6 +8,8 @@ Covers:
 - ConceptTagCreate      — write model for a single concept tag
 - SubPartFragmentCreate — write model for a sub-part (child) fragment
 - FragmentCreate        — write model for a top-level fragment create request
+- ReviewQueueItem       — one row in the reviewer work-queue (with movement context)
+- ReviewQueueResponse   — cursor-paginated work-queue response
 
 The summary JSONB schema is versioned and documented in
 docs/architecture/fragment-schema.md. The ``version`` field inside ``summary``
@@ -247,6 +249,167 @@ class FragmentResponse(BaseModel):
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Read response models (Component 7 Step 7)
+# ---------------------------------------------------------------------------
+
+
+class ConceptTagDetail(BaseModel):
+    """A hydrated concept tag returned by single-fragment and list reads.
+
+    The ``name``, ``alias``, and ``hierarchy_path`` are resolved from Neo4j at
+    read time.  The base ``concept_id`` and ``is_primary`` come from PostgreSQL.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    concept_id: str
+    is_primary: bool
+    name: str
+    alias: str | None
+    hierarchy_path: list[str]
+
+
+class FragmentDetailResponse(BaseModel):
+    """Full fragment record for ``GET /api/v1/fragments/{id}``.
+
+    Includes concept tags hydrated with Neo4j metadata, harmony events sliced
+    from ``movement_analysis`` over the fragment's bar range, and nested
+    sub-parts one level deep (ADR-011 two-level display limit).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    parent_fragment_id: uuid.UUID | None
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    summary: dict
+    prose_annotation: str | None
+    data_licence: str | None
+    status: str
+    created_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    concept_tags: list[ConceptTagDetail]
+    harmony_events: list[dict]
+    sub_parts: list["FragmentDetailResponse"]
+
+
+class FragmentListItem(BaseModel):
+    """Lightweight fragment entry for ``GET /api/v1/movements/{id}/fragments``.
+
+    Carries only what the on-score overlay needs: coordinates, status, the
+    primary concept alias for the bracket label, and nested sub-parts one
+    level deep (ADR-011 two-level display limit).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    parent_fragment_id: uuid.UUID | None
+    mc_start: int
+    mc_end: int
+    bar_start: int
+    bar_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    status: str
+    primary_concept_id: str | None
+    primary_concept_alias: str | None
+    sub_parts: list["FragmentListItem"]
+
+
+class FragmentListResponse(BaseModel):
+    """Cursor-paginated list of top-level fragments for a movement."""
+
+    items: list[FragmentListItem]
+    next_cursor: str | None
+
+
+class ReviewQueueItem(BaseModel):
+    """One row in the reviewer work-queue (GET /api/v1/reviews/queue).
+
+    Extends the lightweight fragment fields with movement context (composer,
+    work, movement label) and submission metadata so a reviewer can triage
+    without fetching each fragment individually.
+
+    ``submitted_at`` is ``fragment.updated_at`` at the time the row is read —
+    the last write transitioned status to ``submitted``, so ``updated_at``
+    approximates the submission time.
+    """
+
+    model_config = ConfigDict(from_attributes=False)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    status: str
+    primary_concept_id: str | None
+    primary_concept_alias: str | None
+    created_by: uuid.UUID | None
+    submitted_at: datetime
+
+    # Movement context resolved by JOIN in the service layer
+    composer_name: str
+    work_title: str
+    work_catalogue_number: str | None
+    movement_number: int
+    movement_title: str | None
+
+
+class ReviewQueueResponse(BaseModel):
+    """Cursor-paginated list of submitted fragments awaiting review."""
+
+    items: list[ReviewQueueItem]
+    next_cursor: str | None
+
+
+class FragmentUpdateResponse(FragmentResponse):
+    """Response for PATCH /api/v1/fragments/{id}.
+
+    Extends FragmentResponse with revision metadata so the UI can reflect
+    'this edit re-opened review' when an approved fragment transitions back
+    to submitted, or when a submitted fragment's prior reviews are cleared.
+    """
+
+    previous_status: str
+    """The fragment's status before this edit was applied."""
+
+    status_changed: bool
+    """True when the edit triggered a status transition (e.g. approved → submitted)."""
+
+
+class FragmentDeleteResponse(BaseModel):
+    """Response body for DELETE /api/v1/fragments/{id}.
+
+    ``child_count`` is the number of sub-part (stage) children removed by the
+    cascade delete (or that *would* be removed when ``dry_run=True``).
+    ``movement_analysis`` rows are never deleted — they are movement-level,
+    not fragment-owned (fragment-schema.md).
+    """
+
+    model_config = ConfigDict(from_attributes=False)
+
+    fragment_id: uuid.UUID
+    child_count: int
+    dry_run: bool
 
 
 class Fragment(Base):

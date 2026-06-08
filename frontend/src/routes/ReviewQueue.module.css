@@ -1,0 +1,101 @@
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-6);
+  flex-shrink: 0;
+}
+
+.navLink {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.navLink:hover span {
+  color: var(--color-on-surface) !important;
+}
+
+.title {
+  margin: 0;
+  flex: 1;
+}
+
+.body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.listPanel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-2);
+  flex-shrink: 0;
+}
+
+/* Queue row layout */
+.itemRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  width: 100%;
+  text-align: left;
+}
+
+.itemPrimary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.aliasBadge {
+  display: inline-block;
+  background: var(--color-surface-container-high);
+  padding: 1px var(--spacing-2);
+  flex-shrink: 0;
+}
+
+/* Load more */
+.loadMore {
+  padding: var(--spacing-3) var(--spacing-4);
+  flex-shrink: 0;
+}
+
+.loadMoreButton {
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--color-surface-container);
+  width: 100%;
+}
+
+.loadMoreButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.loadMoreButton:hover:not(:disabled) {
+  background: var(--color-surface-container-high);
+}

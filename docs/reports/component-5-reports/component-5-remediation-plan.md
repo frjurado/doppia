@@ -1,6 +1,6 @@
 # Component 5 — Post-Implementation Remediation Plan
 
-**Status:** Draft for implementation (Claude Code executes all code/seed/migration work; this doc is the spec).
+**Status:** Complete. All G0–G7 items shipped. G6.2 and G6.3 (the last open items) closed in Component 7 Steps 15–16.
 **Scope:** The issue list raised after Component 5 Parts 1–5 shipped. Grouped, sequenced, and pinned to concrete files and docs.
 **Workflow note:** Every code, YAML, and migration change below is done in **Claude Code**. This document and the ADR/architecture-doc edits it calls for are the only artefacts edited in Cowork.
 
@@ -311,6 +311,8 @@ This is exactly the foundational-first ordering requested; the complexity field 
 
 **Verify:** A DCML passage shows clear `V65`-style labels keyed to measure/beat; null bass/soprano read as "not computed"; review state legible but not noisy.
 
+> **Status: Completed in Component 7 Step 15.** See `frontend/src/components/score/HarmonyPanel.tsx`.
+
 ### G6.3 — In-score chord labels under each system (net-new; full plan)
 **Issue:** Show the chord info (`V65` etc.) *in the score*, under the relevant system, at the metrically correct position — the single most useful aid.
 
@@ -327,6 +329,8 @@ This is exactly the foundational-first ordering requested; the complexity field 
 **Files (Claude Code):** a new overlay module `frontend/src/components/score/harmonyOverlay.ts` + `.module.css`; consumes the ghost index from `ghosts.ts` and the sliced events from `scoreApi.ts`; mounted by `ScoreViewer.tsx`; shares the re-projection signal from G1.3.
 
 **Verify:** On a DCML-annotated movement, `V65`/etc. appear under the correct system at the beat x-position of the event; labels track zoom/resize; volta filtering places ending labels correctly; the panel and the in-score labels agree.
+
+> **Status: Completed in Component 7 Step 16 (tag mode only).** The open decision on view-mode visibility was resolved: labels render in tag mode only (narrowing this plan's "default to both modes" recommendation). Design reference: `docs/architecture/harmony-score-overlay.md`. Shipped modules: `frontend/src/components/score/harmonyOverlay.ts`, `frontend/src/components/score/harmonyOverlay.module.css`.
 
 ---
 

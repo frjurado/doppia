@@ -75,11 +75,21 @@ stage_width = (stage.default_weight / sum_of_weights) × main_bracket_width
 
 If no `default_weight` is set on any sibling edge, equal distribution applies (all weights implicitly 1.0).
 
-### Grid snapping
+### Grid snapping and auto-resolution drop
 
-Default positions are computed in score-space coordinates and then **snapped to the currently active selection grid** (see §5). The stage bracket boundaries align to the nearest grid position — beat boundaries if the grid is at beat resolution, eighth-note boundaries if at sub-beat resolution. This means a stage that by raw proportion would end at beat 2.3 snaps to beat 2 or beat 2.5 depending on the active grid.
+Default positions are distributed by `default_weight` and snapped to the active selection grid (see §5).
 
-Snapping resolves left-to-right: each stage is snapped in sequence, with the right boundary of stage N becoming the left boundary of stage N+1. The rightmost stage's right boundary is pinned to the main bracket's right boundary, absorbing any rounding remainder.
+**Auto-drop when the selection is too short for measure-level placement.** If the committed selection cannot accommodate N stages at measure resolution (fewer bars than stages), pre-population automatically selects the finest resolution at which the stages fit — Measure → Beat → Sub-beat — and switches the resolution toggle to match. The annotator is shown a brief inline note ("switched to beat resolution to fit 4 stages") so the grid change is not silent.
+
+If even sub-beat resolution cannot fit the required number of stages (e.g. a one-beat selection for a four-stage concept), no brackets are placed; submission remains blocked until the annotator extends the main selection or reduces the stage count.
+
+Snapping resolves left-to-right: each stage is snapped in sequence, with the right boundary of stage N becoming the left boundary of stage N+1.
+
+### Outer-edge pinning in contiguous mode
+
+In `contiguous` mode the **first stage's left edge is always the main bracket's left edge**, and the **last stage's right edge is always the main bracket's right edge**. These outer boundaries are not independently draggable — they are by design fixed to the main selection. The only draggable boundaries are the internal split handles between adjacent stages.
+
+Changing the outer extent of the stage group is done by resizing the main bracket (§6, "Main bracket change after stages are committed").
 
 ### Required stages
 
@@ -95,7 +105,7 @@ An **absent toggle** in the stage list in the form panel (§7.3) lets the user e
 - In `contiguous` mode, the absent stage's proportional share is redistributed to its neighbours, shifting the split handle between them.
 - The bracket reappears (at its neighbours' current boundary) if the user re-enables the stage, and the neighbours' shared boundary shifts back to accommodate it.
 
-An optional stage that has not been explicitly marked absent and has not been dragged from its default position is in a limbo state — neither confirmed present nor absent. **Submission is blocked while any optional stage is in this limbo state.** The submission checklist (§7.5) flags this explicitly. The user must either drag the bracket (confirming presence and refining its bounds) or toggle it absent.
+An optional stage at its pre-populated default position is valid data and counts toward submission — the annotator is not required to drag it. The user can refine the bounds by dragging (which sets `confirmed = true` on the stage assignment) or toggle it absent; both are optional actions. The only way an optional stage blocks submission is if it has an error state (bounds outside the main bracket). See §7.5.
 
 ### Compound stages and segmentation
 
@@ -172,9 +182,17 @@ Type Refinement changes (§7.2) follow the same logic: sub-stage brackets that s
 
 ### Main bracket change after stages are committed
 
-If the user extends the main bracket, the outermost stage brackets (first and last in order) auto-extend to fill the new space.
+When the annotator resizes the main bracket, stage positions update using a **hybrid redistribution + clamp** policy (Component 7 Step 3):
 
-If the user contracts the main bracket so that it no longer fully contains a stage bracket, the affected stage brackets are shown in an error state (a distinct visual style — e.g. red border). Submission is blocked until the user either expands the main bracket to re-contain all stages, or trims the affected stage brackets to fit within the new main bounds.
+- **Default-position stages redistribute proportionally.** Any stage still at its pre-populated default (not manually dragged, not confirmed) is re-laid out by `default_weight` across the new main range, snapped to the active grid.
+- **Active stages are preserved.** A stage the annotator has dragged or confirmed (required, or an activated optional) keeps its position and width through the resize.
+- **Auto-drop to a finer grid is the escape valve.** Before clamping, if the shrunken range can still fit all active stages at a finer resolution, the grid is dropped (reusing `chooseStageGrid`) and stages are re-snapped.
+- **The resize hard-clamps to protect active stages.** The main-bracket drag cannot shrink past the point that would force any active stage below one grid unit. The clamp fires only after the finer-grid escape valve is exhausted.
+- **No silent disappearance.** Active optional stages are never force-disappeared by a resize. The "outside main bracket" error state is reserved for genuine orphaning (e.g. a structural concept change that removes a stage's slot) — not for ordinary resizes.
+
+### Handle-affordance lock during stage resize
+
+While a stage-split-handle drag is in progress, the main-bracket handle hover affordance is suppressed. The main ghost sits immediately adjacent to the stage brackets; without the lock, the cursor routinely crosses the main ghost mid-drag and triggers the show-handles animation, which is distracting and serves no purpose during an active stage resize. The lock is a single `stageDragActive` boolean on the interaction state; it is cleared the instant the drag ends. Normal main-ghost hover behaviour resumes immediately after the stage drag completes.
 
 ### Bidirectional linking (score ↔ form)
 
@@ -264,13 +282,25 @@ A small, always-visible checklist at the bottom of the form panel. Updates live:
 | Fragment drawn | Yes |
 | Concept selected | Yes |
 | Type Refinement set (if applicable) | Yes |
-| Required stages all assigned | Yes |
-| Optional stages all confirmed present or absent | Yes |
+| Stages complete (if applicable — see note) | Yes |
 | Required properties all set | Yes |
 | Stage bounds within main bracket | Yes |
 | Stage gaps / overlaps (free containment mode only) | Warning only |
 
 Items with warnings (non-blocking) are listed with a ⚠ icon. Items blocking submission show ✗. The Submit button is disabled until all blocking items are resolved.
+
+**Stages row conditionality.** The "Stages complete" row is shown only when **both** of these are true:
+1. The selected concept has `CONTAINS` edges (`conceptHasStages = schemaTree.stages.length > 0`).
+2. The main fragment bracket has been drawn (`flags.fragmentSet = true`), meaning stages have been pre-populated.
+
+Before a concept is selected, for stageless concepts, or before a fragment bracket is drawn (stages not yet pre-populated), the row is suppressed entirely.
+
+**Semantics of "Stages complete."** The row is checked when all non-orphaned, non-absent stages have valid bounds and no error flag:
+- **Required stages**: auto-satisfied by `prePopulateStages()` — they always get bounds.
+- **Optional stages**: pre-populated positions are valid data; dragging to refine is optional, not required for submission. Toggling absent is the way to mark a stage not present.
+- **Error state** (`bounds` outside the main bracket): blocks the row regardless of stage type.
+
+In practice the row is checked immediately after pre-population unless a stage has been dragged outside the main bracket. Implemented via `computeStagesComplete()` in `stages.ts`; the `confirmed` flag on a stage assignment is preserved for visual/tracking purposes but does not gate the checklist item. See Component 7 Step 1.
 
 ---
 
@@ -335,3 +365,28 @@ This section maps each design section above to the shipped modules. It is update
 | Backend — fragment submission endpoints (Step 6) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
 | Backend — harmony-event correction (Step 7) | `backend/services/analysis.py`, `backend/api/routes/movements.py` |
 | Backend — review state machine (Step 8) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+
+---
+
+## 12. Implemented in Component 7
+
+Component 7 shipped the tagging-tool carry-in fixes (§§4–6 behaviour), the CRUD backend, the on-score stored-fragment display, the review loop UI, and the harmony panel completion (G6.2 / G6.3). The table below maps those additions to their shipped modules.
+
+| Design area / step | Shipped module(s) |
+|---|---|
+| §4 Stage pre-population auto-drop grid (Step 2) | `frontend/src/components/score/stages.ts` (`chooseStageGrid`) |
+| §6 Hybrid main-resize / active-stage clamp (Step 3) | `frontend/src/components/score/stages.ts`, `frontend/src/components/score/StageBrackets.tsx`, `frontend/src/components/score/StageList.tsx` |
+| §6 Beat/sub-beat stage geometry (Step 4) | `frontend/src/components/score/stages.ts`, `frontend/src/components/score/StageBrackets.tsx` |
+| §6 Handle-affordance lock during stage resize (Step 5) | `frontend/src/components/score/annotator.ts`, `frontend/src/components/score/ghosts.ts`, `frontend/src/components/score/StageBrackets.tsx` |
+| §7.5 Stages checklist row conditionality (Step 1) | `frontend/src/components/score/SubmissionChecklist.tsx` |
+| Score-title first-system bracket nudge (Step 6) | `frontend/src/routes/ScoreViewer.tsx` |
+| Backend — fragment read endpoints (Step 7) | `backend/services/fragments.py`, `backend/api/routes/fragments.py`, `backend/api/routes/movements.py` |
+| Backend — fragment update + revision semantics (Step 8) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+| Backend — fragment delete + cascade (Step 9) | `backend/services/fragments.py`, `backend/api/routes/fragments.py` |
+| On-score stored-fragment overlay — projection layer (Step 10) | `frontend/src/components/score/FragmentOverlay.tsx` |
+| On-score stored-fragment overlay — brackets, labels, collapsed/expanded (Step 11) | `frontend/src/components/score/FragmentOverlay.tsx` |
+| Fragment side panel — record view, edit, delete (Step 12) | `frontend/src/routes/ScoreViewer.tsx`, `frontend/src/components/score/FragmentDetailPanel.tsx` |
+| Review queue (Step 13) | `backend/api/routes/reviews.py`, `frontend/src/routes/ReviewQueue.tsx` |
+| Approve/reject in side panel + gate feedback (Step 14) | `frontend/src/components/score/FragmentDetailPanel.tsx` |
+| G6.2 Harmony panel clarity (Step 15) | `frontend/src/components/score/HarmonyPanel.tsx` |
+| G6.3 In-score chord label overlay (Step 16) | `frontend/src/components/score/harmonyOverlay.ts`, `frontend/src/components/score/harmonyOverlay.module.css` |

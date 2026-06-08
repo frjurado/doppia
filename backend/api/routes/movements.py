@@ -1,6 +1,7 @@
-"""Movement analysis API routes: harmony event correction endpoints.
+"""Movement analysis API routes: harmony event correction and fragment list.
 
 Routes:
+    GET    /api/v1/movements/{movement_id}/fragments                 — list stored fragments (cursor-paginated)
     GET    /api/v1/movements/{movement_id}/analysis/events           — read events (slice by bar range)
     POST   /api/v1/movements/{movement_id}/analysis/events           — insert a new event
     POST   /api/v1/movements/{movement_id}/analysis/events/delete    — delete an event
@@ -12,13 +13,15 @@ All routes require the ``editor`` role. Move-boundary and edit-chord are
 deliberately separate endpoints; the UI must never conflate them.
 
 See docs/roadmap/component-5-tagging-tool.md § Step 7.
+See docs/roadmap/component-7-fragment-database.md § Step 7.
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from api.dependencies import require_role
+from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import Response
 from models.analysis import (
@@ -30,7 +33,10 @@ from models.analysis import (
     HarmonyEventOut,
 )
 from models.base import get_db
+from models.fragment import FragmentListResponse
+from neo4j import AsyncDriver
 from services.analysis import MovementAnalysisService
+from services.fragments import FragmentService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/movements", tags=["Movements"])
@@ -48,6 +54,91 @@ def get_analysis_service(
         A :class:`~services.analysis.MovementAnalysisService` bound to the session.
     """
     return MovementAnalysisService(db)
+
+
+def get_fragment_service(
+    db: AsyncSession = Depends(get_db),
+    driver: AsyncDriver = Depends(get_neo4j),
+) -> FragmentService:
+    """FastAPI dependency that constructs a :class:`~services.fragments.FragmentService`.
+
+    Args:
+        db: Async SQLAlchemy session (injected by ``get_db``).
+        driver: Async Neo4j driver (injected by ``get_neo4j``).
+
+    Returns:
+        A :class:`~services.fragments.FragmentService` bound to both databases.
+    """
+    return FragmentService(db, driver)
+
+
+@router.get(
+    "/{movement_id}/fragments",
+    response_model=FragmentListResponse,
+    dependencies=[require_role("editor")],
+    summary="List stored fragments for a movement",
+    response_description=(
+        "Cursor-paginated list of top-level fragments for the movement, each "
+        "with sub-parts nested one level deep. Status visibility is enforced "
+        "at the service layer: editors see their own drafts plus all "
+        "submitted/approved/rejected; admins see all."
+    ),
+)
+async def list_movement_fragments(
+    movement_id: uuid.UUID = Path(
+        ..., description="UUID of the movement whose fragments to list"
+    ),
+    cursor: str | None = Query(
+        None,
+        description=(
+            "Opaque pagination cursor from a prior response. Omit to start "
+            "from the first fragment (ordered by mc_start, then id)."
+        ),
+    ),
+    page_size: int = Query(
+        100,
+        ge=1,
+        le=500,
+        description="Maximum number of top-level fragments to return per page.",
+    ),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentListResponse:
+    """Return a cursor-paginated list of fragments tagged on a movement.
+
+    Returns only top-level fragments (no ``parent_fragment_id``); their
+    sub-parts are nested inside each item. Pagination is ordered by
+    ``(mc_start ASC, id ASC)`` for stable, position-ordered traversal.
+
+    The status filter is enforced at the service layer and cannot be
+    bypassed by a direct API call. Editors see their own drafts plus all
+    submitted/approved/rejected fragments. A different annotator's drafts
+    are invisible.
+
+    This endpoint answers "what is tagged on this score." The concept-tag
+    browse query ("all PACs in the corpus") is Component 8.
+
+    Args:
+        movement_id: UUID of the movement to query.
+        cursor: Opaque cursor from ``next_cursor`` in a prior response.
+        page_size: Maximum top-level items per page (1–500, default 100).
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        :class:`~models.fragment.FragmentListResponse` with ``items`` and
+        an optional ``next_cursor``.
+
+    Raises:
+        422: Cursor string is malformed.
+    """
+    return await service.list_for_movement(
+        movement_id,
+        caller_id=user.id,
+        caller_role=user.role,
+        cursor=cursor,
+        page_size=page_size,
+    )
 
 
 @router.get(

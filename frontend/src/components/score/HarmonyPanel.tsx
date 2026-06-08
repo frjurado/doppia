@@ -1,15 +1,17 @@
 /**
- * Harmony summary panel — Component 5 Step 16.
+ * Harmony summary panel — Component 5 Step 16, clarified in Component 7 Step 15 (G6.2).
  *
  * Reads movement_analysis events for the committed selection range and lets
  * the annotator confirm, edit, insert, and delete harmony events. Visible
  * once a selection has been drawn (fragmentSet = true).
  *
- * DCML-only (Phase 1):
- *   - bass_pitch / soprano_pitch are null for the Mozart corpus; rendered as
- *     "not computed" rather than empty/zero (fragment-schema.md).
- *   - The inferred key header is derived from the first event's local_key —
- *     this value will seed actual_key.value in the fragment summary on submit.
+ * Display (G6.2):
+ *   - Events grouped by measure (mn, volta) for scannability.
+ *   - Each card leads with the human label (numeral + local_key); root/quality/
+ *     inversion appear as secondary detail below.
+ *   - Review status (source + unreviewed warning) is visible but visually quiet.
+ *   - bass_pitch / soprano_pitch are null for the DCML corpus until Component 6;
+ *     a single footer note says "not computed" rather than leaving per-event blanks.
  *
  * Edit semantics (tagging-tool-design.md § Step 16):
  *   - Confirm: marks reviewed=True, source/auto unchanged (common case for
@@ -21,10 +23,11 @@
  *   - Delete: removes an event; prior event extends through the vacated slot.
  *
  * References: fragment-schema.md § "Harmonic analysis: movement-level single
- * source of truth", docs/roadmap/component-5-tagging-tool.md § Step 16.
+ * source of truth", docs/roadmap/component-5-tagging-tool.md § Step 16,
+ * docs/roadmap/component-7-fragment-database.md § Step 15.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SelectionRange } from './annotator';
 import {
   confirmHarmonyEvent,
@@ -68,6 +71,23 @@ const ROOT_ACCIDENTAL_OPTIONS = [
   { value: 'sharp', label: '♯ Sharp' },
 ];
 
+// Display maps for secondary detail (G6.2) — same vocabulary as the in-score labels (Step 16)
+const QUALITY_DISPLAY: Record<string, string> = {
+  'major': 'major',
+  'minor': 'minor',
+  'diminished': 'dim',
+  'augmented': 'aug',
+  'half-diminished': 'ø',
+  'dominant-seventh': 'dom7',
+};
+
+const INVERSION_DISPLAY: Record<number, string> = {
+  0: 'root pos',
+  1: '1st inv',
+  2: '2nd inv',
+  3: '3rd inv',
+};
+
 // ---------------------------------------------------------------------------
 // Local types
 // ---------------------------------------------------------------------------
@@ -108,6 +128,17 @@ interface InsertForm {
 export interface HarmonyPanelProps {
   movementId: string;
   selectionRange: SelectionRange | null;
+  /**
+   * Called after any successful mutation (confirm, edit, insert, delete) so
+   * the in-score overlay can refresh its cached event list (Step 16 / G6.3).
+   */
+  onHarmonyUpdated?: () => void;
+  /**
+   * Event key to scroll into view and briefly highlight — set by ScoreViewer
+   * when the annotator clicks an in-score label (click-to-focus, Step 16).
+   * Format: "${mn}:${volta ?? ''}:${beat}" — matches eventKey().
+   */
+  focusedEventKey?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,20 +149,36 @@ function eventKey(e: HarmonyEventOut): string {
   return `${e.mn}:${e.volta ?? ''}:${e.beat}`;
 }
 
-function positionLabel(e: HarmonyEventOut): string {
-  const volta = e.volta != null ? `v${e.volta}` : '';
+function beatLabel(e: HarmonyEventOut): string {
   const beatStr = e.beat % 1 === 0
     ? String(e.beat)
     : e.beat.toFixed(2).replace(/\.?0+$/, '');
-  return `m.${e.mn}${volta} b${beatStr}`;
+  return `b${beatStr}`;
 }
 
-function chordSummary(e: HarmonyEventOut): string {
+function measureGroupLabel(mn: number, volta: number | null): string {
+  return volta != null ? `Bar ${mn} (v${volta})` : `Bar ${mn}`;
+}
+
+// Primary human label: "V65/V (G)" — same vocabulary as in-score harmony overlay (Step 16)
+function primaryLabel(e: HarmonyEventOut): string {
+  let chord = e.numeral ?? '';
+  if (e.applied_to) chord += `/${e.applied_to}`;
+  const key = e.local_key ? ` (${e.local_key})` : '';
+  return (chord + key) || '—';
+}
+
+// Secondary detail: "root 5 · dim · 1st inv · ext 7"
+function secondaryDetail(e: HarmonyEventOut): string {
   const parts: string[] = [];
-  if (e.numeral) parts.push(e.numeral);
-  if (e.applied_to) parts.push(`/${e.applied_to}`);
-  if (e.local_key) parts.push(`(${e.local_key})`);
-  return parts.join(' ') || '—';
+  if (e.root != null) {
+    const acc = e.root_accidental === 'flat' ? '♭' : e.root_accidental === 'sharp' ? '♯' : '';
+    parts.push(`root ${acc}${e.root}`);
+  }
+  if (e.quality) parts.push(QUALITY_DISPLAY[e.quality] ?? e.quality);
+  if (e.inversion != null) parts.push(INVERSION_DISPLAY[e.inversion] ?? String(e.inversion));
+  if (e.extensions && e.extensions.length > 0) parts.push(`ext ${e.extensions.join(', ')}`);
+  return parts.join(' · ');
 }
 
 function eventToEditForm(e: HarmonyEventOut): EditForm {
@@ -171,7 +218,12 @@ function emptyInsertForm(defaultMn?: number): InsertForm {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPanelProps) {
+export default function HarmonyPanel({
+  movementId,
+  selectionRange,
+  onHarmonyUpdated,
+  focusedEventKey,
+}: HarmonyPanelProps) {
   const [events, setEvents] = useState<HarmonyEventOut[]>([]);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -189,6 +241,24 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
   const [insertError, setInsertError] = useState<string | null>(null);
 
   const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(new Set());
+
+  // Ref on the outer panel div used by click-to-focus to querySelector event cards.
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // ── Click-to-focus (Step 16 / G6.3) ─────────────────────────────────────
+  // When ScoreViewer emits a focusedEventKey (from an in-score label click),
+  // scroll the matching event card into view and apply a brief highlight.
+  useEffect(() => {
+    if (!focusedEventKey || !panelRef.current) return;
+    const el = panelRef.current.querySelector<HTMLElement>(
+      `[data-event-key="${focusedEventKey}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    el.classList.add(styles.eventCardFocused!);
+    const t = setTimeout(() => el.classList.remove(styles.eventCardFocused!), 1200);
+    return () => clearTimeout(t);
+  }, [focusedEventKey]);
 
   // ── Fetch events ─────────────────────────────────────────────────────────
 
@@ -238,6 +308,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
           mc: event.mc ?? null,
         });
         setEvents(prev => prev.map(e => eventKey(e) === key ? updated : e));
+        onHarmonyUpdated?.();
       } catch {
         // Fall back to full refetch on failure
         await fetchEvents();
@@ -245,7 +316,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
         setBusyKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
       }
     },
-    [movementId, fetchEvents],
+    [movementId, fetchEvents, onHarmonyUpdated],
   );
 
   const handleConfirmAll = useCallback(async () => {
@@ -274,7 +345,8 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
       prev.map(e => updates.find(u => eventKey(u) === eventKey(e)) ?? e),
     );
     setBusyKeys(new Set());
-  }, [events, movementId]);
+    onHarmonyUpdated?.();
+  }, [events, movementId, onHarmonyUpdated]);
 
   // ── Edit ─────────────────────────────────────────────────────────────────
 
@@ -355,12 +427,13 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
       setEditingKey(null);
       setEditForm(null);
       await fetchEvents();
+      onHarmonyUpdated?.();
     } catch (err) {
       setEditError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setEditSaving(false);
     }
-  }, [editForm, movementId, fetchEvents]);
+  }, [editForm, movementId, fetchEvents, onHarmonyUpdated]);
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
@@ -376,13 +449,14 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
           mc: event.mc ?? null,
         });
         await fetchEvents();
+        onHarmonyUpdated?.();
       } catch {
         // Keep event in list on failure
       } finally {
         setBusyKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
       }
     },
-    [movementId, fetchEvents],
+    [movementId, fetchEvents, onHarmonyUpdated],
   );
 
   // ── Insert ────────────────────────────────────────────────────────────────
@@ -427,12 +501,13 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
       setInsertOpen(false);
       setInsertForm(emptyInsertForm(selectionRange?.barStart));
       await fetchEvents();
+      onHarmonyUpdated?.();
     } catch (err) {
       setInsertError(err instanceof Error ? err.message : 'Insert failed');
     } finally {
       setInsertSaving(false);
     }
-  }, [insertForm, movementId, selectionRange, fetchEvents]);
+  }, [insertForm, movementId, selectionRange, fetchEvents, onHarmonyUpdated]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -440,12 +515,27 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
   // Inferred key: first event's local_key seeds actual_key.value in the summary
   const inferredKey = events.length > 0 ? (events[0].local_key ?? null) : null;
 
+  // Events grouped by (mn, volta) for measure-level scannability (G6.2)
+  const eventsByMeasure = useMemo(() => {
+    const groups = new Map<string, { mn: number; volta: number | null; items: HarmonyEventOut[] }>();
+    for (const event of events) {
+      const groupKey = `${event.mn}:${event.volta ?? ''}`;
+      const existing = groups.get(groupKey);
+      if (existing) {
+        existing.items.push(event);
+      } else {
+        groups.set(groupKey, { mn: event.mn, volta: event.volta ?? null, items: [event] });
+      }
+    }
+    return [...groups.values()].sort((a, b) => a.mn - b.mn || (a.volta ?? 0) - (b.volta ?? 0));
+  }, [events]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (!selectionRange) return null;
 
   return (
-    <div className={styles.panel}>
+    <div ref={panelRef} className={styles.panel}>
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className={styles.header}>
         {inferredKey && (
@@ -483,210 +573,229 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
         </Type>
       )}
 
-      {/* ── Event list ───────────────────────────────────────────────────── */}
+      {/* ── Event list, grouped by measure ───────────────────────────────── */}
       {loadState === 'idle' && events.length === 0 && (
         <Type variant="label-sm" as="p" className={styles.statusText}>
           No harmony events in this range.
         </Type>
       )}
 
-      {events.length > 0 && (
-        <ul className={styles.eventList} role="list">
-          {events.map(event => {
-            const key = eventKey(event);
-            const isEditing = editingKey === key;
-            const isBusy = busyKeys.has(key);
+      {eventsByMeasure.length > 0 && (
+        <div className={styles.measureGroups}>
+          {eventsByMeasure.map(({ mn, volta, items }) => (
+            <div key={`${mn}:${volta ?? ''}`} className={styles.measureGroup}>
+              <div className={styles.measureHeader}>
+                <Type variant="label-sm" as="span">{measureGroupLabel(mn, volta)}</Type>
+              </div>
+              <ul className={styles.eventList} role="list">
+                {items.map(event => {
+                  const key = eventKey(event);
+                  const isEditing = editingKey === key;
+                  const isBusy = busyKeys.has(key);
+                  const secondary = secondaryDetail(event);
 
-            return (
-              <li key={key} className={styles.eventCard}>
-                {/* ── Event row ──────────────────────────────────────── */}
-                <div className={styles.eventRow}>
-                  <span className={styles.position}>
-                    <Type variant="label-sm" as="span">{positionLabel(event)}</Type>
-                  </span>
-                  <span className={styles.chord}>
-                    <Type variant="label-sm" as="span">{chordSummary(event)}</Type>
-                  </span>
-                  <span
-                    className={
-                      event.reviewed ? styles.badgeReviewed : styles.badgeUnreviewed
-                    }
-                  >
-                    <Type variant="label-sm" as="span">
-                      {event.source}
-                      {event.reviewed ? ' ✓' : ' ⚠'}
-                    </Type>
-                  </span>
-                  <div className={styles.actions}>
-                    {!event.reviewed && (
-                      <button
-                        type="button"
-                        className={styles.actionConfirm}
-                        title="Confirm as reviewed"
-                        disabled={isBusy}
-                        onClick={() => handleConfirm(event)}
-                      >
-                        ✓
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className={styles.actionEdit}
-                      title={isEditing ? 'Close editor' : 'Edit event'}
-                      disabled={isBusy}
-                      onClick={() => isEditing ? handleEditCancel() : handleEditOpen(event)}
-                      aria-pressed={isEditing}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.actionDelete}
-                      title="Delete event"
-                      disabled={isBusy}
-                      onClick={() => handleDelete(event)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
+                  return (
+                    <li key={key} className={styles.eventCard} data-event-key={key}>
+                      {/* ── Event row ────────────────────────────────── */}
+                      <div className={styles.eventRow}>
+                        <span className={styles.beat}>
+                          <Type variant="label-sm" as="span">{beatLabel(event)}</Type>
+                        </span>
+                        <div className={styles.chordBlock}>
+                          <span className={styles.eventPrimary}>
+                            <Type variant="label-sm" as="span">{primaryLabel(event)}</Type>
+                          </span>
+                          {secondary && (
+                            <span className={styles.eventSecondary}>
+                              <Type variant="label-sm" as="span">{secondary}</Type>
+                            </span>
+                          )}
+                        </div>
+                        {!event.reviewed && (
+                          <span className={styles.badgeUnreviewed}>
+                            <Type variant="label-sm" as="span">
+                              {event.source} ⚠
+                            </Type>
+                          </span>
+                        )}
+                        {event.reviewed && (
+                          <span className={styles.badgeReviewed}>
+                            <Type variant="label-sm" as="span">{event.source}</Type>
+                          </span>
+                        )}
+                        <div className={styles.actions}>
+                          {!event.reviewed && (
+                            <button
+                              type="button"
+                              className={styles.actionConfirm}
+                              title="Confirm as reviewed"
+                              disabled={isBusy}
+                              onClick={() => handleConfirm(event)}
+                            >
+                              ✓
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={styles.actionEdit}
+                            title={isEditing ? 'Close editor' : 'Edit event'}
+                            disabled={isBusy}
+                            onClick={() => isEditing ? handleEditCancel() : handleEditOpen(event)}
+                            aria-pressed={isEditing}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.actionDelete}
+                            title="Delete event"
+                            disabled={isBusy}
+                            onClick={() => handleDelete(event)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
 
-                {/* ── Inline edit form ───────────────────────────────── */}
-                {isEditing && editForm && (
-                  <div className={styles.editForm}>
-                    <div className={styles.formGrid}>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Beat</Type>
-                        <input
-                          type="number"
-                          step="0.5"
-                          min="0.5"
-                          className={styles.textInput}
-                          value={editForm.beat}
-                          onChange={e => setEditForm(f => f && { ...f, beat: e.target.value })}
-                        />
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Numeral</Type>
-                        <input
-                          type="text"
-                          className={styles.textInput}
-                          value={editForm.numeral}
-                          onChange={e => setEditForm(f => f && { ...f, numeral: e.target.value })}
-                        />
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Local key</Type>
-                        <input
-                          type="text"
-                          className={styles.textInput}
-                          placeholder="e.g. G, d, f#"
-                          value={editForm.localKey}
-                          onChange={e => setEditForm(f => f && { ...f, localKey: e.target.value })}
-                        />
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Root (1–7)</Type>
-                        <input
-                          type="number"
-                          min="1"
-                          max="7"
-                          className={styles.textInput}
-                          value={editForm.root}
-                          onChange={e => setEditForm(f => f && { ...f, root: e.target.value })}
-                        />
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Quality</Type>
-                        <select
-                          className={styles.selectInput}
-                          value={editForm.quality}
-                          onChange={e => setEditForm(f => f && { ...f, quality: e.target.value })}
-                        >
-                          <option value="">— select —</option>
-                          {QUALITY_OPTIONS.map(o => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Inversion</Type>
-                        <select
-                          className={styles.selectInput}
-                          value={editForm.inversion}
-                          onChange={e => setEditForm(f => f && { ...f, inversion: e.target.value })}
-                        >
-                          {INVERSION_OPTIONS.map(o => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Root acc.</Type>
-                        <select
-                          className={styles.selectInput}
-                          value={editForm.rootAccidental}
-                          onChange={e => setEditForm(f => f && { ...f, rootAccidental: e.target.value })}
-                        >
-                          {ROOT_ACCIDENTAL_OPTIONS.map(o => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className={styles.fieldLabel}>
-                        <Type variant="label-sm" as="span">Applied to</Type>
-                        <input
-                          type="text"
-                          className={styles.textInput}
-                          placeholder="e.g. V"
-                          value={editForm.appliedTo}
-                          onChange={e => setEditForm(f => f && { ...f, appliedTo: e.target.value })}
-                        />
-                      </label>
-                      <label className={`${styles.fieldLabel} ${styles.fieldFull}`}>
-                        <Type variant="label-sm" as="span">Extensions (comma-separated)</Type>
-                        <input
-                          type="text"
-                          className={styles.textInput}
-                          placeholder="e.g. 7, 9"
-                          value={editForm.extensions}
-                          onChange={e => setEditForm(f => f && { ...f, extensions: e.target.value })}
-                        />
-                      </label>
-                    </div>
+                      {/* ── Inline edit form ─────────────────────────── */}
+                      {isEditing && editForm && (
+                        <div className={styles.editForm}>
+                          <div className={styles.formGrid}>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Beat</Type>
+                              <input
+                                type="number"
+                                step="0.5"
+                                min="0.5"
+                                className={styles.textInput}
+                                value={editForm.beat}
+                                onChange={e => setEditForm(f => f && { ...f, beat: e.target.value })}
+                              />
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Numeral</Type>
+                              <input
+                                type="text"
+                                className={styles.textInput}
+                                value={editForm.numeral}
+                                onChange={e => setEditForm(f => f && { ...f, numeral: e.target.value })}
+                              />
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Local key</Type>
+                              <input
+                                type="text"
+                                className={styles.textInput}
+                                placeholder="e.g. G, d, f#"
+                                value={editForm.localKey}
+                                onChange={e => setEditForm(f => f && { ...f, localKey: e.target.value })}
+                              />
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Root (1–7)</Type>
+                              <input
+                                type="number"
+                                min="1"
+                                max="7"
+                                className={styles.textInput}
+                                value={editForm.root}
+                                onChange={e => setEditForm(f => f && { ...f, root: e.target.value })}
+                              />
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Quality</Type>
+                              <select
+                                className={styles.selectInput}
+                                value={editForm.quality}
+                                onChange={e => setEditForm(f => f && { ...f, quality: e.target.value })}
+                              >
+                                <option value="">— select —</option>
+                                {QUALITY_OPTIONS.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Inversion</Type>
+                              <select
+                                className={styles.selectInput}
+                                value={editForm.inversion}
+                                onChange={e => setEditForm(f => f && { ...f, inversion: e.target.value })}
+                              >
+                                {INVERSION_OPTIONS.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Root acc.</Type>
+                              <select
+                                className={styles.selectInput}
+                                value={editForm.rootAccidental}
+                                onChange={e => setEditForm(f => f && { ...f, rootAccidental: e.target.value })}
+                              >
+                                {ROOT_ACCIDENTAL_OPTIONS.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className={styles.fieldLabel}>
+                              <Type variant="label-sm" as="span">Applied to</Type>
+                              <input
+                                type="text"
+                                className={styles.textInput}
+                                placeholder="e.g. V"
+                                value={editForm.appliedTo}
+                                onChange={e => setEditForm(f => f && { ...f, appliedTo: e.target.value })}
+                              />
+                            </label>
+                            <label className={`${styles.fieldLabel} ${styles.fieldFull}`}>
+                              <Type variant="label-sm" as="span">Extensions (comma-separated)</Type>
+                              <input
+                                type="text"
+                                className={styles.textInput}
+                                placeholder="e.g. 7, 9"
+                                value={editForm.extensions}
+                                onChange={e => setEditForm(f => f && { ...f, extensions: e.target.value })}
+                              />
+                            </label>
+                          </div>
 
-                    {editError && (
-                      <Type variant="label-sm" as="p" className={styles.formError} role="alert">
-                        {editError}
-                      </Type>
-                    )}
+                          {editError && (
+                            <Type variant="label-sm" as="p" className={styles.formError} role="alert">
+                              {editError}
+                            </Type>
+                          )}
 
-                    <div className={styles.formActions}>
-                      <button
-                        type="button"
-                        className={styles.saveButton}
-                        onClick={handleEditSave}
-                        disabled={editSaving}
-                      >
-                        <Type variant="label-sm" as="span">
-                          {editSaving ? 'Saving…' : 'Save'}
-                        </Type>
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.cancelButton}
-                        onClick={handleEditCancel}
-                        disabled={editSaving}
-                      >
-                        <Type variant="label-sm" as="span">Cancel</Type>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                          <div className={styles.formActions}>
+                            <button
+                              type="button"
+                              className={styles.saveButton}
+                              onClick={handleEditSave}
+                              disabled={editSaving}
+                            >
+                              <Type variant="label-sm" as="span">
+                                {editSaving ? 'Saving…' : 'Save'}
+                              </Type>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.cancelButton}
+                              onClick={handleEditCancel}
+                              disabled={editSaving}
+                            >
+                              <Type variant="label-sm" as="span">Cancel</Type>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* ── Insert form / Add button ─────────────────────────────────────── */}
@@ -849,7 +958,7 @@ export default function HarmonyPanel({ movementId, selectionRange }: HarmonyPane
 
       {/* ── DCML-only note ────────────────────────────────────────────────── */}
       <Type variant="label-sm" as="p" className={styles.dcmlNote}>
-        Bass and soprano voices: not computed (Phase 1)
+        Bass and soprano voices: not computed (Component 6)
       </Type>
     </div>
   );

@@ -55,7 +55,7 @@ export interface MainBracketProps {
 // Internal types and helpers
 // ---------------------------------------------------------------------------
 
-interface BracketSegment {
+export interface BracketSegment {
   systemTop: number;
   left: number;
   right: number;
@@ -84,7 +84,8 @@ interface BracketSegment {
  * endings produce different visual positions (different systemTop values) and
  * form distinct groups without any special endingN handling here.
  */
-function resolveSegments(
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveSegments(
   sel: SelectionRange,
   layer: GhostLayer,
   resolution: ResolutionMode,

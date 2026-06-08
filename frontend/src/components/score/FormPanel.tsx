@@ -126,6 +126,16 @@ export interface FormPanelProps {
   movementId?: string | null;
   /** Committed selection range; used to slice harmony events by bar range. */
   selectionRange?: SelectionRange | null;
+  /**
+   * Called after any successful harmony mutation so the in-score overlay
+   * (Step 16 / G6.3) can refresh its cached event list.
+   */
+  onHarmonyUpdated?: () => void;
+  /**
+   * Event key to scroll/focus in HarmonyPanel — set by ScoreViewer when the
+   * annotator clicks an in-score chord label (click-to-focus, Step 16).
+   */
+  harmonyFocusKey?: string | null;
 
   // ── Step 17: Prose annotation ────────────────────────────────────────────
 
@@ -159,6 +169,17 @@ export interface FormPanelProps {
    * reset of the session and all annotation state (G1.2).
    */
   onDeleteFragment?: () => void;
+  /**
+   * Edit-prefill data for the fragment edit flow (Component 7 Step 12).
+   * When set, FormPanel initialises with this concept and property values on
+   * mount instead of starting blank. Consumed once via the prefillConsumedRef;
+   * the fragmentResetKey on the parent gates remounting so this fires once
+   * per edit session.
+   */
+  editPrefill?: {
+    concept: ConceptSearchHit;
+    propertyValues: PropertyFormValues;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +261,9 @@ export default function FormPanel({
   submitError = null,
   draftId = null,
   onDeleteFragment,
+  editPrefill = null,
+  onHarmonyUpdated,
+  harmonyFocusKey,
 }: FormPanelProps) {
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
@@ -248,6 +272,24 @@ export default function FormPanel({
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [selectedRefinement, setSelectedRefinement] = useState<TypeRefinementChild | null>(null);
   const [propertyValues, setPropertyValues] = useState<PropertyFormValues>({});
+
+  // ── Edit prefill (Component 7 Step 12) ────────────────────────────────────
+  // When this FormPanel is remounted with an editPrefill (fragment edit flow),
+  // consume it once on mount: store the property values in a ref so the async
+  // schema fetch inside handleConceptSelect can apply them, then call
+  // handleConceptSelect to load the concept and schema tree.
+  const prefillConsumedRef = useRef(false);
+  const prefillPropertyValuesRef = useRef<PropertyFormValues | null>(null);
+
+  // Consume editPrefill once on mount.  fragmentResetKey on the parent gates
+  // remounting so this fires at most once per edit session.
+  useEffect(() => {
+    if (!editPrefill || prefillConsumedRef.current) return;
+    prefillConsumedRef.current = true;
+    prefillPropertyValuesRef.current = editPrefill.propertyValues;
+    handleConceptSelect(editPrefill.concept);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally mount-only; editPrefill is stable at mount time
 
   // When the session rebuilds (ghost layer re-render), re-apply conceptSet so
   // the checklist stays coherent.
@@ -289,9 +331,15 @@ export default function FormPanel({
       try {
         const tree = await getConceptSchemas(concept.id);
         setSchemaTree(tree);
-        // Carry over values for schemas shared with the previous concept;
-        // discard values for schemas that no longer apply (Step 13).
-        setPropertyValues(prev => carryOverValues(prev, tree.schemas));
+        // If a prefill was stored (edit flow), use those values directly.
+        // Otherwise carry over values for schemas shared with the previous concept.
+        const prefillVals = prefillPropertyValuesRef.current;
+        if (prefillVals !== null) {
+          prefillPropertyValuesRef.current = null; // consumed
+          setPropertyValues(prefillVals);
+        } else {
+          setPropertyValues(prev => carryOverValues(prev, tree.schemas));
+        }
         onConceptChange?.(concept, tree);
       } catch {
         setSchemaError('Could not load concept schema. Try again.');
@@ -436,6 +484,8 @@ export default function FormPanel({
           <HarmonyPanel
             movementId={movementId}
             selectionRange={selectionRange ?? null}
+            onHarmonyUpdated={onHarmonyUpdated}
+            focusedEventKey={harmonyFocusKey}
           />
         </section>
       )}
@@ -476,6 +526,7 @@ export default function FormPanel({
           flags={flags}
           typeRefinementRequired={typeRefinements.length > 0}
           typeRefinementSet={selectedRefinement !== null}
+          conceptHasStages={schemaTree !== null && schemaTree.stages.length > 0}
           isSavingDraft={isSavingDraft}
           isSubmitting={isSubmitting}
           submitError={submitError}

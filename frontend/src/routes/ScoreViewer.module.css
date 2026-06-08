@@ -193,6 +193,14 @@
   color: var(--color-on-surface);
 }
 
+/* Auto-grid note shown when pre-population switches resolution to fit stages. */
+.gridAutoSwitchNote {
+  color: var(--color-on-surface-variant);
+  font-style: italic;
+  padding-left: var(--spacing-4);
+  align-self: center;
+}
+
 /* ── TAG / Done mode button ──────────────────────────────────────────────── */
 
 /* Right column of the 1fr/auto/1fr toolbar grid — contains the TAG button. */

@@ -594,6 +594,12 @@ Who can delete a fragment:
 - `approved` fragments cannot be deleted by annotators; only admins can delete them.
 - Deleting a parent fragment cascades to all child (sub-part) fragments (`ON DELETE CASCADE` on `parent_fragment_id`). The API and UI both require explicit confirmation before deleting a parent record, since the cascade may affect many sub-parts.
 
+### Implementation notes (Component 7)
+
+- **Review loop UI ships in full here.** Both the reviewer work-queue (browse by `submitted` status) and the approve/reject controls in the side panel were delivered in Component 7, so the submit → find → approve/reject cycle is exercisable end to end in the UI. The review loop is *not* split across Components 7 and 8.
+- **`bass_pitch` / `soprano_pitch` remain null.** Component 6 (the music21 preprocessing pipeline) is deferred. For all DCML-sourced events in `movement_analysis`, `bass_pitch` and `soprano_pitch` are `null` until Component 6's top-up pass runs. The harmony panel and in-score overlay render this absence as "not computed" rather than an empty value.
+- **Tagging-tool carry-in fixes land in Component 7 Part 1.** Stage-bracket geometry at beat/sub-beat resolution, the hybrid main-resize behaviour, the auto-drop pre-population grid, and the stages-checklist conditionality are all corrective fixes to the Component 5 tagging tool that ship here before any annotator builds habits against the incorrect behaviour.
+
 ---
 
 ## Component 8 — Fragment Browsing

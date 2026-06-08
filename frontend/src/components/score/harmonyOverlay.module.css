@@ -1,0 +1,39 @@
+/* Harmony chord label overlay — Component 7 Step 16 (G6.3).
+   Z-index 25: above ghost layer (20), below bracket overlays (30).
+   Labels default to pointer-events: none so they never intercept ghost
+   drag-select interactions. The .labelClickable variant enables click-to-focus. */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 25;
+}
+
+.label {
+  position: absolute;
+
+  /* Public Sans — label tier per DESIGN.md */
+  font-family: 'Public Sans', sans-serif;
+  font-size: 10px;
+  line-height: 1.2;
+
+  /* Henle Blue #3f5f77 at 70% opacity: readable but deferential to notation */
+  color: rgba(63, 95, 119, 0.70);
+  white-space: nowrap;
+  border-radius: 0;
+  padding: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Click-to-focus variant — pointer-events enabled, hover emphasis */
+.labelClickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.labelClickable:hover {
+  color: rgba(63, 95, 119, 1);
+  text-decoration: underline;
+}

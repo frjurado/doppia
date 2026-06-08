@@ -264,6 +264,7 @@ function makeLayerWithMeasures(
       key,
       bounds: { left: (i * 100), top: 0, width: 100, height: 50 },
       systemTop: 0,
+      renderOrder: i,
     } satisfies MeasureGhostEntry);
     return el;
   });
@@ -1064,6 +1065,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
         el, barN, endingN, key,
         bounds: { left: i * 100, top: 0, width: 100, height: 50 },
         systemTop: 0,
+        renderOrder: i,
       } satisfies MeasureGhostEntry);
       return el;
     });
@@ -1225,6 +1227,55 @@ describe('AnnotationSession — destroy', () => {
 
     // Dark class should be removed.
     expect(els[0]!.classList.contains('dark')).toBe(false);
+    container.remove();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AnnotationSession — stage-drag affordance lock (Component 7 Step 5)
+// ---------------------------------------------------------------------------
+
+describe('AnnotationSession — setStageDragActive', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('showHandles is not called during an active stage drag', () => {
+    const { container, layer, els } = makeLayerWithMeasures([1, 2, 3]);
+    const session = new AnnotationSession(layer, { resolution: 'measure' });
+
+    // Commit a selection so _handlesReady becomes true.
+    measureDrag(els, 0, [2]);
+
+    const showSpy = vi.spyOn(layer, 'showHandles');
+
+    // Lock: stage drag active — mouseover a dark ghost should NOT call showHandles.
+    session.setStageDragActive(true);
+    els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(showSpy).not.toHaveBeenCalled();
+
+    // Unlock: mouseover a dark ghost now shows handles again.
+    session.setStageDragActive(false);
+    els[0]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(showSpy).toHaveBeenCalledOnce();
+
+    session.destroy();
+    container.remove();
+  });
+
+  it('setStageDragActive(false) calls hideHandles to clear any visible handles', () => {
+    const { container, layer, els } = makeLayerWithMeasures([1, 2]);
+    const session = new AnnotationSession(layer, { resolution: 'measure' });
+    measureDrag(els, 0, [1]);
+
+    const hideSpy = vi.spyOn(layer, 'hideHandles');
+
+    session.setStageDragActive(true);
+    session.setStageDragActive(false);
+
+    expect(hideSpy).toHaveBeenCalled();
+
+    session.destroy();
     container.remove();
   });
 });

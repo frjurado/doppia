@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
@@ -9,16 +10,20 @@ import { AnnotationSession, buildRepeatBarriers } from '../components/score/anno
 import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
-import type { StageAssignment, SubPartTag } from '../components/score/stages';
+import type { BeatSlot, StageBounds, StageAssignment, SubPartTag } from '../components/score/stages';
 import {
+  chooseStageGrid,
+  computeResizeClamp,
   computeStagesComplete,
   prePopulateStages,
+  prePopulateStagesAtGrid,
   reconcileWithNewConcept,
-  reconcileWithSelection,
+  respondToMainResize,
   toggleStageAbsent,
 } from '../components/score/stages';
 import FormPanel from '../components/score/FormPanel';
 import type { FormSubmitData } from '../components/score/FormPanel';
+import type { PropertyFormValues } from '../components/score/PropertyForm';
 import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
@@ -29,17 +34,21 @@ import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioTo
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 import { transposeKey } from '../utils/transposeKey';
-import type { ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
+import type { ContainsStage, ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
 import { getConceptSchemas } from '../services/conceptApi';
 import {
   createFragment,
   updateFragment,
   submitFragment,
 } from '../services/fragmentApi';
-import type { FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
+import { getHarmonyEvents } from '../services/analysisApi';
+import type { HarmonyEventOut } from '../services/analysisApi';
+import { HarmonyOverlay } from '../components/score/harmonyOverlay';
+import type { FragmentDetailResponse, FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
 import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
 import { ApiError } from '../services/api';
+import { useStoredFragments } from '../hooks/useStoredFragments';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -96,6 +105,14 @@ const DEFAULT_PAGE_WIDTH = 1200;
  * scrolls horizontally rather than compressing notation further.
  */
 const MIN_PAGE_WIDTH = 480;
+
+/**
+ * Numeric rank for each resolution mode (higher = finer).
+ * Used to decide whether a pre-population grid change is a genuine
+ * auto-drop to a finer resolution or an unwanted coarsening of a
+ * resolution the annotator already set (Step 3 / Component 7).
+ */
+const GRID_RANK: Record<ResolutionMode, number> = { measure: 0, beat: 1, subbeat: 2 };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -220,11 +237,124 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
   );
 }
 
+// ---------------------------------------------------------------------------
+// Auto-grid pre-population helpers (Component 7 Step 2)
+// ---------------------------------------------------------------------------
+
+/** True when entry falls within the selection bounds (beat-precision aware). */
+function _inSelectionBounds(
+  entry: { barN: number; beatFloat: number },
+  sel: SelectionRange,
+): boolean {
+  if (entry.barN < sel.barStart || entry.barN > sel.barEnd) return false;
+  if (sel.beatStart !== null && entry.barN === sel.barStart && entry.beatFloat < sel.beatStart) return false;
+  if (sel.beatEnd   !== null && entry.barN === sel.barEnd   && entry.beatFloat >= sel.beatEnd) return false;
+  return true;
+}
+
+/**
+ * Choose the finest grid that fits stageCount stages, compute beat/sub-beat
+ * positions from the ghost layer, and return the pre-populated assignments.
+ *
+ * blocked is true when the selection cannot fit stages even at sub-beat
+ * resolution — the caller should surface a UI note and keep assignments empty.
+ */
+function computeAutoPrePopulate(
+  stages: ContainsStage[],
+  selection: SelectionRange,
+  ghostLayer: GhostLayer | null,
+): { assignments: StageAssignment[]; grid: ResolutionMode; blocked: boolean } {
+  // Collect beat and sub-beat positions within the selection from the ghost layer.
+  const beatPositions: BeatSlot[] = [];
+  const subBeatPositions: BeatSlot[] = [];
+
+  if (ghostLayer) {
+    for (const entry of ghostLayer.beatIndex.values()) {
+      if (_inSelectionBounds(entry, selection)) beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    }
+    beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+
+    for (const entry of ghostLayer.subBeatIndex.values()) {
+      if (_inSelectionBounds(entry, selection)) subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    }
+    subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+  }
+
+  const grid = chooseStageGrid(selection, stages.length, beatPositions.length, subBeatPositions.length);
+
+  const measureSlots = selection.barEnd - selection.barStart + 1;
+  const blocked =
+    stages.length > 0 &&
+    measureSlots < stages.length &&
+    beatPositions.length < stages.length &&
+    subBeatPositions.length < stages.length;
+
+  if (blocked) return { assignments: [], grid, blocked: true };
+
+  let assignments: StageAssignment[];
+  if (grid === 'measure') {
+    assignments = prePopulateStages(stages, selection);
+  } else if (grid === 'beat') {
+    assignments = prePopulateStagesAtGrid(stages, selection, beatPositions);
+  } else {
+    assignments = prePopulateStagesAtGrid(stages, selection, subBeatPositions);
+  }
+
+  return { assignments, grid, blocked: false };
+}
+
+/**
+ * Restore stage assignments from a fragment's sub-parts (Component 7 Step 12
+ * edit flow). Matches each sub-part to its stage by primary concept_id →
+ * CONTAINS edge target_id. Sub-parts with no matching stage are silently
+ * dropped; stages with no matching sub-part get null bounds (absent for
+ * optional, effectively unset for required).
+ */
+function buildStageAssignmentsFromSubParts(
+  subParts: FragmentDetailResponse['sub_parts'],
+  stages: ContainsStage[],
+): StageAssignment[] {
+  const subPartMap = new Map<string, FragmentDetailResponse['sub_parts'][number]>();
+  for (const sp of subParts) {
+    const primary = sp.concept_tags.find(t => t.is_primary);
+    if (primary) subPartMap.set(primary.concept_id, sp);
+  }
+
+  return stages.map((stage) => {
+    const sp = subPartMap.get(stage.target_id);
+    const bounds: StageBounds | null = sp
+      ? {
+          barStart:  sp.bar_start,
+          beatStart: sp.beat_start,
+          barEnd:    sp.bar_end,
+          beatEnd:   sp.beat_end,
+        }
+      : null;
+    return {
+      stageId:         stage.target_id,
+      stageName:       stage.target_name,
+      order:           stage.order,
+      required:        stage.required,
+      displayMode:     stage.display_mode,
+      containmentMode: stage.containment_mode,
+      defaultWeight:   stage.default_weight,
+      bounds,
+      // Treat restored stages as confirmed so they don't trigger "limbo" warnings.
+      confirmed:       bounds !== null,
+      absent:          bounds === null && !stage.required,
+      orphaned:        false,
+      error:           false,
+    } satisfies StageAssignment;
+  });
+}
+
 export default function ScoreViewer() {
   const { movementId } = useParams<{ movementId: string }>();
   const [searchParams] = useSearchParams();
   /** Source key from the ?key= query param, e.g. "G major". Null if not provided. */
   const sourceKey = searchParams.get('key');
+  /** Fragment UUID from ?fragmentId= — set by the review queue to auto-open a fragment. */
+  const focusFragmentId = searchParams.get('fragmentId');
   usePageTitle('Score Viewer — Doppia');
 
   // ── Viewer state ────────────────────────────────────────────────────────
@@ -318,6 +448,13 @@ export default function ScoreViewer() {
   // ghost positions match the currently rendered score geometry.
   const ghostLayerRef = useRef<GhostLayer | null>(null);
   const annotationSessionRef = useRef<AnnotationSession | null>(null);
+  // ── Harmony overlay (Component 7 Step 16 / G6.3) ─────────────────────────
+  // Imperative overlay; lifecycle mirrors ghost layer (rebuilt on reproject).
+  const harmonyOverlayRef = useRef<HarmonyOverlay | null>(null);
+  // Cached full-movement events for the overlay. Updated by fetchAllHarmonyEvents
+  // and pushed to the overlay via setEvents(); also seed new HarmonyOverlay on
+  // every ghost rebuild so the overlay starts populated, not blank.
+  const allHarmonyEventsRef = useRef<HarmonyEventOut[]>([]);
   // Precomputed barN → mc mapping for the currently loaded MEI.
   const mcIndexRef = useRef<Map<string, number> | null>(null);
   // G1.3: tracks the (movementId, tagMode) context of the last ghost build so
@@ -360,6 +497,16 @@ export default function ScoreViewer() {
   // Cached so reconcileWithNewConcept can compute brand-new default placements.
   const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
 
+  // Mirrors stageAssignments in a ref so callbacks can check current length
+  // without adding stageAssignments to their dependency arrays.
+  const stageAssignmentsRef = useRef<StageAssignment[]>([]);
+  // True when the committed selection is too short for the chosen concept's
+  // stages even at sub-beat resolution (Step 2 auto-grid; Step 3 will clamp).
+  const [stageGridBlocked, setStageGridBlocked] = useState(false);
+  // Brief inline note shown when pre-population auto-switches the resolution.
+  const [gridAutoSwitchNote, setGridAutoSwitchNote] = useState<string | null>(null);
+  const gridNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Sub-part tags (Step 15) ───────────────────────────────────────────────
   // Keyed by stageId; null means the stage has no sub-part tag yet.
   // Cleared (and subPartResetKey incremented) when the main concept changes so
@@ -380,9 +527,48 @@ export default function ScoreViewer() {
   // fragmentDraftId: UUID of the in-progress draft, set after the first
   // successful create. Subsequent saves use PATCH; null = not yet saved.
   const [fragmentDraftId, setFragmentDraftId] = useState<string | null>(null);
+  // ── Harmony click-to-focus (Step 16 / G6.3) ──────────────────────────────
+  // Set when the annotator clicks an in-score chord label; forwarded to
+  // FormPanel → HarmonyPanel to scroll/focus the matching event card.
+  const [harmonyFocusKey, setHarmonyFocusKey] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ── Stored-fragment overlay (Component 7 Step 10) ─────────────────────────
+  // Fetches all stored fragments for the current movement so the overlay can
+  // project and display them.  refresh() is called after a successful submit
+  // so the newly submitted fragment appears immediately.
+  const {
+    fragments: storedFragments,
+    refresh: refreshStoredFragments,
+  } = useStoredFragments(movementId);
+
+  // ── Fragment detail panel (Component 7 Step 12) ──────────────────────────
+  // selectedFragmentId: UUID of the stored fragment whose detail panel is open.
+  // Clicking a stored bracket sets this; close button / Edit clears it.
+  const [selectedFragmentId, setSelectedFragmentId] = useState<string | null>(null);
+
+  // Auto-open detail panel when ?fragmentId= is present (Step 13: review queue navigation).
+  // Fires once storedFragments resolves so the fragment is known to exist on this movement.
+  useEffect(() => {
+    if (focusFragmentId && storedFragments.some((f) => f.id === focusFragmentId)) {
+      setSelectedFragmentId(focusFragmentId);
+    }
+  }, [focusFragmentId, storedFragments]);
+  // Incremented to force a session rebuild when the edit flow is triggered
+  // while already in tag mode (tagMode change alone wouldn't fire the effect).
+  const [sessionRebuildKey, setSessionRebuildKey] = useState(0);
+  // Refs consumed by the session build effect and handleConceptChange during
+  // the edit flow.  Using refs avoids adding them to effect dependency arrays.
+  const editPrefillRef = useRef<FragmentDetailResponse | null>(null);
+  const editSubPartsRef = useRef<FragmentDetailResponse['sub_parts'] | null>(null);
+  // Passed as editPrefill to FormPanel on remount so it initialises with the
+  // edit fragment's concept and property values.
+  const [editPrefillFormData, setEditPrefillFormData] = useState<{
+    concept: ConceptSearchHit;
+    propertyValues: PropertyFormValues;
+  } | null>(null);
 
   // ── Position update callback (Step 14.4) ─────────────────────────────────
   /**
@@ -608,6 +794,22 @@ export default function ScoreViewer() {
     };
   }, [scheduleRerender]);
 
+  // Mirror stageAssignments into a ref so callbacks can read .length without
+  // adding stageAssignments to their dependency arrays.
+  useEffect(() => {
+    stageAssignmentsRef.current = stageAssignments;
+  }, [stageAssignments]);
+
+  // Show a brief inline note when pre-population auto-drops the resolution.
+  const showGridNote = useCallback((grid: ResolutionMode, stageCount: number) => {
+    if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
+    const label = grid === 'beat' ? 'beat' : grid === 'subbeat' ? 'sub-beat' : 'measure';
+    setGridAutoSwitchNote(`Switched to ${label} resolution to fit ${stageCount} stage${stageCount === 1 ? '' : 's'}`);
+    gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
+  }, []);
+  // Clear the timer on unmount.
+  useEffect(() => () => { if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current); }, []);
+
   // ── Stage handlers (Step 14) ─────────────────────────────────────────────
 
   /**
@@ -626,19 +828,45 @@ export default function ScoreViewer() {
 
       if (!concept || !schemaTree || schemaTree.stages.length === 0) {
         setStageAssignments([]);
+        setStageGridBlocked(false);
         setActiveStageId(null);
         return;
       }
-      setStageAssignments(prev => {
-        if (prev.length === 0) {
-          return selectionRange
-            ? prePopulateStages(schemaTree.stages, selectionRange)
-            : [];
+
+      // Edit flow: if editing a stored fragment, restore stage assignments from
+      // its sub_parts instead of running auto-pre-population (ADR-011).
+      const editSubParts = editSubPartsRef.current;
+      if (editSubParts !== null) {
+        editSubPartsRef.current = null; // consume
+        setStageAssignments(buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages));
+        setStageGridBlocked(false);
+        return;
+      }
+
+      if (stageAssignmentsRef.current.length === 0) {
+        if (!selectionRange) {
+          setStageAssignments([]);
+          setStageGridBlocked(false);
+          return;
         }
-        return reconcileWithNewConcept(prev, schemaTree.stages, selectionRange);
-      });
+        const { assignments, grid, blocked } = computeAutoPrePopulate(
+          schemaTree.stages, selectionRange, ghostLayerRef.current,
+        );
+        setStageAssignments(assignments);
+        setStageGridBlocked(blocked);
+        if (!blocked && (GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+          resolutionRef.current = grid;
+          setResolution(grid);
+          showGridNote(grid, schemaTree.stages.length);
+        }
+      } else {
+        setStageGridBlocked(false);
+        setStageAssignments(prev =>
+          reconcileWithNewConcept(prev, schemaTree.stages, selectionRange),
+        );
+      }
     },
-    [selectionRange],
+    [selectionRange, showGridNote],
   );
 
   /**
@@ -659,8 +887,10 @@ export default function ScoreViewer() {
         const parentTree = activeSchemaTreeRef.current;
         if (!parentTree || parentTree.stages.length === 0) {
           setStageAssignments([]);
+          setStageGridBlocked(false);
           return;
         }
+        setStageGridBlocked(false);
         setStageAssignments(prev =>
           reconcileWithNewConcept(prev, parentTree.stages, selectionRange),
         );
@@ -671,21 +901,37 @@ export default function ScoreViewer() {
         activeSchemaTreeRef.current = childTree;
         if (childTree.stages.length === 0) {
           setStageAssignments([]);
+          setStageGridBlocked(false);
           return;
         }
-        setStageAssignments(prev => {
-          if (prev.length === 0) {
-            return selectionRange
-              ? prePopulateStages(childTree.stages, selectionRange)
-              : [];
+
+        if (stageAssignmentsRef.current.length === 0) {
+          if (!selectionRange) {
+            setStageAssignments([]);
+            setStageGridBlocked(false);
+            return;
           }
-          return reconcileWithNewConcept(prev, childTree.stages, selectionRange);
-        });
+          const { assignments, grid, blocked } = computeAutoPrePopulate(
+            childTree.stages, selectionRange, ghostLayerRef.current,
+          );
+          setStageAssignments(assignments);
+          setStageGridBlocked(blocked);
+          if (!blocked && (GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+            resolutionRef.current = grid;
+            setResolution(grid);
+            showGridNote(grid, childTree.stages.length);
+          }
+        } else {
+          setStageGridBlocked(false);
+          setStageAssignments(prev =>
+            reconcileWithNewConcept(prev, childTree.stages, selectionRange),
+          );
+        }
       } catch {
         // Schema fetch failure: keep existing assignments unchanged.
       }
     },
-    [selectionRange],
+    [selectionRange, showGridNote],
   );
 
   /** Called by StageBrackets on every split handle drag tick. */
@@ -728,6 +974,9 @@ export default function ScoreViewer() {
     setSelectionRange(null);
     setCommittedSelection(null);
     setStageAssignments([]);
+    setStageGridBlocked(false);
+    if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
+    setGridAutoSwitchNote(null);
     setActiveStageId(null);
     setSubPartTags({});
     setSubPartResetKey(k => k + 1);
@@ -736,6 +985,92 @@ export default function ScoreViewer() {
     activeSchemaTreeRef.current = null;
     setFragmentResetKey(k => k + 1);
   }, []);
+
+  // ── Fragment detail panel handlers (Component 7 Step 12) ────────────────
+
+  /**
+   * Called when the user clicks Edit in the detail panel.
+   *
+   * Rebuilds the annotation session seeded with the stored fragment's bar/beat
+   * selection.  FormPanel is remounted with editPrefill so it restores the
+   * concept and property values.  Stage assignments are restored in
+   * handleConceptChange via editSubPartsRef.
+   */
+  const handleEditFragment = useCallback(
+    (fragment: FragmentDetailResponse) => {
+      // Close the detail panel first.
+      setSelectedFragmentId(null);
+
+      // Seed refs consumed by the session build effect and handleConceptChange.
+      editPrefillRef.current = fragment;
+      editSubPartsRef.current = fragment.sub_parts;
+
+      // Build a ConceptSearchHit from the primary concept tag.
+      const primaryTag = fragment.concept_tags.find(t => t.is_primary);
+      if (!primaryTag) return;
+      const concept: ConceptSearchHit = {
+        id: primaryTag.concept_id,
+        name: primaryTag.name,
+        aliases: primaryTag.alias ? [primaryTag.alias] : [],
+        hierarchy_path: primaryTag.hierarchy_path,
+        definition: null,
+      };
+
+      // Build property values: convert stored "true"/"false" strings to booleans.
+      const rawProperties = (fragment.summary as Record<string, unknown>)?.properties;
+      const propertyValues: PropertyFormValues = {};
+      if (rawProperties && typeof rawProperties === 'object') {
+        for (const [schemaId, val] of Object.entries(rawProperties)) {
+          if (val === 'true') propertyValues[schemaId] = true;
+          else if (val === 'false') propertyValues[schemaId] = false;
+          else if (typeof val === 'string' || Array.isArray(val)) {
+            propertyValues[schemaId] = val as string | string[];
+          }
+        }
+      }
+
+      // Set prefill data (passed to FormPanel on remount) and restore prose.
+      setEditPrefillFormData({ concept, propertyValues });
+      setProseAnnotation(fragment.prose_annotation ?? '');
+      // Remount FormPanel so it consumes the editPrefill on mount.
+      setFragmentResetKey(k => k + 1);
+
+      // Trigger session rebuild to seed the selection on the score.
+      if (tagMode === 'tag') {
+        setSessionRebuildKey(k => k + 1);
+      } else {
+        setTagMode('tag');
+      }
+    },
+    [tagMode],
+  );
+
+  /**
+   * Called when the detail panel's delete flow completes successfully.
+   * Clears the panel and refreshes the overlay list so the deleted bracket
+   * disappears immediately.
+   */
+  const handleDeleteStoredFragment = useCallback(
+    (fragmentId: string) => {
+      void fragmentId; // consumed by the API call inside FragmentDetailPanel
+      setSelectedFragmentId(null);
+      refreshStoredFragments();
+    },
+    [refreshStoredFragments],
+  );
+
+  /**
+   * Called when the detail panel's approve or reject flow completes.
+   * Keeps the panel open so the reviewer sees the updated status badge,
+   * and refreshes the overlay so the bracket colour updates immediately.
+   */
+  const handleReviewDone = useCallback(
+    (fragmentId: string) => {
+      void fragmentId;
+      refreshStoredFragments();
+    },
+    [refreshStoredFragments],
+  );
 
   // ── Submission handlers (Step 18) ────────────────────────────────────────
 
@@ -807,8 +1142,11 @@ export default function ScoreViewer() {
           bar_end:        a.bounds.barEnd,
           mc_start:       mcStart,
           mc_end:         mcEnd,
-          beat_start:     a.bounds.beatStart ?? null,
-          beat_end:       a.bounds.beatEnd   ?? null,
+          // ADR-005: both beats null (measure-level) or both non-null with
+          // beatStart < beatEnd.  Normalize any invalid pair to both-null here
+          // so backend validation never receives an asymmetric or inverted pair.
+          beat_start:     (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatStart : null,
+          beat_end:       (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatEnd   : null,
           repeat_context: committedSelection.repeat_context,
           summary: {
             version:            1,
@@ -906,36 +1244,98 @@ export default function ScoreViewer() {
         // Reset draft ID on success — the submitted fragment is immutable
         // until a reviewer rejects it; a new annotation starts clean.
         setFragmentDraftId(null);
+        // Refresh stored-fragment overlay so the newly submitted fragment
+        // appears immediately (Component 7 Step 10).
+        refreshStoredFragments();
       } catch (err) {
         setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
       } finally {
         setIsSubmitting(false);
       }
     },
-    [committedSelection, movementId, fragmentDraftId, buildPayload],
+    [committedSelection, movementId, fragmentDraftId, buildPayload, refreshStoredFragments],
   );
 
+  // Mirror stageAssignments into a ref so callbacks can read .length without
   // Keep stagesComplete in sync with assignments and session.
+  // Blocked state overrides: if the selection cannot fit the concept's stages,
+  // stagesComplete is false regardless of the (empty) assignment list.
   useEffect(() => {
     const session = annotationSessionRef.current;
     if (!session) return;
-    const complete = computeStagesComplete(stageAssignments);
+    const complete = stageGridBlocked ? false : computeStagesComplete(stageAssignments);
     session.setStagesComplete(complete);
+  }, [stageAssignments, stageGridBlocked]);
+
+  // Component 7 Step 3 — keep the annotator's hard-clamp in sync with the
+  // current confirmed stage bounds.  Fires whenever assignments change so
+  // the clamp is always up to date (e.g. after a split-handle drag confirms
+  // a stage or after an absent-toggle frees space).
+  useEffect(() => {
+    const clamp = computeResizeClamp(stageAssignments);
+    annotationSessionRef.current?.setMinBarRange(clamp);
   }, [stageAssignments]);
 
   // When the committed selection changes, reconcile stage assignments with
-  // the new main bracket bounds.
+  // the new main bracket bounds or (re-)attempt auto-grid pre-population.
   useEffect(() => {
     if (!selectionRange) return;
-    setStageAssignments(prev => {
-      if (prev.length === 0 && activeSchemaTreeRef.current?.stages.length) {
-        // First selection after concept was already chosen: pre-populate now.
-        return prePopulateStages(activeSchemaTreeRef.current.stages, selectionRange);
+    const stages = activeSchemaTreeRef.current?.stages;
+    if (stageAssignmentsRef.current.length === 0 && stages?.length) {
+      // First selection after concept chosen, or retry after a blocked selection
+      // was extended — attempt auto-grid pre-population.
+      const { assignments, grid, blocked } = computeAutoPrePopulate(
+        stages, selectionRange, ghostLayerRef.current,
+      );
+      setStageAssignments(assignments);
+      setStageGridBlocked(blocked);
+      if (!blocked && (GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+        resolutionRef.current = grid;
+        setResolution(grid);
+        showGridNote(grid, stages.length);
       }
-      if (prev.length === 0) return prev;
-      return reconcileWithSelection(prev, selectionRange);
-    });
-  }, [selectionRange]);
+    } else {
+      if (stageAssignmentsRef.current.length === 0) return;
+
+      // Component 7 Step 3 — hybrid resize response.
+      // Collect beat/sub-beat positions within the new selection for the grid
+      // auto-drop (same approach as computeAutoPrePopulate in Step 2).
+      const beatPositions: BeatSlot[] = [];
+      const subBeatPositions: BeatSlot[] = [];
+      if (ghostLayerRef.current) {
+        for (const entry of ghostLayerRef.current.beatIndex.values()) {
+          if (_inSelectionBounds(entry, selectionRange)) {
+            beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+          }
+        }
+        beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+        for (const entry of ghostLayerRef.current.subBeatIndex.values()) {
+          if (_inSelectionBounds(entry, selectionRange)) {
+            subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+          }
+        }
+        subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
+      }
+
+      const { assignments, droppedGrid, blocked } = respondToMainResize(
+        stageAssignmentsRef.current,
+        selectionRange,
+        resolutionRef.current,
+        beatPositions,
+        subBeatPositions,
+      );
+
+      setStageAssignments(assignments);
+      setStageGridBlocked(blocked);
+
+      if (!blocked && droppedGrid && droppedGrid !== resolutionRef.current) {
+        resolutionRef.current = droppedGrid;
+        setResolution(droppedGrid);
+        const total = assignments.filter(a => !a.absent && !a.orphaned).length;
+        showGridNote(droppedGrid, total);
+      }
+    }
+  }, [selectionRange, showGridNote]);
 
   // ── Ghost layer + annotation session lifecycle (Step 11) ─────────────────
   //
@@ -977,6 +1377,13 @@ export default function ScoreViewer() {
     const isSameContext = prevScoreKeyRef.current === scoreKey;
     prevScoreKeyRef.current = scoreKey;
 
+    // Edit flow: consume editPrefillRef before computing shouldReproject.
+    // When the user clicks Edit on a stored fragment, handleEditFragment sets
+    // this ref.  We read and clear it here so the session is seeded with the
+    // stored fragment's selection rather than the current FormPanel selection.
+    const editFragment = editPrefillRef.current;
+    if (editFragment !== null) editPrefillRef.current = null;
+
     // Read committed selection state from the React state closure.
     // We deliberately do NOT snapshot from annotationSessionRef.current here
     // because React runs the previous effect's cleanup (which nulls the ref)
@@ -989,16 +1396,20 @@ export default function ScoreViewer() {
     const hadFragment     = annotationFlags.fragmentSet;
     const prevSelection   = selectionRange;
     const prevFlags       = annotationFlags;
-    const shouldReproject = isSameContext && hadFragment;
+    // Edit flow always forces a full reset so FormPanel starts clean.
+    // The new session is then seeded with the stored fragment's selection.
+    const shouldReproject = editFragment === null && isSameContext && hadFragment;
 
-    // Teardown: destroy the previous session and layer.
+    // Teardown: destroy the previous session, ghost layer, and harmony overlay.
     annotationSessionRef.current?.destroy();
     ghostLayerRef.current?.destroy();
+    harmonyOverlayRef.current?.destroy();
     annotationSessionRef.current = null;
     ghostLayerRef.current        = null;
+    harmonyOverlayRef.current    = null;
 
     if (!shouldReproject) {
-      // Full reset — new score, tagMode change, or no committed fragment.
+      // Full reset — new score, tagMode change, no committed fragment, or edit.
       // State resets are batched with the subsequent setGhostLayer call so
       // MainBracket sees a single coherent update.
       setSelectionRange(null);
@@ -1011,7 +1422,13 @@ export default function ScoreViewer() {
       setActiveStageId(null);
       setSubPartTags({});
       setSubPartResetKey(k => k + 1);
-      setFragmentDraftId(null);
+      // Edit flow: set fragmentDraftId to the stored fragment's id so subsequent
+      // saves PATCH the existing record rather than creating a duplicate.
+      if (editFragment !== null) {
+        setFragmentDraftId(editFragment.id);
+      } else {
+        setFragmentDraftId(null);
+      }
     }
     // When shouldReproject is true the following state all survives the rebuild:
     //   selectionRange / committedSelection — logical bar/beat coordinates
@@ -1044,9 +1461,25 @@ export default function ScoreViewer() {
         resolution: resolutionRef.current,
       };
 
-      // G1.3: seed the new session with the logical selection so ghosts are
-      // re-highlighted on the fresh geometry without firing React callbacks.
-      if (shouldReproject && prevSelection && prevFlags) {
+      // Seed the session's initial selection either from an edit prefill
+      // (stored fragment) or from the current React selection (G1.3 reproject).
+      if (editFragment !== null) {
+        // Edit flow: restore the stored fragment's bar/beat selection on the
+        // score so the bracket appears immediately when FormPanel mounts.
+        sessionOpts.initialSelection = {
+          barStart:      editFragment.bar_start,
+          barEnd:        editFragment.bar_end,
+          beatStart:     editFragment.beat_start,
+          beatEnd:       editFragment.beat_end,
+          repeatContext: editFragment.repeat_context as SelectionRange['repeatContext'],
+        };
+        // No flags — FormPanel will set them as the user confirms concept/stages.
+        sessionOpts.initialFlags = {
+          conceptSet: false, stagesComplete: false, propertiesComplete: false,
+        };
+      } else if (shouldReproject && prevSelection && prevFlags) {
+        // G1.3: seed the new session with the logical selection so ghosts are
+        // re-highlighted on the fresh geometry without firing React callbacks.
         sessionOpts.initialSelection = prevSelection;
         sessionOpts.initialFlags = {
           conceptSet:         prevFlags.conceptSet,
@@ -1072,6 +1505,18 @@ export default function ScoreViewer() {
       // pointer events (resolutionRef mirrors the resolution state without
       // needing resolution itself in this effect's dependency array).
       session.setResolution(resolutionRef.current);
+
+      // G6.3: mount the in-score harmony overlay. Seeded with the most recently
+      // fetched full-movement events so it starts populated on re-renders.
+      harmonyOverlayRef.current = new HarmonyOverlay({
+        container,
+        ghostLayer: layer,
+        mcIndex: mcIdx,
+        events: allHarmonyEventsRef.current,
+        onLabelClick: (mn, volta, beat) => {
+          setHarmonyFocusKey(`${mn}:${volta ?? ''}:${beat}`);
+        },
+      });
     }
 
     return () => {
@@ -1080,17 +1525,21 @@ export default function ScoreViewer() {
       // intent clear. The refs are nulled to prevent stale-closure access.
       annotationSessionRef.current?.destroy();
       ghostLayerRef.current?.destroy();
+      harmonyOverlayRef.current?.destroy();
       annotationSessionRef.current = null;
       ghostLayerRef.current        = null;
+      harmonyOverlayRef.current    = null;
     };
   // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
   // tagMode entering 'tag' creates the session; leaving destroys it.
   // status gates the effect from running during loading.
+  // sessionRebuildKey is incremented by handleEditFragment when already in tag
+  // mode so the edit selection is seeded without toggling tagMode.
   // movementId is intentionally read from the closure (not the dep array):
   // route changes always co-occur with status/tagMode/svgPages changes, so
   // adding movementId would fire the effect before the new SVG is ready.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, svgPages, tagMode]);
+  }, [status, svgPages, tagMode, sessionRebuildKey]);
 
   // Forward resolution changes to the active annotation session (Step 10).
   // The session handles the no-op case when the mode is unchanged, and cancels
@@ -1098,6 +1547,43 @@ export default function ScoreViewer() {
   useEffect(() => {
     annotationSessionRef.current?.setResolution(resolution);
   }, [resolution]);
+
+  // ── Harmony overlay event data (Step 16 / G6.3) ───────────────────────────
+  // Fetch all movement events (unfenced — not selection-scoped) whenever the
+  // viewer enters tag mode for a loaded movement.  The overlay needs the full
+  // movement so it can label every visible system, not just the selection range.
+  useEffect(() => {
+    if (tagMode !== 'tag' || !movementId) {
+      allHarmonyEventsRef.current = [];
+      return;
+    }
+    let cancelled = false;
+    getHarmonyEvents(movementId, 1, 99999)
+      .then((evs) => {
+        if (cancelled) return;
+        allHarmonyEventsRef.current = evs;
+        harmonyOverlayRef.current?.setEvents(evs);
+      })
+      .catch(() => {
+        // Non-fatal: overlay stays empty until the next successful fetch.
+      });
+    return () => { cancelled = true; };
+  }, [tagMode, movementId]);
+
+  /**
+   * Called by FormPanel → HarmonyPanel after any successful harmony mutation
+   * (confirm, edit, insert, delete). Re-fetches the full movement event list
+   * and pushes it to the in-score overlay so labels stay in sync.
+   */
+  const handleHarmonyUpdated = useCallback(() => {
+    if (!movementId || tagMode !== 'tag') return;
+    getHarmonyEvents(movementId, 1, 99999)
+      .then((evs) => {
+        allHarmonyEventsRef.current = evs;
+        harmonyOverlayRef.current?.setEvents(evs);
+      })
+      .catch(() => {});
+  }, [movementId, tagMode]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1370,6 +1856,17 @@ export default function ScoreViewer() {
               })}
             </div>
           )}
+          {/* Brief note shown when pre-population auto-drops the resolution grid. */}
+          {gridAutoSwitchNote && tagMode === 'tag' && (
+            <Type
+              variant="label-sm"
+              as="span"
+              className={styles.gridAutoSwitchNote}
+              aria-live="polite"
+            >
+              {gridAutoSwitchNote}
+            </Type>
+          )}
         </div>
 
         {/* TAG / Done button — enters and exits annotation mode (G1.1).
@@ -1482,7 +1979,11 @@ export default function ScoreViewer() {
                 Step 11: MainBracket (Layer 3) renders once fragmentSet is true.
                 Step 14: StageBrackets (Layer 4) renders once conceptSet is true
                          and the concept has CONTAINS edges. */}
-            <FragmentOverlay>
+            <FragmentOverlay
+              fragments={storedFragments}
+              ghostLayer={ghostLayer}
+              onBracketClick={setSelectedFragmentId}
+            >
               <MainBracket
                 selection={selectionRange}
                 layer={ghostLayer}
@@ -1498,16 +1999,30 @@ export default function ScoreViewer() {
                 activeStageId={activeStageId}
                 onStageActivate={handleStageActivate}
                 onSplitHandleMove={handleSplitHandleMove}
+                session={annotationSessionRef.current}
               />
             </FragmentOverlay>
           </div>
         </div>
 
-        {/* Form panel — mounted only in tag mode (G1.1).
+        {/* Detail panel — shown when a stored bracket is clicked (Step 12).
+            Occupies the same layout slot as FormPanel (mutual exclusion). */}
+        {selectedFragmentId !== null && (
+          <FragmentDetailPanel
+            fragmentId={selectedFragmentId}
+            onClose={() => setSelectedFragmentId(null)}
+            onEdit={handleEditFragment}
+            onDeleteDone={handleDeleteStoredFragment}
+            onReviewDone={handleReviewDone}
+            tagMode={tagMode}
+          />
+        )}
+
+        {/* Form panel — mounted only in tag mode with no detail panel open (G1.1).
             Mounting is gated so the score is fully usable for reading and
             MIDI playback without the sidebar. The concurrent-flag model
             still applies within the mounted panel. */}
-        {tagMode === 'tag' && (
+        {tagMode === 'tag' && selectedFragmentId === null && (
           <FormPanel
             key={fragmentResetKey}
             session={annotationSessionRef.current}
@@ -1532,6 +2047,9 @@ export default function ScoreViewer() {
             isSubmitting={isSubmitting}
             submitError={submitError}
             draftId={fragmentDraftId}
+            editPrefill={editPrefillFormData}
+            onHarmonyUpdated={handleHarmonyUpdated}
+            harmonyFocusKey={harmonyFocusKey}
           />
         )}
 

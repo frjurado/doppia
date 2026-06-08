@@ -9,7 +9,11 @@
  *   1. Fragment drawn        — flags.fragmentSet
  *   2. Concept selected      — flags.conceptSet
  *   3. Type Refinement set   — only shown when applicable (typeRefinementRequired)
- *   4. Stages complete       — flags.stagesComplete (covers required/optional/error)
+ *   4. Stages complete       — flags.stagesComplete; row is ONLY shown when
+ *                              conceptHasStages is true (tagging-tool-design.md §7.5).
+ *                              Stageless concepts keep stagesComplete trivially true
+ *                              but the checklist row is suppressed — it is not
+ *                              applicable and would mislead the annotator.
  *   5. Properties filled     — flags.propertiesComplete
  *
  * Save Draft is enabled whenever a selection exists (flags.fragmentSet), since
@@ -38,6 +42,20 @@ export interface SubmissionChecklistProps {
   typeRefinementRequired: boolean;
   /** True when a Type Refinement option has been selected. */
   typeRefinementSet: boolean;
+  /**
+   * True when the selected concept has CONTAINS edges (i.e. declares stages).
+   * One of two gates that control whether the "Stages complete" row appears.
+   *
+   * The row is shown only when BOTH this prop AND flags.fragmentSet are true:
+   *   - conceptHasStages false → no concept selected, or stageless concept → no row
+   *   - flags.fragmentSet false → no bracket drawn yet, stages not pre-populated → no row
+   *   - both true → row visible; checked when all non-absent stages have valid bounds
+   *
+   * The underlying flags.stagesComplete value is unchanged (trivially true for
+   * empty assignments); this prop plus fragmentSet control visibility only.
+   * See tagging-tool-design.md §7.5.
+   */
+  conceptHasStages: boolean;
   /** True while a Save Draft request is in flight. */
   isSavingDraft: boolean;
   /** True while a Submit request is in flight. */
@@ -86,6 +104,7 @@ export default function SubmissionChecklist({
   flags,
   typeRefinementRequired,
   typeRefinementSet,
+  conceptHasStages,
   isSavingDraft,
   isSubmitting,
   submitError,
@@ -119,7 +138,9 @@ export default function SubmissionChecklist({
         {typeRefinementRequired && (
           <CheckRow label="Type Refinement set" done={typeRefinementSet} />
         )}
-        <CheckRow label="Stages complete" done={flags.stagesComplete} />
+        {conceptHasStages && flags.fragmentSet && (
+          <CheckRow label="Stages complete" done={flags.stagesComplete} />
+        )}
         <CheckRow label="Properties filled" done={flags.propertiesComplete} />
       </ul>
 

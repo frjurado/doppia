@@ -1,0 +1,552 @@
+/* FragmentDetailPanel — Component 7 Step 12
+   Design system: DESIGN.md — tonal layering, no divider lines, 0px radius. */
+
+/* Mirrors FormPanel.module.css structure so the two panels are visually
+   consistent when they appear in the same layout slot. */
+.panel {
+  flex-shrink: 0;
+  background-color: var(--color-surface-container-low);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding-bottom: 88px;
+}
+
+/* ── Resize handle (left edge, mirrors FormPanel G6.1) ─────────────────────── */
+
+.resizeHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.resizeHandle:hover,
+.resizeHandle:active {
+  background-color: var(--color-primary);
+  opacity: 0.4;
+}
+
+/* ── State containers (loading / error) ─────────────────────────────────────── */
+
+.stateContainer {
+  padding: var(--spacing-6) var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  align-items: flex-start;
+}
+
+.stateText {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.errorText {
+  color: var(--color-error, #b3261e);
+  margin: 0;
+}
+
+.closeInlineButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-1) 0;
+  color: var(--color-primary);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────────── */
+
+/* Status badge + concept name + hierarchy path on the left; × on the right. */
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-2);
+  background-color: var(--color-surface-container-low);
+  padding-left: calc(var(--spacing-4) + 4px); /* account for resize handle */
+}
+
+.headerMeta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 0;
+  flex: 1;
+}
+
+/* ── Status badge ──────────────────────────────────────────────────────────── */
+
+.statusBadge {
+  display: inline-block;
+  padding: 0 var(--spacing-2);
+  background-color: var(--color-surface-container-high);
+}
+
+.statusDraft {
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+}
+
+.statusSubmitted {
+  background-color: var(--color-secondary-container, #dce2f9);
+  color: var(--color-on-secondary-container, #1a237e);
+}
+
+.statusApproved {
+  background-color: var(--color-primary-container, #d3e8f0);
+  color: var(--color-on-primary-container, #003040);
+}
+
+.statusRejected {
+  background-color: var(--color-error-container, #f9dedc);
+  color: var(--color-error, #b3261e);
+}
+
+.conceptName {
+  margin: 0;
+  color: var(--color-on-background);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hierarchyPath {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.closeButton {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-on-surface-variant);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.closeButton:hover {
+  color: var(--color-on-surface);
+}
+
+/* ── Sections ────────────────────────────────────────────────────────────────── */
+
+.section {
+  padding: var(--spacing-3) var(--spacing-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding-left: calc(var(--spacing-4) + 4px);
+}
+
+/* Alternate tonal depth between sections (no divider lines per DESIGN.md). */
+.section + .section {
+  background-color: var(--color-surface-container);
+}
+
+.sectionHeading {
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+/* ── Range section ─────────────────────────────────────────────────────────── */
+
+.rangeText {
+  margin: 0;
+  color: var(--color-on-background);
+}
+
+.beatRange {
+  color: var(--color-on-surface-variant);
+}
+
+.repeatContext {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Data list (key–value pairs: summary, properties) ─────────────────────── */
+
+.dataList {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.dataRow {
+  display: flex;
+  gap: var(--spacing-3);
+  align-items: baseline;
+}
+
+.dataRow dt {
+  color: var(--color-on-surface-variant);
+  flex-shrink: 0;
+  min-width: 6rem;
+}
+
+.dataRow dd {
+  margin: 0;
+  color: var(--color-on-background);
+}
+
+/* ── Review marks ──────────────────────────────────────────────────────────── */
+
+.reviewedMark {
+  color: var(--color-primary);
+  font-size: 0.8em;
+}
+
+.unreviewedMark {
+  color: var(--color-on-surface-variant);
+  font-style: italic;
+  font-size: 0.8em;
+}
+
+/* ── Harmony events ─────────────────────────────────────────────────────────── */
+
+.harmonyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.harmonyEvent {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-3);
+}
+
+.harmonyPosition {
+  flex-shrink: 0;
+  min-width: 5rem;
+  color: var(--color-on-surface-variant);
+}
+
+.harmonyChord {
+  flex: 1;
+  color: var(--color-on-background);
+}
+
+/* ── Prose ──────────────────────────────────────────────────────────────────── */
+
+.proseText {
+  margin: 0;
+  color: var(--color-on-background);
+  white-space: pre-wrap;
+}
+
+/* ── Sub-parts list ─────────────────────────────────────────────────────────── */
+
+.subPartsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.subPartItem {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+}
+
+.subPartName {
+  color: var(--color-on-background);
+}
+
+.subPartRange {
+  color: var(--color-on-surface-variant);
+}
+
+/* ── Review actions (Step 14) ──────────────────────────────────────────────── */
+
+.reviewSection {
+  padding: var(--spacing-3) var(--spacing-4);
+  padding-left: calc(var(--spacing-4) + 4px);
+  background-color: var(--color-surface-container);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.reviewHeading {
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.reviewActions {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: center;
+}
+
+.approveButton {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-4);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.approveButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.approveButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.rejectOpenButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-error, #b3261e);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rejectOpenButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rejectOpenButton:hover:not(:disabled) {
+  background-color: var(--color-error-container, #f9dedc);
+}
+
+.rejectTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  background-color: var(--color-surface-container-high);
+  border: none;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--color-on-background);
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.rejectTextarea:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.rejectSendButton {
+  background-color: var(--color-error, #b3261e);
+  color: var(--color-on-error, #ffffff);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rejectSendButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rejectSendButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.reviewErrorText {
+  margin: 0;
+  color: var(--color-error, #b3261e);
+}
+
+/* ── Approval gate failure (Step 14) ──────────────────────────────────────── */
+
+.gateFailed {
+  padding: var(--spacing-3) var(--spacing-4);
+  padding-left: calc(var(--spacing-4) + 4px);
+  background-color: var(--color-error-container, #f9dedc);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.gateFailedIntro {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+}
+
+.gateItem {
+  display: flex;
+  gap: var(--spacing-2);
+  align-items: baseline;
+}
+
+.gateItemLabel {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+  flex-shrink: 0;
+}
+
+.gateEventList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.gateEventItem {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-3);
+  color: var(--color-on-error-container, #410002);
+}
+
+.gateNote {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+  font-style: italic;
+}
+
+/* ── Delete confirmation ─────────────────────────────────────────────────────── */
+
+.deleteConfirm {
+  padding: var(--spacing-3) var(--spacing-4);
+  padding-left: calc(var(--spacing-4) + 4px);
+  background-color: var(--color-error-container, #f9dedc);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.deleteConfirmText {
+  margin: 0;
+  color: var(--color-on-error-container, #410002);
+}
+
+.deleteErrorText {
+  margin: 0;
+  color: var(--color-error, #b3261e);
+}
+
+.confirmActions {
+  display: flex;
+  gap: var(--spacing-2);
+}
+
+.confirmDeleteButton {
+  background-color: var(--color-error, #b3261e);
+  color: var(--color-on-error, #ffffff);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.confirmDeleteButton:hover {
+  opacity: 0.9;
+}
+
+.cancelButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.cancelButton:hover {
+  color: var(--color-on-surface);
+}
+
+/* ── Footer: Edit + Delete actions (tag mode only) ──────────────────────────── */
+
+.footer {
+  padding: var(--spacing-3) var(--spacing-4);
+  padding-left: calc(var(--spacing-4) + 4px);
+  display: flex;
+  gap: var(--spacing-2);
+  background-color: var(--color-surface-container-low);
+  margin-top: auto;
+}
+
+.editButton {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-4);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.editButton:hover {
+  opacity: 0.9;
+}
+
+.deleteButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-error, #b3261e);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.deleteButton:hover {
+  background-color: var(--color-error-container, #f9dedc);
+}

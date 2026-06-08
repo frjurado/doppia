@@ -1,16 +1,19 @@
-"""Fragment API routes: create, update, submit, and review fragment records.
+"""Fragment API routes: create, read, update, submit, review, and delete.
 
 Routes:
-    POST  /api/v1/fragments                  — create a draft fragment
-    PATCH /api/v1/fragments/{id}             — update a draft or rejected fragment
-    POST  /api/v1/fragments/{id}/submit      — transition draft → submitted
-    POST  /api/v1/fragments/{id}/approve     — record an approval; gate → approved
-    POST  /api/v1/fragments/{id}/reject      — record a rejection → rejected
+    GET    /api/v1/fragments/{id}             — read one fragment (full detail)
+    POST   /api/v1/fragments                  — create a draft fragment
+    PATCH  /api/v1/fragments/{id}             — update at any status (revision semantics)
+    DELETE /api/v1/fragments/{id}             — delete with permission checks and cascade
+    POST   /api/v1/fragments/{id}/submit      — transition draft → submitted
+    POST   /api/v1/fragments/{id}/approve     — record an approval; gate → approved
+    POST   /api/v1/fragments/{id}/reject      — record a rejection → rejected
 
-All routes require the ``editor`` role. List/read/delete endpoints are
-out of scope for Component 5 and will be added in Component 7.
+All routes require the ``editor`` role. The movement-scoped list endpoint
+(GET /api/v1/movements/{id}/fragments) is registered on the movements router.
 
 See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
+See docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9.
 """
 
 from __future__ import annotations
@@ -19,12 +22,15 @@ import uuid
 from typing import Annotated
 
 from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from models.base import get_db
 from models.fragment import (
     FragmentCreate,
+    FragmentDeleteResponse,
+    FragmentDetailResponse,
     FragmentResponse,
     FragmentUpdate,
+    FragmentUpdateResponse,
     ReviewRequest,
 )
 from neo4j import AsyncDriver
@@ -51,6 +57,44 @@ def get_fragment_service(
         A :class:`~services.fragments.FragmentService` bound to both databases.
     """
     return FragmentService(db, driver)
+
+
+@router.get(
+    "/{fragment_id}",
+    response_model=FragmentDetailResponse,
+    dependencies=[require_role("editor")],
+    summary="Read one fragment (full detail)",
+    response_description=(
+        "Full fragment record: coordinates, concept tags hydrated with Neo4j "
+        "name/alias/hierarchy, harmony events sliced from movement_analysis, "
+        "and nested sub-parts one level deep."
+    ),
+)
+async def get_fragment(
+    fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to read"),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentDetailResponse:
+    """Return the full record for one fragment.
+
+    Draft fragments are visible only to their creator and admins.  All other
+    statuses (submitted, approved, rejected) are visible to any editor.
+    Requesting a draft that belongs to a different annotator returns 404.
+
+    Args:
+        fragment_id: UUID of the fragment to read.
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        :class:`~models.fragment.FragmentDetailResponse` with concept tags,
+        sliced harmony events, and nested sub-parts.
+
+    Raises:
+        404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist or is a
+            draft not owned by the caller.
+    """
+    return await service.get(fragment_id, caller_id=user.id, caller_role=user.role)
 
 
 @router.post(
@@ -93,41 +137,153 @@ async def create_fragment(
 
 @router.patch(
     "/{fragment_id}",
-    response_model=FragmentResponse,
+    response_model=FragmentUpdateResponse,
     dependencies=[require_role("editor")],
-    summary="Update a draft fragment",
-    response_description="The updated fragment.",
+    summary="Update a fragment (draft, submitted, or approved)",
+    response_description=(
+        "The updated fragment with revision metadata. "
+        "``status_changed=true`` means the edit triggered a status transition "
+        "(e.g. ``approved`` → ``submitted``); ``previous_status`` names the "
+        "status before the edit so the UI can surface 'this edit re-opened review'."
+    ),
 )
 async def update_fragment(
     payload: FragmentUpdate,
-    fragment_id: uuid.UUID = Path(
-        ..., description="UUID of the draft fragment to update"
-    ),
+    fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to update"),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
-) -> FragmentResponse:
-    """Replace all mutable fields of a ``draft`` fragment.
+) -> FragmentUpdateResponse:
+    """Replace mutable fields of a fragment at any status.
 
-    Only the annotator who created the draft (or an admin) may call this
-    endpoint. The ``movement_id`` cannot change after creation. All concept
-    tags and sub-parts in the payload replace any previously stored values.
+    The endpoint accepts fragments in ``draft``, ``rejected``, ``submitted``,
+    or ``approved`` status. The creator and admins may edit; non-creators are
+    rejected with a 422.
+
+    **Revision semantics (analytic edit — coordinates, summary, concept tags,
+    or sub-parts changed):**
+
+    * ``draft`` → stays ``draft``.
+    * ``rejected`` → transitions to ``draft``.
+    * ``submitted`` → stays ``submitted``; all prior ``fragment_review`` rows
+      are cleared (the thing reviewed has changed).
+    * ``approved`` → transitions to ``submitted``; all prior
+      ``fragment_review`` rows are cleared.
+
+    **Prose-only edit** (only ``prose_annotation`` changed, all analytic fields
+    identical to stored state): update is applied in place with no status
+    change and no review-row clearing.
+
+    The ``movement_id`` is immutable after creation. All concept tags and
+    sub-parts in the payload replace any previously stored values atomically.
 
     Args:
         payload: Replacement payload (all mutable fields; no ``movement_id``).
-        fragment_id: UUID of the draft to update.
+        fragment_id: UUID of the fragment to update.
         service: Fragment service (injected).
         user: Authenticated caller (injected).
 
     Returns:
-        The updated :class:`~models.fragment.FragmentResponse`.
+        :class:`~models.fragment.FragmentUpdateResponse` with the updated
+        fragment and ``status_changed`` / ``previous_status`` revision fields.
+
+    Raises:
+        404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist.
+        422 ``FRAGMENT_VALIDATION_ERROR``: Caller is not the creator/admin,
+            a concept id is missing from the graph, or a sub-part is out of range.
     """
-    fragment = await service.update_draft(
+    result = await service.update(
         fragment_id=fragment_id,
         payload=payload,
         caller_id=user.id,
         caller_role=user.role,
     )
-    return FragmentResponse.model_validate(fragment)
+    base = FragmentResponse.model_validate(result.fragment)
+    return FragmentUpdateResponse(
+        **base.model_dump(),
+        previous_status=result.previous_status,
+        status_changed=result.status_changed,
+    )
+
+
+@router.delete(
+    "/{fragment_id}",
+    response_model=FragmentDeleteResponse,
+    dependencies=[require_role("editor")],
+    summary="Delete a fragment with permission checks and cascade to sub-parts",
+    response_description=(
+        "The deleted fragment's UUID, the number of sub-part children removed "
+        "(or would-be-removed when ``dry_run=true``), and the ``dry_run`` flag."
+    ),
+)
+async def delete_fragment(
+    fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to delete"),
+    confirm_cascade: bool = Query(
+        False,
+        description=(
+            "Set to true to authorise deleting the parent and all its sub-parts. "
+            "Required when the fragment has sub-parts; ignored when it has none. "
+            "The request is refused (422) with the child count when this is false "
+            "and sub-parts exist."
+        ),
+    ),
+    dry_run: bool = Query(
+        False,
+        description=(
+            "If true, return the cascade child_count without executing any delete. "
+            "Use this to preview the cascade before confirming."
+        ),
+    ),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> FragmentDeleteResponse:
+    """Delete a fragment, its sub-parts, and their concept tags.
+
+    **Permission matrix:**
+
+    * Creators may delete their own ``draft``, ``submitted``, or ``rejected``
+      fragments.
+    * ``approved`` fragments cannot be deleted by annotators — only admins
+      may delete them.
+    * Non-creators (other than admins) cannot delete any fragment.
+
+    **Cascade guard:** if the fragment has sub-parts and ``confirm_cascade``
+    is ``false``, the request is refused (422) with the child count in
+    ``detail.child_count``. Pass ``confirm_cascade=true`` to proceed.
+
+    **Dry run:** pass ``dry_run=true`` to preview the cascade count without
+    deleting anything. Permission checks still run.
+
+    ``movement_analysis`` rows are never removed — they are movement-level,
+    not fragment-owned.
+
+    Args:
+        fragment_id: UUID of the fragment to delete.
+        confirm_cascade: Authorise the cascade deletion when sub-parts exist.
+        dry_run: Return child_count without deleting.
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        :class:`~models.fragment.FragmentDeleteResponse` with the fragment UUID,
+        the child count, and the ``dry_run`` flag.
+
+    Raises:
+        404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist.
+        422 ``FRAGMENT_VALIDATION_ERROR``: Caller lacks delete permission, or
+            the fragment has sub-parts and ``confirm_cascade=false``.
+    """
+    result = await service.delete(
+        fragment_id=fragment_id,
+        caller_id=user.id,
+        caller_role=user.role,
+        confirm_cascade=confirm_cascade,
+        dry_run=dry_run,
+    )
+    return FragmentDeleteResponse(
+        fragment_id=result.fragment_id,
+        child_count=result.child_count,
+        dry_run=result.dry_run,
+    )
 
 
 @router.post(
