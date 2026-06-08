@@ -106,8 +106,10 @@ interface SummaryV1 {
   properties?: Record<string, string | string[]>;
 }
 
-function isSummaryV1(s: Record<string, unknown>): s is SummaryV1 {
-  return s.version === 1 && typeof s.key === 'string' && typeof s.meter === 'string';
+function isSummaryV1(s: unknown): s is SummaryV1 {
+  if (typeof s !== 'object' || s === null) return false;
+  const r = s as Record<string, unknown>;
+  return r['version'] === 1 && typeof r['key'] === 'string' && typeof r['meter'] === 'string';
 }
 
 // ---------------------------------------------------------------------------

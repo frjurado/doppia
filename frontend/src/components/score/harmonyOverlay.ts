@@ -58,7 +58,6 @@ function primaryLabel(e: HarmonyEventOut, includeKey = true): string {
  */
 export class HarmonyOverlay {
   private _ghostLayer: GhostLayer;
-  private _mcIndex: Map<string, number>;
   private _events: HarmonyEventOut[];
   private readonly _onLabelClick:
     | ((mn: number, volta: number | null, beat: number) => void)
@@ -67,7 +66,6 @@ export class HarmonyOverlay {
 
   constructor(options: HarmonyOverlayOptions) {
     this._ghostLayer = options.ghostLayer;
-    this._mcIndex = options.mcIndex;
     this._events = options.events;
     this._onLabelClick = options.onLabelClick;
 
@@ -83,9 +81,8 @@ export class HarmonyOverlay {
    * Rebuild all label positions from a fresh ghost layer and mcIndex.
    * Called by ScoreViewer on every reproject() signal (Verovio re-render).
    */
-  reproject(ghostLayer: GhostLayer, mcIndex: Map<string, number>): void {
+  reproject(ghostLayer: GhostLayer, _mcIndex: Map<string, number>): void {
     this._ghostLayer = ghostLayer;
-    this._mcIndex = mcIndex;
     this._buildLabels();
   }
 

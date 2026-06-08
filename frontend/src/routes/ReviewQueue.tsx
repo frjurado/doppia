@@ -149,7 +149,7 @@ export default function ReviewQueue() {
                         </Type>
                       </span>
                     )}
-                    <Type variant="body-md" as="span">
+                    <Type variant="body-sm" as="span">
                       {formatBarRange(item)}
                     </Type>
                   </div>
