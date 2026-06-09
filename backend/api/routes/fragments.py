@@ -28,6 +28,7 @@ from api.dependencies import (
     get_current_user,
     get_neo4j,
     get_redis,
+    get_storage,
     require_role,
 )
 from fastapi import APIRouter, Depends, Path, Query
@@ -45,6 +46,7 @@ from models.fragment import (
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.fragments import FragmentService
+from services.object_storage import StorageClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/fragments", tags=["Fragments"])
@@ -54,6 +56,7 @@ def get_fragment_service(
     db: AsyncSession = Depends(get_db),
     driver: AsyncDriver = Depends(get_neo4j),
     redis: Redis | None = Depends(get_redis),
+    storage: StorageClient = Depends(get_storage),
 ) -> FragmentService:
     """FastAPI dependency that constructs a :class:`~services.fragments.FragmentService`.
 
@@ -65,11 +68,12 @@ def get_fragment_service(
         driver: Async Neo4j driver (injected by ``get_neo4j``).
         redis: Async Redis client for the subtree cache (injected by ``get_redis``).
             ``None`` when Redis is unavailable; the service degrades gracefully.
+        storage: Object storage client for resolving preview signed URLs.
 
     Returns:
         A :class:`~services.fragments.FragmentService` bound to all backends.
     """
-    return FragmentService(db, driver, redis)
+    return FragmentService(db, driver, redis, storage)
 
 
 @router.get(

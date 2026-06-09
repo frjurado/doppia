@@ -17,6 +17,7 @@ See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import uuid
@@ -62,6 +63,7 @@ from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
 )
+from services.object_storage import StorageClient
 from services.tasks.render_fragment_preview import render_fragment_preview
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -206,10 +208,12 @@ class FragmentService:
         db: AsyncSession,
         driver: AsyncDriver,
         redis: Redis | None = None,
+        storage: StorageClient | None = None,
     ) -> None:
         self._db = db
         self._driver = driver
         self._redis = redis
+        self._storage = storage
 
     # ------------------------------------------------------------------
     # Public interface — write path
@@ -1285,6 +1289,21 @@ class FragmentService:
             row.movement_id: row.events or [] for row in analysis_result
         }
 
+        # Resolve preview signed URLs concurrently for all fragments that have
+        # a stored preview_object_key (ADR-008: null until Celery task completes).
+        async def _resolve_preview(
+            frag_id: uuid.UUID, key: str | None
+        ) -> tuple[uuid.UUID, str | None]:
+            if self._storage is None or key is None:
+                return frag_id, None
+            return frag_id, await self._storage.signed_url(key)
+
+        preview_url_map: dict[uuid.UUID, str | None] = dict(
+            await asyncio.gather(
+                *[_resolve_preview(f.id, f.preview_object_key) for f in page]
+            )
+        )
+
         items: list[ConceptBrowseItem] = []
         for f in page:
             ptag = primary_tag_by_frag.get(f.id)
@@ -1313,7 +1332,7 @@ class FragmentService:
                     data_licence=f.data_licence,
                     data_licence_url=dl_url,
                     harmony_sources=h_sources,
-                    preview_url=None,
+                    preview_url=preview_url_map.get(f.id),
                     created_by=f.created_by,
                     updated_at=f.updated_at,
                     composer_name=ctx.get("composer_name", ""),
