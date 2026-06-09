@@ -418,6 +418,58 @@ class FragmentDeleteResponse(BaseModel):
     dry_run: bool
 
 
+class ConceptBrowseItem(BaseModel):
+    """One fragment card in the concept-scoped browse list.
+
+    Returned by ``GET /api/v1/fragments?concept_id={id}``.  Carries all fields
+    the list-view preview card needs: coordinates, primary concept, movement
+    context, status, licence, and the preview URL (null until Step 5 generates
+    the SVG).
+
+    ``data_licence`` is stored on the fragment row (derived at write time per
+    ADR-009).  ``harmony_sources`` (the transparency field listing in-range event
+    sources) is added in Step 3.
+    """
+
+    model_config = ConfigDict(from_attributes=False)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    bar_start: int
+    bar_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    status: str
+    primary_concept_id: str | None
+    primary_concept_alias: str | None
+    primary_concept_name: str | None
+    data_licence: str | None
+    preview_url: str | None
+    created_by: uuid.UUID | None
+    updated_at: datetime
+
+    composer_name: str
+    work_title: str
+    work_catalogue_number: str | None
+    movement_number: int
+    movement_title: str | None
+
+
+class ConceptBrowseResponse(BaseModel):
+    """Cursor-paginated concept-scoped browse result.
+
+    Returned by ``GET /api/v1/fragments?concept_id={id}&include_subtypes={bool}``.
+    ``concept_id`` and ``include_subtypes`` are echoed back so the caller can
+    identify which browse produced these results.
+    """
+
+    items: list[ConceptBrowseItem]
+    next_cursor: str | None
+    concept_id: str
+    include_subtypes: bool
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 

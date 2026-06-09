@@ -31,9 +31,15 @@ from errors import (
     HarmonyNotReviewedError,
     SelfReviewForbiddenError,
 )
-from graph.queries.concepts import check_concepts_have_harmony_gate, get_concepts_by_ids
+from graph.queries.concepts import (
+    check_concepts_have_harmony_gate,
+    get_concepts_by_ids,
+    get_subtype_ids_async,
+)
 from models.analysis import MovementAnalysis
 from models.fragment import (
+    ConceptBrowseItem,
+    ConceptBrowseResponse,
     ConceptTagDetail,
     Fragment,
     FragmentConceptTag,
@@ -50,6 +56,8 @@ from models.fragment import (
 )
 from models.music import Composer, Corpus, Movement, Work
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
+from services.cache import get_subtree_cache, set_subtree_cache
 from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
@@ -149,9 +157,15 @@ class FragmentService:
         driver: Application-scoped async Neo4j driver (from ``get_neo4j``).
     """
 
-    def __init__(self, db: AsyncSession, driver: AsyncDriver) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        driver: AsyncDriver,
+        redis: Redis | None = None,
+    ) -> None:
         self._db = db
         self._driver = driver
+        self._redis = redis
 
     # ------------------------------------------------------------------
     # Public interface — write path
@@ -1010,6 +1024,224 @@ class FragmentService:
         )
         return ReviewQueueResponse(items=items, next_cursor=next_cursor)
 
+    async def list_by_concept(
+        self,
+        concept_id: str,
+        include_subtypes: bool,
+        status_filter: str,
+        caller_id: str,
+        caller_role: str,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> ConceptBrowseResponse:
+        """Return a cursor-paginated browse list of fragments for a concept.
+
+        The two-step cross-database join (ADR pattern):
+        1. Resolve the concept id set from Neo4j (downward IS_SUBTYPE_OF subtree
+           when ``include_subtypes=True``; singleton set otherwise).
+        2. Query PostgreSQL for top-level fragments whose
+           ``fragment_concept_tag.concept_id`` is in that set.
+
+        A fragment matches on **any** of its tags (not only ``is_primary``), so
+        a cross-referenced fragment surfaces under every concept it is tagged
+        with.  Fragments with multiple matching tags appear exactly once (the
+        subquery uses DISTINCT on fragment_id).
+
+        The subtree expansion is cached in Redis keyed by ``concept_id`` when
+        ``include_subtypes=True``; the singleton case is never cached because it
+        is free.  The cache is invalidated by ``scripts/seed.py`` after every
+        re-seed.
+
+        Status visibility rules (service layer, not bypassable via the route):
+        - Admins see all fragments matching the requested ``status_filter``.
+        - Editors see their own drafts plus all submitted/approved/rejected, then
+          additionally filtered to the requested ``status_filter``.
+
+        Results are ordered ``(updated_at DESC, id ASC)`` so the most recently
+        edited fragment appears first across all movements in the result set.
+
+        Args:
+            concept_id: Neo4j Concept id to browse (the root of the subtree).
+            include_subtypes: When True, include all non-stub subtypes of the
+                concept; when False, return only exact-concept matches.
+            status_filter: Limit results to this fragment status.  One of
+                ``draft``, ``submitted``, ``approved``, ``rejected``.  Defaults
+                to ``approved`` when an invalid value is supplied.
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller.
+            cursor: Opaque time-ordered pagination cursor from a prior response.
+            page_size: Maximum items per page (1–200).
+
+        Returns:
+            :class:`~models.fragment.ConceptBrowseResponse` with items and an
+            optional ``next_cursor`` for the following page.
+
+        Raises:
+            ValueError: Cursor string is malformed.
+        """
+        concept_ids = await self._resolve_subtree(concept_id, include_subtypes)
+        if not concept_ids:
+            return ConceptBrowseResponse(
+                items=[],
+                next_cursor=None,
+                concept_id=concept_id,
+                include_subtypes=include_subtypes,
+            )
+
+        # Subquery: distinct fragment_ids that carry any matching concept tag.
+        matching_ids_sq = (
+            select(FragmentConceptTag.fragment_id)
+            .where(FragmentConceptTag.concept_id.in_(concept_ids))
+            .distinct()
+            .subquery()
+        )
+
+        stmt = (
+            select(Fragment)
+            .where(
+                Fragment.parent_fragment_id.is_(None),
+                Fragment.id.in_(select(matching_ids_sq.c.fragment_id)),
+            )
+            .order_by(Fragment.updated_at.desc(), Fragment.id.asc())
+        )
+
+        # Status visibility — enforced at the service layer.
+        valid_statuses = frozenset({"draft", "submitted", "approved", "rejected"})
+        effective_status = (
+            status_filter if status_filter in valid_statuses else "approved"
+        )
+
+        if caller_role != "admin":
+            caller_uuid = uuid.UUID(caller_id)
+            # Base visibility: own drafts + all non-draft.
+            stmt = stmt.where(
+                or_(
+                    Fragment.status.in_(["submitted", "approved", "rejected"]),
+                    and_(
+                        Fragment.status == "draft",
+                        Fragment.created_by == caller_uuid,
+                    ),
+                )
+            )
+
+        # Further scope to the requested status.
+        stmt = stmt.where(Fragment.status == effective_status)
+
+        # Time-ordered cursor: filter to rows strictly older than the cursor.
+        if cursor is not None:
+            cursor_ts, cursor_id = _decode_time_cursor(cursor)
+            stmt = stmt.where(
+                or_(
+                    Fragment.updated_at < cursor_ts,
+                    and_(
+                        Fragment.updated_at == cursor_ts,
+                        Fragment.id > cursor_id,
+                    ),
+                )
+            )
+
+        result = await self._db.execute(stmt.limit(page_size + 1))
+        rows = list(result.scalars().all())
+
+        has_next = len(rows) > page_size
+        page = rows[:page_size]
+
+        if not page:
+            return ConceptBrowseResponse(
+                items=[],
+                next_cursor=None,
+                concept_id=concept_id,
+                include_subtypes=include_subtypes,
+            )
+
+        page_ids = [f.id for f in page]
+        movement_ids = list({f.movement_id for f in page})
+
+        # Load primary concept tags for the page fragments.
+        tags_result = await self._db.execute(
+            select(FragmentConceptTag).where(
+                FragmentConceptTag.fragment_id.in_(page_ids),
+                FragmentConceptTag.is_primary.is_(True),
+            )
+        )
+        primary_tag_by_frag: dict[uuid.UUID, FragmentConceptTag] = {}
+        for tag in tags_result.scalars().all():
+            primary_tag_by_frag[tag.fragment_id] = tag
+
+        # Batch Neo4j concept hydration for primary concept IDs.
+        primary_concept_ids = list({t.concept_id for t in primary_tag_by_frag.values()})
+        concept_name_map: dict[str, str] = {}
+        concept_alias_map: dict[str, str | None] = {}
+        if primary_concept_ids:
+            async with self._driver.session() as neo_session:
+                for c in await get_concepts_by_ids(neo_session, primary_concept_ids):
+                    aliases: list[str] = c.get("aliases", [])
+                    concept_name_map[c["id"]] = c.get("name", c["id"])
+                    concept_alias_map[c["id"]] = aliases[0] if aliases else None
+
+        # Batch movement context.
+        ctx_result = await self._db.execute(
+            select(
+                Movement.id.label("movement_id"),
+                Movement.movement_number,
+                Movement.title.label("movement_title"),
+                Work.title.label("work_title"),
+                Work.catalogue_number.label("work_catalogue_number"),
+                Composer.name.label("composer_name"),
+            )
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .join(Composer, Corpus.composer_id == Composer.id)
+            .where(Movement.id.in_(movement_ids))
+        )
+        movement_ctx: dict[uuid.UUID, dict] = {
+            row["movement_id"]: dict(row) for row in ctx_result.mappings().all()
+        }
+
+        items: list[ConceptBrowseItem] = []
+        for f in page:
+            ptag = primary_tag_by_frag.get(f.id)
+            p_concept_id = ptag.concept_id if ptag else None
+            ctx = movement_ctx.get(f.movement_id, {})
+            items.append(
+                ConceptBrowseItem(
+                    id=f.id,
+                    movement_id=f.movement_id,
+                    bar_start=f.bar_start,
+                    bar_end=f.bar_end,
+                    beat_start=f.beat_start,
+                    beat_end=f.beat_end,
+                    repeat_context=f.repeat_context,
+                    status=f.status,
+                    primary_concept_id=p_concept_id,
+                    primary_concept_alias=(
+                        concept_alias_map.get(p_concept_id) if p_concept_id else None
+                    ),
+                    primary_concept_name=(
+                        concept_name_map.get(p_concept_id) if p_concept_id else None
+                    ),
+                    data_licence=f.data_licence,
+                    preview_url=None,
+                    created_by=f.created_by,
+                    updated_at=f.updated_at,
+                    composer_name=ctx.get("composer_name", ""),
+                    work_title=ctx.get("work_title", ""),
+                    work_catalogue_number=ctx.get("work_catalogue_number"),
+                    movement_number=ctx.get("movement_number", 0),
+                    movement_title=ctx.get("movement_title"),
+                )
+            )
+
+        next_cursor = (
+            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+        )
+        return ConceptBrowseResponse(
+            items=items,
+            next_cursor=next_cursor,
+            concept_id=concept_id,
+            include_subtypes=include_subtypes,
+        )
+
     # ------------------------------------------------------------------
     # Public interface — delete
     # ------------------------------------------------------------------
@@ -1654,6 +1886,47 @@ class FragmentService:
                 return True
 
         return False
+
+    # ------------------------------------------------------------------
+    # Internal helpers — subtree resolution (Component 8 Step 2)
+    # ------------------------------------------------------------------
+
+    async def _resolve_subtree(
+        self,
+        concept_id: str,
+        include_subtypes: bool,
+    ) -> set[str]:
+        """Resolve the set of concept ids for a browse query.
+
+        When ``include_subtypes=False`` returns the singleton ``{concept_id}``
+        immediately (no Neo4j or Redis access needed).
+
+        When ``include_subtypes=True`` checks the Redis subtree cache first; on
+        a miss, runs the downward IS_SUBTYPE_OF traversal via Neo4j and
+        populates the cache for subsequent requests.
+
+        Args:
+            concept_id: The root concept to resolve.
+            include_subtypes: When False, return only the root.
+
+        Returns:
+            Set of concept ids to match against ``fragment_concept_tag``.
+        """
+        if not include_subtypes:
+            return {concept_id}
+
+        if self._redis is not None:
+            cached = await get_subtree_cache(self._redis, concept_id)
+            if cached is not None:
+                return cached
+
+        async with self._driver.session() as neo_session:
+            ids = await get_subtype_ids_async(neo_session, concept_id)
+
+        if self._redis is not None:
+            await set_subtree_cache(self._redis, concept_id, ids)
+
+        return ids
 
     # ------------------------------------------------------------------
     # Internal helpers — concept validation

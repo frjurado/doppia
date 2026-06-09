@@ -39,6 +39,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from models.base import close_db, init_db
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from redis.asyncio import Redis
 from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await neo4j_driver.verify_connectivity()
     app.state.neo4j_driver = neo4j_driver
 
+    redis_url = os.environ.get(
+        "REDIS_URL",
+        os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+    )
+    try:
+        redis_client: Redis | None = Redis.from_url(redis_url, decode_responses=True)
+        await redis_client.ping()
+        app.state.redis_client = redis_client
+        logger.info("Startup: Redis client connected.")
+    except Exception as exc:
+        logger.warning("Startup: Redis unavailable (%s); subtree cache disabled.", exc)
+        app.state.redis_client = None
+
     # Fetch Supabase JWKS for ES256 token verification (new Supabase projects).
     # Stored on app.state so the auth middleware can access it without an env var.
     # Falls back gracefully to None; middleware then tries SUPABASE_JWT_SECRET (HS256).
@@ -154,6 +168,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Shutdown: closing database connections.")
     await close_db()
     await neo4j_driver.close()
+    if app.state.redis_client is not None:
+        await app.state.redis_client.aclose()
     logger.info("Shutdown complete.")
 
 

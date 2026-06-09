@@ -597,6 +597,23 @@ def main() -> None:
     finally:
         driver.close()
 
+    # â"€â"€ Invalidate the Redis subtree cache â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    # A re-seed may change IS_SUBTYPE_OF edges; stale cached subtrees would
+    # silently mis-scope concept-browse queries. Clear all ``subtree:*`` keys.
+    from backend.services.cache import invalidate_subtree_cache_sync  # noqa: PLC0415
+
+    redis_url = os.environ.get(
+        "REDIS_URL",
+        os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+    )
+    try:
+        deleted = invalidate_subtree_cache_sync(redis_url)
+        print(f"\n[seed] Subtree cache cleared: {deleted} key(s) deleted.")
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"\n[seed] Warning: could not clear subtree cache: {exc}", file=sys.stderr
+        )
+
     sys.exit(0)
 
 

@@ -1,5 +1,6 @@
 /**
- * Fragment API client — write surface (Component 5) and read surface (Component 7).
+ * Fragment API client — write surface (Component 5), read surface (Component 7),
+ * and concept-scoped browse (Component 8 Step 2).
  *
  * Write endpoints (Step 6, Component 5):
  *   POST   /api/v1/fragments             — create draft
@@ -9,6 +10,9 @@
  * Read endpoints (Step 7, Component 7):
  *   GET    /api/v1/fragments/{id}                      — full fragment detail
  *   GET    /api/v1/movements/{id}/fragments            — movement-scoped list
+ *
+ * Browse endpoint (Step 2, Component 8):
+ *   GET    /api/v1/fragments?concept_id={id}           — concept-scoped browse
  *
  * Delete endpoint (Step 9, Component 7):
  *   DELETE /api/v1/fragments/{id}        — delete with permission checks and cascade
@@ -27,6 +31,7 @@
  * References:
  *   docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 18
  *   docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9
+ *   docs/roadmap/component-8-fragment-browsing.md § Step 2
  *   docs/architecture/fragment-schema.md §"The summary JSONB schema"
  *   backend/models/fragment.py
  */
@@ -362,6 +367,98 @@ export async function listMovementFragments(
   return apiFetch<FragmentListResponse>(
     `/api/v1/movements/${movementId}/fragments${qs}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Concept-scoped browse (Component 8 Step 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One fragment card in the concept-scoped browse list.
+ * Maps to Python ConceptBrowseItem in backend/models/fragment.py.
+ *
+ * `preview_url` is null until Step 5 (fragment-preview Celery task) generates
+ * the SVG. `data_licence` is the stored per-fragment licence derived from
+ * in-range harmony event sources at write time (ADR-009).
+ */
+export interface ConceptBrowseItem {
+  id: string;
+  movement_id: string;
+  bar_start: number;
+  bar_end: number;
+  beat_start: number | null;
+  beat_end: number | null;
+  repeat_context: string | null;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  primary_concept_id: string | null;
+  /** First alias of the primary concept (e.g. "PAC"), or null. */
+  primary_concept_alias: string | null;
+  /** Full name of the primary concept, or null if no primary tag. */
+  primary_concept_name: string | null;
+  /** Effective per-fragment data licence (ADR-009), e.g. "CC BY-SA 4.0". */
+  data_licence: string | null;
+  /** Signed URL for the server-rendered SVG preview (null until Step 5). */
+  preview_url: string | null;
+  created_by: string | null;
+  /** ISO datetime of the last status transition or edit. */
+  updated_at: string;
+  composer_name: string;
+  work_title: string;
+  work_catalogue_number: string | null;
+  movement_number: number;
+  movement_title: string | null;
+}
+
+/** Cursor-paginated concept-scoped browse response. */
+export interface ConceptBrowseResponse {
+  items: ConceptBrowseItem[];
+  /** Opaque cursor to pass as `cursor` to fetch the next page. Null on last page. */
+  next_cursor: string | null;
+  /** Echoed back from the request for result identification. */
+  concept_id: string;
+  include_subtypes: boolean;
+}
+
+/**
+ * Browse fragments by concept tag across the full corpus.
+ *
+ * Returns fragments whose concept tags include the given concept (and, when
+ * `includeSubtypes` is true, any of its non-stub subtypes). A fragment
+ * matches on any of its tags — not only the primary one — so cross-referenced
+ * fragments surface under every relevant concept. Fragments with multiple
+ * matching tags appear exactly once.
+ *
+ * Status visibility is enforced by the server: editors see their own drafts
+ * plus all submitted/approved/rejected fragments.
+ *
+ * @param conceptId   Neo4j Concept id to browse (e.g. "AuthenticCadence").
+ * @param options.includeSubtypes  Include subtypes (default true).
+ * @param options.status           Fragment status filter (default "approved").
+ * @param options.cursor           Opaque cursor from a prior response.
+ * @param options.pageSize         Items per page (1–200, default 50).
+ * @throws ApiError on auth errors or a malformed cursor.
+ */
+export async function listByConcept(
+  conceptId: string,
+  options: {
+    includeSubtypes?: boolean;
+    status?: 'draft' | 'submitted' | 'approved' | 'rejected';
+    cursor?: string;
+    pageSize?: number;
+  } = {},
+): Promise<ConceptBrowseResponse> {
+  const {
+    includeSubtypes = true,
+    status = 'approved',
+    cursor,
+    pageSize,
+  } = options;
+  const params = new URLSearchParams({ concept_id: conceptId });
+  params.set('include_subtypes', String(includeSubtypes));
+  params.set('status', status);
+  if (cursor !== undefined) params.set('cursor', cursor);
+  if (pageSize !== undefined) params.set('page_size', String(pageSize));
+  return apiFetch<ConceptBrowseResponse>(`/api/v1/fragments?${params}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 """Fragment API routes: create, read, update, submit, review, and delete.
 
 Routes:
+    GET    /api/v1/fragments                  — concept-scoped browse list
     GET    /api/v1/fragments/{id}             — read one fragment (full detail)
     POST   /api/v1/fragments                  — create a draft fragment
     PATCH  /api/v1/fragments/{id}             — update at any status (revision semantics)
@@ -14,6 +15,7 @@ All routes require the ``editor`` role. The movement-scoped list endpoint
 
 See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 See docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9.
+See docs/roadmap/component-8-fragment-browsing.md § Step 2.
 """
 
 from __future__ import annotations
@@ -21,10 +23,17 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
+from api.dependencies import (
+    AppUser,
+    get_current_user,
+    get_neo4j,
+    get_redis,
+    require_role,
+)
 from fastapi import APIRouter, Depends, Path, Query
 from models.base import get_db
 from models.fragment import (
+    ConceptBrowseResponse,
     FragmentCreate,
     FragmentDeleteResponse,
     FragmentDetailResponse,
@@ -34,6 +43,7 @@ from models.fragment import (
     ReviewRequest,
 )
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
 from services.fragments import FragmentService
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,20 +53,123 @@ router = APIRouter(prefix="/fragments", tags=["Fragments"])
 def get_fragment_service(
     db: AsyncSession = Depends(get_db),
     driver: AsyncDriver = Depends(get_neo4j),
+    redis: Redis | None = Depends(get_redis),
 ) -> FragmentService:
     """FastAPI dependency that constructs a :class:`~services.fragments.FragmentService`.
 
-    Separated from the route handler so tests can override either dependency
+    Separated from the route handler so tests can override any dependency
     via ``app.dependency_overrides``.
 
     Args:
         db: Async SQLAlchemy session (injected by ``get_db``).
         driver: Async Neo4j driver (injected by ``get_neo4j``).
+        redis: Async Redis client for the subtree cache (injected by ``get_redis``).
+            ``None`` when Redis is unavailable; the service degrades gracefully.
 
     Returns:
-        A :class:`~services.fragments.FragmentService` bound to both databases.
+        A :class:`~services.fragments.FragmentService` bound to all backends.
     """
-    return FragmentService(db, driver)
+    return FragmentService(db, driver, redis)
+
+
+@router.get(
+    "",
+    response_model=ConceptBrowseResponse,
+    dependencies=[require_role("editor")],
+    summary="Browse fragments by concept tag",
+    response_description=(
+        "Cursor-paginated list of top-level fragments whose concept tags include "
+        "the requested concept (and its subtypes when ``include_subtypes=true``). "
+        "Each item carries the movement label, primary concept alias, stored "
+        "``data_licence``, and a ``preview_url`` (null until Step 5 generates "
+        "the SVG)."
+    ),
+)
+async def list_fragments_by_concept(
+    concept_id: str = Query(
+        ...,
+        description=(
+            "Neo4j Concept id to browse (e.g. ``AuthenticCadence``). "
+            "Required — the concept-scoped browse endpoint always needs a root."
+        ),
+    ),
+    include_subtypes: bool = Query(
+        True,
+        description=(
+            "When true (default), include fragments tagged with any non-stub "
+            "subtype of the concept as well as the concept itself. "
+            "When false, return only exact-concept matches."
+        ),
+    ),
+    status: str = Query(
+        "approved",
+        description=(
+            "Fragment status to browse. One of ``draft``, ``submitted``, "
+            "``approved`` (default), ``rejected``. Visibility rules apply: "
+            "editors see their own drafts and all non-draft statuses. "
+            "An invalid value falls back to ``approved``."
+        ),
+    ),
+    cursor: str | None = Query(
+        None,
+        description="Opaque pagination cursor from a prior response's ``next_cursor``.",
+    ),
+    page_size: int = Query(
+        50,
+        ge=1,
+        le=200,
+        description="Maximum items per page (1–200, default 50).",
+    ),
+    service: FragmentService = Depends(get_fragment_service),
+    user: Annotated[AppUser, Depends(get_current_user)] = None,
+) -> ConceptBrowseResponse:
+    """Browse fragments by concept tag across the full corpus.
+
+    Returns a cursor-paginated list of top-level fragments whose
+    ``fragment_concept_tag`` rows include the requested concept (or any of its
+    non-stub subtypes when ``include_subtypes=true``).
+
+    A fragment appears under **any** concept it is tagged with, not only its
+    primary (``is_primary=true``) concept, so cross-referenced fragments surface
+    under every relevant concept.  Fragments with multiple in-set tags appear
+    exactly once.
+
+    **Status visibility** is enforced at the service layer:
+
+    * Editors see their own drafts plus all submitted/approved/rejected
+      fragments; the ``status`` filter further scopes within that visible set.
+    * Admins see all fragments of the requested status.
+    * A spoofed ``status=draft`` returns only the caller's own drafts regardless
+      of role (editor), because the visibility rule gates draft access to creators.
+
+    The subtree expansion (``include_subtypes=true``) is cached in Redis per
+    concept and invalidated when the knowledge graph is re-seeded.
+
+    Args:
+        concept_id: Neo4j Concept id (e.g. ``"AuthenticCadence"``).
+        include_subtypes: Include subtype fragments in the result.
+        status: Fragment status filter (default ``approved``).
+        cursor: Opaque cursor from a prior response for pagination.
+        page_size: Items per page (1–200).
+        service: Fragment service (injected).
+        user: Authenticated caller (injected).
+
+    Returns:
+        :class:`~models.fragment.ConceptBrowseResponse` with items, a
+        ``next_cursor``, and the echoed ``concept_id``/``include_subtypes``.
+
+    Raises:
+        422: ``cursor`` is malformed.
+    """
+    return await service.list_by_concept(
+        concept_id=concept_id,
+        include_subtypes=include_subtypes,
+        status_filter=status,
+        caller_id=user.id,
+        caller_role=user.role,
+        cursor=cursor,
+        page_size=page_size,
+    )
 
 
 @router.get(
