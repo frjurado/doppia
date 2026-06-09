@@ -4,7 +4,7 @@ All task modules import ``celery_app`` from here.  The broker is configured via
 environment variables so that local dev (Redis in Docker), CI, and production
 (Upstash Redis) all use the same code path.
 
-Both current tasks (``generate_incipit``, ``ingest_analysis``) are fire-and-forget:
+All current tasks (``generate_incipit``, ``ingest_analysis``, ``render_fragment_preview``) are fire-and-forget:
 no caller ever reads their results.  The result backend is therefore disabled
 (``task_ignore_result = True``) to avoid unnecessary Redis commands.  See
 ADR-017 for the full rationale.
@@ -38,6 +38,7 @@ celery_app = Celery(
     include=[
         "services.tasks.generate_incipit",
         "services.tasks.ingest_analysis",
+        "services.tasks.render_fragment_preview",
     ],
 )
 

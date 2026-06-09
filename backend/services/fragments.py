@@ -62,6 +62,7 @@ from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
 )
+from services.tasks.render_fragment_preview import render_fragment_preview
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -413,6 +414,7 @@ class FragmentService:
         validate_containment_for_update(payload)
         await self._check_all_concepts_for_update(payload)
 
+        _should_regenerate_preview = False
         try:
             async with self._db.begin():
                 # Load the fragment at any status; revision logic handles transitions.
@@ -467,6 +469,14 @@ class FragmentService:
                     self._db.add(fragment)
                 else:
                     # Analytic edit: full field replacement with revision semantics.
+                    # Check for measure-range change before overwriting coordinates
+                    # (ADR-008: a range edit on submitted/approved invalidates the preview).
+                    if previous_status in ("submitted", "approved") and (
+                        fragment.mc_start != payload.mc_start
+                        or fragment.mc_end != payload.mc_end
+                    ):
+                        _should_regenerate_preview = True
+
                     data_licence = await self._derive_data_licence(
                         fragment.movement_id, payload.bar_start, payload.bar_end
                     )
@@ -528,6 +538,11 @@ class FragmentService:
                 detail={"integrity_error": str(exc.orig)},
             ) from exc
 
+        # Enqueue after commit so the task reads the updated mc_start/mc_end
+        # (ADR-008: bar-range edit on submitted/approved re-triggers preview generation).
+        if _should_regenerate_preview:
+            render_fragment_preview.delay(str(fragment_id))
+
         return FragmentUpdateResult(fragment=fragment, previous_status=previous_status)
 
     async def submit(self, fragment_id: uuid.UUID) -> Fragment:
@@ -565,6 +580,9 @@ class FragmentService:
             fragment.updated_at = datetime.now(tz=timezone.utc)
             self._db.add(fragment)
 
+        # Enqueue after the transaction commits so the task reads committed state
+        # (ADR-008: preview is generated at the draft → submitted transition).
+        render_fragment_preview.delay(str(fragment_id))
         return fragment
 
     # ------------------------------------------------------------------
