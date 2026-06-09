@@ -12,12 +12,16 @@ minimum role level.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from models.base import get_db
 from neo4j import AsyncDriver
 from services.object_storage import StorageClient, make_storage_client
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _ROLE_HIERARCHY: dict[str, int] = {"editor": 1, "admin": 2}
 
@@ -37,15 +41,26 @@ class AppUser:
     email: str
 
 
-async def get_current_user(request: Request) -> AppUser:
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> AppUser:
     """FastAPI dependency that returns the authenticated user for the current request.
 
     Reads the user attached to ``request.state.user`` by ``AuthMiddleware``.
     Raises HTTP 401 if no user is present (i.e. the request carried no
     ``Authorization`` header).
 
+    When ``AUTH_MODE=supabase`` (staging/production), also upserts a row into
+    ``app_user`` so that ``fragment.created_by`` FK constraints pass without
+    requiring a separate provisioning step. The upsert is idempotent and also
+    keeps ``email`` and ``role`` current with the Supabase JWT claims. In
+    ``AUTH_MODE=local`` the dev users are seeded separately via
+    ``scripts/seed_dev_users.py``.
+
     Args:
         request: The incoming FastAPI request.
+        db: Async database session (injected).
 
     Returns:
         The authenticated user.
@@ -60,6 +75,17 @@ async def get_current_user(request: Request) -> AppUser:
             detail="Authentication required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if os.environ.get("AUTH_MODE", "supabase") == "supabase" and user.role:
+        await db.execute(
+            text(
+                "INSERT INTO app_user (id, email, role) "
+                "VALUES (:id, :email, :role) "
+                "ON CONFLICT (id) DO UPDATE "
+                "SET email = EXCLUDED.email, role = EXCLUDED.role"
+            ),
+            {"id": user.id, "email": user.email, "role": user.role},
+        )
+        await db.commit()
     return user
 
 

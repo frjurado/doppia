@@ -18,9 +18,12 @@ See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 from __future__ import annotations
 
 import base64
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from errors import (
     FragmentNotFoundError,
@@ -208,6 +211,7 @@ class FragmentService:
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
         except IntegrityError as exc:
+            logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
                 "Fragment references a missing related record (user or movement).",
                 detail={"integrity_error": str(exc.orig)},
@@ -298,6 +302,7 @@ class FragmentService:
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
         except IntegrityError as exc:
+            logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
                 "Fragment references a missing related record (user or movement).",
                 detail={"integrity_error": str(exc.orig)},
@@ -460,6 +465,7 @@ class FragmentService:
                         self._add_concept_tags(child.id, sp.concept_tags)
 
         except IntegrityError as exc:
+            logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
                 "Fragment references a missing related record (user or movement).",
                 detail={"integrity_error": str(exc.orig)},
