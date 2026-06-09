@@ -1,0 +1,96 @@
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pageNav {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  padding: var(--spacing-2) var(--spacing-4);
+  flex-shrink: 0;
+}
+
+.navBack {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.navBack:hover span {
+  color: var(--color-on-surface) !important;
+}
+
+/* Status badge — mirrors Fragment Browser / Review Queue */
+.statusBadge {
+  padding: 1px var(--spacing-2);
+  background: var(--color-surface-container-high);
+}
+
+.statusBadge[data-status='approved'] {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+.statusBadge[data-status='submitted'] {
+  background: var(--color-tertiary-container);
+  color: var(--color-on-tertiary-container);
+}
+
+.statusBadge[data-status='rejected'] {
+  background: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+.centered {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+  max-width: 800px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+}
+
+.conceptTitle {
+  margin: 0;
+}
+
+/* Notation placeholder panel — replaced by the Verovio render in Step 11 */
+.notationArea {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-8);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.tagChip {
+  padding: 2px var(--spacing-3);
+  background: var(--color-surface-container-high);
+}

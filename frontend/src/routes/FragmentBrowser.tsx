@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -110,18 +110,47 @@ function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodePr
 }
 
 // ---------------------------------------------------------------------------
-// Fragment list item
+// Fragment preview card
 // ---------------------------------------------------------------------------
 
-function FragmentListRow({ item }: { item: ConceptBrowseItem }) {
-  const barRange =
-    item.beat_start != null
-      ? `mm. ${item.bar_start}–${item.bar_end}`
-      : `mm. ${item.bar_start}–${item.bar_end}`;
+interface FragmentCardProps {
+  item: ConceptBrowseItem;
+  onOpen: (id: string) => void;
+}
+
+function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
+  const barRange = `mm. ${item.bar_start}–${item.bar_end}`;
+  const workLabel = `${item.work_title}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
+  const movementLabel = `mvt. ${item.movement_number}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
 
   return (
-    <Surface layer="container-lowest" className={styles.fragmentRow}>
+    <button
+      type="button"
+      className={styles.fragmentCard}
+      onClick={() => onOpen(item.id)}
+      aria-label={`Open fragment ${conceptLabel} ${barRange}`}
+    >
+      <div className={styles.previewArea}>
+        {item.preview_url ? (
+          <img
+            src={item.preview_url}
+            alt=""
+            className={styles.previewImage}
+            loading="lazy"
+          />
+        ) : (
+          <div className={styles.previewPlaceholder}>
+            <Type
+              variant="label-sm"
+              as="span"
+              style={{ color: 'var(--color-on-surface-variant)' }}
+            >
+              Preview generating…
+            </Type>
+          </div>
+        )}
+      </div>
       <div className={styles.fragmentMeta}>
         <Type variant="body-sm" as="span" className={styles.fragmentConcept}>
           {conceptLabel}
@@ -131,36 +160,33 @@ function FragmentListRow({ item }: { item: ConceptBrowseItem }) {
           as="span"
           style={{ color: 'var(--color-on-surface-variant)' }}
         >
-          {item.composer_name} · {item.work_title}
-          {item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''} ·
-          mvt. {item.movement_number}
-          {item.movement_title ? ` (${item.movement_title})` : ''}
+          {item.composer_name} · {workLabel}
         </Type>
         <Type
           variant="label-sm"
           as="span"
           style={{ color: 'var(--color-on-surface-variant)' }}
         >
-          {barRange}
+          {movementLabel} · {barRange}
         </Type>
+        <div className={styles.fragmentBadges}>
+          <span className={styles.statusBadge} data-status={item.status}>
+            <Type variant="label-sm" as="span">
+              {item.status}
+            </Type>
+          </span>
+          {item.data_licence && (
+            <Type
+              variant="label-sm"
+              as="span"
+              style={{ color: 'var(--color-on-surface-variant)', opacity: 0.7 }}
+            >
+              {item.data_licence}
+            </Type>
+          )}
+        </div>
       </div>
-      <div className={styles.fragmentBadges}>
-        <span className={styles.statusBadge} data-status={item.status}>
-          <Type variant="label-sm" as="span">
-            {item.status}
-          </Type>
-        </span>
-        {item.data_licence && (
-          <Type
-            variant="label-sm"
-            as="span"
-            style={{ color: 'var(--color-on-surface-variant)' }}
-          >
-            {item.data_licence}
-          </Type>
-        )}
-      </div>
-    </Surface>
+    </button>
   );
 }
 
@@ -179,6 +205,7 @@ function FragmentListRow({ item }: { item: ConceptBrowseItem }) {
  */
 export default function FragmentBrowser() {
   usePageTitle('Fragment Browser — Doppia');
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const rootId = searchParams.get('root');
@@ -300,6 +327,13 @@ export default function FragmentBrowser() {
   );
 
   const selectedNode = treeNodes.find((n) => n.id === conceptId) ?? null;
+
+  const openFragment = useCallback(
+    (id: string) => {
+      navigate(`/fragments/${id}`);
+    },
+    [navigate],
+  );
 
   return (
     <Surface layer="base" className={styles.page}>
@@ -457,7 +491,7 @@ export default function FragmentBrowser() {
                   </div>
                 )}
                 {fragments.map((item) => (
-                  <FragmentListRow key={item.id} item={item} />
+                  <FragmentCard key={item.id} item={item} onOpen={openFragment} />
                 ))}
                 {fragmentsNextCursor && !fragmentsLoading && (
                   <div className={styles.loadMore}>
