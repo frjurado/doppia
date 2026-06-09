@@ -554,6 +554,12 @@ class Fragment(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Fragment preview SVG in object storage (ADR-008, Component 8 Step 5).
+    # Null until the render_fragment_preview Celery task completes.
+    preview_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preview_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class FragmentConceptTag(Base):
