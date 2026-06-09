@@ -1,4 +1,4 @@
-"""Concept service: full-text search and schema-tree assembly.
+"""Concept service: full-text search, schema-tree assembly, and concept-tree navigation.
 
 All database access is encapsulated here; route handlers never call
 graph queries directly.
@@ -18,6 +18,7 @@ from graph.queries.concepts import (
     check_concept_exists,
     get_concept_contains_stages,
     get_concept_property_schemas,
+    get_concept_subtree,
     get_type_refinement_children,
     search_concepts,
 )
@@ -25,6 +26,8 @@ from models.concepts import (
     ConceptSchemaTreeResponse,
     ConceptSearchItem,
     ConceptSearchResponse,
+    ConceptTreeNode,
+    ConceptTreeResponse,
     ContainsStageItem,
     PropertySchemaItem,
     PropertyValueItem,
@@ -32,22 +35,37 @@ from models.concepts import (
     TypeRefinement,
     TypeRefinementChild,
 )
+from models.fragment import Fragment, FragmentConceptTag
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
+from services.cache import get_tree_cache, set_tree_cache
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # How many items to return per page.
 _PAGE_SIZE: int = 20
 
 
 class ConceptService:
-    """Business logic for concept search and schema retrieval.
+    """Business logic for concept search, schema retrieval, and tree navigation.
 
     Args:
-        driver: The application-scoped async Neo4j driver, obtained via the
-            ``get_neo4j`` FastAPI dependency.
+        driver: The application-scoped async Neo4j driver.
+        db: Async SQLAlchemy session; required only for ``get_tree`` (fragment
+            counts).  Pass ``None`` when only search/schema operations are needed.
+        redis: Async Redis client; used by ``get_tree`` to cache the tree
+            response.  Pass ``None`` to skip caching.
     """
 
-    def __init__(self, driver: AsyncDriver) -> None:
+    def __init__(
+        self,
+        driver: AsyncDriver,
+        db: AsyncSession | None = None,
+        redis: Redis | None = None,
+    ) -> None:
         self._driver = driver
+        self._db = db
+        self._redis = redis
 
     async def search(
         self,
@@ -154,6 +172,98 @@ class ConceptService:
             stages=stages,
             type_refinement=type_refinement,
         )
+
+    async def get_tree(self, root_id: str) -> ConceptTreeResponse:
+        """Return the concept subtree rooted at root_id for the tag browser.
+
+        Performs three operations:
+
+        1. Checks Redis for a cached ``ConceptTreeResponse`` (key
+           ``tree:{root_id}``); returns it immediately on a hit.
+        2. Queries Neo4j for all non-stub concepts in the IS_SUBTYPE_OF
+           subtree, building a flat node list with parent_id linkage and
+           hierarchy paths.
+        3. Queries PostgreSQL for ``approved`` fragment counts per concept id
+           (cross-reference tags, not only ``is_primary``) and attaches them
+           to each node.
+
+        The assembled response is written back to Redis with a 1-hour TTL
+        (invalidated by ``scripts/seed.py`` after every re-seed).
+
+        Raises :class:`~errors.ConceptNotFoundError` (→ HTTP 404) when
+        ``root_id`` is unknown or refers to a stub concept.
+
+        Args:
+            root_id: Immutable concept identifier for the tree root.
+
+        Returns:
+            :class:`~models.concepts.ConceptTreeResponse` with a flat node
+            list ordered alphabetically.
+
+        Raises:
+            ConceptNotFoundError: If no non-stub Concept with ``root_id`` exists.
+        """
+        if self._redis is not None:
+            cached = await get_tree_cache(self._redis, root_id)
+            if cached is not None:
+                return ConceptTreeResponse.model_validate(cached)
+
+        async with self._driver.session() as neo4j_session:
+            rows = await get_concept_subtree(neo4j_session, root_id)
+
+        if not rows:
+            raise ConceptNotFoundError(
+                f"Concept '{root_id}' not found or is a stub.",
+                detail={"concept_id": root_id},
+            )
+
+        node_ids = [r["id"] for r in rows]
+        counts = await self._fetch_fragment_counts(node_ids)
+
+        nodes = [
+            ConceptTreeNode(
+                id=r["id"],
+                name=r["name"],
+                aliases=r["aliases"] or [],
+                hierarchy_path=r["hierarchy_path"] or [],
+                parent_id=r["parent_id"],
+                fragment_count=counts.get(r["id"], 0),
+            )
+            for r in rows
+        ]
+
+        response = ConceptTreeResponse(root_id=root_id, nodes=nodes)
+
+        if self._redis is not None:
+            await set_tree_cache(self._redis, root_id, response.model_dump())
+
+        return response
+
+    async def _fetch_fragment_counts(self, concept_ids: list[str]) -> dict[str, int]:
+        """Return approved fragment counts keyed by concept_id.
+
+        Counts every fragment whose concept tags include a concept in the list,
+        regardless of ``is_primary``.  Only ``approved`` fragments are counted
+        (the "browse the finished corpus" baseline).
+
+        Returns an empty dict when no database session is available.
+        """
+        if self._db is None or not concept_ids:
+            return {}
+        stmt = (
+            select(
+                FragmentConceptTag.concept_id,
+                func.count(Fragment.id.distinct()).label("cnt"),
+            )
+            .join(Fragment, Fragment.id == FragmentConceptTag.fragment_id)
+            .where(
+                FragmentConceptTag.concept_id.in_(concept_ids),
+                Fragment.status == "approved",
+            )
+            .group_by(FragmentConceptTag.concept_id)
+        )
+        result = await self._db.execute(stmt)
+        return {row.concept_id: row.cnt for row in result}
 
 
 # ---------------------------------------------------------------------------

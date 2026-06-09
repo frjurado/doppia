@@ -67,6 +67,11 @@ export default function CorpusBrowser() {
       {/* Page-level nav strip */}
       <Surface layer="container-lowest" className={styles.pageNav}>
         <Type variant="label-md" as="span" className={styles.pageNavTitle}>Browse</Type>
+        <Link to="/concepts" className={styles.pageNavLink}>
+          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+            Fragment Browser →
+          </Type>
+        </Link>
         <Link to="/review-queue" className={styles.pageNavLink}>
           <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
             Review Queue →

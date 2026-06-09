@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
 import Surface from '../components/ui/Surface';
@@ -108,6 +108,11 @@ export default function ReviewQueue() {
         <Type variant="label-md" as="h1" className={styles.title}>
           Review Queue
         </Type>
+        <Link to="/concepts" className={styles.navLink}>
+          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+            Fragment Browser →
+          </Type>
+        </Link>
       </Surface>
 
       {/* Queue list */}

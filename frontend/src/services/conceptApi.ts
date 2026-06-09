@@ -155,3 +155,67 @@ export async function getConceptSchemas(id: string): Promise<ConceptSchemaTree> 
     ConceptSchemaTreeSchema,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Concept tree  (Component 8 Step 7 — tag browser)
+// ---------------------------------------------------------------------------
+
+/**
+ * One node in the IS_SUBTYPE_OF subtree returned by GET /api/v1/concepts/tree.
+ *
+ * The tree is serialised as a flat list; build the nested UI by keying on
+ * `parent_id`. The root node has `parent_id = null`.
+ *
+ * `fragment_count` is the number of approved fragments tagged with this concept
+ * (any tag, not only is_primary). Counts may be up to 1 hour stale when served
+ * from the Redis cache.
+ */
+export interface ConceptTreeNode {
+  id: string;
+  name: string;
+  aliases: string[];
+  /** Ancestor names from domain root to this node, inclusive. */
+  hierarchy_path: string[];
+  /** Parent concept id within the subtree, or null for the root. */
+  parent_id: string | null;
+  fragment_count: number;
+}
+
+/** Response from GET /api/v1/concepts/tree?root={id}. */
+export interface ConceptTreeResponse {
+  root_id: string;
+  /** All non-stub nodes in the subtree, alphabetically sorted. */
+  nodes: ConceptTreeNode[];
+}
+
+const ConceptTreeNodeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  aliases: z.array(z.string()),
+  hierarchy_path: z.array(z.string()),
+  parent_id: z.string().nullable(),
+  fragment_count: z.number(),
+});
+
+const ConceptTreeResponseSchema = z.object({
+  root_id: z.string(),
+  nodes: z.array(ConceptTreeNodeSchema),
+});
+
+/**
+ * Fetch the IS_SUBTYPE_OF subtree rooted at `rootId` for the tag browser.
+ *
+ * Returns a flat list of all non-stub concept nodes with parent_id linkage
+ * and approved fragment counts. Cached server-side in Redis (1h TTL,
+ * invalidated on re-seed).
+ *
+ * @param rootId  Root concept id (e.g. "Cadence").
+ */
+export async function getConceptTree(rootId: string): Promise<ConceptTreeResponse> {
+  const params = new URLSearchParams({ root: rootId });
+  return apiFetch(
+    `${BASE}/concepts/tree?${params.toString()}`,
+    undefined,
+    ConceptTreeResponseSchema,
+  );
+}

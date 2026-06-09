@@ -187,3 +187,56 @@ class ConceptSearchResponse(BaseModel):
 
     items: list[ConceptSearchItem]
     next_cursor: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Concept tree response models  (GET /api/v1/concepts/tree)
+# ---------------------------------------------------------------------------
+
+
+class ConceptTreeNode(BaseModel):
+    """One node in the concept IS_SUBTYPE_OF subtree.
+
+    The tree is returned as a flat list; the caller assembles the hierarchy
+    from ``parent_id``.  The root node's ``parent_id`` is ``None`` even if
+    the root concept has ancestors above it in the full graph — those are
+    outside the queried subtree and are not included.
+
+    Attributes:
+        id: Immutable concept identifier.
+        name: Human-readable concept name.
+        aliases: Alternative names / abbreviations (e.g. ``["PAC"]``).
+        hierarchy_path: Ancestor names from domain root to this concept,
+            inclusive (e.g. ``["Cadence", "Authentic Cadence",
+            "Perfect Authentic Cadence"]``).
+        parent_id: The id of this node's direct IS_SUBTYPE_OF parent
+            *within the subtree*, or ``None`` for the root.
+        fragment_count: Number of ``approved`` fragments whose concept tags
+            include this concept (cross-reference tags count, not only
+            ``is_primary``).
+    """
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    hierarchy_path: list[str] = Field(default_factory=list)
+    parent_id: str | None = None
+    fragment_count: int = 0
+
+
+class ConceptTreeResponse(BaseModel):
+    """Flat node list for the concept subtree rooted at ``root_id``.
+
+    The tree is serialised as a flat list so the response has no recursive
+    structure.  UI components build the nested display by keying on
+    ``parent_id``.
+
+    Attributes:
+        root_id: The concept id that was used as the root of the query.
+        nodes: All non-stub concepts in the subtree, sorted alphabetically
+            by name.  Always contains at least one node (the root itself)
+            when ``root_id`` is a valid non-stub concept.
+    """
+
+    root_id: str
+    nodes: list[ConceptTreeNode]
