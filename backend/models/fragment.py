@@ -284,6 +284,10 @@ class FragmentDetailResponse(BaseModel):
     Includes concept tags hydrated with Neo4j metadata, harmony events sliced
     from ``movement_analysis`` over the fragment's bar range, and nested
     sub-parts one level deep (ADR-011 two-level display limit).
+
+    ``data_licence_url`` is the canonical URL for ``data_licence`` (ADR-009).
+    ``harmony_sources`` is the sorted set of distinct ``source`` values from
+    in-range ``movement_analysis`` events, for transparency (ADR-009).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -301,6 +305,8 @@ class FragmentDetailResponse(BaseModel):
     summary: dict
     prose_annotation: str | None
     data_licence: str | None
+    data_licence_url: str | None
+    harmony_sources: list[str]
     status: str
     created_by: uuid.UUID | None
     created_at: datetime
@@ -427,8 +433,9 @@ class ConceptBrowseItem(BaseModel):
     the SVG).
 
     ``data_licence`` is stored on the fragment row (derived at write time per
-    ADR-009).  ``harmony_sources`` (the transparency field listing in-range event
-    sources) is added in Step 3.
+    ADR-009).  ``data_licence_url`` is the canonical URL for that licence.
+    ``harmony_sources`` is the sorted set of distinct ``source`` values from
+    in-range ``movement_analysis`` events, for transparency (ADR-009).
     """
 
     model_config = ConfigDict(from_attributes=False)
@@ -445,6 +452,8 @@ class ConceptBrowseItem(BaseModel):
     primary_concept_alias: str | None
     primary_concept_name: str | None
     data_licence: str | None
+    data_licence_url: str | None
+    harmony_sources: list[str]
     preview_url: str | None
     created_by: uuid.UUID | None
     updated_at: datetime

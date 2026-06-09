@@ -31,7 +31,7 @@
  * References:
  *   docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 18
  *   docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9
- *   docs/roadmap/component-8-fragment-browsing.md § Step 2
+ *   docs/roadmap/component-8-fragment-browsing.md §§ Step 2, Step 3
  *   docs/architecture/fragment-schema.md §"The summary JSONB schema"
  *   backend/models/fragment.py
  */
@@ -187,7 +187,12 @@ export interface FragmentDetailResponse {
   repeat_context: string | null;
   summary: Record<string, unknown>;
   prose_annotation: string | null;
+  /** Effective per-fragment data licence (ADR-009), e.g. "CC BY-SA 4.0". */
   data_licence: string | null;
+  /** Canonical URL for data_licence, e.g. "https://creativecommons.org/licenses/by-sa/4.0/". */
+  data_licence_url: string | null;
+  /** Sorted distinct source values from in-range harmony events (ADR-009). */
+  harmony_sources: string[];
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
   created_by: string | null;
   created_at: string;
@@ -379,7 +384,9 @@ export async function listMovementFragments(
  *
  * `preview_url` is null until Step 5 (fragment-preview Celery task) generates
  * the SVG. `data_licence` is the stored per-fragment licence derived from
- * in-range harmony event sources at write time (ADR-009).
+ * in-range harmony event sources at write time (ADR-009). `data_licence_url`
+ * is the canonical URL for that licence. `harmony_sources` is the sorted set
+ * of distinct source values from in-range movement_analysis events (ADR-009).
  */
 export interface ConceptBrowseItem {
   id: string;
@@ -397,6 +404,10 @@ export interface ConceptBrowseItem {
   primary_concept_name: string | null;
   /** Effective per-fragment data licence (ADR-009), e.g. "CC BY-SA 4.0". */
   data_licence: string | null;
+  /** Canonical URL for data_licence, e.g. "https://creativecommons.org/licenses/by-sa/4.0/". */
+  data_licence_url: string | null;
+  /** Sorted distinct source values from in-range harmony events (ADR-009). */
+  harmony_sources: string[];
   /** Signed URL for the server-rendered SVG preview (null until Step 5). */
   preview_url: string | null;
   created_by: string | null;

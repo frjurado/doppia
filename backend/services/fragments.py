@@ -108,6 +108,49 @@ _REPEAT_CONTEXT_TO_VOLTA: dict[str, int] = {
     "third_ending": 3,
 }
 
+# Maps the data_licence short string to its canonical URL (ADR-009).
+_LICENCE_URL_MAP: dict[str, str] = {
+    "CC BY-SA 4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
+}
+
+
+def _sources_in_range(
+    events: list[dict],
+    bar_start: int,
+    bar_end: int,
+    repeat_context: str | None,
+) -> list[str]:
+    """Return sorted distinct source values for events in a fragment's bar range.
+
+    Mirrors the filtering logic of :meth:`FragmentService._slice_harmony_events`
+    but collects ``source`` values rather than full event dicts.  Used to
+    populate ``harmony_sources`` on list and detail read responses (ADR-009).
+
+    Args:
+        events: The full ``movement_analysis.events`` array for a movement.
+        bar_start: Inclusive lower bound (notated bar number).
+        bar_end: Inclusive upper bound (notated bar number).
+        repeat_context: Fragment repeat context string, or ``None``.
+
+    Returns:
+        Sorted list of distinct ``source`` strings found in the range.
+        Empty list when no events fall in range or no events carry a source.
+    """
+    volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(repeat_context or "", None)
+    sources: set[str] = set()
+    for ev in events:
+        mn = ev.get("mn")
+        if mn is None:
+            continue
+        if not (bar_start <= int(mn) <= bar_end):
+            continue
+        if volta_filter is not None and ev.get("volta") != volta_filter:
+            continue
+        src = ev.get("source")
+        if src:
+            sources.add(src)
+    return sorted(sources)
+
 
 def _encode_cursor(mc_start: int, fragment_id: uuid.UUID) -> str:
     """Encode an (mc_start, id) pair as a URL-safe base64 pagination cursor."""
@@ -636,6 +679,16 @@ class FragmentService:
             fragment.repeat_context,
         )
 
+        # Derive licence fields from harmony events and the stored licence string.
+        harmony_sources = sorted(
+            {ev.get("source") for ev in harmony_events if ev.get("source")}
+        )
+        data_licence_url = (
+            _LICENCE_URL_MAP.get(fragment.data_licence)
+            if fragment.data_licence
+            else None
+        )
+
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
         sub_part_responses = [
@@ -653,6 +706,10 @@ class FragmentService:
                 summary=sp.summary,
                 prose_annotation=sp.prose_annotation,
                 data_licence=sp.data_licence,
+                data_licence_url=(
+                    _LICENCE_URL_MAP.get(sp.data_licence) if sp.data_licence else None
+                ),
+                harmony_sources=[],
                 status=sp.status,
                 created_by=sp.created_by,
                 created_at=sp.created_at,
@@ -680,6 +737,8 @@ class FragmentService:
             summary=fragment.summary,
             prose_annotation=fragment.prose_annotation,
             data_licence=fragment.data_licence,
+            data_licence_url=data_licence_url,
+            harmony_sources=harmony_sources,
             status=fragment.status,
             created_by=fragment.created_by,
             created_at=fragment.created_at,
@@ -1198,11 +1257,24 @@ class FragmentService:
             row["movement_id"]: dict(row) for row in ctx_result.mappings().all()
         }
 
+        # Batch movement_analysis events for harmony_sources derivation (ADR-009).
+        analysis_result = await self._db.execute(
+            select(MovementAnalysis.movement_id, MovementAnalysis.events).where(
+                MovementAnalysis.movement_id.in_(movement_ids)
+            )
+        )
+        movement_events: dict[uuid.UUID, list[dict]] = {
+            row.movement_id: row.events or [] for row in analysis_result
+        }
+
         items: list[ConceptBrowseItem] = []
         for f in page:
             ptag = primary_tag_by_frag.get(f.id)
             p_concept_id = ptag.concept_id if ptag else None
             ctx = movement_ctx.get(f.movement_id, {})
+            evs = movement_events.get(f.movement_id, [])
+            h_sources = _sources_in_range(evs, f.bar_start, f.bar_end, f.repeat_context)
+            dl_url = _LICENCE_URL_MAP.get(f.data_licence) if f.data_licence else None
             items.append(
                 ConceptBrowseItem(
                     id=f.id,
@@ -1221,6 +1293,8 @@ class FragmentService:
                         concept_name_map.get(p_concept_id) if p_concept_id else None
                     ),
                     data_licence=f.data_licence,
+                    data_licence_url=dl_url,
+                    harmony_sources=h_sources,
                     preview_url=None,
                     created_by=f.created_by,
                     updated_at=f.updated_at,
