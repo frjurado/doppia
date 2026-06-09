@@ -130,7 +130,10 @@ class _FragmentWriteBase(BaseModel):
 
     Beat constraints follow ADR-005:
     - ``beat_start`` and ``beat_end`` must both be set or both be null.
-    - When set, ``beat_start`` must be strictly less than ``beat_end``.
+    - When set and ``bar_start == bar_end``, ``beat_start`` must be strictly
+      less than ``beat_end``. For cross-bar selections beats are 1-indexed
+      within their respective bar, so the comparison is meaningless and is
+      not enforced.
 
     The measure-level floor/ceil bounds from ADR-005 (floor(beat_start) >=
     bar_start, ceil(beat_end) <= bar_end) are omitted here because the beat
@@ -165,10 +168,13 @@ class _FragmentWriteBase(BaseModel):
             )
         # Both are non-null at this point.
         assert bs is not None and be is not None  # narrow type for mypy
-        if bs >= be:
+        # For cross-bar selections beats are 1-indexed within their respective
+        # bar, so beat_start may numerically exceed beat_end (e.g. beat 3.5 in
+        # bar 2 → beat 2.0 in bar 3). Only enforce ordering within a single bar.
+        if self.bar_start == self.bar_end and bs >= be:
             raise ValueError(
                 f"beat_start ({bs}) must be strictly less than beat_end ({be}) "
-                "(ADR-005)"
+                "within a single bar (ADR-005)"
             )
         return self
 

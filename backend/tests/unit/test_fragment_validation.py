@@ -202,20 +202,58 @@ class TestFragmentWriteModels:
         assert frag.beat_end == pytest.approx(2.5)
 
     def test_beat_start_equal_to_beat_end_rejected(self) -> None:
-        """beat_start == beat_end is rejected: selection would be zero-width (ADR-005)."""
+        """beat_start == beat_end in a single bar is rejected: zero-width (ADR-005)."""
         from models.fragment import FragmentCreate
 
         with pytest.raises(ValidationError) as exc_info:
-            FragmentCreate.model_validate(_min_fragment(beat_start=2.0, beat_end=2.0))
+            FragmentCreate.model_validate(
+                _min_fragment(
+                    bar_start=2,
+                    bar_end=2,
+                    mc_start=2,
+                    mc_end=2,
+                    beat_start=2.0,
+                    beat_end=2.0,
+                )
+            )
         assert any("beat_start" in str(e) for e in exc_info.value.errors())
 
     def test_beat_start_greater_than_beat_end_rejected(self) -> None:
-        """beat_start > beat_end is rejected — reversed selection is invalid (ADR-005)."""
+        """beat_start > beat_end within a single bar is rejected (ADR-005)."""
         from models.fragment import FragmentCreate
 
         with pytest.raises(ValidationError) as exc_info:
-            FragmentCreate.model_validate(_min_fragment(beat_start=3.0, beat_end=1.0))
+            FragmentCreate.model_validate(
+                _min_fragment(
+                    bar_start=2,
+                    bar_end=2,
+                    mc_start=2,
+                    mc_end=2,
+                    beat_start=3.0,
+                    beat_end=1.0,
+                )
+            )
         assert any("beat_start" in str(e) for e in exc_info.value.errors())
+
+    def test_cross_bar_beat_inverted_numerically_passes(self) -> None:
+        """Cross-bar: beat_start > beat_end numerically is valid (ADR-005).
+
+        e.g. beat 3.5 of bar 2 → beat 2.0 of bar 3 is a legitimate fragment.
+        """
+        from models.fragment import FragmentCreate
+
+        frag = FragmentCreate.model_validate(
+            _min_fragment(
+                bar_start=2,
+                bar_end=3,
+                mc_start=2,
+                mc_end=3,
+                beat_start=3.5,
+                beat_end=2.0,
+            )
+        )
+        assert frag.beat_start == pytest.approx(3.5)
+        assert frag.beat_end == pytest.approx(2.0)
 
     def test_beat_start_set_beat_end_null_rejected(self) -> None:
         """beat_start set with beat_end null is rejected: both or neither (ADR-005)."""
@@ -239,16 +277,16 @@ class TestFragmentWriteModels:
         assert frag.beat_end is None
 
     def test_sub_part_inherits_beat_constraint(self) -> None:
-        """beat_start >= beat_end is also rejected on sub-parts."""
+        """beat_start >= beat_end within a single bar is also rejected on sub-parts."""
         from models.fragment import FragmentCreate
 
         sub_part = {
             "bar_start": 2,
-            "bar_end": 3,
+            "bar_end": 2,
             "mc_start": 2,
-            "mc_end": 3,
+            "mc_end": 2,
             "beat_start": 4.0,
-            "beat_end": 1.0,  # reversed — invalid
+            "beat_end": 1.0,  # reversed within same bar — invalid
             "summary": _min_summary(),
             "concept_tags": [_min_tag()],
         }

@@ -60,9 +60,15 @@ This representation is resolution-independent: the server does not need to know 
 **Constraint:** `beat_start` and `beat_end` must satisfy:
 - `floor(beat_start) >= bar_start`
 - `ceil(beat_end) <= bar_end`
-- `beat_start < beat_end`
+- `beat_start < beat_end` **when `bar_start == bar_end`** (same-bar selection only)
 
-These constraints are enforced at the Pydantic validation layer before any database write.
+The ordering constraint does not apply to cross-bar selections: `beat_start` is
+1-indexed within `bar_start` and `beat_end` is 1-indexed within `bar_end`, so
+comparing them numerically across bars is meaningless. A selection from beat 3.5
+of bar 2 to beat 2.0 of bar 3 is valid even though `3.5 > 2.0`.
+
+The floor/ceil bounds and the ordering constraint for same-bar selections are
+enforced at the Pydantic validation layer before any database write.
 
 **Nullable convention:** `beat_start` and `beat_end` may remain null if the annotator makes a measure-level selection only. This is valid for concepts whose granularity does not warrant sub-measure precision (e.g. a formal section spanning many bars). Null means "the full extent of the measure range"; it does not mean "data missing."
 
