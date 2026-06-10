@@ -115,8 +115,7 @@
 /* Score + bracket overlay wrapper */
 .scoreContent {
   position: relative;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: auto visible;
 }
 
 /* Verovio SVG container */
@@ -126,6 +125,7 @@
 
 .svgPage svg {
   display: block;
+
   /* Natural width — Verovio sizes to content with breaks:"none" */
   max-width: none;
 }
@@ -144,6 +144,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+
   /* Must not clip brackets drawn below the SVG bottom edge */
   overflow: visible;
 }

@@ -23,6 +23,10 @@
   flex-shrink: 0;
 }
 
+.subtypesToggle span {
+  color: var(--color-on-surface-variant);
+}
+
 .pageNavLink:hover span {
   color: var(--color-on-surface) !important;
 }
@@ -217,10 +221,6 @@
   gap: var(--spacing-2);
   cursor: pointer;
   flex-shrink: 0;
-}
-
-.subtypesToggle span {
-  color: var(--color-on-surface-variant);
 }
 
 .listScroll {
