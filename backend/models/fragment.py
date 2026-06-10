@@ -288,6 +288,16 @@ class FragmentDetailResponse(BaseModel):
     ``data_licence_url`` is the canonical URL for ``data_licence`` (ADR-009).
     ``harmony_sources`` is the sorted set of distinct ``source`` values from
     in-range ``movement_analysis`` events, for transparency (ADR-009).
+
+    Movement context fields (``composer_name``, ``work_title``,
+    ``work_catalogue_number``, ``movement_number``, ``movement_title``) and
+    ``mei_url`` / ``preview_url`` are populated on top-level fragments and left
+    ``None`` on sub-parts (which are embedded inside their parent's response and
+    share the parent's movement context).
+
+    ``mei_url`` is resolved to a signed URL at request time per ADR-002 — never
+    stored.  ``preview_url`` is null until the ``render_fragment_preview`` task
+    completes (ADR-008).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -314,6 +324,15 @@ class FragmentDetailResponse(BaseModel):
     concept_tags: list[ConceptTagDetail]
     harmony_events: list[dict]
     sub_parts: list["FragmentDetailResponse"]
+    # Movement context — populated on top-level fragments; None on sub-parts.
+    composer_name: str | None = None
+    work_title: str | None = None
+    work_catalogue_number: str | None = None
+    movement_number: int | None = None
+    movement_title: str | None = None
+    # Signed URLs resolved at request time (ADR-002); never stored.
+    mei_url: str | None = None
+    preview_url: str | None = None
 
 
 class FragmentListItem(BaseModel):

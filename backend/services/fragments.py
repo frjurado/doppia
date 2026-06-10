@@ -615,7 +615,10 @@ class FragmentService:
         Returns:
             :class:`~models.fragment.FragmentDetailResponse` with concept tags
             hydrated from Neo4j, harmony events sliced from
-            ``movement_analysis``, and sub-parts nested one level deep.
+            ``movement_analysis``, sub-parts nested one level deep, movement
+            context (composer / work / movement label), a signed ``mei_url``
+            for Verovio and MIDI rendering, and a ``preview_url`` (null until
+            the preview task completes).
 
         Raises:
             FragmentNotFoundError: Fragment does not exist or is a draft not
@@ -711,6 +714,33 @@ class FragmentService:
             else None
         )
 
+        # Resolve movement context (label) and signed URLs for MEI and preview.
+        # Movement context is needed by the isolated detail view to show composer/
+        # work/movement labels and to fetch the MEI for Verovio + MIDI rendering.
+        ctx_result = await self._db.execute(
+            select(
+                Movement.movement_number,
+                Movement.title.label("movement_title"),
+                Movement.mei_object_key,
+                Work.title.label("work_title"),
+                Work.catalogue_number.label("work_catalogue_number"),
+                Composer.name.label("composer_name"),
+            )
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .join(Composer, Corpus.composer_id == Composer.id)
+            .where(Movement.id == fragment.movement_id)
+        )
+        ctx = dict(ctx_result.mappings().one_or_none() or {})
+
+        mei_url: str | None = None
+        if self._storage is not None and ctx.get("mei_object_key"):
+            mei_url = await self._storage.signed_url(ctx["mei_object_key"])
+
+        preview_url: str | None = None
+        if self._storage is not None and fragment.preview_object_key:
+            preview_url = await self._storage.signed_url(fragment.preview_object_key)
+
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
         sub_part_responses = [
@@ -768,6 +798,13 @@ class FragmentService:
             concept_tags=[_hydrate_tag(t) for t in parent_tags],
             harmony_events=harmony_events,
             sub_parts=sub_part_responses,
+            composer_name=ctx.get("composer_name"),
+            work_title=ctx.get("work_title"),
+            work_catalogue_number=ctx.get("work_catalogue_number"),
+            movement_number=ctx.get("movement_number"),
+            movement_title=ctx.get("movement_title"),
+            mei_url=mei_url,
+            preview_url=preview_url,
         )
 
     async def list_for_movement(
