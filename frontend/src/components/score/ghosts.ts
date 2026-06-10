@@ -1,7 +1,8 @@
 // Side-effect import: includes ghost highlight CSS (.ghost.light / .ghost.dark)
-// in the Vite bundle. The ghost elements are created imperatively (not via JSX)
-// so the CSS file would otherwise never be bundled.
-import './ghosts.module.css';
+// in the Vite bundle. Plain CSS (not a CSS Module) because ghost elements are
+// created imperatively outside React's component tree — same pattern as
+// .is-playing in base.css.
+import './ghosts.css';
 
 /**
  * Ghost layer — invisible interactive overlay providing measure, beat, and

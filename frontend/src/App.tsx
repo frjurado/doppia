@@ -3,6 +3,8 @@ import RequireAuth from './components/auth/RequireAuth';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import CorpusBrowser from './routes/CorpusBrowser';
+import FragmentBrowser from './routes/FragmentBrowser';
+import FragmentDetail from './routes/FragmentDetail';
 import ReviewQueue from './routes/ReviewQueue';
 import ScoreViewer from './routes/ScoreViewer';
 
@@ -36,6 +38,26 @@ export default function App() {
             <RequireAuth>
               <ErrorBoundary>
                 <ReviewQueue />
+              </ErrorBoundary>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/concepts"
+          element={
+            <RequireAuth>
+              <ErrorBoundary>
+                <FragmentBrowser />
+              </ErrorBoundary>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/fragments/:fragmentId"
+          element={
+            <RequireAuth>
+              <ErrorBoundary>
+                <FragmentDetail />
               </ErrorBoundary>
             </RequireAuth>
           }

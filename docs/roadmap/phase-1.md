@@ -622,6 +622,10 @@ GET /api/v1/fragments?concept_id={id}&include_subtypes=true&status=approved
 
 With `include_subtypes=true`, the query traverses the `IS_SUBTYPE_OF` tree downward from the given concept node and returns fragments tagged with any concept in that subtree. This requires a join across PostgreSQL (`fragment_concept_tag`) and Neo4j (subtree traversal); implement it as: (1) query Neo4j for all subtype ids of the given concept, (2) query PostgreSQL for fragments whose `concept_id` is in that set. Cache the subtree results in Redis — Redis is available from day one (it is in the Docker Compose stack as the Celery broker), so this cache can be implemented in Phase 1.
 
+A fragment surfaces under **any** of its concept tags, not only its primary (`is_primary`) tag: the join matches on `fragment_concept_tag.concept_id` regardless of `is_primary`, so a fragment cross-referenced to a concept appears when browsing that concept as well as when browsing its driving concept. Result counts therefore reflect every relevant tag, which is the intended browse behaviour for discovery (see `component-8-fragment-browsing.md` Step 2).
+
+**Phase 1 scope — annotator-facing only.** All Component 8 read endpoints are `require_role("editor")`. The default `status=approved` covers the canonical "browse the finished corpus" case; editors may filter by other statuses to browse their own in-progress work, and the filter is enforced at the service layer and cannot be bypassed by a direct API call. The unauthenticated `approved`-only browse endpoint — and the ADR-009 ABC-corpus exclusion enforcement — are deferred to Phase 2. The per-fragment `data_licence`/`harmony_sources` serialiser (ADR-009) is built and wired into both the list and detail responses in Component 8 so the derivation lives in a single place ready for that public path; it derives the effective licence from in-range `movement_analysis` event `source` values at query time, with no schema change required.
+
 ### Fragment List Previews
 
 Each fragment in the list view should show a small Verovio-rendered preview of the fragment's bars. Generate this as a static SVG at fragment submission time (Celery task, server-side Verovio Python bindings), stored in object storage. Return the preview URL from the list endpoint. Do not render fragments client-side in the list view — it would be too slow for large result sets.
@@ -630,7 +634,7 @@ Each fragment in the list view should show a small Verovio-rendered preview of t
 
 The individual fragment detail view is the same Verovio rendering + MIDI playback infrastructure used in the score viewer, constrained to the fragment's `bar_start`/`bar_end` range (whole containing measures as the default). Display the full concept tag, property values, music21 summary, and prose annotation. If the fragment has sub-parts, display them as nested brackets within the rendered fragment.
 
-**Forward-compatibility — rendering context:** the fragment detail API should accept an optional `context_bars` integer parameter (default: 0) specifying how many additional bars to render on each side of the fragment's range. Phase 1 leaves this at 0 (containing measures only), but future contexts — blog embeds, MCQ exercises, or showing the parent container fragment for orientation — will need configurable context without a data model change. Design the API contract to accept the parameter now; the implementation ignores any non-zero value until the consuming feature is built.
+**Forward-compatibility — rendering context (ADR-024):** the fragment detail API accepts an optional structured `context` parameter carrying a `mode` discriminator, *not* a bare `context_bars` integer. A single symmetric integer cannot express the contexts that are actually wanted — asymmetric framing (more bars before than after), or fragment-relative context (the enclosing container fragment, or the span since the previous same-domain fragment) — so the contract is published as a discriminated set of modes: `none` (default — containing measures only), `bars` (independent `before`/`after` counts), `enclosing_fragment` (render the parent container fragment), and `previous_same_domain` (render from after the previous same-domain fragment up to this one). Phase 1 implements only `mode=none`; the other modes are accepted and validated but otherwise ignored until their consuming feature (blog embeds, MCQ exercises, orientation views) is built. The contract maps onto existing columns (`parent_fragment_id`, `mc_start`) and the concept domain in the graph, so no data-model change is required to publish it now or to implement the modes later. See ADR-024 for the full rationale and the mode table.
 
 ---
 
@@ -709,6 +713,7 @@ All architectural decisions have been recorded as ADRs in `docs/adr/`. The table
 | DCML licensing constraint | CC BY-SA 4.0 per-fragment `data_licence` field; ABC corpus excluded from public API | ADR-009 |
 | Frontend framework | React 18 + Vite + TypeScript + React Router v6; no SSR | ADR-010 |
 | Multi-level tagging design | See ADR | ADR-011 |
+| Fragment rendering context | Structured `context.mode` contract (not a `context_bars` int); Phase 1 implements `none` only | ADR-024 |
 
 ---
 

@@ -17,10 +17,14 @@ See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from errors import (
     FragmentNotFoundError,
@@ -28,9 +32,15 @@ from errors import (
     HarmonyNotReviewedError,
     SelfReviewForbiddenError,
 )
-from graph.queries.concepts import check_concepts_have_harmony_gate, get_concepts_by_ids
+from graph.queries.concepts import (
+    check_concepts_have_harmony_gate,
+    get_concepts_by_ids,
+    get_subtype_ids_async,
+)
 from models.analysis import MovementAnalysis
 from models.fragment import (
+    ConceptBrowseItem,
+    ConceptBrowseResponse,
     ConceptTagDetail,
     Fragment,
     FragmentConceptTag,
@@ -47,10 +57,14 @@ from models.fragment import (
 )
 from models.music import Composer, Corpus, Movement, Work
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
+from services.cache import get_subtree_cache, set_subtree_cache
 from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
 )
+from services.object_storage import StorageClient
+from services.tasks.render_fragment_preview import render_fragment_preview
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,6 +110,49 @@ _REPEAT_CONTEXT_TO_VOLTA: dict[str, int] = {
     "second_ending": 2,
     "third_ending": 3,
 }
+
+# Maps the data_licence short string to its canonical URL (ADR-009).
+_LICENCE_URL_MAP: dict[str, str] = {
+    "CC BY-SA 4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
+}
+
+
+def _sources_in_range(
+    events: list[dict],
+    bar_start: int,
+    bar_end: int,
+    repeat_context: str | None,
+) -> list[str]:
+    """Return sorted distinct source values for events in a fragment's bar range.
+
+    Mirrors the filtering logic of :meth:`FragmentService._slice_harmony_events`
+    but collects ``source`` values rather than full event dicts.  Used to
+    populate ``harmony_sources`` on list and detail read responses (ADR-009).
+
+    Args:
+        events: The full ``movement_analysis.events`` array for a movement.
+        bar_start: Inclusive lower bound (notated bar number).
+        bar_end: Inclusive upper bound (notated bar number).
+        repeat_context: Fragment repeat context string, or ``None``.
+
+    Returns:
+        Sorted list of distinct ``source`` strings found in the range.
+        Empty list when no events fall in range or no events carry a source.
+    """
+    volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(repeat_context or "", None)
+    sources: set[str] = set()
+    for ev in events:
+        mn = ev.get("mn")
+        if mn is None:
+            continue
+        if not (bar_start <= int(mn) <= bar_end):
+            continue
+        if volta_filter is not None and ev.get("volta") != volta_filter:
+            continue
+        src = ev.get("source")
+        if src:
+            sources.add(src)
+    return sorted(sources)
 
 
 def _encode_cursor(mc_start: int, fragment_id: uuid.UUID) -> str:
@@ -146,9 +203,17 @@ class FragmentService:
         driver: Application-scoped async Neo4j driver (from ``get_neo4j``).
     """
 
-    def __init__(self, db: AsyncSession, driver: AsyncDriver) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        driver: AsyncDriver,
+        redis: Redis | None = None,
+        storage: StorageClient | None = None,
+    ) -> None:
         self._db = db
         self._driver = driver
+        self._redis = redis
+        self._storage = storage
 
     # ------------------------------------------------------------------
     # Public interface — write path
@@ -208,6 +273,7 @@ class FragmentService:
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
         except IntegrityError as exc:
+            logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
                 "Fragment references a missing related record (user or movement).",
                 detail={"integrity_error": str(exc.orig)},
@@ -298,6 +364,7 @@ class FragmentService:
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
         except IntegrityError as exc:
+            logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
                 "Fragment references a missing related record (user or movement).",
                 detail={"integrity_error": str(exc.orig)},
@@ -351,6 +418,7 @@ class FragmentService:
         validate_containment_for_update(payload)
         await self._check_all_concepts_for_update(payload)
 
+        _should_regenerate_preview = False
         try:
             async with self._db.begin():
                 # Load the fragment at any status; revision logic handles transitions.
@@ -405,6 +473,14 @@ class FragmentService:
                     self._db.add(fragment)
                 else:
                     # Analytic edit: full field replacement with revision semantics.
+                    # Check for measure-range change before overwriting coordinates
+                    # (ADR-008: a range edit on submitted/approved invalidates the preview).
+                    if previous_status in ("submitted", "approved") and (
+                        fragment.mc_start != payload.mc_start
+                        or fragment.mc_end != payload.mc_end
+                    ):
+                        _should_regenerate_preview = True
+
                     data_licence = await self._derive_data_licence(
                         fragment.movement_id, payload.bar_start, payload.bar_end
                     )
@@ -460,10 +536,16 @@ class FragmentService:
                         self._add_concept_tags(child.id, sp.concept_tags)
 
         except IntegrityError as exc:
+            logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
                 "Fragment references a missing related record (user or movement).",
                 detail={"integrity_error": str(exc.orig)},
             ) from exc
+
+        # Enqueue after commit so the task reads the updated mc_start/mc_end
+        # (ADR-008: bar-range edit on submitted/approved re-triggers preview generation).
+        if _should_regenerate_preview:
+            render_fragment_preview.delay(str(fragment_id))
 
         return FragmentUpdateResult(fragment=fragment, previous_status=previous_status)
 
@@ -502,6 +584,9 @@ class FragmentService:
             fragment.updated_at = datetime.now(tz=timezone.utc)
             self._db.add(fragment)
 
+        # Enqueue after the transaction commits so the task reads committed state
+        # (ADR-008: preview is generated at the draft → submitted transition).
+        render_fragment_preview.delay(str(fragment_id))
         return fragment
 
     # ------------------------------------------------------------------
@@ -530,7 +615,10 @@ class FragmentService:
         Returns:
             :class:`~models.fragment.FragmentDetailResponse` with concept tags
             hydrated from Neo4j, harmony events sliced from
-            ``movement_analysis``, and sub-parts nested one level deep.
+            ``movement_analysis``, sub-parts nested one level deep, movement
+            context (composer / work / movement label), a signed ``mei_url``
+            for Verovio and MIDI rendering, and a ``preview_url`` (null until
+            the preview task completes).
 
         Raises:
             FragmentNotFoundError: Fragment does not exist or is a draft not
@@ -616,6 +704,43 @@ class FragmentService:
             fragment.repeat_context,
         )
 
+        # Derive licence fields from harmony events and the stored licence string.
+        harmony_sources = sorted(
+            {ev.get("source") for ev in harmony_events if ev.get("source")}
+        )
+        data_licence_url = (
+            _LICENCE_URL_MAP.get(fragment.data_licence)
+            if fragment.data_licence
+            else None
+        )
+
+        # Resolve movement context (label) and signed URLs for MEI and preview.
+        # Movement context is needed by the isolated detail view to show composer/
+        # work/movement labels and to fetch the MEI for Verovio + MIDI rendering.
+        ctx_result = await self._db.execute(
+            select(
+                Movement.movement_number,
+                Movement.title.label("movement_title"),
+                Movement.mei_object_key,
+                Work.title.label("work_title"),
+                Work.catalogue_number.label("work_catalogue_number"),
+                Composer.name.label("composer_name"),
+            )
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .join(Composer, Corpus.composer_id == Composer.id)
+            .where(Movement.id == fragment.movement_id)
+        )
+        ctx = dict(ctx_result.mappings().one_or_none() or {})
+
+        mei_url: str | None = None
+        if self._storage is not None and ctx.get("mei_object_key"):
+            mei_url = await self._storage.signed_url(ctx["mei_object_key"])
+
+        preview_url: str | None = None
+        if self._storage is not None and fragment.preview_object_key:
+            preview_url = await self._storage.signed_url(fragment.preview_object_key)
+
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
         sub_part_responses = [
@@ -633,6 +758,10 @@ class FragmentService:
                 summary=sp.summary,
                 prose_annotation=sp.prose_annotation,
                 data_licence=sp.data_licence,
+                data_licence_url=(
+                    _LICENCE_URL_MAP.get(sp.data_licence) if sp.data_licence else None
+                ),
+                harmony_sources=[],
                 status=sp.status,
                 created_by=sp.created_by,
                 created_at=sp.created_at,
@@ -660,6 +789,8 @@ class FragmentService:
             summary=fragment.summary,
             prose_annotation=fragment.prose_annotation,
             data_licence=fragment.data_licence,
+            data_licence_url=data_licence_url,
+            harmony_sources=harmony_sources,
             status=fragment.status,
             created_by=fragment.created_by,
             created_at=fragment.created_at,
@@ -667,6 +798,13 @@ class FragmentService:
             concept_tags=[_hydrate_tag(t) for t in parent_tags],
             harmony_events=harmony_events,
             sub_parts=sub_part_responses,
+            composer_name=ctx.get("composer_name"),
+            work_title=ctx.get("work_title"),
+            work_catalogue_number=ctx.get("work_catalogue_number"),
+            movement_number=ctx.get("movement_number"),
+            movement_title=ctx.get("movement_title"),
+            mei_url=mei_url,
+            preview_url=preview_url,
         )
 
     async def list_for_movement(
@@ -1003,6 +1141,254 @@ class FragmentService:
             _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
         )
         return ReviewQueueResponse(items=items, next_cursor=next_cursor)
+
+    async def list_by_concept(
+        self,
+        concept_id: str,
+        include_subtypes: bool,
+        status_filter: str,
+        caller_id: str,
+        caller_role: str,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> ConceptBrowseResponse:
+        """Return a cursor-paginated browse list of fragments for a concept.
+
+        The two-step cross-database join (ADR pattern):
+        1. Resolve the concept id set from Neo4j (downward IS_SUBTYPE_OF subtree
+           when ``include_subtypes=True``; singleton set otherwise).
+        2. Query PostgreSQL for top-level fragments whose
+           ``fragment_concept_tag.concept_id`` is in that set.
+
+        A fragment matches on **any** of its tags (not only ``is_primary``), so
+        a cross-referenced fragment surfaces under every concept it is tagged
+        with.  Fragments with multiple matching tags appear exactly once (the
+        subquery uses DISTINCT on fragment_id).
+
+        The subtree expansion is cached in Redis keyed by ``concept_id`` when
+        ``include_subtypes=True``; the singleton case is never cached because it
+        is free.  The cache is invalidated by ``scripts/seed.py`` after every
+        re-seed.
+
+        Status visibility rules (service layer, not bypassable via the route):
+        - Admins see all fragments matching the requested ``status_filter``.
+        - Editors see their own drafts plus all submitted/approved/rejected, then
+          additionally filtered to the requested ``status_filter``.
+
+        Results are ordered ``(updated_at DESC, id ASC)`` so the most recently
+        edited fragment appears first across all movements in the result set.
+
+        Args:
+            concept_id: Neo4j Concept id to browse (the root of the subtree).
+            include_subtypes: When True, include all non-stub subtypes of the
+                concept; when False, return only exact-concept matches.
+            status_filter: Limit results to this fragment status.  One of
+                ``draft``, ``submitted``, ``approved``, ``rejected``.  Defaults
+                to ``approved`` when an invalid value is supplied.
+            caller_id: String UUID of the authenticated caller.
+            caller_role: Role of the authenticated caller.
+            cursor: Opaque time-ordered pagination cursor from a prior response.
+            page_size: Maximum items per page (1–200).
+
+        Returns:
+            :class:`~models.fragment.ConceptBrowseResponse` with items and an
+            optional ``next_cursor`` for the following page.
+
+        Raises:
+            ValueError: Cursor string is malformed.
+        """
+        concept_ids = await self._resolve_subtree(concept_id, include_subtypes)
+        if not concept_ids:
+            return ConceptBrowseResponse(
+                items=[],
+                next_cursor=None,
+                concept_id=concept_id,
+                include_subtypes=include_subtypes,
+            )
+
+        # Subquery: distinct fragment_ids that carry any matching concept tag.
+        matching_ids_sq = (
+            select(FragmentConceptTag.fragment_id)
+            .where(FragmentConceptTag.concept_id.in_(concept_ids))
+            .distinct()
+            .subquery()
+        )
+
+        stmt = (
+            select(Fragment)
+            .where(
+                Fragment.parent_fragment_id.is_(None),
+                Fragment.id.in_(select(matching_ids_sq.c.fragment_id)),
+            )
+            .order_by(Fragment.updated_at.desc(), Fragment.id.asc())
+        )
+
+        # Status visibility — enforced at the service layer.
+        valid_statuses = frozenset({"draft", "submitted", "approved", "rejected"})
+        effective_status = (
+            status_filter if status_filter in valid_statuses else "approved"
+        )
+
+        if caller_role != "admin":
+            caller_uuid = uuid.UUID(caller_id)
+            # Base visibility: own drafts + all non-draft.
+            stmt = stmt.where(
+                or_(
+                    Fragment.status.in_(["submitted", "approved", "rejected"]),
+                    and_(
+                        Fragment.status == "draft",
+                        Fragment.created_by == caller_uuid,
+                    ),
+                )
+            )
+
+        # Further scope to the requested status.
+        stmt = stmt.where(Fragment.status == effective_status)
+
+        # Time-ordered cursor: filter to rows strictly older than the cursor.
+        if cursor is not None:
+            cursor_ts, cursor_id = _decode_time_cursor(cursor)
+            stmt = stmt.where(
+                or_(
+                    Fragment.updated_at < cursor_ts,
+                    and_(
+                        Fragment.updated_at == cursor_ts,
+                        Fragment.id > cursor_id,
+                    ),
+                )
+            )
+
+        result = await self._db.execute(stmt.limit(page_size + 1))
+        rows = list(result.scalars().all())
+
+        has_next = len(rows) > page_size
+        page = rows[:page_size]
+
+        if not page:
+            return ConceptBrowseResponse(
+                items=[],
+                next_cursor=None,
+                concept_id=concept_id,
+                include_subtypes=include_subtypes,
+            )
+
+        page_ids = [f.id for f in page]
+        movement_ids = list({f.movement_id for f in page})
+
+        # Load primary concept tags for the page fragments.
+        tags_result = await self._db.execute(
+            select(FragmentConceptTag).where(
+                FragmentConceptTag.fragment_id.in_(page_ids),
+                FragmentConceptTag.is_primary.is_(True),
+            )
+        )
+        primary_tag_by_frag: dict[uuid.UUID, FragmentConceptTag] = {}
+        for tag in tags_result.scalars().all():
+            primary_tag_by_frag[tag.fragment_id] = tag
+
+        # Batch Neo4j concept hydration for primary concept IDs.
+        primary_concept_ids = list({t.concept_id for t in primary_tag_by_frag.values()})
+        concept_name_map: dict[str, str] = {}
+        concept_alias_map: dict[str, str | None] = {}
+        if primary_concept_ids:
+            async with self._driver.session() as neo_session:
+                for c in await get_concepts_by_ids(neo_session, primary_concept_ids):
+                    aliases: list[str] = c.get("aliases", [])
+                    concept_name_map[c["id"]] = c.get("name", c["id"])
+                    concept_alias_map[c["id"]] = aliases[0] if aliases else None
+
+        # Batch movement context.
+        ctx_result = await self._db.execute(
+            select(
+                Movement.id.label("movement_id"),
+                Movement.movement_number,
+                Movement.title.label("movement_title"),
+                Work.title.label("work_title"),
+                Work.catalogue_number.label("work_catalogue_number"),
+                Composer.name.label("composer_name"),
+            )
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .join(Composer, Corpus.composer_id == Composer.id)
+            .where(Movement.id.in_(movement_ids))
+        )
+        movement_ctx: dict[uuid.UUID, dict] = {
+            row["movement_id"]: dict(row) for row in ctx_result.mappings().all()
+        }
+
+        # Batch movement_analysis events for harmony_sources derivation (ADR-009).
+        analysis_result = await self._db.execute(
+            select(MovementAnalysis.movement_id, MovementAnalysis.events).where(
+                MovementAnalysis.movement_id.in_(movement_ids)
+            )
+        )
+        movement_events: dict[uuid.UUID, list[dict]] = {
+            row.movement_id: row.events or [] for row in analysis_result
+        }
+
+        # Resolve preview signed URLs concurrently for all fragments that have
+        # a stored preview_object_key (ADR-008: null until Celery task completes).
+        async def _resolve_preview(
+            frag_id: uuid.UUID, key: str | None
+        ) -> tuple[uuid.UUID, str | None]:
+            if self._storage is None or key is None:
+                return frag_id, None
+            return frag_id, await self._storage.signed_url(key)
+
+        preview_url_map: dict[uuid.UUID, str | None] = dict(
+            await asyncio.gather(
+                *[_resolve_preview(f.id, f.preview_object_key) for f in page]
+            )
+        )
+
+        items: list[ConceptBrowseItem] = []
+        for f in page:
+            ptag = primary_tag_by_frag.get(f.id)
+            p_concept_id = ptag.concept_id if ptag else None
+            ctx = movement_ctx.get(f.movement_id, {})
+            evs = movement_events.get(f.movement_id, [])
+            h_sources = _sources_in_range(evs, f.bar_start, f.bar_end, f.repeat_context)
+            dl_url = _LICENCE_URL_MAP.get(f.data_licence) if f.data_licence else None
+            items.append(
+                ConceptBrowseItem(
+                    id=f.id,
+                    movement_id=f.movement_id,
+                    bar_start=f.bar_start,
+                    bar_end=f.bar_end,
+                    beat_start=f.beat_start,
+                    beat_end=f.beat_end,
+                    repeat_context=f.repeat_context,
+                    status=f.status,
+                    primary_concept_id=p_concept_id,
+                    primary_concept_alias=(
+                        concept_alias_map.get(p_concept_id) if p_concept_id else None
+                    ),
+                    primary_concept_name=(
+                        concept_name_map.get(p_concept_id) if p_concept_id else None
+                    ),
+                    data_licence=f.data_licence,
+                    data_licence_url=dl_url,
+                    harmony_sources=h_sources,
+                    preview_url=preview_url_map.get(f.id),
+                    created_by=f.created_by,
+                    updated_at=f.updated_at,
+                    composer_name=ctx.get("composer_name", ""),
+                    work_title=ctx.get("work_title", ""),
+                    work_catalogue_number=ctx.get("work_catalogue_number"),
+                    movement_number=ctx.get("movement_number", 0),
+                    movement_title=ctx.get("movement_title"),
+                )
+            )
+
+        next_cursor = (
+            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+        )
+        return ConceptBrowseResponse(
+            items=items,
+            next_cursor=next_cursor,
+            concept_id=concept_id,
+            include_subtypes=include_subtypes,
+        )
 
     # ------------------------------------------------------------------
     # Public interface — delete
@@ -1648,6 +2034,47 @@ class FragmentService:
                 return True
 
         return False
+
+    # ------------------------------------------------------------------
+    # Internal helpers — subtree resolution (Component 8 Step 2)
+    # ------------------------------------------------------------------
+
+    async def _resolve_subtree(
+        self,
+        concept_id: str,
+        include_subtypes: bool,
+    ) -> set[str]:
+        """Resolve the set of concept ids for a browse query.
+
+        When ``include_subtypes=False`` returns the singleton ``{concept_id}``
+        immediately (no Neo4j or Redis access needed).
+
+        When ``include_subtypes=True`` checks the Redis subtree cache first; on
+        a miss, runs the downward IS_SUBTYPE_OF traversal via Neo4j and
+        populates the cache for subsequent requests.
+
+        Args:
+            concept_id: The root concept to resolve.
+            include_subtypes: When False, return only the root.
+
+        Returns:
+            Set of concept ids to match against ``fragment_concept_tag``.
+        """
+        if not include_subtypes:
+            return {concept_id}
+
+        if self._redis is not None:
+            cached = await get_subtree_cache(self._redis, concept_id)
+            if cached is not None:
+                return cached
+
+        async with self._driver.session() as neo_session:
+            ids = await get_subtype_ids_async(neo_session, concept_id)
+
+        if self._redis is not None:
+            await set_subtree_cache(self._redis, concept_id, ids)
+
+        return ids
 
     # ------------------------------------------------------------------
     # Internal helpers — concept validation

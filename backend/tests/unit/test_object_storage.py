@@ -12,6 +12,7 @@ Test structure:
     TestSignedUrl           — default TTL (CLIENT_FACING_URL_TTL), custom TTL
     TestGetMei              — success path and ClientError propagation
     TestIncipitKey          — pure function, no mocking required
+    TestFragmentPreviewKey  — per-fragment key, distinct from incipit, matches ADR-008
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from services.object_storage import (
     BACKEND_PROCESSING_TTL,
     CLIENT_FACING_URL_TTL,
     StorageClient,
+    fragment_preview_key,
     incipit_key,
     make_storage_client,
 )
@@ -329,3 +331,47 @@ class TestIncipitKey:
         assert "k331" in key
         assert "movement-1" in key
         assert key.endswith("/incipit.svg")
+
+
+# ---------------------------------------------------------------------------
+# TestFragmentPreviewKey
+# ---------------------------------------------------------------------------
+
+
+class TestFragmentPreviewKey:
+    def test_matches_adr008_pattern(self) -> None:
+        """fragment_preview_key returns the ADR-008 per-fragment path."""
+        key = fragment_preview_key(
+            "mozart", "piano-sonatas", "k331", "movement-1", "frag-uuid-1"
+        )
+        assert key == "mozart/piano-sonatas/k331/movement-1/fragments/frag-uuid-1.svg"
+
+    def test_two_fragments_same_movement_produce_distinct_keys(self) -> None:
+        """Two fragments on the same movement get different object keys."""
+        key_a = fragment_preview_key(
+            "mozart", "piano-sonatas", "k331", "movement-1", "uuid-aaa"
+        )
+        key_b = fragment_preview_key(
+            "mozart", "piano-sonatas", "k331", "movement-1", "uuid-bbb"
+        )
+        assert key_a != key_b
+
+    def test_incipit_key_is_unchanged(self) -> None:
+        """Adding fragment_preview_key does not affect incipit_key output."""
+        incipit = incipit_key("mozart", "piano-sonatas", "k331", "movement-1")
+        assert incipit == "mozart/piano-sonatas/k331/movement-1/incipit.svg"
+
+    def test_preview_key_differs_from_incipit_key(self) -> None:
+        """A fragment preview key and the movement incipit key never collide."""
+        preview = fragment_preview_key(
+            "mozart", "piano-sonatas", "k331", "movement-1", "some-uuid"
+        )
+        incipit = incipit_key("mozart", "piano-sonatas", "k331", "movement-1")
+        assert preview != incipit
+
+    def test_fragment_id_appears_in_key(self) -> None:
+        """The fragment UUID is embedded in the returned key."""
+        fid = "deadbeef-0000-0000-0000-000000000001"
+        key = fragment_preview_key("bach", "wtc", "bwv846", "prelude", fid)
+        assert fid in key
+        assert key.endswith(f"/fragments/{fid}.svg")

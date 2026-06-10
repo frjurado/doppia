@@ -1,21 +1,30 @@
-"""Concept API routes: search and schema-tree lookup.
+"""Concept API routes: search, schema-tree lookup, and concept-tree navigation.
 
 Routes:
     GET /api/v1/concepts/search              — full-text search with cursor pagination
+    GET /api/v1/concepts/tree                — IS_SUBTYPE_OF subtree for tag browser
     GET /api/v1/concepts/{concept_id}/schemas — schema tree for a taggable concept
 
 All routes require the ``editor`` role.
 
-See docs/roadmap/component-5-tagging-tool.md § Steps 3–4.
+See docs/roadmap/component-5-tagging-tool.md § Steps 3–4 and
+docs/roadmap/component-8-fragment-browsing.md § Step 7.
 """
 
 from __future__ import annotations
 
-from api.dependencies import get_neo4j, require_role
+from api.dependencies import get_neo4j, get_redis, require_role
 from fastapi import APIRouter, Depends, Path, Query
-from models.concepts import ConceptSchemaTreeResponse, ConceptSearchResponse
+from models.base import get_db
+from models.concepts import (
+    ConceptSchemaTreeResponse,
+    ConceptSearchResponse,
+    ConceptTreeResponse,
+)
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
 from services.concepts import ConceptService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/concepts", tags=["Concepts"])
 
@@ -33,6 +42,27 @@ def get_concept_service(driver: AsyncDriver = Depends(get_neo4j)) -> ConceptServ
         A :class:`~services.concepts.ConceptService` bound to the driver.
     """
     return ConceptService(driver)
+
+
+def get_concept_tree_service(
+    driver: AsyncDriver = Depends(get_neo4j),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis | None = Depends(get_redis),
+) -> ConceptService:
+    """FastAPI dependency for the tree endpoint — includes db and Redis.
+
+    The tree endpoint needs the SQLAlchemy session for fragment counts and
+    the Redis client for response caching.
+
+    Args:
+        driver: Async Neo4j driver.
+        db: Async SQLAlchemy session.
+        redis: Async Redis client (may be ``None`` if Redis is unavailable).
+
+    Returns:
+        A :class:`~services.concepts.ConceptService` with all deps wired.
+    """
+    return ConceptService(driver, db=db, redis=redis)
 
 
 @router.get(
@@ -75,6 +105,50 @@ async def search_concepts(
         an optional ``next_cursor``.
     """
     return await service.search(q=q, domain=domain, cursor=cursor)
+
+
+@router.get(
+    "/tree",
+    response_model=ConceptTreeResponse,
+    dependencies=[require_role("editor")],
+    summary="Get the IS_SUBTYPE_OF subtree for a concept",
+    response_description=(
+        "Flat list of all non-stub concepts in the subtree rooted at "
+        "``root``, with parent_id linkage and approved fragment counts. "
+        "Cached in Redis with a 1-hour TTL; invalidated on re-seed."
+    ),
+)
+async def get_concept_tree(
+    root: str = Query(
+        ...,
+        description=(
+            "Root concept id (e.g. 'Cadence'). "
+            "All non-stub IS_SUBTYPE_OF descendants are included."
+        ),
+    ),
+    service: ConceptService = Depends(get_concept_tree_service),
+) -> ConceptTreeResponse:
+    """Return the IS_SUBTYPE_OF subtree rooted at *root* for the tag browser.
+
+    The response is a flat list of concept nodes, each carrying its id, name,
+    aliases, hierarchy path, parent_id within the subtree, and the count of
+    ``approved`` fragments tagged with that concept.  The frontend assembles
+    the nested tree UI by keying on ``parent_id``.
+
+    Responses are cached in Redis (invalidated when the seed script runs).
+    Fragment counts reflect the current database state on every cache miss;
+    counts in a cached response may be up to 1 hour stale.
+
+    Returns HTTP 404 when ``root`` is unknown or refers to a stub concept.
+
+    Args:
+        root: Immutable concept identifier for the tree root.
+        service: Concept tree service (injected).
+
+    Returns:
+        :class:`~models.concepts.ConceptTreeResponse`.
+    """
+    return await service.get_tree(root)
 
 
 @router.get(

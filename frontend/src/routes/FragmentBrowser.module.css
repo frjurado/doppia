@@ -1,0 +1,344 @@
+.page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Nav strip */
+.pageNav {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  padding: var(--spacing-2) var(--spacing-4);
+  flex-shrink: 0;
+}
+
+.pageNavTitle {
+  flex: 1;
+}
+
+.pageNavLink {
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.subtypesToggle span {
+  color: var(--color-on-surface-variant);
+}
+
+.pageNavLink:hover span {
+  color: var(--color-on-surface) !important;
+}
+
+/* Two-panel body */
+.body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  overflow: hidden;
+}
+
+/* Left: concept tree panel */
+.treePanel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.treePanelHeader {
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-2);
+  flex-shrink: 0;
+}
+
+/* Root search */
+.searchBox {
+  padding: 0 var(--spacing-3) var(--spacing-2);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.searchInput {
+  width: 100%;
+  background: var(--color-surface-container);
+  border: none;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-on-surface);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.searchInput::placeholder {
+  color: var(--color-on-surface-variant);
+}
+
+.searchInput:focus {
+  background: var(--color-surface-container-high);
+}
+
+.searchDropdown {
+  position: absolute;
+  left: var(--spacing-3);
+  right: var(--spacing-3);
+  top: 100%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.searchItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  cursor: pointer;
+  background: none;
+  border: none;
+  text-align: left;
+  width: 100%;
+}
+
+.searchItem:hover {
+  background: var(--color-surface-container-high);
+}
+
+/* Tree scroll area */
+.treeScroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.treeEmpty {
+  padding: var(--spacing-4);
+  text-align: center;
+}
+
+/* Tree nodes */
+.treeNode {
+  display: flex;
+  flex-direction: column;
+}
+
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  padding-right: var(--spacing-3);
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  min-height: 36px;
+}
+
+.treeRow:hover {
+  background: var(--color-surface-container);
+}
+
+.treeRow[data-selected='true'] {
+  background: var(--color-primary-container);
+}
+
+.treeRow[data-selected='true'] span {
+  color: var(--color-on-primary-container);
+}
+
+.treeToggle {
+  font-size: 0.75rem;
+  color: var(--color-on-surface-variant);
+  flex-shrink: 0;
+  width: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.treeTogglePlaceholder {
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.treeLabel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.treeAlias {
+  color: var(--color-primary);
+  text-transform: uppercase;
+}
+
+.treeCount {
+  flex-shrink: 0;
+  background: var(--color-surface-container-high);
+  padding: 1px var(--spacing-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.treeRow[data-selected='true'] .treeCount {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.treeChildren {
+  /* children are indented via paddingLeft on their own treeRow */
+}
+
+/* Right: fragment list panel */
+.listPanel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-6) var(--spacing-2);
+  flex-shrink: 0;
+}
+
+.listHeaderLeft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.subtypesToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.listScroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.listEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-8);
+}
+
+/* Fragment card (preview cards for concept browse) */
+.fragmentCard {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-surface-container-lowest);
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.fragmentCard:hover {
+  background: var(--color-surface-container-low);
+}
+
+/* SVG preview image */
+.previewArea {
+  flex-shrink: 0;
+  width: 140px;
+  height: 90px;
+  background: var(--color-surface-container);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.previewImage {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.previewPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--spacing-2);
+}
+
+.fragmentMeta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+.fragmentConcept {
+  font-weight: 600;
+}
+
+.fragmentBadges {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+  margin-top: var(--spacing-1);
+}
+
+/* Status badge — mirrors ReviewQueue status styling */
+.statusBadge {
+  padding: 1px var(--spacing-2);
+  background: var(--color-surface-container-high);
+}
+
+.statusBadge[data-status='approved'] {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+.statusBadge[data-status='submitted'] {
+  background: var(--color-tertiary-container);
+  color: var(--color-on-tertiary-container);
+}
+
+.statusBadge[data-status='rejected'] {
+  background: var(--color-error-container);
+  color: var(--color-on-error-container);
+}
+
+/* Load more */
+.loadMore {
+  padding: var(--spacing-2) 0;
+  flex-shrink: 0;
+}
+
+.loadMoreButton {
+  width: 100%;
+  border: none;
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--color-surface-container);
+  cursor: pointer;
+}
+
+.loadMoreButton:hover {
+  background: var(--color-surface-container-high);
+}

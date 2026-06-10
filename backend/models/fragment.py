@@ -130,7 +130,10 @@ class _FragmentWriteBase(BaseModel):
 
     Beat constraints follow ADR-005:
     - ``beat_start`` and ``beat_end`` must both be set or both be null.
-    - When set, ``beat_start`` must be strictly less than ``beat_end``.
+    - When set and ``bar_start == bar_end``, ``beat_start`` must be strictly
+      less than ``beat_end``. For cross-bar selections beats are 1-indexed
+      within their respective bar, so the comparison is meaningless and is
+      not enforced.
 
     The measure-level floor/ceil bounds from ADR-005 (floor(beat_start) >=
     bar_start, ceil(beat_end) <= bar_end) are omitted here because the beat
@@ -165,10 +168,13 @@ class _FragmentWriteBase(BaseModel):
             )
         # Both are non-null at this point.
         assert bs is not None and be is not None  # narrow type for mypy
-        if bs >= be:
+        # For cross-bar selections beats are 1-indexed within their respective
+        # bar, so beat_start may numerically exceed beat_end (e.g. beat 3.5 in
+        # bar 2 → beat 2.0 in bar 3). Only enforce ordering within a single bar.
+        if self.bar_start == self.bar_end and bs >= be:
             raise ValueError(
                 f"beat_start ({bs}) must be strictly less than beat_end ({be}) "
-                "(ADR-005)"
+                "within a single bar (ADR-005)"
             )
         return self
 
@@ -278,6 +284,20 @@ class FragmentDetailResponse(BaseModel):
     Includes concept tags hydrated with Neo4j metadata, harmony events sliced
     from ``movement_analysis`` over the fragment's bar range, and nested
     sub-parts one level deep (ADR-011 two-level display limit).
+
+    ``data_licence_url`` is the canonical URL for ``data_licence`` (ADR-009).
+    ``harmony_sources`` is the sorted set of distinct ``source`` values from
+    in-range ``movement_analysis`` events, for transparency (ADR-009).
+
+    Movement context fields (``composer_name``, ``work_title``,
+    ``work_catalogue_number``, ``movement_number``, ``movement_title``) and
+    ``mei_url`` / ``preview_url`` are populated on top-level fragments and left
+    ``None`` on sub-parts (which are embedded inside their parent's response and
+    share the parent's movement context).
+
+    ``mei_url`` is resolved to a signed URL at request time per ADR-002 — never
+    stored.  ``preview_url`` is null until the ``render_fragment_preview`` task
+    completes (ADR-008).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -295,6 +315,8 @@ class FragmentDetailResponse(BaseModel):
     summary: dict
     prose_annotation: str | None
     data_licence: str | None
+    data_licence_url: str | None
+    harmony_sources: list[str]
     status: str
     created_by: uuid.UUID | None
     created_at: datetime
@@ -302,6 +324,15 @@ class FragmentDetailResponse(BaseModel):
     concept_tags: list[ConceptTagDetail]
     harmony_events: list[dict]
     sub_parts: list["FragmentDetailResponse"]
+    # Movement context — populated on top-level fragments; None on sub-parts.
+    composer_name: str | None = None
+    work_title: str | None = None
+    work_catalogue_number: str | None = None
+    movement_number: int | None = None
+    movement_title: str | None = None
+    # Signed URLs resolved at request time (ADR-002); never stored.
+    mei_url: str | None = None
+    preview_url: str | None = None
 
 
 class FragmentListItem(BaseModel):
@@ -412,6 +443,61 @@ class FragmentDeleteResponse(BaseModel):
     dry_run: bool
 
 
+class ConceptBrowseItem(BaseModel):
+    """One fragment card in the concept-scoped browse list.
+
+    Returned by ``GET /api/v1/fragments?concept_id={id}``.  Carries all fields
+    the list-view preview card needs: coordinates, primary concept, movement
+    context, status, licence, and the preview URL (null until Step 5 generates
+    the SVG).
+
+    ``data_licence`` is stored on the fragment row (derived at write time per
+    ADR-009).  ``data_licence_url`` is the canonical URL for that licence.
+    ``harmony_sources`` is the sorted set of distinct ``source`` values from
+    in-range ``movement_analysis`` events, for transparency (ADR-009).
+    """
+
+    model_config = ConfigDict(from_attributes=False)
+
+    id: uuid.UUID
+    movement_id: uuid.UUID
+    bar_start: int
+    bar_end: int
+    beat_start: float | None
+    beat_end: float | None
+    repeat_context: str | None
+    status: str
+    primary_concept_id: str | None
+    primary_concept_alias: str | None
+    primary_concept_name: str | None
+    data_licence: str | None
+    data_licence_url: str | None
+    harmony_sources: list[str]
+    preview_url: str | None
+    created_by: uuid.UUID | None
+    updated_at: datetime
+
+    composer_name: str
+    work_title: str
+    work_catalogue_number: str | None
+    movement_number: int
+    movement_title: str | None
+
+
+class ConceptBrowseResponse(BaseModel):
+    """Cursor-paginated concept-scoped browse result.
+
+    Returned by ``GET /api/v1/fragments?concept_id={id}&include_subtypes={bool}``.
+    ``concept_id`` and ``include_subtypes`` are echoed back so the caller can
+    identify which browse produced these results.
+    """
+
+    items: list[ConceptBrowseItem]
+    next_cursor: str | None
+    concept_id: str
+    include_subtypes: bool
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 
@@ -486,6 +572,12 @@ class Fragment(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Fragment preview SVG in object storage (ADR-008, Component 8 Step 5).
+    # Null until the render_fragment_preview Celery task completes.
+    preview_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preview_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

@@ -66,3 +66,13 @@ Generate fragment previews **server-side, statically, at submission time** via a
 **Client-side rendering at browse time.** Rejected on performance grounds. Verovio WASM initialisation and rendering is too slow to run concurrently for a list of fragments. The user experience degrades proportionally with list size, making pagination a workaround rather than a solution. The approach also couples browse performance to the client's hardware, which is inappropriate for a tool that needs to work reliably for annotators.
 
 **Server-side rendering on demand (not cached).** Rejected. Rendering on every list request would make the list endpoint slow and CPU-intensive under any concurrent usage. Caching the result is equivalent to the static generation approach but without the clean trigger point (submission) and without R2 as the durable store.
+
+---
+
+## Implementation Notes
+
+*Added 2026-06-10, Component 8 Step 15.*
+
+**Storage key — per-fragment key is authoritative.** The storage key pattern in the Decision section above — `{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/fragments/{fragment_id}.svg` — is the authoritative format. An earlier version of `backend/services/object_storage.py` documented a movement-level preview key (`…/{movement_slug}/preview.svg`), which would have caused key collisions for any movement with more than one fragment. This discrepancy was reconciled in Component 8 Step 4: the key-builder in `object_storage.py` was updated to the per-fragment format. The movement-level `incipit.svg` key (a distinct per-movement asset) is unaffected.
+
+**Regeneration entry point for the Component 1 MEI correction workflow.** When an MEI file is corrected via the Component 1 correction workflow, every fragment on the affected movement requires preview regeneration. The correction workflow must call `FragmentService.enqueue_preview_regeneration_for_movement(movement_id)` (or the equivalent service-layer entry point), which enqueues the `render_fragment_preview` Celery task for every fragment on that movement whose status is `submitted` or above. This is a Component 1 / root-file concern; it is flagged here as the integration point the correction workflow must wire up. Do not enqueue preview regeneration directly from the correction route handler — the service layer owns the task-enqueueing logic.

@@ -7,18 +7,18 @@ The client is environment-agnostic: the same code runs against MinIO locally
 and Cloudflare R2 in staging/production.  All configuration is supplied via
 environment variables (ADR-002).  No application code branches on environment.
 
-Key convention (ADR-002):
+Key convention (ADR-002, ADR-008):
 
 - Normalized MEI:  ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei``
 - Original MEI:    ``originals/{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei``
 - Incipit SVG:     ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg``
   (written by the ``generate_incipit`` Celery task — Component 2)
-- Preview SVG:     ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/preview.svg``
-  (written by Component 7; not by this module)
+- Fragment preview SVG: ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/fragments/{fragment_id}.svg``
+  (written by the ``render_fragment_preview`` Celery task — Component 8, ADR-008)
 
 Example usage::
 
-    from services.object_storage import make_storage_client, incipit_key
+    from services.object_storage import make_storage_client, incipit_key, fragment_preview_key
 
     client = make_storage_client()
     await client.put_mei("mozart/piano-sonatas/k331/movement-1.mei", mei_bytes)
@@ -226,6 +226,37 @@ def incipit_key(
         S3 object key string.
     """
     return f"{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/incipit.svg"
+
+
+def fragment_preview_key(
+    composer_slug: str,
+    corpus_slug: str,
+    work_slug: str,
+    movement_slug: str,
+    fragment_id: str,
+) -> str:
+    """Return the object key for a fragment's server-side preview SVG (ADR-008).
+
+    Key format: ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}/fragments/{fragment_id}.svg``
+
+    The per-fragment key ensures that multiple fragments on the same movement
+    each get their own object without collision, and is distinct from the
+    movement-level incipit key (``.../incipit.svg``).
+
+    Args:
+        composer_slug: URL-safe composer identifier (e.g. ``"mozart"``).
+        corpus_slug: URL-safe corpus identifier (e.g. ``"piano-sonatas"``).
+        work_slug: URL-safe work identifier (e.g. ``"k331"``).
+        movement_slug: URL-safe movement identifier (e.g. ``"movement-1"``).
+        fragment_id: UUID of the fragment row (e.g. ``"a1b2c3d4-..."``)
+
+    Returns:
+        S3 object key string.
+    """
+    return (
+        f"{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}"
+        f"/fragments/{fragment_id}.svg"
+    )
 
 
 def make_storage_client() -> StorageClient:

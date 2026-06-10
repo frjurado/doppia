@@ -304,6 +304,8 @@ Compute which page a target measure falls on using `getPageWithElement()`, rende
 
 The incipit approach (page 1 of a smart-break render) is not applicable to mid-score fragment rendering because the target measures could be on any page. Strategy 1 is the correct solution for Component 3.
 
+**Component 8 reuse.** The isolated fragment detail view (`FragmentDetail.tsx`, Component 8 Step 11) and the server-side `render_fragment_preview` Celery task (Component 8 Step 5) both render a fragment's `mc_start`/`mc_end` range using the same Strategy 1 call sequence. No additional spike is required for Component 8: the WASM client-side verification below (edge cases: mid-system start, repeat, first/second ending) applies equally to the Component 8 render path.
+
 ---
 
 ## Relation to other documents

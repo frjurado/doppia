@@ -784,3 +784,169 @@ class TestListMovementFragments:
         ids_p2 = {i["id"] for i in page2["items"]}
         assert len(ids_p1 & ids_p2) == 0, "Pages must not overlap"
         assert len(ids_p1 | ids_p2) == 3
+
+
+# ---------------------------------------------------------------------------
+# TestRenderingContextParameter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestRenderingContextParameter:
+    """GET /api/v1/fragments/{id}?context.mode=... — ADR-024 contract.
+
+    Phase 1 implements only ``mode=none`` (containing measures only).
+    All other modes (``bars``, ``enclosing_fragment``, ``previous_same_domain``)
+    are accepted and validated (not a 422) but produce the same containing-
+    measures-only response.  An unknown mode value is a 422.
+    """
+
+    async def _create(self, client: AsyncClient, movement_id: str) -> str:
+        resp = await client.post(
+            "/api/v1/fragments",
+            headers={"Authorization": "Bearer dev-token"},
+            json=_fragment_payload(movement_id),
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()["id"]
+
+    async def test_default_mode_none_returns_fragment(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """No context.mode param → same response as mode=none."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == frag_id
+
+    async def test_mode_none_explicit_returns_fragment(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """Explicit context.mode=none returns the containing-measures-only fragment."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=none",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == frag_id
+
+    async def test_mode_bars_accepted_and_ignored(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """context.mode=bars with before/after is accepted (200) and Phase-1 ignored."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=bars&before=2&after=3",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == frag_id
+
+    async def test_mode_enclosing_fragment_accepted_and_ignored(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """context.mode=enclosing_fragment is accepted (200) and Phase-1 ignored."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=enclosing_fragment",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == frag_id
+
+    async def test_mode_previous_same_domain_accepted_and_ignored(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """context.mode=previous_same_domain is accepted (200) and Phase-1 ignored."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=previous_same_domain",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == frag_id
+
+    async def test_invalid_mode_returns_422(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """An unknown context.mode value is rejected with 422 Unprocessable Entity."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=unknown_mode",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 422
+
+    async def test_negative_before_returns_422(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """before < 0 is rejected with 422 (validated even when mode is bars)."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=bars&before=-1&after=0",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 422
+
+    async def test_negative_after_returns_422(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """after < 0 is rejected with 422 (validated even when mode is bars)."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=bars&before=0&after=-2",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 422
+
+    async def test_non_default_mode_response_matches_mode_none(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """Phase 1: non-default modes return the same fragment body as mode=none."""
+        frag_id = await self._create(read_client, seeded_movement)
+
+        resp_none = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=none",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        resp_bars = await read_client.get(
+            f"/api/v1/fragments/{frag_id}?context.mode=bars&before=2&after=2",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+
+        assert resp_none.status_code == 200
+        assert resp_bars.status_code == 200
+        # Both responses must return the same fragment record.
+        assert resp_none.json()["id"] == resp_bars.json()["id"] == frag_id
+        assert resp_none.json()["bar_start"] == resp_bars.json()["bar_start"]
+        assert resp_none.json()["bar_end"] == resp_bars.json()["bar_end"]

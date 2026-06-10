@@ -399,11 +399,19 @@ class TestCreateFragment:
         fragments_client: AsyncClient,
         seeded_movement: str,
     ) -> None:
-        """beat_start >= beat_end fails Pydantic validation (422)."""
+        """beat_start >= beat_end within a single bar fails Pydantic validation (422)."""
         resp = await fragments_client.post(
             "/api/v1/fragments",
             headers={"Authorization": "Bearer dev-token"},
-            json=_fragment_payload(seeded_movement, beat_start=3.0, beat_end=1.0),
+            json=_fragment_payload(
+                seeded_movement,
+                bar_start=2,
+                bar_end=2,
+                mc_start=2,
+                mc_end=2,
+                beat_start=3.0,
+                beat_end=1.0,
+            ),
         )
         assert resp.status_code == 422
 

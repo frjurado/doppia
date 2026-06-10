@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -19,6 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
 _TEST_SECRET = "test-jwt-secret-for-unit-tests"
@@ -97,6 +99,7 @@ async def supabase_client(
         validation_exception_handler,
     )
     from api.router import router as api_router
+    from models.base import get_db
 
     # Test-only protected route — not part of the production router.
     # Use the classic `= Depends(...)` syntax; AppUser is a dataclass
@@ -123,6 +126,15 @@ async def supabase_client(
     )
     app.include_router(api_router)
     app.include_router(_test_router)
+
+    # get_current_user now upserts the Supabase user into app_user. Auth
+    # unit tests don't run a database, so override get_db with a no-op mock
+    # session so the upsert path is exercised without a real engine.
+    async def _mock_db():
+        mock_session = AsyncMock(spec=AsyncSession)
+        yield mock_session
+
+    app.dependency_overrides[get_db] = _mock_db
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

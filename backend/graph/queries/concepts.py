@@ -19,7 +19,7 @@ from neo4j import AsyncSession as _AsyncSession
 from neo4j import Session as _Session
 
 # ---------------------------------------------------------------------------
-# Schema inheritance
+# Schema inheritance  (upward IS_SUBTYPE_OF traversal)
 # ---------------------------------------------------------------------------
 
 _GET_INHERITED_SCHEMAS = """\
@@ -60,6 +60,78 @@ def get_inherited_schema_ids(session: _Session, concept_id: str) -> list[str]:
     """
     result = session.run(_GET_INHERITED_SCHEMAS, concept_id=concept_id)
     return [r["schema_id"] for r in result.data()]
+
+
+# ---------------------------------------------------------------------------
+# Downward subtype traversal  (Component 8 — concept-scoped browse)
+# ---------------------------------------------------------------------------
+
+_GET_SUBTYPE_IDS = """\
+MATCH (descendant:Concept)-[:IS_SUBTYPE_OF*0..]->(root:Concept {id: $concept_id})
+WHERE NOT descendant.stub
+RETURN collect(DISTINCT descendant.id) AS ids
+"""
+"""Return the id of every non-stub concept in the IS_SUBTYPE_OF subtree rooted at concept_id.
+
+The *0.. quantifier includes the root itself (zero hops), so a leaf with no
+subtypes returns a singleton set containing only itself.  Stub concepts
+(``stub = true``) are excluded to keep the id set tight for browse queries —
+no fragments are ever tagged against a stub in Phase 1.
+
+Use this for downward traversal; use ``_GET_INHERITED_SCHEMAS`` for upward
+traversal (schema/property inheritance).
+
+Parameters:
+    concept_id — the root concept's immutable id string
+"""
+
+
+def get_subtype_ids(session: _Session, concept_id: str) -> set[str]:
+    """Return all non-stub concept ids in the IS_SUBTYPE_OF subtree rooted at concept_id.
+
+    Includes the root itself; a leaf concept with no subtypes returns a
+    singleton set.  Stub concepts are excluded.
+
+    Used by integration tests and seed scripts that hold a synchronous session.
+    For FastAPI handlers use ``get_subtype_ids_async``.
+
+    Args:
+        session: An open synchronous Neo4j session.
+        concept_id: The root concept id (e.g. ``"AuthenticCadence"``).
+
+    Returns:
+        Set of concept id strings; empty only when concept_id itself is a stub
+        or does not exist.
+    """
+    result = session.run(_GET_SUBTYPE_IDS, concept_id=concept_id)
+    row = result.single()
+    if row is None:
+        return set()
+    return set(row["ids"])
+
+
+async def get_subtype_ids_async(
+    session: _AsyncSession,
+    concept_id: str,
+) -> set[str]:
+    """Async variant of ``get_subtype_ids`` for use in FastAPI service functions.
+
+    Return all non-stub concept ids in the IS_SUBTYPE_OF subtree rooted at
+    concept_id, including the root itself.  Stub concepts are excluded.
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The root concept id (e.g. ``"AuthenticCadence"``).
+
+    Returns:
+        Set of concept id strings; empty only when concept_id itself is a stub
+        or does not exist.
+    """
+    result = await session.run(_GET_SUBTYPE_IDS, concept_id=concept_id)
+    row = await result.single()
+    if row is None:
+        return set()
+    return set(row["ids"])
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +479,70 @@ async def check_concepts_have_harmony_gate(
     if row is None:
         return False
     return bool(row["has_harmony_gate"])
+
+
+# ---------------------------------------------------------------------------
+# Concept subtree structure  (async — used by GET /api/v1/concepts/tree)
+# ---------------------------------------------------------------------------
+
+_GET_CONCEPT_SUBTREE = """\
+MATCH (descendant:Concept)-[:IS_SUBTYPE_OF*0..]->(root:Concept {id: $root_id})
+WHERE NOT descendant.stub
+WITH collect(DISTINCT descendant) AS all_nodes
+UNWIND all_nodes AS node
+OPTIONAL MATCH (node)-[:IS_SUBTYPE_OF]->(parent:Concept)
+WHERE parent IN all_nodes
+CALL {
+  WITH node
+  MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(r:Concept)
+  WHERE NOT (r)-[:IS_SUBTYPE_OF]->(:Concept)
+  WITH p ORDER BY length(p) DESC LIMIT 1
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+}
+RETURN node.id                        AS id,
+       node.name                      AS name,
+       coalesce(node.aliases, [])     AS aliases,
+       parent.id                      AS parent_id,
+       hierarchy_path
+ORDER BY node.name
+"""
+"""Return all non-stub concepts in the IS_SUBTYPE_OF subtree rooted at root_id.
+
+Each row carries the node's id, name, aliases, hierarchy_path (from domain
+root to this node inclusive), and parent_id within the subtree (null for the
+queried root itself, even if the root has ancestors above it).
+
+Used by the concept-tree navigator (Component 8 Step 7) to build the
+hierarchical tag-browser UI in one Neo4j round-trip.  The caller assembles
+the flat list into a nested structure by grouping on parent_id.
+
+Parameters:
+    root_id — the id of the concept that forms the top of the displayed tree
+"""
+
+
+async def get_concept_subtree(
+    session: _AsyncSession,
+    root_id: str,
+) -> list[dict[str, Any]]:
+    """Return all non-stub concepts in the IS_SUBTYPE_OF subtree rooted at root_id.
+
+    Each dict has keys: ``id``, ``name``, ``aliases`` (list),
+    ``hierarchy_path`` (list), ``parent_id`` (str or None).  The root node
+    itself has ``parent_id = None``; every other node's ``parent_id`` is the
+    id of its direct IS_SUBTYPE_OF parent *within the subtree*.
+
+    Returns an empty list when ``root_id`` is unknown or refers to a stub.
+
+    Args:
+        session: An open async Neo4j session.
+        root_id: The root concept id (e.g. ``"Cadence"``).
+
+    Returns:
+        List of node dicts, ordered alphabetically by name.
+    """
+    result = await session.run(_GET_CONCEPT_SUBTREE, root_id=root_id)
+    return await result.data()
 
 
 async def search_concepts(

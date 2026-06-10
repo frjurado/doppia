@@ -137,6 +137,22 @@ curl -X POST "https://<project-ref>.supabase.co/auth/v1/token?grant_type=passwor
   -d '{"email": "user@example.com", "password": "password"}'
 ```
 
+On **Windows PowerShell**, use `Invoke-RestMethod` — `curl.exe` strips inner quotes from JSON bodies and produces a parse error:
+
+```powershell
+$SUPABASE_URL = "https://<project-ref>.supabase.co"
+$ANON_KEY     = "<anon-key>"
+
+$response = Invoke-RestMethod `
+  -Method POST `
+  -Uri "$SUPABASE_URL/auth/v1/token?grant_type=password" `
+  -Headers @{ "apikey" = $ANON_KEY } `
+  -ContentType "application/json" `
+  -Body '{"email":"user@example.com","password":"password"}'
+
+$TOKEN = $response.access_token
+```
+
 The response contains `access_token`. Tokens expire after one hour; repeat this call to refresh. Pass the token as `Authorization: Bearer <token>` on all authenticated API requests.
 
 **Seeding the browser with a token (Phase 1 only).** Until a login page is built, paste the token into the browser console on the staging URL:
@@ -228,17 +244,17 @@ This variable is baked into the JavaScript bundle at build time (Vite `import.me
 1. Create an account at [upstash.com](https://upstash.com).
 2. Create a new Redis database. Choose the nearest region.
 3. From the database console → **Connect**, copy the **Redis URL** (starts with `redis://` or `rediss://`). This is the connection string for the Redis protocol — not the REST API URL (`https://...`), which is for the Upstash HTTP client only.
-4. Set `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` all to the same Redis connection URL in Fly.io secrets:
+4. Set `REDIS_URL` and `CELERY_BROKER_URL` to the Redis connection URL. Set `CELERY_RESULT_BACKEND` to `cache+memory://` — **do not** point it at Redis:
 
 ```bash
 fly secrets set \
-  REDIS_URL="redis://default:<password>@<host>:<port>" \
-  CELERY_BROKER_URL="redis://default:<password>@<host>:<port>" \
-  CELERY_RESULT_BACKEND="redis://default:<password>@<host>:<port>" \
+  REDIS_URL="rediss://default:<password>@<host>:<port>" \
+  CELERY_BROKER_URL="rediss://default:<password>@<host>:<port>" \
+  CELERY_RESULT_BACKEND="cache+memory://" \
   --app doppia-staging
 ```
 
-`REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` are used by Celery for task queuing. All three must point to the Redis connection URL, not the REST API URL.
+`REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` is the Celery task broker. `CELERY_RESULT_BACKEND` must be `cache+memory://` and not a `rediss://` URL: all tasks are fire-and-forget (`task_ignore_result = True` in `celery_app.py`), and pointing the result backend at a `rediss://` URL causes the worker to crash on startup with a missing `ssl_cert_reqs` parameter error.
 
 Redis is wired in from day one but is not load-bearing in Phase 1. If the Upstash connection is unavailable, the Celery task dispatch (music21 analysis, incipit generation) logs a warning and the upload continues — the core ingestion (MEI validation, R2 storage, PostgreSQL records) is unaffected. Cache misses are acceptable in Phase 1; Redis is required for correctness only from Phase 2 onward.
 
@@ -265,7 +281,7 @@ fly secrets set \
   R2_SECRET_ACCESS_KEY=<secret> \
   REDIS_URL=<redis-connection-url> \
   CELERY_BROKER_URL=<redis-connection-url> \
-  CELERY_RESULT_BACKEND=<redis-connection-url> \
+  CELERY_RESULT_BACKEND="cache+memory://" \
   --app doppia-staging
 fly deploy --app doppia-staging
 ```
@@ -306,6 +322,80 @@ fly ssh console --app doppia-staging -C "python scripts/seed.py --domain cadence
 fly ssh console --app doppia-staging -C "python scripts/validate_graph.py"
 ```
 
+## DCML corpus re-ingestion
+
+Required when a bug fix changes how `movement_analysis.events` JSONB is computed (e.g. a `_compute_beat` correction). The admin `/dispatch-pending-analysis` endpoint **cannot** be used for DCML movements because the harmonies TSV is not stored in R2 — it is only available during the original upload. The only correct re-ingestion path is to re-upload the corpus ZIP, which passes the TSV through the pipeline again.
+
+A Celery worker must be running to process the analysis tasks. The worker is absent from `fly.toml` by default (Phase 1); add it temporarily.
+
+### Step 1 — Add the worker to fly.toml
+
+```toml
+[processes]
+  app    = "uvicorn main:app --host 0.0.0.0 --port 8000"
+  worker = "celery -A services.celery_app worker --loglevel=info --concurrency=1"
+
+# existing [[vm]] block for app stays as-is, add:
+[[vm]]
+  processes  = ["worker"]
+  memory     = "1gb"
+  cpu_kind   = "shared"
+  cpus       = 1
+```
+
+Also ensure `[http_service]` has `processes = ["app"]` so HTTP traffic is not routed to the worker machine (it is already present in the committed `fly.toml`).
+
+### Step 2 — Deploy and confirm the worker is healthy
+
+```bash
+fly deploy --app doppia-staging
+fly logs --app doppia-staging
+```
+
+Look for the Celery banner `celery@... ready.` with no `CRITICAL` errors. If the worker crashes with `ValueError: A rediss:// URL must have parameter ssl_cert_reqs`, the `CELERY_RESULT_BACKEND` secret is set to a `rediss://` URL — fix it:
+
+```bash
+fly secrets set CELERY_RESULT_BACKEND="cache+memory://" --app doppia-staging
+```
+
+### Step 3 — Re-upload the corpus ZIP
+
+```bash
+# bash
+curl -X POST https://doppia-staging.fly.dev/api/v1/composers/mozart/corpora/piano-sonatas/upload \
+  -H "Authorization: Bearer <admin-token>" \
+  -F "archive=@/path/to/piano-sonatas.zip"
+```
+
+```powershell
+# PowerShell
+curl.exe -X POST "https://doppia-staging.fly.dev/api/v1/composers/mozart/corpora/piano-sonatas/upload" `
+  -H "Authorization: Bearer $TOKEN" `
+  -F "archive=@C:\path\to\piano-sonatas.zip"
+```
+
+### Step 4 — Confirm all movements analysed
+
+```bash
+fly logs --app doppia-staging   # watch for task succeeded lines
+fly ssh console --app doppia-staging -C "python -c \"
+import os, sqlalchemy as sa
+e = sa.create_engine(os.environ['DATABASE_URL'].replace('+asyncpg',''))
+with e.connect() as c:
+    print(c.execute(sa.text('SELECT COUNT(*) FROM movement WHERE pending_analysis=TRUE')).scalar())
+\""
+```
+
+Should print `0`.
+
+### Step 5 — Remove the worker and redeploy
+
+Revert `fly.toml` to the single `app` process (remove the `worker` line from `[processes]` and its `[[vm]]` block), then:
+
+```bash
+fly deploy --app doppia-staging
+```
+
 ## Uploading a corpus
 
 Corpus upload requires an `admin` bearer token (see "Getting a bearer token" above). The upload ZIP must contain a `metadata.yaml` sidecar plus the MEI files and (for DCML corpora) harmonies TSV files referenced by it. See `scripts/prepare_dcml_corpus.py` for how to produce a compliant ZIP from a DCML repository.
@@ -314,6 +404,14 @@ Corpus upload requires an `admin` bearer token (see "Getting a bearer token" abo
 curl -X POST https://doppia-staging.fly.dev/api/v1/composers/<composer_slug>/corpora/<corpus_slug>/upload \
   -H "Authorization: Bearer <admin-token>" \
   -F "archive=@/path/to/corpus.zip"
+```
+
+On **Windows PowerShell**, use `curl.exe` with `-F` for multipart upload (`Invoke-RestMethod -Form` requires PowerShell 7; Windows ships with 5.1):
+
+```powershell
+curl.exe -X POST "https://doppia-staging.fly.dev/api/v1/composers/<composer_slug>/corpora/<corpus_slug>/upload" `
+  -H "Authorization: Bearer $TOKEN" `
+  -F "archive=@C:\path\to\corpus.zip"
 ```
 
 The response is a structured ingestion report listing accepted movements (with any normalisation warnings) and rejected movements (with validation errors). All movements are processed independently; a rejection of one does not block others.
