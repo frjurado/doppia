@@ -59,7 +59,7 @@
   flex-direction: column;
   gap: var(--spacing-2);
   padding: var(--spacing-4);
-  max-width: 800px;
+  max-width: 960px;
 }
 
 .section {
@@ -73,16 +73,149 @@
   margin: 0;
 }
 
-/* Notation placeholder panel — replaced by the Verovio render in Step 11 */
-.notationArea {
-  min-height: 200px;
+/* ─── Notation section ──────────────────────────────────────────────────────── */
+
+.notationSection {
   display: flex;
   flex-direction: column;
+  padding: var(--spacing-4);
+  gap: var(--spacing-3);
+}
+
+/* Scale toggle strip */
+.scoreControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.scaleGroup {
+  display: flex;
+  gap: 1px;
+}
+
+.scaleBtn {
+  background: var(--color-surface-container-high);
+  border: none;
+  cursor: pointer;
+  padding: 2px var(--spacing-3);
+  min-width: 28px;
+  text-align: center;
+}
+
+.scaleBtn:hover {
+  background: var(--color-surface-container-highest);
+}
+
+.scaleBtnActive {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+/* Score + bracket overlay wrapper */
+.scoreContent {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+/* Verovio SVG container */
+.svgPage {
+  line-height: 0;
+}
+
+.svgPage svg {
+  display: block;
+  /* Natural width — Verovio sizes to content with breaks:"none" */
+  max-width: none;
+}
+
+/* Loading / error state inside score area */
+.renderState {
+  min-height: 120px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-8);
+  padding: var(--spacing-6);
 }
+
+/* Sub-part bracket overlay layer */
+.subPartOverlayLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Must not clip brackets drawn below the SVG bottom edge */
+  overflow: visible;
+}
+
+/* Individual sub-part bracket bar */
+.subPartBracket {
+  position: absolute;
+  height: 4px;
+  background: var(--color-primary);
+  opacity: 0.55;
+}
+
+.subPartBracket[data-status='approved'] {
+  background: var(--color-primary);
+}
+
+.subPartBracket[data-status='submitted'] {
+  background: var(--color-tertiary);
+}
+
+.subPartBracket[data-status='rejected'] {
+  background: var(--color-error);
+  opacity: 0.4;
+}
+
+/* Short label above the bracket bar */
+.subPartLabel {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--color-on-surface-variant);
+  white-space: nowrap;
+}
+
+/* ─── Playback bar ──────────────────────────────────────────────────────────── */
+
+.playbackBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding-top: var(--spacing-2);
+}
+
+.transportButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px var(--spacing-2);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--color-on-surface);
+  min-width: 28px;
+  text-align: center;
+}
+
+.transportButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.transportButton:not(:disabled):hover {
+  background: var(--color-surface-container-high);
+}
+
+.positionDisplay {
+  color: var(--color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Tag chips ─────────────────────────────────────────────────────────────── */
 
 .tagList {
   display: flex;

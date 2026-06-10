@@ -202,6 +202,15 @@ export interface FragmentDetailResponse {
   harmony_events: Record<string, unknown>[];
   /** Sub-part (stage) fragments nested one level deep (ADR-011 two-level limit). */
   sub_parts: FragmentDetailResponse[];
+  // Movement context — populated on top-level fragments; null on sub-parts (Step 9).
+  composer_name: string | null;
+  work_title: string | null;
+  work_catalogue_number: string | null;
+  movement_number: number | null;
+  movement_title: string | null;
+  // Signed URLs resolved at request time (ADR-002); never stored (Step 9).
+  mei_url: string | null;
+  preview_url: string | null;
 }
 
 /**
