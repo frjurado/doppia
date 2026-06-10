@@ -87,7 +87,7 @@ CREATE INDEX fragment_movement_idx ON fragment (movement_id);
 
 **Stage sub-fragments.** Cadence stage data is stored as child fragments using this mechanism — not as a `stages` key inside the parent's `summary`. Every confirmed stage (required, or optional and not toggled absent) produces one child fragment: `concept_id` is the stage concept's id (`CadentialInitialTonic`, `CadentialPreDominant`, `CadentialDominant`, `CadentialFinalTonic`), spatial bounds match the stage bracket, and `summary.properties` carries whichever stage property values were recorded (`Stage1Components`, `Stage2Components`, `Cadential64` — all optional). A child fragment with an empty `summary.properties` object is valid; the fragment's existence asserts that the stage is present and where it falls.
 
-**`status`** drives the peer review state machine: `draft → submitted → approved` (or `rejected → draft`). Only `approved` fragments are visible in the public fragment browser. The status filter is enforced at the service layer on every read — the single-record GET, the movement-scoped list, and the review queue — and cannot be bypassed by a direct API call. The decisions recorded by individual reviewers live in the `fragment_review` table (below); `status` on the fragment is the aggregate outcome.
+**`status`** drives the peer review state machine: `draft → submitted → approved` (or `rejected → draft`). Only `approved` fragments are visible in the public fragment browser. The status filter is enforced at the service layer on every read — the single-record GET, the movement-scoped list, the review queue, and the concept-scoped browse — and cannot be bypassed by a direct API call. The decisions recorded by individual reviewers live in the `fragment_review` table (below); `status` on the fragment is the aggregate outcome.
 
 ---
 
@@ -364,6 +364,8 @@ fragments = await fragment_repo.get_by_concept_ids(
 ```
 
 This two-step pattern is the canonical approach. No component queries across database types in a single call. The service layer owns the join logic; route handlers call the service, not the databases directly.
+
+**Concept-scoped browse.** The Component 8 browse query (`GET /api/v1/fragments?concept_id=...&include_subtypes=true`) uses this same two-step pattern. The PostgreSQL step joins on `fragment_concept_tag.concept_id` regardless of `is_primary`, so a fragment appears under any concept it is tagged with — not only its driving concept. Result rows are `DISTINCT`-ed so a fragment carrying multiple in-set tags appears once. This query is implemented as a reusable service function (`FragmentService.list_by_concept`) so Phase 3's AI reasoning layer can call it from tool-calling context; see the "Fragment browsing as the precursor to AI retrieval" forward-compatibility note in `docs/roadmap/phase-1.md`.
 
 **Referential integrity:** there is no database-enforced foreign key between `fragment_concept_tag.concept_id` and Neo4j. Integrity is maintained by the Pydantic validation layer at write time: before any fragment record is persisted, the validation layer verifies that every `concept_id` in the tag list exists in Neo4j. A write that references a non-existent concept is rejected with a descriptive error before it touches any database.
 
