@@ -28,6 +28,84 @@ from starlette.exceptions import HTTPException
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
+async def _purge_leaked_test_fixtures(
+    _db_engine: AsyncEngine,
+) -> AsyncGenerator[None, None]:
+    """Delete any raw-SQL test fixtures left behind by a prior interrupted run.
+
+    Raw-SQL fixture teardown (e.g. seeded_movement in test_concept_browse_api.py)
+    does not run when a test aborts mid-session on Windows with a ProactorEventLoop.
+    This guard runs once at session start and removes any orphaned rows whose
+    composer slug matches the ``{prefix}-{8hexchars}`` patterns used by fixtures
+    in this directory.  The real Mozart corpus (slug ``mozart``) is never touched.
+
+    Patterns cleaned up:
+        - composer slugs: ``mozart-{8hex}`` (test_concept_browse_api.py)
+    """
+    _TEST_COMPOSER_PATTERN = "mozart-________"
+
+    factory = async_sessionmaker(
+        _db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with factory() as session:
+        # Walk the FK graph in the correct deletion order.
+        for stmt in (
+            """DELETE FROM fragment_concept_tag
+               WHERE fragment_id IN (
+                 SELECT f.id FROM fragment f
+                 JOIN movement m ON f.movement_id = m.id
+                 JOIN work w ON m.work_id = w.id
+                 JOIN corpus c ON w.corpus_id = c.id
+                 JOIN composer co ON c.composer_id = co.id
+                 WHERE co.slug LIKE :pat
+               )""",
+            """DELETE FROM fragment_review
+               WHERE fragment_id IN (
+                 SELECT f.id FROM fragment f
+                 JOIN movement m ON f.movement_id = m.id
+                 JOIN work w ON m.work_id = w.id
+                 JOIN corpus c ON w.corpus_id = c.id
+                 JOIN composer co ON c.composer_id = co.id
+                 WHERE co.slug LIKE :pat
+               )""",
+            """DELETE FROM fragment
+               WHERE movement_id IN (
+                 SELECT m.id FROM movement m
+                 JOIN work w ON m.work_id = w.id
+                 JOIN corpus c ON w.corpus_id = c.id
+                 JOIN composer co ON c.composer_id = co.id
+                 WHERE co.slug LIKE :pat
+               )""",
+            """DELETE FROM movement_analysis
+               WHERE movement_id IN (
+                 SELECT m.id FROM movement m
+                 JOIN work w ON m.work_id = w.id
+                 JOIN corpus c ON w.corpus_id = c.id
+                 JOIN composer co ON c.composer_id = co.id
+                 WHERE co.slug LIKE :pat
+               )""",
+            """DELETE FROM movement
+               WHERE work_id IN (
+                 SELECT w.id FROM work w
+                 JOIN corpus c ON w.corpus_id = c.id
+                 JOIN composer co ON c.composer_id = co.id
+                 WHERE co.slug LIKE :pat
+               )""",
+            """DELETE FROM work
+               WHERE corpus_id IN (
+                 SELECT c.id FROM corpus c
+                 JOIN composer co ON c.composer_id = co.id
+                 WHERE co.slug LIKE :pat
+               )""",
+            "DELETE FROM corpus WHERE composer_id IN (SELECT id FROM composer WHERE slug LIKE :pat)",
+            "DELETE FROM composer WHERE slug LIKE :pat",
+        ):
+            await session.execute(text(stmt), {"pat": _TEST_COMPOSER_PATTERN})
+        await session.commit()
+    yield
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
 async def _seed_dev_users(_db_engine: AsyncEngine) -> AsyncGenerator[None, None]:
     """Seed synthetic dev user rows so fragment.created_by and
     fragment_review.reviewer_id FK constraints pass in integration tests.
