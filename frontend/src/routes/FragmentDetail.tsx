@@ -2,11 +2,13 @@
  * Fragment detail page — isolated Verovio render + MIDI + record display.
  *
  * Component 8 Steps 11–12:
- *   Step 11 (this file): isolated Verovio render constrained to the fragment's
- *     mc_start/mc_end via renderFragment(), MIDI playback via useMidiPlayback,
- *     and sub-part bracket overlays positioned from SVG measure geometry.
- *   Step 12: full record display (summary, properties, harmony events) using
- *     FragmentDetailPanel — landed in a subsequent step.
+ *   Step 11: isolated Verovio render constrained to the fragment's mc_start/mc_end
+ *     via renderFragment(), MIDI playback via useMidiPlayback, and sub-part bracket
+ *     overlays positioned from SVG measure geometry.
+ *   Step 12: full record display (summary, properties, harmony events with
+ *     bass/soprano pitch, prose annotation, sub-parts, data licence) using
+ *     FragmentDetailPanel in standalone mode. Rendering-context contract
+ *     published as ADR-024 on the backend (GET /fragments/{id}?context.mode=).
  *
  * Overlay rule (CLAUDE.md): all bracket overlays are absolutely-positioned HTML
  * elements above the SVG; Verovio's SVG is never modified. The one exception is
@@ -24,6 +26,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -428,6 +431,15 @@ export default function FragmentDetail() {
                 )}
               </Type>
             )}
+            {fragment.harmony_sources.length > 0 && (
+              <Type
+                variant="label-sm"
+                as="p"
+                style={{ color: 'var(--color-on-surface-variant)', opacity: 0.7, margin: 0 }}
+              >
+                Sources: {fragment.harmony_sources.join(', ')}
+              </Type>
+            )}
           </Surface>
 
           {/* ── Notation area ─────────────────────────────────────────────── */}
@@ -567,21 +579,17 @@ export default function FragmentDetail() {
             </Surface>
           )}
 
-          {/* ── Prose annotation ──────────────────────────────────────────── */}
-          {fragment.prose_annotation && (
-            <Surface layer="container-lowest" className={styles.section}>
-              <Type
-                variant="label-sm"
-                as="h2"
-                style={{ color: 'var(--color-on-surface-variant)', margin: 0 }}
-              >
-                Note
-              </Type>
-              <Type variant="body-sm" as="p" style={{ margin: 0 }}>
-                {fragment.prose_annotation}
-              </Type>
-            </Surface>
-          )}
+          {/* ── Full fragment record (Component 8 Step 12) ────────────────── */}
+          {/* Summary, properties, harmony events (with bass/soprano pitch),
+              prose annotation (Commentary), sub-parts, and data licence.
+              Reuses FragmentDetailPanel in standalone mode — no panel chrome
+              or action buttons, skips the internal getFragment fetch. */}
+          <FragmentDetailPanel
+            fragmentId={fragment.id}
+            initialFragment={fragment}
+            tagMode="view"
+            standalone
+          />
 
         </div>
       )}

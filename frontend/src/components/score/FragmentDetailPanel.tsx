@@ -124,17 +124,22 @@ interface HarmonyRow {
   applied_to: string | null;
   local_key: string | null;
   reviewed: boolean | null;
+  /** Component 6 deferral: null for DCML-sourced events until music21 top-up pass. */
+  bass_pitch: string | null;
+  soprano_pitch: string | null;
 }
 
 function toHarmonyRow(e: Record<string, unknown>): HarmonyRow {
   return {
-    mn:         typeof e.mn         === 'number'  ? e.mn         : 0,
-    beat:       typeof e.beat       === 'number'  ? e.beat       : 0,
-    volta:      typeof e.volta      === 'number'  ? e.volta      : null,
-    numeral:    typeof e.numeral    === 'string'  ? e.numeral    : null,
-    applied_to: typeof e.applied_to === 'string'  ? e.applied_to : null,
-    local_key:  typeof e.local_key  === 'string'  ? e.local_key  : null,
-    reviewed:   typeof e.reviewed   === 'boolean' ? e.reviewed   : null,
+    mn:            typeof e.mn            === 'number'  ? e.mn            : 0,
+    beat:          typeof e.beat          === 'number'  ? e.beat          : 0,
+    volta:         typeof e.volta         === 'number'  ? e.volta         : null,
+    numeral:       typeof e.numeral       === 'string'  ? e.numeral       : null,
+    applied_to:    typeof e.applied_to    === 'string'  ? e.applied_to    : null,
+    local_key:     typeof e.local_key     === 'string'  ? e.local_key     : null,
+    reviewed:      typeof e.reviewed      === 'boolean' ? e.reviewed      : null,
+    bass_pitch:    typeof e.bass_pitch    === 'string'  ? e.bass_pitch    : null,
+    soprano_pitch: typeof e.soprano_pitch === 'string'  ? e.soprano_pitch : null,
   };
 }
 
@@ -179,18 +184,23 @@ function statusClass(status: FragmentDetailResponse['status']): string {
 export interface FragmentDetailPanelProps {
   /** UUID of the fragment to display. Changes trigger a fresh fetch. */
   fragmentId: string;
-  /** Called when the close button is activated. */
-  onClose: () => void;
   /**
-   * Called when Edit is activated. ScoreViewer receives the full fragment
-   * detail and restores it into the tagging form.
+   * Called when the close button is activated (panel mode only).
+   * Optional — not used in standalone mode.
    */
-  onEdit: (fragment: FragmentDetailResponse) => void;
+  onClose?: () => void;
   /**
-   * Called after a successful delete. ScoreViewer closes the panel and
-   * refreshes the stored-fragment overlay.
+   * Called when Edit is activated (panel mode only). ScoreViewer receives the
+   * full fragment detail and restores it into the tagging form.
+   * Optional — not used in standalone mode.
    */
-  onDeleteDone: (fragmentId: string) => void;
+  onEdit?: (fragment: FragmentDetailResponse) => void;
+  /**
+   * Called after a successful delete (panel mode only). ScoreViewer closes
+   * the panel and refreshes the stored-fragment overlay.
+   * Optional — not used in standalone mode.
+   */
+  onDeleteDone?: (fragmentId: string) => void;
   /**
    * Called after a successful approve or reject. ScoreViewer refreshes the
    * stored-fragment overlay so the bracket status colour updates immediately.
@@ -201,10 +211,23 @@ export interface FragmentDetailPanelProps {
    * Current viewer mode. Edit and Delete are only shown in tag mode
    * (read-only panel in view mode per tagging-tool-design.md §Step 12).
    * Approve / Reject are shown in both modes for submitted fragments.
+   * Irrelevant in standalone mode (all actions are hidden).
    */
   tagMode: 'view' | 'tag';
   /** Test hook. Defaults to 'fragment-detail-panel'. */
   'data-testid'?: string;
+  /**
+   * When true, render as an inline record section without panel chrome,
+   * close button, or action buttons. Used by the Fragment Detail page
+   * (Component 8 Step 12) to embed the record below the Verovio render.
+   */
+  standalone?: boolean;
+  /**
+   * Pre-fetched fragment data. When provided alongside ``standalone=true``,
+   * the internal ``getFragment`` call is skipped; only ``getConceptSchemas``
+   * is fetched to resolve property schema names for display.
+   */
+  initialFragment?: FragmentDetailResponse;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,13 +259,19 @@ export default function FragmentDetailPanel({
   onReviewDone,
   tagMode,
   'data-testid': testId,
+  standalone = false,
+  initialFragment,
 }: FragmentDetailPanelProps) {
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
 
   // ── Data state ─────────────────────────────────────────────────────────────
-  const [fragment, setFragment] = useState<FragmentDetailResponse | null>(null);
+  // Pre-seed from initialFragment when in standalone mode to avoid a duplicate
+  // getFragment fetch (the detail page already has the data).
+  const [fragment, setFragment] = useState<FragmentDetailResponse | null>(
+    standalone && initialFragment ? initialFragment : null,
+  );
   const [schemas, setSchemas] = useState<PropertySchema[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!(standalone && initialFragment));
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // ── Delete state ───────────────────────────────────────────────────────────
@@ -259,6 +288,28 @@ export default function FragmentDetailPanel({
   // ── Fetch on fragmentId change ─────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
+
+    // In standalone mode with a pre-fetched fragment, skip the getFragment
+    // call entirely.  Only reset non-data state so the schema fetch still runs.
+    if (standalone && initialFragment) {
+      setFragment(initialFragment);
+      setSchemas(null);
+      setLoading(true);
+
+      const primary = initialFragment.concept_tags.find(t => t.is_primary);
+      if (primary) {
+        getConceptSchemas(primary.concept_id)
+          .then(tree => { if (!cancelled) setSchemas(tree.schemas); })
+          .catch(() => { /* fall back to raw schema IDs */ })
+          .finally(() => { if (!cancelled) setLoading(false); });
+      } else {
+        setLoading(false);
+      }
+
+      return () => { cancelled = true; };
+    }
+
+    // Panel mode: full fetch.
     setLoading(true);
     setLoadError(null);
     setFragment(null);
@@ -296,6 +347,9 @@ export default function FragmentDetailPanel({
     })();
 
     return () => { cancelled = true; };
+  // standalone and initialFragment are intentionally excluded from deps:
+  // we only re-run when fragmentId changes (standalone props don't change).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragmentId]);
 
   // ── Delete handlers ────────────────────────────────────────────────────────
@@ -313,7 +367,7 @@ export default function FragmentDetailPanel({
       // confirmCascade=true when the fragment has sub-parts; the server requires
       // it to authorise the cascade (fragment-schema.md § "Delete Permissions").
       await deleteFragment(fragment.id, fragment.sub_parts.length > 0);
-      onDeleteDone(fragment.id);
+      onDeleteDone?.(fragment.id);
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : 'Failed to delete fragment.');
       setDeleteState('idle');
@@ -405,19 +459,23 @@ export default function FragmentDetailPanel({
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  const Wrapper = standalone ? 'div' : 'aside';
+
   return (
-    <aside
-      className={styles.panel}
-      style={{ width: panelWidth }}
+    <Wrapper
+      className={standalone ? styles.standaloneRecord : styles.panel}
+      style={standalone ? undefined : { width: panelWidth }}
       aria-label="Fragment details"
       data-testid={testId ?? 'fragment-detail-panel'}
     >
-      {/* Resize handle (left edge, same as FormPanel G6.1) */}
-      <div
-        className={styles.resizeHandle}
-        onMouseDown={onHandleMouseDown}
-        aria-hidden="true"
-      />
+      {/* Resize handle — panel mode only */}
+      {!standalone && (
+        <div
+          className={styles.resizeHandle}
+          onMouseDown={onHandleMouseDown}
+          aria-hidden="true"
+        />
+      )}
 
       {/* ── Loading ──────────────────────────────────────────────────────── */}
       {loading && (
@@ -430,62 +488,68 @@ export default function FragmentDetailPanel({
       {!loading && loadError && (
         <div className={styles.stateContainer}>
           <Type variant="body-sm" as="p" className={styles.errorText}>{loadError}</Type>
-          <button type="button" className={styles.closeInlineButton} onClick={onClose}>
-            <Type variant="label-sm" as="span">Close</Type>
-          </button>
+          {onClose && (
+            <button type="button" className={styles.closeInlineButton} onClick={onClose}>
+              <Type variant="label-sm" as="span">Close</Type>
+            </button>
+          )}
         </div>
       )}
 
       {/* ── Fragment content ─────────────────────────────────────────────── */}
       {!loading && !loadError && fragment && (
         <>
-          {/* ── Header: status + concept name + close ──────────────────── */}
-          <header className={styles.header}>
-            <div className={styles.headerMeta}>
-              <span className={`${styles.statusBadge} ${statusClass(fragment.status)}`}>
-                <Type variant="label-sm" as="span">{STATUS_LABELS[fragment.status]}</Type>
-              </span>
-              {primaryTag && (
-                <Type variant="title" as="h2" className={styles.conceptName}>
-                  {primaryTag.name}
-                </Type>
-              )}
-              {primaryTag && primaryTag.hierarchy_path.length > 0 && (
-                <Type variant="label-sm" as="p" className={styles.hierarchyPath}>
-                  {primaryTag.hierarchy_path.join(' › ')}
-                </Type>
-              )}
-            </div>
-            <button
-              type="button"
-              className={styles.closeButton}
-              onClick={onClose}
-              aria-label="Close fragment panel"
-            >
-              ×
-            </button>
-          </header>
-
-          {/* ── Range ──────────────────────────────────────────────────── */}
-          <section className={styles.section}>
-            <Type variant="label-sm" as="h3" className={styles.sectionHeading}>Range</Type>
-            <Type variant="body-sm" as="p" className={styles.rangeText}>
-              {fragment.bar_start === fragment.bar_end
-                ? `Bar ${fragment.bar_start}`
-                : `Bars ${fragment.bar_start}–${fragment.bar_end}`}
-              {fragment.beat_start !== null && (
-                <span className={styles.beatRange}>
-                  {' '}(beat {fragment.beat_start}
-                  {fragment.beat_end !== null ? `–${fragment.beat_end}` : ''})
+          {/* ── Header: status + concept name + close (panel mode only) ── */}
+          {!standalone && (
+            <header className={styles.header}>
+              <div className={styles.headerMeta}>
+                <span className={`${styles.statusBadge} ${statusClass(fragment.status)}`}>
+                  <Type variant="label-sm" as="span">{STATUS_LABELS[fragment.status]}</Type>
                 </span>
-              )}
-            </Type>
-            {fragment.repeat_context && (
-              <Type variant="label-sm" as="p" className={styles.repeatContext}>
-                Repeat context: {fragment.repeat_context}
+                {primaryTag && (
+                  <Type variant="title" as="h2" className={styles.conceptName}>
+                    {primaryTag.name}
+                  </Type>
+                )}
+                {primaryTag && primaryTag.hierarchy_path.length > 0 && (
+                  <Type variant="label-sm" as="p" className={styles.hierarchyPath}>
+                    {primaryTag.hierarchy_path.join(' › ')}
+                  </Type>
+                )}
+              </div>
+              <button
+                type="button"
+                className={styles.closeButton}
+                onClick={onClose}
+                aria-label="Close fragment panel"
+              >
+                ×
+              </button>
+            </header>
+          )}
+
+          {/* ── Range (panel mode only — already shown in detail page header) */}
+          {!standalone && (
+            <section className={styles.section}>
+              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>Range</Type>
+              <Type variant="body-sm" as="p" className={styles.rangeText}>
+                {fragment.bar_start === fragment.bar_end
+                  ? `Bar ${fragment.bar_start}`
+                  : `Bars ${fragment.bar_start}–${fragment.bar_end}`}
+                {fragment.beat_start !== null && (
+                  <span className={styles.beatRange}>
+                    {' '}(beat {fragment.beat_start}
+                    {fragment.beat_end !== null ? `–${fragment.beat_end}` : ''})
+                  </span>
+                )}
               </Type>
-            )}
-          </section>
+              {fragment.repeat_context && (
+                <Type variant="label-sm" as="p" className={styles.repeatContext}>
+                  Repeat context: {fragment.repeat_context}
+                </Type>
+              )}
+            </section>
+          )}
 
           {/* ── Summary ────────────────────────────────────────────────── */}
           {summary && (
@@ -570,6 +634,13 @@ export default function FragmentDetailPanel({
                         </Type>
                       </span>
                     )}
+                    {/* Bass / soprano pitch (Component 6 deferral: null until
+                        music21 auto-analysis top-up pass is implemented). */}
+                    <span className={styles.harmonyPitches}>
+                      <Type variant="label-sm" as="span">
+                        {row.bass_pitch ?? '—'} / {row.soprano_pitch ?? '—'}
+                      </Type>
+                    </span>
                   </li>
                 ))}
               </ol>
@@ -617,8 +688,37 @@ export default function FragmentDetailPanel({
             </section>
           )}
 
-          {/* ── Review actions (Step 14) — shown for submitted fragments ── */}
-          {fragment.status === 'submitted' && reviewPhase !== 'gate-failed' && (
+          {/* ── Data licence / harmony sources (ADR-009, Component 8 Step 12) ─ */}
+          {(fragment.data_licence || fragment.harmony_sources.length > 0) && (
+            <section className={styles.section}>
+              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
+                Data licence
+              </Type>
+              {fragment.data_licence && (
+                <Type variant="body-sm" as="p" className={styles.licenceText}>
+                  {fragment.data_licence_url ? (
+                    <a href={fragment.data_licence_url} target="_blank" rel="noreferrer">
+                      {fragment.data_licence}
+                    </a>
+                  ) : (
+                    fragment.data_licence
+                  )}
+                </Type>
+              )}
+              {fragment.harmony_sources.length > 0 && (
+                <ul className={styles.sourcesList}>
+                  {fragment.harmony_sources.map(src => (
+                    <li key={src} className={styles.sourceChip}>
+                      <Type variant="label-sm" as="span">{src}</Type>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {/* ── Review actions (Step 14) — shown for submitted fragments (panel only) */}
+          {!standalone && fragment.status === 'submitted' && reviewPhase !== 'gate-failed' && (
             <div className={styles.reviewSection}>
               <Type variant="label-sm" as="h3" className={styles.reviewHeading}>
                 Review
@@ -697,8 +797,8 @@ export default function FragmentDetailPanel({
             </div>
           )}
 
-          {/* ── Approval gate failure (Step 14) ───────────────────────────── */}
-          {fragment.status === 'submitted' && reviewPhase === 'gate-failed' && gateDetail && (
+          {/* ── Approval gate failure (Step 14, panel only) ───────────────── */}
+          {!standalone && fragment.status === 'submitted' && reviewPhase === 'gate-failed' && gateDetail && (
             <div className={styles.gateFailed}>
               <Type variant="label-sm" as="p" className={styles.gateFailedIntro}>
                 Approval gate: the items below must be confirmed before approval
@@ -765,8 +865,8 @@ export default function FragmentDetailPanel({
             </div>
           )}
 
-          {/* ── Delete confirmation (inline) ───────────────────────────── */}
-          {deleteState === 'confirming' && (
+          {/* ── Delete confirmation (panel only) ──────────────────────────── */}
+          {!standalone && deleteState === 'confirming' && (
             <div className={styles.deleteConfirm}>
               <Type variant="body-sm" as="p" className={styles.deleteConfirmText}>
                 {fragment.sub_parts.length > 0
@@ -800,19 +900,19 @@ export default function FragmentDetailPanel({
             </div>
           )}
 
-          {deleteState === 'deleting' && (
+          {!standalone && deleteState === 'deleting' && (
             <div className={styles.deleteConfirm}>
               <Type variant="label-sm" as="p" className={styles.stateText}>Deleting…</Type>
             </div>
           )}
 
-          {/* ── Footer: Edit + Delete (tag mode only; hidden while confirming) */}
-          {tagMode === 'tag' && deleteState === 'idle' && (
+          {/* ── Footer: Edit + Delete (tag mode only; panel only) ─────────── */}
+          {!standalone && tagMode === 'tag' && deleteState === 'idle' && (
             <footer className={styles.footer}>
               <button
                 type="button"
                 className={styles.editButton}
-                onClick={() => onEdit(fragment)}
+                onClick={() => onEdit?.(fragment)}
               >
                 <Type variant="label-sm" as="span">Edit</Type>
               </button>
@@ -827,6 +927,6 @@ export default function FragmentDetailPanel({
           )}
         </>
       )}
-    </aside>
+    </Wrapper>
   );
 }

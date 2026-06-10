@@ -15,13 +15,14 @@ All routes require the ``editor`` role. The movement-scoped list endpoint
 
 See docs/roadmap/component-5-tagging-tool.md §§ Step 6, Step 8.
 See docs/roadmap/component-7-fragment-database.md §§ Step 7, Step 8, Step 9.
-See docs/roadmap/component-8-fragment-browsing.md § Step 2.
+See docs/roadmap/component-8-fragment-browsing.md §§ Step 2, Step 12.
+See docs/adr/ADR-024-fragment-rendering-context.md — structured context contract.
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from api.dependencies import (
     AppUser,
@@ -189,6 +190,40 @@ async def list_fragments_by_concept(
 )
 async def get_fragment(
     fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to read"),
+    context_mode: Literal[
+        "none", "bars", "enclosing_fragment", "previous_same_domain"
+    ] = Query(
+        "none",
+        alias="context.mode",
+        description=(
+            "Rendering-context mode (ADR-024).  ``none`` (default): containing "
+            "measures only — the fragment's ``bar_start``/``bar_end`` range. "
+            "``bars``: ``before``/``after`` additional bars on each side. "
+            "``enclosing_fragment``: render the parent container fragment for "
+            "orientation.  ``previous_same_domain``: render from after the prior "
+            "same-domain fragment.  Phase 1 implements only ``none``; all other "
+            "modes are accepted and validated but ignored (containing-measures-only "
+            "is returned regardless)."
+        ),
+    ),
+    context_before: int = Query(
+        0,
+        ge=0,
+        alias="before",
+        description=(
+            "Additional bars before the range when ``context.mode=bars``. "
+            "Phase 1: accepted, validated (≥ 0), and ignored."
+        ),
+    ),
+    context_after: int = Query(
+        0,
+        ge=0,
+        alias="after",
+        description=(
+            "Additional bars after the range when ``context.mode=bars``. "
+            "Phase 1: accepted, validated (≥ 0), and ignored."
+        ),
+    ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
 ) -> FragmentDetailResponse:
@@ -198,8 +233,23 @@ async def get_fragment(
     statuses (submitted, approved, rejected) are visible to any editor.
     Requesting a draft that belongs to a different annotator returns 404.
 
+    **Rendering context (ADR-024).** The ``context.mode`` parameter publishes
+    the structured context contract.  Phase 1 implements only ``mode=none``
+    (containing measures only, the current default).  The other modes
+    (``bars``, ``enclosing_fragment``, ``previous_same_domain``) are accepted
+    and validated — an unknown mode is a 422 — but have no effect in Phase 1:
+    the response is identical to ``mode=none`` regardless.  Each mode lands
+    with its consuming feature (blog embeds, MCQ exercises, parent-fragment
+    orientation) without a breaking parameter change.
+
     Args:
         fragment_id: UUID of the fragment to read.
+        context_mode: Rendering-context mode (see above; Phase 1: only ``none``
+            has effect).
+        context_before: Additional bars before the range (``bars`` mode only;
+            Phase 1: ignored).
+        context_after: Additional bars after the range (``bars`` mode only;
+            Phase 1: ignored).
         service: Fragment service (injected).
         user: Authenticated caller (injected).
 
@@ -210,7 +260,13 @@ async def get_fragment(
     Raises:
         404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist or is a
             draft not owned by the caller.
+        422: ``context.mode`` value is not one of the accepted modes, or
+            ``before``/``after`` are negative.
     """
+    # context_mode / context_before / context_after: accepted and validated.
+    # Phase 1 implements only mode=none; non-default modes are ignored here.
+    # The _ prefix silences linters for the intentionally unused parameters.
+    _ = context_mode, context_before, context_after
     return await service.get(fragment_id, caller_id=user.id, caller_role=user.role)
 
 
