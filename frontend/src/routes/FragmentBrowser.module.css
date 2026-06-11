@@ -149,12 +149,10 @@
   background: var(--color-surface-container);
 }
 
+/* Selected state mirrors BrowseItem (Step 17 / F6): subtle tonal layer,
+   no colour inversion. */
 .treeRow[data-selected='true'] {
-  background: var(--color-primary-container);
-}
-
-.treeRow[data-selected='true'] span {
-  color: var(--color-on-primary-container);
+  background: var(--color-surface-container-high);
 }
 
 .treeToggle {
@@ -192,8 +190,7 @@
 }
 
 .treeRow[data-selected='true'] .treeCount {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+  background: var(--color-surface-container-highest);
 }
 
 .treeChildren {
@@ -266,12 +263,13 @@
   background: var(--color-surface-container-low);
 }
 
-/* SVG preview image */
+/* SVG preview image — score preview well, same token as corpus incipits
+   (Step 17 / F4). */
 .previewArea {
   flex-shrink: 0;
   width: 140px;
   height: 90px;
-  background: var(--color-surface-container);
+  background: var(--color-surface-container-low);
   overflow: hidden;
 }
 
@@ -297,10 +295,6 @@
   min-width: 0;
 }
 
-.fragmentConcept {
-  font-weight: 600;
-}
-
 .fragmentBadges {
   display: flex;
   align-items: center;
@@ -321,8 +315,8 @@
 }
 
 .statusBadge[data-status='submitted'] {
-  background: var(--color-tertiary-container);
-  color: var(--color-on-tertiary-container);
+  background: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
 }
 
 .statusBadge[data-status='rejected'] {
@@ -330,9 +324,9 @@
   color: var(--color-on-error-container);
 }
 
-/* Load more */
+/* Load more — wrapper padding mirrors ReviewQueue (Step 17 / F3) */
 .loadMore {
-  padding: var(--spacing-2) 0;
+  padding: var(--spacing-3) var(--spacing-4);
   flex-shrink: 0;
 }
 

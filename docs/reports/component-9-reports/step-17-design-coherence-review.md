@@ -84,3 +84,16 @@ Ordered; F1+F2 are one change. No code has been changed in this review.
 6. **F7** — `.scaleBtn` → ScoreViewer toggle treatment (decided).
 
 Verification after the fix task: visually confirm submitted/rejected badges, sub-part brackets, and selected tree rows in the running frontend; `npm test` passes; `DESIGN.md` needs no amendment (the token additions implement its existing palette intent; record the F18 rows-vs-cards rule there if desired).
+
+---
+
+## Implementation note (2026-06-12)
+
+F1–F7 implemented. Value decisions taken where "promote the de-facto fallbacks" was underdetermined:
+
+- **`--color-on-primary-container` is `#ffffff`, not the de-facto fallback `#003040`.** The fallback assumed a light M3-style container; this project's `--color-primary-container` is mid-blue `#587891`, on which `#003040` is exactly the dark-on-mid-blue contrast failure F1 flagged (≈3:1). White passes AA (≈4.7:1). Side effect: the panel's approved badge text goes from dark teal to white.
+- **Families completed with M3-consistent companions where no de-facto value existed:** `--color-secondary: #575e71` / `--color-on-secondary: #ffffff` (the M3 blue-scheme secondary matching the de-facto `#dce2f9` container), `--color-tertiary-container: #ffdf9e` / `--color-on-tertiary-container: #261a00` (M3 gold companions to `#7a5900`; currently unused after F2 remapped submitted → secondary).
+- **`--color-on-surface: #1b1c17` added** (alias of `on-background`): route CSS referenced it without a fallback — same class of bug as F1, harmless for `color` since the invalid value inherits, but now defined.
+- **F2 scope:** the submitted *status* uses the secondary family everywhere (badges and sub-part brackets); `tertiary` remains the warning/unreviewed accent (`StageList .warnText`, `HarmonyPanel .badgeUnreviewed`) — those are not status mappings.
+- **F7:** colour treatment (transparent base, `on-surface-variant` text, primary text on hover, solid primary when active) mirrored exactly; `.scaleBtn` keeps its compact geometry (`2px` vertical padding, `min-width: 28px`) since it sits in the detail view's tighter control strip.
+- **Fallback sweep** limited to the families tokenized here (error/tertiary/secondary/on-primary-container); pre-existing redundant fallbacks for primary/surface tokens in `components/score/` were left alone.

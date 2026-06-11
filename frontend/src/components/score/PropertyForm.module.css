@@ -56,7 +56,7 @@
 
 /* The * required indicator. */
 .required {
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   font-size: 0.875em;
   margin-left: 0.15em;
 }

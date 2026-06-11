@@ -64,7 +64,7 @@
 }
 
 .schemaError {
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   margin: 0;
 }
 
@@ -134,11 +134,11 @@
   border: none;
   cursor: pointer;
   padding: var(--spacing-1) var(--spacing-2);
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
 }
 
 .deleteButton:hover {
-  background-color: var(--color-error-container, #f9dedc);
+  background-color: var(--color-error-container);
 }
 
 /* ── No-selection hint ────────────────────────────────────────────────────── */

@@ -6,11 +6,7 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
-import {
-  ReviewQueueItem,
-  ReviewQueueResponse,
-  listReviewQueue,
-} from '../services/fragmentApi';
+import { ReviewQueueItem, ReviewQueueResponse, listReviewQueue } from '../services/fragmentApi';
 import styles from './ReviewQueue.module.css';
 
 /**
@@ -75,9 +71,7 @@ export default function ReviewQueue() {
     const mvt = item.movement_title
       ? `${item.movement_number}. ${item.movement_title}`
       : `Movement ${item.movement_number}`;
-    const catalogue = item.work_catalogue_number
-      ? ` (${item.work_catalogue_number})`
-      : '';
+    const catalogue = item.work_catalogue_number ? ` (${item.work_catalogue_number})` : '';
     return `${item.work_title}${catalogue} — ${mvt}`;
   }
 
@@ -103,7 +97,8 @@ export default function ReviewQueue() {
             </Type>
             {!isLoading && !error && (
               <Type variant="label-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
-                {items.length}{nextCursor ? '+' : ''} item{items.length !== 1 ? 's' : ''}
+                {items.length}
+                {nextCursor ? '+' : ''} item{items.length !== 1 ? 's' : ''}
               </Type>
             )}
           </div>
@@ -151,7 +146,11 @@ export default function ReviewQueue() {
                   <Type
                     variant="label-sm"
                     as="span"
-                    style={{ color: 'var(--color-on-surface-variant)', display: 'block', opacity: 0.7 }}
+                    style={{
+                      color: 'var(--color-on-surface-variant)',
+                      display: 'block',
+                      opacity: 0.7,
+                    }}
                   >
                     Submitted {formatSubmittedAt(item.submitted_at)}
                   </Type>
@@ -169,7 +168,7 @@ export default function ReviewQueue() {
                 onClick={handleLoadMore}
                 disabled={isLoadingMore}
               >
-                <Type variant="label-md" as="span">
+                <Type variant="label-sm" as="span">
                   {isLoadingMore ? 'Loading…' : 'Load more'}
                 </Type>
               </button>

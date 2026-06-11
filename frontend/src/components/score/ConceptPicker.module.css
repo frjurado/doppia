@@ -110,7 +110,7 @@
 }
 
 .errorMsg {
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   padding: var(--spacing-2) 0;
 }
 

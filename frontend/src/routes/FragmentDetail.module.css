@@ -36,8 +36,8 @@
 }
 
 .statusBadge[data-status='submitted'] {
-  background: var(--color-tertiary-container);
-  color: var(--color-on-tertiary-container);
+  background: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
 }
 
 .statusBadge[data-status='rejected'] {
@@ -172,22 +172,25 @@
   gap: 1px;
 }
 
+/* Mirrors ScoreViewer's .sizeButton treatment (Step 17 / F7): transparent
+   base, primary text on hover, solid primary when active. */
 .scaleBtn {
-  background: var(--color-surface-container-high);
+  background: transparent;
   border: none;
   cursor: pointer;
   padding: 2px var(--spacing-3);
   min-width: 28px;
   text-align: center;
+  color: var(--color-on-surface-variant);
 }
 
 .scaleBtn:hover {
-  background: var(--color-surface-container-highest);
+  color: var(--color-primary);
 }
 
 .scaleBtnActive {
-  background: var(--color-primary-container);
-  color: var(--color-on-primary-container);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
 }
 
 /* Score + bracket overlay wrapper.
@@ -261,7 +264,7 @@
 }
 
 .subPartBracket[data-status='submitted'] {
-  background: var(--color-tertiary);
+  background: var(--color-secondary);
 }
 
 .subPartBracket[data-status='rejected'] {

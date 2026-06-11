@@ -57,3 +57,9 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+
+/* Bold modifier — the only sanctioned way to render a variant at weight 600
+   (Newsreader 600 is loaded). Applied via the `bold` prop on Type. */
+.bold {
+  font-weight: 600;
+}

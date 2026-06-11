@@ -167,32 +167,20 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
           />
         ) : (
           <div className={styles.previewPlaceholder}>
-            <Type
-              variant="label-sm"
-              as="span"
-              style={{ color: 'var(--color-on-surface-variant)' }}
-            >
+            <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
               Preview generating…
             </Type>
           </div>
         )}
       </div>
       <div className={styles.fragmentMeta}>
-        <Type variant="body-sm" as="span" className={styles.fragmentConcept}>
+        <Type variant="body-sm" as="span" bold>
           {conceptLabel}
         </Type>
-        <Type
-          variant="label-sm"
-          as="span"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
+        <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
           {item.composer_name} · {workLabel}
         </Type>
-        <Type
-          variant="label-sm"
-          as="span"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
+        <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
           {movementLabel} · {barRange}
         </Type>
         <div className={styles.fragmentBadges}>
@@ -333,7 +321,7 @@ export default function FragmentBrowser() {
         return next;
       });
     },
-    [setSearchParams],
+    [setSearchParams]
   );
 
   // ---- load fragments when selected concept changes ----
@@ -357,7 +345,7 @@ export default function FragmentBrowser() {
         if (isFirstPage) setFragmentsLoading(false);
       }
     },
-    [conceptId, includeSubtypes, statusFilter],
+    [conceptId, includeSubtypes, statusFilter]
   );
 
   useEffect(() => {
@@ -381,7 +369,7 @@ export default function FragmentBrowser() {
         return next;
       });
     },
-    [setSearchParams, conceptId],
+    [setSearchParams, conceptId]
   );
 
   const clearSelection = useCallback(() => {
@@ -402,7 +390,7 @@ export default function FragmentBrowser() {
     (id: string) => {
       navigate(`/fragments/${id}`);
     },
-    [navigate],
+    [navigate]
   );
 
   return (
@@ -421,7 +409,9 @@ export default function FragmentBrowser() {
                 onClick={clearSelection}
                 aria-label={`Clear selection: ${selectedNode.name}`}
               >
-                <Type variant="label-sm" as="span">{selectedNode.name}</Type>
+                <Type variant="label-sm" as="span">
+                  {selectedNode.name}
+                </Type>
                 <span aria-hidden="true">×</span>
               </button>
             )}
@@ -441,7 +431,11 @@ export default function FragmentBrowser() {
               <Surface layer="container-highest" floating className={styles.searchDropdown}>
                 {searchLoading && (
                   <div className={styles.searchItem}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
                       Searching…
                     </Type>
                   </div>
@@ -453,8 +447,14 @@ export default function FragmentBrowser() {
                     className={styles.searchItem}
                     onClick={() => pickRoot(r.id)}
                   >
-                    <Type variant="body-sm" as="span">{r.name}</Type>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    <Type variant="body-sm" as="span">
+                      {r.name}
+                    </Type>
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
                       {r.id}
                     </Type>
                   </button>
@@ -467,7 +467,11 @@ export default function FragmentBrowser() {
           <div className={styles.treeScroll}>
             {treeLoading && (
               <div className={styles.treeEmpty}>
-                <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                <Type
+                  variant="label-sm"
+                  as="span"
+                  style={{ color: 'var(--color-on-surface-variant)' }}
+                >
                   Loading…
                 </Type>
               </div>
@@ -481,21 +485,26 @@ export default function FragmentBrowser() {
             )}
             {!treeLoading && !treeError && !rootId && (
               <div className={styles.treeEmpty}>
-                <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                <Type
+                  variant="label-sm"
+                  as="span"
+                  style={{ color: 'var(--color-on-surface-variant)' }}
+                >
                   Search for a concept to browse
                 </Type>
               </div>
             )}
-            {!treeLoading && roots.map((root) => (
-              <TreeNode
-                key={root.id}
-                node={root}
-                childrenMap={childrenMap}
-                selectedId={conceptId}
-                onSelect={selectConcept}
-                depth={0}
-              />
-            ))}
+            {!treeLoading &&
+              roots.map((root) => (
+                <TreeNode
+                  key={root.id}
+                  node={root}
+                  childrenMap={childrenMap}
+                  selectedId={conceptId}
+                  onSelect={selectConcept}
+                  depth={0}
+                />
+              ))}
           </div>
         </Surface>
 
@@ -535,7 +544,11 @@ export default function FragmentBrowser() {
               <div className={styles.listScroll}>
                 {fragmentsLoading && (
                   <div className={styles.listEmpty}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
                       Loading fragments…
                     </Type>
                   </div>
@@ -549,7 +562,11 @@ export default function FragmentBrowser() {
                 )}
                 {!fragmentsLoading && !fragmentsError && fragments.length === 0 && (
                   <div className={styles.listEmpty}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
                       No approved fragments found
                     </Type>
                   </div>
@@ -564,7 +581,9 @@ export default function FragmentBrowser() {
                       className={styles.loadMoreButton}
                       onClick={() => loadFragments(fragmentsNextCursor)}
                     >
-                      <Type variant="label-sm" as="span">Load more</Type>
+                      <Type variant="label-sm" as="span">
+                        Load more
+                      </Type>
                     </button>
                   </div>
                 )}
@@ -572,7 +591,11 @@ export default function FragmentBrowser() {
             </>
           ) : (
             <div className={styles.listEmpty}>
-              <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+              <Type
+                variant="label-sm"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
                 {rootId ? 'Select a concept from the tree' : 'Search for a concept to get started'}
               </Type>
             </div>

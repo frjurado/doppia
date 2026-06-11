@@ -51,7 +51,7 @@
 }
 
 .errorText {
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   padding: var(--spacing-2) var(--spacing-3);
   margin: 0;
 }
@@ -165,7 +165,7 @@
 
 .badgeUnreviewed {
   flex-shrink: 0;
-  color: var(--color-tertiary, #7a5900);
+  color: var(--color-tertiary);
   white-space: nowrap;
 }
 
@@ -211,14 +211,14 @@
   color: var(--color-on-surface);
 }
 
-.actionEdit[aria-pressed="true"] {
+.actionEdit[aria-pressed='true'] {
   background-color: var(--color-surface-container-high, #eae8df);
   color: var(--color-primary, #3f5f77);
 }
 
 .actionDelete:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-error, #b3261e) 10%, transparent);
-  color: var(--color-error, #b3261e);
+  background-color: color-mix(in srgb, var(--color-error) 10%, transparent);
+  color: var(--color-error);
 }
 
 /* ── Inline edit form ────────────────────────────────────────────────────── */
@@ -307,7 +307,7 @@
 /* ── Form-level error ────────────────────────────────────────────────────── */
 
 .formError {
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   margin: 0;
 }
 
