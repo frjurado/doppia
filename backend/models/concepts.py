@@ -240,3 +240,32 @@ class ConceptTreeResponse(BaseModel):
 
     root_id: str
     nodes: list[ConceptTreeNode]
+
+
+# ---------------------------------------------------------------------------
+# Domain roots response model  (GET /api/v1/concepts/roots)
+# ---------------------------------------------------------------------------
+
+
+class ConceptRootItem(BaseModel):
+    """A domain root concept — a non-stub concept with no IS_SUBTYPE_OF parent.
+
+    Attributes:
+        id: Immutable concept identifier (e.g. ``"Cadence"``).
+        name: Human-readable concept name.
+        aliases: Alternative names / abbreviations; empty list if none.
+    """
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+
+
+class ConceptRootsResponse(BaseModel):
+    """All domain root concepts, sorted alphabetically.
+
+    Attributes:
+        roots: Ordered list of domain root items.
+    """
+
+    roots: list[ConceptRootItem]

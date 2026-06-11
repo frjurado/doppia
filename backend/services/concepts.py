@@ -19,10 +19,13 @@ from graph.queries.concepts import (
     get_concept_contains_stages,
     get_concept_property_schemas,
     get_concept_subtree,
+    get_domain_roots,
     get_type_refinement_children,
     search_concepts,
 )
 from models.concepts import (
+    ConceptRootItem,
+    ConceptRootsResponse,
     ConceptSchemaTreeResponse,
     ConceptSearchItem,
     ConceptSearchResponse,
@@ -171,6 +174,24 @@ class ConceptService:
             schemas=schemas,
             stages=stages,
             type_refinement=type_refinement,
+        )
+
+    async def get_roots(self) -> ConceptRootsResponse:
+        """Return all domain root concepts (non-stub nodes with no IS_SUBTYPE_OF parent).
+
+        Domain roots are the natural entry points for the concept-tree navigator.
+        Results are ordered alphabetically by name.
+
+        Returns:
+            :class:`~models.concepts.ConceptRootsResponse` with a list of root items.
+        """
+        async with self._driver.session() as session:
+            rows = await get_domain_roots(session)
+        return ConceptRootsResponse(
+            roots=[
+                ConceptRootItem(id=r["id"], name=r["name"], aliases=r["aliases"] or [])
+                for r in rows
+            ]
         )
 
     async def get_tree(self, root_id: str) -> ConceptTreeResponse:

@@ -139,7 +139,18 @@ Previews ~25% larger and left-aligned in their column (then iterate visually); r
 
 ### Step 14 — Fragment browser
 
-Concepts column shows the available concepts by default instead of an empty search bar (the concept tree from Component 8's navigator is the natural source). Preview height set to a useful size (thumbnail-height single system; evaluate hover-scroll vs. fixed crop and pick one). Draft-and-document the future multi-domain filter (design note only — no implementation until a second domain is seeded).
+Concepts column shows the available concepts by default instead of an empty search bar (the concept tree from Component 8's navigator is the natural source). Preview height set to a useful size (thumbnail-height single system; hover-scroll chosen and implemented — same pattern as the corpus browser MovementCard). Draft-and-document the future multi-domain filter (design note only — no implementation until a second domain is seeded).
+
+**Multi-domain filter — deferred design note:**
+Once more than one domain is seeded (e.g. Cadences + Sequences), the current single-root URL pattern (`?root=<concept-id>`) becomes limiting — a user studying a passage tagged with concepts from two domains must navigate each domain separately. The future filter should:
+
+1. Replace the single `?root` URL param with a multi-value `?domains` param listing active domain roots.
+2. Render each domain as a collapsible labelled section in the concepts column, with per-domain toggle affordances.
+3. Accumulate checked concepts across domains into the fragment query — OR within a domain (subtypes), AND across domains (fragment must match all active domains).
+4. Display a pill strip of active domain filters above the fragment list, with individual-remove and clear-all controls.
+5. Preserve the existing `includeSubtypes` toggle per domain (not globally).
+
+No implementation until a second domain is seeded and the interaction can be validated against real multi-domain data. The URL schema change is a breaking change to bookmarked URLs; plan a redirect from the old `?root` form.
 
 ### Step 15 — Fragment viewer (detail view)
 

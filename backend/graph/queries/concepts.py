@@ -545,6 +545,45 @@ async def get_concept_subtree(
     return await result.data()
 
 
+# ---------------------------------------------------------------------------
+# Domain root discovery  (async — used by GET /api/v1/concepts/roots)
+# ---------------------------------------------------------------------------
+
+_GET_DOMAIN_ROOTS = """\
+MATCH (c:Concept)
+WHERE NOT (c)-[:IS_SUBTYPE_OF]->(:Concept)
+  AND NOT c.stub
+RETURN c.id                       AS id,
+       c.name                     AS name,
+       coalesce(c.aliases, [])    AS aliases
+ORDER BY c.name
+"""
+"""Return all non-stub concept nodes that have no IS_SUBTYPE_OF parent.
+
+These are the domain roots (e.g. 'Cadence') — the natural entry points for
+the concept-tree navigator.  Stub concepts are excluded because the tree
+endpoint also excludes stubs, so a stub root would yield an empty tree.
+"""
+
+
+async def get_domain_roots(
+    session: _AsyncSession,
+) -> list[dict[str, Any]]:
+    """Return all non-stub concept nodes with no IS_SUBTYPE_OF parent.
+
+    Each dict has keys: ``id``, ``name``, ``aliases`` (list).
+
+    Args:
+        session: An open async Neo4j session.
+
+    Returns:
+        List of root dicts ordered alphabetically by name; empty when the
+        graph contains no concepts or all roots are stubs.
+    """
+    result = await session.run(_GET_DOMAIN_ROOTS)
+    return await result.data()
+
+
 async def search_concepts(
     session: _AsyncSession,
     *,

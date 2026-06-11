@@ -4,7 +4,7 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
-import { ConceptTreeNode, getConceptTree } from '../services/conceptApi';
+import { ConceptTreeNode, getConceptRoots, getConceptTree } from '../services/conceptApi';
 import { ConceptBrowseItem, listByConcept } from '../services/fragmentApi';
 import styles from './FragmentBrowser.module.css';
 
@@ -113,6 +113,9 @@ function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodePr
 // Fragment preview card
 // ---------------------------------------------------------------------------
 
+const SCROLL_SPEED_PX_PER_S = 60;
+const RETURN_DURATION_S = 0.5;
+
 interface FragmentCardProps {
   item: ConceptBrowseItem;
   onOpen: (id: string) => void;
@@ -123,17 +126,40 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const barRange = `mm. ${item.bar_start}–${item.bar_end}`;
   const workLabel = `${item.work_title}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
   const movementLabel = `mvt. ${item.movement_number}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
+  const [hovered, setHovered] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    const wrapper = wrapperRef.current;
+    if (!img || !wrapper) return;
+    if (hovered) {
+      const scrollDist = img.offsetWidth - wrapper.offsetWidth;
+      if (scrollDist > 0) {
+        const duration = scrollDist / SCROLL_SPEED_PX_PER_S;
+        img.style.transition = `transform ${duration}s linear`;
+        img.style.transform = `translateX(-${scrollDist}px)`;
+      }
+    } else {
+      img.style.transition = `transform ${RETURN_DURATION_S}s ease-out`;
+      img.style.transform = 'translateX(0)';
+    }
+  }, [hovered]);
 
   return (
     <button
       type="button"
       className={styles.fragmentCard}
       onClick={() => onOpen(item.id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       aria-label={`Open fragment ${conceptLabel} ${barRange}`}
     >
-      <div className={styles.previewArea}>
+      <div ref={wrapperRef} className={styles.previewArea}>
         {item.preview_url ? (
           <img
+            ref={imgRef}
             src={item.preview_url}
             alt=""
             className={styles.previewImage}
@@ -230,6 +256,34 @@ export default function FragmentBrowser() {
   const [includeSubtypes, setIncludeSubtypes] = useState(true);
   const [statusFilter] = useState<'approved' | 'submitted' | 'draft' | 'rejected'>('approved');
 
+  // The root id set by the auto-load on mount — used by clearSelection to
+  // reset the tree back to the default domain view.
+  const defaultRootIdRef = useRef<string | null>(null);
+
+  // ---- auto-load domain roots on first visit (no root in URL) ----
+  useEffect(() => {
+    if (rootId) {
+      // Page opened with an explicit ?root — treat it as the default.
+      if (!defaultRootIdRef.current) defaultRootIdRef.current = rootId;
+      return;
+    }
+    getConceptRoots()
+      .then((roots) => {
+        if (roots.length > 0) {
+          defaultRootIdRef.current = roots[0].id;
+          setSearchParams((p) => {
+            const next = new URLSearchParams(p);
+            next.set('root', roots[0].id);
+            return next;
+          });
+        }
+      })
+      .catch(() => {
+        // Silently ignore — user can still type a root manually.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- load tree when root changes ----
   useEffect(() => {
     if (!rootId) {
@@ -319,12 +373,28 @@ export default function FragmentBrowser() {
     (id: string) => {
       setSearchParams((p) => {
         const next = new URLSearchParams(p);
-        next.set('concept', id);
+        if (id === conceptId) {
+          next.delete('concept');
+        } else {
+          next.set('concept', id);
+        }
         return next;
       });
     },
-    [setSearchParams],
+    [setSearchParams, conceptId],
   );
+
+  const clearSelection = useCallback(() => {
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.delete('concept');
+      const defaultRoot = defaultRootIdRef.current;
+      if (defaultRoot) {
+        next.set('root', defaultRoot);
+      }
+      return next;
+    });
+  }, [setSearchParams]);
 
   const selectedNode = treeNodes.find((n) => n.id === conceptId) ?? null;
 
@@ -344,6 +414,17 @@ export default function FragmentBrowser() {
             <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
               Concepts
             </Type>
+            {conceptId && selectedNode && (
+              <button
+                type="button"
+                className={styles.clearSelection}
+                onClick={clearSelection}
+                aria-label={`Clear selection: ${selectedNode.name}`}
+              >
+                <Type variant="label-sm" as="span">{selectedNode.name}</Type>
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
           </div>
 
           {/* Root search */}

@@ -17,6 +17,7 @@ from api.dependencies import get_neo4j, get_redis, require_role
 from fastapi import APIRouter, Depends, Path, Query
 from models.base import get_db
 from models.concepts import (
+    ConceptRootsResponse,
     ConceptSchemaTreeResponse,
     ConceptSearchResponse,
     ConceptTreeResponse,
@@ -149,6 +150,33 @@ async def get_concept_tree(
         :class:`~models.concepts.ConceptTreeResponse`.
     """
     return await service.get_tree(root)
+
+
+@router.get(
+    "/roots",
+    response_model=ConceptRootsResponse,
+    dependencies=[require_role("editor")],
+    summary="List all domain root concepts",
+    response_description=(
+        "All non-stub concepts with no IS_SUBTYPE_OF parent, sorted alphabetically. "
+        "These are the natural entry points for the concept-tree navigator."
+    ),
+)
+async def list_concept_roots(
+    service: ConceptService = Depends(get_concept_service),
+) -> ConceptRootsResponse:
+    """Return all domain root concepts.
+
+    A domain root is a non-stub Concept node with no IS_SUBTYPE_OF parent —
+    the top-level entry point for each seeded knowledge domain (e.g. 'Cadence').
+    The fragment browser uses this list to pre-populate the concept tree on load
+    without requiring the user to search for a root first.
+
+    Returns:
+        :class:`~models.concepts.ConceptRootsResponse` with roots sorted
+        alphabetically by name.
+    """
+    return await service.get_roots()
 
 
 @router.get(
