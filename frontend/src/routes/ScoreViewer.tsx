@@ -85,13 +85,7 @@ const TRANSPOSE_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
   { label: 'Tritone down',      value: '-A4' },
 ];
 
-/** Music notation fonts available in Verovio 6.1.0. Default: Bravura. */
-const FONT_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: 'Bravura', value: 'Bravura' },
-  { label: 'Leipzig', value: 'Leipzig' },
-  { label: 'Leland', value: 'Leland' },
-];
-
+/** Pinned music notation font for all Verovio renders. */
 const DEFAULT_FONT = 'Bravura';
 
 /**
@@ -129,7 +123,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *
  * Three-zone layout:
  *   1. Toolbar (container-high, scrolls with page): back link, staff size,
- *      transposition, and music font controls.
+ *      and transposition controls. Music font is pinned to Bravura.
  *   2. Score panel: Verovio SVG pages rendered progressively inside a
  *      centered max-width: 1200px container.
  *   3. Playback bar (container-highest, fixed bottom): transport controls
@@ -377,7 +371,6 @@ export default function ScoreViewer() {
   // ── Controls state ───────────────────────────────────────────────────────
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
   const [transpose, setTranspose] = useState('');
-  const [font, setFont] = useState<string>(DEFAULT_FONT);
 
   // ── MIDI state (Step 14) ─────────────────────────────────────────────────
   /**
@@ -1710,12 +1703,6 @@ export default function ScoreViewer() {
     scheduleRerender(scaleRef.current, newTranspose, fontRef.current);
   };
 
-  const handleFontChange = (newFont: string) => {
-    setFont(newFont);
-    fontRef.current = newFont;
-    scheduleRerender(scaleRef.current, transposeRef.current, newFont);
-  };
-
   // ── Render ───────────────────────────────────────────────────────────────
 
   const isPlaybackAvailable = midiBase64 !== null;
@@ -1784,30 +1771,6 @@ export default function ScoreViewer() {
             />
           </div>
 
-          {/* Music font select */}
-          <div className={styles.toolbarSelectControl}>
-            <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
-              <Type
-                variant="label-md"
-                as="span"
-                style={{ color: 'var(--color-on-surface-variant)' }}
-              >
-                Music font
-              </Type>
-            </label>
-            <select
-              id="font-select"
-              className={styles.toolbarSelect}
-              value={font}
-              onChange={(e) => handleFontChange(e.target.value)}
-            >
-              {FONT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
           {/* Resolution toggle — visible only in tag mode (G1.1) */}
           {tagMode === 'tag' && (
             <div

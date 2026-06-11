@@ -575,13 +575,9 @@ Add `pageMarginTop: 0` and `pageMarginBottom: 0` to the Verovio options. This re
 
 Between the stacked page `<div>` wrappers, use a CSS `gap: 12px` on the flex column container. This gives just enough visual separation to read page boundaries during scrolling without a large blank region between systems.
 
-**Music font selector.**
+**Music font selector** *(removed in Component 9 Step 16).*
 
-Add a font selector to the toolbar alongside the scale and transposition controls. Offer three options: Leipzig, Bravura, Leland. Default to **Bravura** for Phase 1. The selection is session-level only — no persistence to `localStorage` at this stage.
-
-The Verovio option key is `font` (e.g. `{ font: "Bravura" }`). Changing font triggers a full re-render identically to a scale change: set new options, reload MEI, re-render all pages with the overlay pattern from Step 12.1 (keep previous SVG visible, show "Re-rendering…" label during the pass).
-
-Render the selector as a `<select>` element, styled consistently with the transposition control. Its `label-md` label is "Music font".
+The toolbar shipped with a font selector offering Leipzig, Bravura, and Leland. It was removed in Component 9 as a dev-only tool with no annotator value. The music font is now pinned to **Bravura** via the `DEFAULT_FONT` constant in `ScoreViewer.tsx`; the Verovio `font` option is still passed through `RenderOptions` so a future change requires only updating that constant.
 
 ---
 

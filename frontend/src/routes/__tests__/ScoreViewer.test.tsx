@@ -246,7 +246,7 @@ describe('ScoreViewer', () => {
     });
   });
 
-  it('renders the toolbar with staff size, transposition, and font controls', () => {
+  it('renders the toolbar with staff size and transposition controls', () => {
     vi.mocked(scoreApi.fetchMeiUrl).mockReturnValue(new Promise(() => {}));
     vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
 
@@ -257,7 +257,7 @@ describe('ScoreViewer', () => {
     expect(screen.getByText('Medium')).toBeInTheDocument();
     expect(screen.getByText('Large')).toBeInTheDocument();
     expect(screen.getByLabelText(/transpose/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/music font/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/music font/i)).not.toBeInTheDocument();
   });
 
   it('transpose options use m2/−m2 (not d2/−d2) for semitone intervals', () => {
