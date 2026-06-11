@@ -101,6 +101,12 @@ Work through `ingestion-warnings.json` family by family and classify each: norma
 - **Non-sequential `<ending @n>` and `<measure> outside <ending>` adjacency warnings.** Verify against the sources; these may be flagging the same volta structures Part 1 must handle — reconcile the two views.
 - **Unpaired `rptend`.** Per the normalization spec these are flagged, not auto-corrected; verify the two cases are musically real (final-bar repeats) or source defects.
 
+### Step 8b — Strip movement title from incipit renders *(deferred — must precede Step 9)*
+
+The incipit SVG currently includes the movement title ("Allegro", "Andante", etc.) as a rendered text element above the first system. This consumes vertical space in the incipit viewport without adding information the card UI already provides, effectively reducing the visible score content at fixed thumbnail height. The fix is a normalizer or Verovio render-option change that suppresses the title element before SVG generation.
+
+**Deferred** past the current Step 13 UI work because it requires re-ingesting (or regenerating incipits for) all movements. It must land before Step 9 so that the re-ingestion of the existing 15 movements and the full corpus ingest in Step 10 both produce title-free incipits; doing it afterwards would require a third full regeneration pass.
+
 ### Step 9 — Normalizer update and re-ingestion of the existing 15 movements
 
 If Steps 6–8 change the normalizer, re-ingest all 15 existing movements so the whole corpus is processed identically. Re-ingestion obligations, all already specified but easy to miss: re-enqueue analysis ingestion (ADR-004), regenerate incipits and fragment previews (ADR-008's MEI-correction trigger), and — critically — verify mc stability for any existing fragments. If document-order measure positions shift, affected fragments must be migrated or flagged for re-validation, and the incident documented; this risk is the reason the tagging campaign waits for Part 3.

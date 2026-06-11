@@ -1,3 +1,17 @@
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+}
+
+.previewArea {
+  flex-shrink: 0;
+  width: 175px;
+  height: 112px;
+  overflow: hidden;
+}
+
 .meta {
-  margin-bottom: var(--spacing-2);
+  flex: 1;
+  min-width: 0;
 }

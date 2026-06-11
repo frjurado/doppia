@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { MovementResponse } from '../../types/browse';
 import Type from '../ui/Type';
 import BrowseItem from './BrowseItem';
@@ -16,24 +17,35 @@ interface MovementCardProps {
  */
 export default function MovementCard({ movement, isSelected, onClick }: MovementCardProps) {
   const subtitle = [movement.key_signature, movement.meter].filter(Boolean).join(' · ');
+  const [hovered, setHovered] = useState(false);
 
   return (
     <BrowseItem id={movement.id} isSelected={isSelected} onClick={onClick}>
-      <div className={styles.meta}>
-        <Type variant="body-lg" as="span">
-          {movement.title ?? `Movement ${movement.movement_number}`}
-        </Type>
-        {subtitle && (
-          <Type
-            variant="label-sm"
-            as="span"
-            style={{ color: 'var(--color-on-surface-variant)', display: 'block' }}
-          >
-            {subtitle}
+      <div
+        className={styles.card}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        <div className={styles.previewArea}>
+          <IncipitImage url={movement.incipit_url} ready={movement.incipit_ready} scrollActive={hovered} />
+        </div>
+        <div className={styles.meta}>
+          <Type variant="body-lg" as="span">
+            {movement.title
+              ? `${movement.movement_number}. ${movement.title}`
+              : `Movement ${movement.movement_number}`}
           </Type>
-        )}
+          {subtitle && (
+            <Type
+              variant="label-sm"
+              as="span"
+              style={{ color: 'var(--color-on-surface-variant)', display: 'block' }}
+            >
+              {subtitle}
+            </Type>
+          )}
+        </div>
       </div>
-      <IncipitImage url={movement.incipit_url} ready={movement.incipit_ready} />
     </BrowseItem>
   );
 }
