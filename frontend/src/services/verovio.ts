@@ -160,6 +160,22 @@ export async function renderPage(
   return tk.renderToSVG(pageNum);
 }
 
+/** Options for renderFragment — RenderOptions plus the layout-break mode. */
+export interface FragmentRenderOptions extends RenderOptions {
+  /**
+   * System-break mode for the fragment render:
+   *   - 'none' (default): all selected measures on one long system. pageWidth
+   *     should be a wide fixed value (≥ 2200). Incipit-style rendering.
+   *   - 'smart': Verovio breaks systems at pageWidth, which should be the
+   *     container's measured pixel width (same convention as renderPage:
+   *     scaleToPageSize maps pageWidth to output pixels). The whole fragment
+   *     still renders as a single SVG page (large pageHeight, trimmed by
+   *     adjustPageHeight). Used by the fragment detail view (Component 9
+   *     Step 15) — system breaks are preferable to horizontal scrolling.
+   */
+  breaks?: 'none' | 'smart';
+}
+
 /**
  * Render a score fragment identified by mc (document-order position index)
  * coordinates.
@@ -169,14 +185,15 @@ export async function renderPage(
  *
  * mc_start and mc_end are the 1-based position indices stored on the fragment
  * row. They map directly to measureRange operands — no @n conversion needed.
- * A wide pageWidth (≥ 2200) combined with breaks:"none" places the entire
- * fragment on a single SVG page.
+ * Layout depends on options.breaks: 'none' places the entire fragment on one
+ * long system; 'smart' allows system breaks at the given pageWidth while
+ * keeping everything on a single SVG page.
  *
  * @param tk      - Toolkit instance from getVerovioToolkit().
  * @param meiText - Normalized MEI content string (not a URL).
  * @param mcStart - Fragment start: 1-based position index (= fragment.mc_start).
  * @param mcEnd   - Fragment end: 1-based position index (= fragment.mc_end).
- * @param options - Scale, transposition, and page-width settings.
+ * @param options - Scale, transposition, page-width, and break settings.
  * @returns SVG markup string for the fragment.
  */
 export async function renderFragment(
@@ -184,21 +201,26 @@ export async function renderFragment(
   meiText: string,
   mcStart: number,
   mcEnd: number,
-  options: RenderOptions,
+  options: FragmentRenderOptions,
 ): Promise<string> {
+  const breaks = options.breaks ?? 'none';
   tk.setOptions({
     scale: options.scale,
     transpose: options.transpose,
     pageWidth: options.pageWidth,
     font: options.font,
     adjustPageHeight: true,
-    breaks: 'none',
+    breaks,
     pageMarginTop: 0,
     pageMarginBottom: 0,
     header: 'none',
     footer: 'none',
-    // No scaleToPageSize for fragment renders — the wide fixed pageWidth
-    // ensures all selected measures appear on one line without scaling.
+    // breaks:'none' — no scaleToPageSize: the wide fixed pageWidth ensures all
+    //   selected measures appear on one line without scaling.
+    // breaks:'smart' — scaleToPageSize so pageWidth is interpreted as output
+    //   pixels (renderPage convention); pageHeight is set high so adjustPageHeight
+    //   yields one page containing every system.
+    ...(breaks === 'smart' ? { scaleToPageSize: true, pageHeight: 60000 } : {}),
   });
   tk.loadData(meiText);
   tk.select({ measureRange: `${mcStart}-${mcEnd}` });

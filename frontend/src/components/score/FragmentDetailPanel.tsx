@@ -33,6 +33,7 @@ import {
 } from '../../services/fragmentApi';
 import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
+import { formatFragmentRange } from '../../utils/fragmentRange';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -532,15 +533,13 @@ export default function FragmentDetailPanel({
           {!standalone && (
             <section className={styles.section}>
               <Type variant="label-sm" as="h3" className={styles.sectionHeading}>Range</Type>
+              {/* Measure/beat display rule (Component 9 Step 15): beats render
+                  only within their measure's context, and not at all when the
+                  fragment spans complete measures. */}
               <Type variant="body-sm" as="p" className={styles.rangeText}>
-                {fragment.bar_start === fragment.bar_end
-                  ? `Bar ${fragment.bar_start}`
-                  : `Bars ${fragment.bar_start}–${fragment.bar_end}`}
-                {fragment.beat_start !== null && (
-                  <span className={styles.beatRange}>
-                    {' '}(beat {fragment.beat_start}
-                    {fragment.beat_end !== null ? `–${fragment.beat_end}` : ''})
-                  </span>
+                {formatFragmentRange(
+                  fragment.bar_start, fragment.bar_end,
+                  fragment.beat_start, fragment.beat_end,
                 )}
               </Type>
               {fragment.repeat_context && (
@@ -672,13 +671,10 @@ export default function FragmentDetailPanel({
                         {spPrimary?.name ?? 'Sub-part'}
                       </Type>
                       <Type variant="body-sm" as="span" className={styles.subPartRange}>
-                        {' bars '}
-                        {sp.bar_start === sp.bar_end
-                          ? sp.bar_start
-                          : `${sp.bar_start}–${sp.bar_end}`
-                        }
-                        {sp.beat_start !== null && (
-                          ` (b${sp.beat_start}${sp.beat_end !== null ? `–${sp.beat_end}` : ''})`
+                        {' '}
+                        {formatFragmentRange(
+                          sp.bar_start, sp.bar_end,
+                          sp.beat_start, sp.beat_end,
                         )}
                       </Type>
                     </li>
@@ -688,8 +684,10 @@ export default function FragmentDetailPanel({
             </section>
           )}
 
-          {/* ── Data licence / harmony sources (ADR-009, Component 8 Step 12) ─ */}
-          {(fragment.data_licence || fragment.harmony_sources.length > 0) && (
+          {/* ── Data licence / harmony sources (ADR-009, Component 8 Step 12) ─
+              Panel mode only: the detail page (standalone) already groups
+              source + licence in its header (Component 9 Step 15). */}
+          {!standalone && (fragment.data_licence || fragment.harmony_sources.length > 0) && (
             <section className={styles.section}>
               <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
                 Data licence

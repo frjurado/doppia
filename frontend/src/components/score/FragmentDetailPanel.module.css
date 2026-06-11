@@ -173,10 +173,6 @@
   color: var(--color-on-background);
 }
 
-.beatRange {
-  color: var(--color-on-surface-variant);
-}
-
 .repeatContext {
   margin: 0;
   color: var(--color-on-surface-variant);

@@ -11,7 +11,10 @@
  *    docs/architecture/mei-ingest-normalization.md §"WASM spike").
  *  - Rendering-context contract: getFragment called with only the id (mode=none
  *    default, ADR-024 — Phase 1 implements only this mode).
- *  - Scale controls: S/M/L buttons rendered; selecting M re-renders at scale 45.
+ *  - Scale controls: S/M/L buttons rendered; M (45) is the default (Component 9
+ *    Step 15); selecting S re-renders at scale 35.
+ *  - Measure/beat display rule (Component 9 Step 15): beats only within their
+ *    measure's context; no beats for complete-measure fragments.
  *  - Playback controls: play button disabled while idle; enabled after MIDI loads.
  *  - FragmentDetailPanel rendered in standalone mode (record component shared
  *    with Component 7 side panel).
@@ -344,6 +347,43 @@ describe('FragmentDetail — concept identity section', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Measure/beat display rule + licence de-duplication (Component 9 Step 15)
+// ---------------------------------------------------------------------------
+
+describe('FragmentDetail — measure/beat display rule', () => {
+  it('shows no beats for a complete-measure fragment', async () => {
+    setupFullLoad(); // default fixture: bars 1–4, beat_start/beat_end null
+    renderDetail();
+    await screen.findByText('mm. 1–4');
+    expect(screen.queryByText(/beat/i)).not.toBeInTheDocument();
+  });
+
+  it('attaches each beat to its own measure for beat-precise fragments', async () => {
+    setupFullLoad(
+      makeFragmentDetail({ bar_start: 3, bar_end: 4, mc_start: 3, mc_end: 4, beat_start: 2, beat_end: 1 }),
+    );
+    renderDetail();
+    await screen.findByText('m. 3, beat 2 – m. 4, beat 1');
+  });
+
+  it('renders the licence exactly once (header only — no duplicated record block)', async () => {
+    setupFullLoad(
+      makeFragmentDetail({
+        data_licence: 'CC BY-SA 4.0',
+        data_licence_url: 'https://creativecommons.org/licenses/by-sa/4.0/',
+        harmony_sources: ['dcml'],
+      }),
+    );
+    renderDetail();
+    await screen.findByText('PAC');
+    await waitFor(() => {
+      expect(screen.getAllByText('CC BY-SA 4.0')).toHaveLength(1);
+      expect(screen.getAllByText(/sources:/i)).toHaveLength(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Rendering-context contract (ADR-024 — Phase 1 mode=none default)
 // ---------------------------------------------------------------------------
 
@@ -386,7 +426,8 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String), // MEI text
         3,                  // mc_start — position index
         5,                  // mc_end
-        expect.objectContaining({ scale: 35 }), // default scale preset
+        // Default scale Medium (45); system breaks allowed (Component 9 Step 15).
+        expect.objectContaining({ scale: 45, breaks: 'smart' }),
       );
     });
   });
@@ -403,7 +444,7 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String),
         1,
         2,
-        expect.objectContaining({ scale: 35 }),
+        expect.objectContaining({ scale: 45 }),
       );
     });
   });
@@ -425,7 +466,7 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String),
         2,
         2,
-        expect.objectContaining({ scale: 35 }),
+        expect.objectContaining({ scale: 45 }),
       );
     });
   });
@@ -447,7 +488,7 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String),
         3,
         3,
-        expect.objectContaining({ scale: 35 }),
+        expect.objectContaining({ scale: 45 }),
       );
     });
   });
@@ -467,22 +508,22 @@ describe('FragmentDetail — scale controls', () => {
     expect(screen.getByRole('button', { name: /^l$/i })).toBeInTheDocument();
   });
 
-  it('S scale button is pressed by default (scale 35)', async () => {
+  it('M scale button is pressed by default (scale 45 — Component 9 Step 15)', async () => {
     setupFullLoad();
     renderDetail();
     await screen.findByText('PAC');
-    const sButton = screen.getByRole('button', { name: /^s$/i });
-    expect(sButton).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: /^m$/i })).toHaveAttribute('aria-pressed', 'false');
+    const mButton = screen.getByRole('button', { name: /^m$/i });
+    expect(mButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /^s$/i })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('clicking M re-renders with scale 45', async () => {
+  it('clicking S re-renders with scale 35', async () => {
     setupFullLoad();
     renderDetail();
     await screen.findByText('PAC');
     vi.mocked(verovioService.renderFragment).mockClear();
 
-    fireEvent.click(screen.getByRole('button', { name: /^m$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^s$/i }));
 
     await waitFor(() => {
       expect(vi.mocked(verovioService.renderFragment)).toHaveBeenCalledWith(
@@ -490,7 +531,7 @@ describe('FragmentDetail — scale controls', () => {
         expect.any(String),
         1,
         4,
-        expect.objectContaining({ scale: 45 }),
+        expect.objectContaining({ scale: 35 }),
       );
     });
   });

@@ -232,6 +232,8 @@ A new `FragmentDetail.tsx` route renders one fragment on its own:
 
 **Verification.** A fragment opens in isolation with only its measures rendered; MIDI plays the fragment and the playback highlight tracks via `onPositionUpdate`; sub-part brackets render nested within bounds; zoom/re-render keeps overlays aligned.
 
+> **As built — amended by Component 9 Step 15 (2026-06-11).** The detail view no longer forces the fragment onto a single system: it renders with `breaks: "smart"` at the measured container width, so long fragments break into systems instead of scrolling horizontally, and vertical space is reserved so the fragment/sub-part brackets are never clipped. The main fragment bracket now always renders above the score (one segment per system row), because the rendered excerpt — whole containing measures, and in the future ADR-024 context modes — is not necessarily the significant fragment. Single-system rendering remains the right call for *other* surfaces (incipits, previews) and for the Phase 2 blog's scrollytelling layout, which is a distinct rendering mode to be requested via the ADR-024 `context` contract (plus a layout option), not a regression of this view.
+
 ---
 
 ### Step 12 — Fragment record display and the rendering-context contract

@@ -146,8 +146,9 @@ function renderBrowser(qs = '') {
 beforeEach(() => {
   vi.clearAllMocks();
 
-  // Default empty tree and empty fragment list — individual tests override as needed.
+  // Default empty tree, roots, and fragment list — individual tests override as needed.
   vi.mocked(conceptApi.getConceptTree).mockResolvedValue({ root_id: 'Cadence', nodes: [] });
+  vi.mocked(conceptApi.getConceptRoots).mockResolvedValue([]);
   vi.mocked(fragmentApi.listByConcept).mockResolvedValue(makeBrowseResponse([]));
 });
 

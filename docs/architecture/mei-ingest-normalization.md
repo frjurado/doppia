@@ -306,6 +306,8 @@ The incipit approach (page 1 of a smart-break render) is not applicable to mid-s
 
 **Component 8 reuse.** The isolated fragment detail view (`FragmentDetail.tsx`, Component 8 Step 11) and the server-side `render_fragment_preview` Celery task (Component 8 Step 5) both render a fragment's `mc_start`/`mc_end` range using the same Strategy 1 call sequence. No additional spike is required for Component 8: the WASM client-side verification below (edge cases: mid-system start, repeat, first/second ending) applies equally to the Component 8 render path.
 
+**Component 9 Step 15 amendment (2026-06-11).** The fragment *detail view* now passes `breaks: "smart"` (with `scaleToPageSize: true`, a large `pageHeight`, and `pageWidth` set to the measured container width) instead of `breaks: "none"` with the wide fixed `pageWidth` — system breaks are preferable to horizontal scrolling on that surface, and the whole fragment still renders as a single SVG page (`adjustPageHeight` trims it to content). The `select()` + `redoLayout()` call sequence and the mc position-index semantics are unchanged. Single-system `breaks: "none"` remains the documented approach for incipits and server-side fragment previews.
+
 ---
 
 ## Relation to other documents
