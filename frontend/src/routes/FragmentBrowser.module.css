@@ -5,30 +5,8 @@
   overflow: hidden;
 }
 
-/* Nav strip */
-.pageNav {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-4);
-  padding: var(--spacing-2) var(--spacing-4);
-  flex-shrink: 0;
-}
-
-.pageNavTitle {
-  flex: 1;
-}
-
-.pageNavLink {
-  text-decoration: none;
-  flex-shrink: 0;
-}
-
 .subtypesToggle span {
   color: var(--color-on-surface-variant);
-}
-
-.pageNavLink:hover span {
-  color: var(--color-on-surface) !important;
 }
 
 /* Two-panel body */

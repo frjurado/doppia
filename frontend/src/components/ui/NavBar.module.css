@@ -1,0 +1,87 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+  padding: 0 var(--spacing-6);
+  height: 48px;
+  background-color: var(--color-surface-container-low);
+  flex-shrink: 0;
+}
+
+/* Wordmark */
+.wordmark {
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.wordmark:hover {
+  color: var(--color-primary-container);
+}
+
+/* Primary nav links */
+.links {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-6);
+}
+
+.link {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+  text-decoration: none;
+}
+
+.link:hover {
+  color: var(--color-on-background);
+}
+
+.linkActive {
+  color: var(--color-primary);
+}
+
+/* Right-side action slot */
+.actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.loginButton {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-primary);
+  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-container));
+  text-decoration: none;
+  padding: var(--spacing-1) var(--spacing-4);
+  display: inline-block;
+}
+
+.loginButton:hover {
+  opacity: 0.88;
+}
+
+/* User badge — non-interactive Phase-1 stub; becomes a dropdown in Phase 2 */
+.userBadge {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+  background: var(--color-surface-container);
+  padding: var(--spacing-1) var(--spacing-4);
+  cursor: default;
+  user-select: none;
+}

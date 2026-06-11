@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -337,23 +337,6 @@ export default function FragmentBrowser() {
 
   return (
     <Surface layer="base" className={styles.page}>
-      {/* Nav strip */}
-      <Surface layer="container-lowest" className={styles.pageNav}>
-        <Type variant="label-md" as="span" className={styles.pageNavTitle}>
-          Fragment Browser
-        </Type>
-        <Link to="/" className={styles.pageNavLink}>
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Browse →
-          </Type>
-        </Link>
-        <Link to="/review-queue" className={styles.pageNavLink}>
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Review Queue →
-          </Type>
-        </Link>
-      </Surface>
-
       <div className={styles.body}>
         {/* Left: concept tree panel */}
         <Surface layer="container-lowest" className={styles.treePanel}>

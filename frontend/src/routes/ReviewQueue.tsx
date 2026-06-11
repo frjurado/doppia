@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
 import Surface from '../components/ui/Surface';
@@ -94,27 +94,6 @@ export default function ReviewQueue() {
 
   return (
     <Surface layer="base" className={styles.page}>
-      {/* Page header with navigation back to corpus browser */}
-      <Surface layer="container-lowest" className={styles.header}>
-        <button
-          type="button"
-          className={styles.navLink}
-          onClick={() => navigate('/')}
-        >
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            ← Browse
-          </Type>
-        </button>
-        <Type variant="label-md" as="h1" className={styles.title}>
-          Review Queue
-        </Type>
-        <Link to="/concepts" className={styles.navLink}>
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Fragment Browser →
-          </Type>
-        </Link>
-      </Surface>
-
       {/* Queue list */}
       <div className={styles.body}>
         <Surface layer="container-low" className={styles.listPanel}>
