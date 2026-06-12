@@ -99,6 +99,8 @@ Verovio expands all repeats (first/second endings, da capo, dal segno) in MIDI a
 
 Fragment rendering uses `mc_start`/`mc_end`, which identify a specific physical measure (including which volta variant). A fragment that spans a first ending has `mc_start`/`mc_end` values pointing unambiguously into the first-ending measures; its MIDI is generated for that measure range only. The repeat expansion in `renderToMIDI` therefore plays only the selected range (the selection is applied before MIDI generation via `select()` + `redoLayout()`).
 
+**Fragments containing unpaired repeat structure (ADR-025).** Selections may cross repeat barlines (but not D.C./D.S. markers or volta-ending boundaries), so a fragment can contain a `:|` whose paired `|:` lies outside the fragment. Honouring it would jump playback out of the fragment, so it is ignored: fragment playback uses **final-pass semantics** — no jump, the fragment plays once, straight through its effective range. Volta endings need no playback special-casing: when a truncated repeat has endings, the non-final endings are already excluded from the fragment's effective range at the selection layer. A repeat structure wholly contained in the fragment (including its `|:`) expands normally, both passes. A D.C./D.S. directive can only sit on a fragment's last bar and is ignored. Full-movement playback is unaffected. The implementation lands with fragment-scoped playback in Component 9; the likely mechanism is stripping unpaired repeat/ending markup from the fragment-scoped toolkit state before `renderToMIDI()`, decided at implementation time. Normative statement: `tagging-tool-design.md` §6A.6.
+
 ---
 
 ## Non-quarter-meter beat normalization

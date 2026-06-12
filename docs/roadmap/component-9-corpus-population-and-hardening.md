@@ -293,7 +293,7 @@ Every item in `various-issues.md`, mapped:
 
 Flagged now so they are raised at the right moment rather than baked in silently:
 
-1. **Repeat-start as a selection boundary** (Step 2) — the symmetry rule is the recommendation; confirm before the spec lands.
+1. **Repeat-start as a selection boundary** (Step 2) — the symmetry rule is the recommendation; confirm before the spec lands. **Resolved 2026-06-12, against the recommendation:** no repeat-barline gates at all (either direction); the hard gates are sibling volta-ending crossings and D.C./D.S. markers — the places where the music never proceeds directly. Recorded in ADR-025; spec in `tagging-tool-design.md` §6A.
 2. **Duplicate-`@n` policy for multi-section movements** (Step 8) — display disambiguation vs. recognised-pattern acceptance; may amend ADR-015.
 3. **Re-ingestion fragment-drift handling** (Step 9) — only if mc positions actually shift; the protocol is decided when the diff is visible.
 4. **Play-from-position interaction model** (Step 20) — measure-level click is the recommendation.
