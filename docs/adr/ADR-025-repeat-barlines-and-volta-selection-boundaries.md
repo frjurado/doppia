@@ -21,7 +21,7 @@ The same scrutiny identifies the one boundary that *is* semantically hard: the b
 
 **Repeat barlines are not selection boundaries.** Selection drags cross repeat-end barlines, repeat-start barlines, and section boundaries freely, at every resolution (measure, beat, sub-beat). The existing repeat-end gate is removed; no repeat-start gate is added.
 
-**Crossing between sibling volta endings is a hard selection gate.** A selection may not have one endpoint inside ending N and the other inside a sibling ending M ≠ N, and a selection anchored inside a non-final ending may not extend past the end of its volta group. The ending-boundary gate implemented in the ADR-005 G2 addendum (`buildEndingBarriers`) is retained.
+**Crossing between sibling volta endings is a hard selection gate.** A selection may not have one endpoint inside ending N and the other inside a sibling ending M ≠ N, and a selection anchored inside a non-final ending may not extend past the end of its volta group. The ending-boundary gate from the ADR-005 G2 addendum is retained (reimplemented in Step 3 as a volta-index rule in `computeSelectionKeys()`, which both clamps at the gates and excludes unreachable sibling endings from the effective range — see Consequences).
 
 **Crossing a da capo or dal segno marker is a hard selection gate.** At a D.C./D.S. marker the jump *always* fires — unlike a repeat-end, there is no final pass that proceeds directly into the following bar. The existing D.C./D.S. clamp from ADR-005 is retained. "To Coda" and "Fine" marks are not gates (the first pass proceeds directly past both); selections into a coda section are gated by the D.C./D.S. marker they would have to cross.
 
@@ -41,7 +41,7 @@ This applies to fragment-scoped playback only. Full-movement playback is unchang
 
 **Positive.**
 
-- The barrier code narrows to the semantically justified gates: the `:|` barriers produced by `buildRepeatBarriers` are removed rather than mirrored, deleting a bug surface instead of doubling it, while the ending-barrier path (`buildEndingBarriers`) and the D.C./D.S. clamps remain.
+- The barrier code narrows to the semantically justified gates: the `:|` barriers are removed rather than mirrored, deleting a bug surface instead of doubling it, while the ending gates and the D.C./D.S. clamps remain. (As implemented in Step 3: `buildRepeatBarriers` became `buildDirectiveBarriers`, D.C./D.S. only; `buildEndingBarriers` is replaced by `buildVoltaIndex` + `computeSelectionKeys`, which clamp at the gates and exclude unreachable sibling endings from the effective range.)
 - Annotators can tag fragments that span section boundaries and repeat barlines, which the corpus genuinely contains (e.g. K331/iii section joins).
 - Fixture SEL-11 ("repeat-start is not a selection barrier, asymmetric with repeat-end") becomes obsolete: the observed repeat-start behaviour is now the specified behaviour for both barline directions.
 

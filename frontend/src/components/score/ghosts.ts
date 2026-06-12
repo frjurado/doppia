@@ -58,6 +58,69 @@ export function measureGhostKey(barN: number, endingN: number | null): string {
 }
 
 // ---------------------------------------------------------------------------
+// Shared measure walk (Component 9 Step 3, tagging-tool-design.md §6A.1)
+// ---------------------------------------------------------------------------
+
+/** Per-measure info produced by walkMeasureKeys(). */
+export interface MeasureWalkInfo {
+  /** The MEI <measure> DOM element. */
+  el: Element;
+  /**
+   * Human bar number. Guarded: when @n is missing or unparseable (e.g. the
+   * MuseScore 'X1' excluded-measure numbering the normalizer flags but cannot
+   * auto-correct), this falls back to the nearest preceding finite @n —
+   * the measure displays under the bar it completes — so barN is always
+   * finite (§6A.1 I2: no NaN can enter any coordinate derivation).
+   */
+  barN: number;
+  /** True when barN is a fallback rather than a parsed @n value. */
+  barNIsFallback: boolean;
+  /** Containing <ending @n>, or null. */
+  endingN: number | null;
+  /**
+   * Deduplicated measure ghost key: measureGhostKey(barN, endingN), with a
+   * '#N' suffix when an earlier measure already produced the same base key
+   * (section-reset @n values, X-numbered fallbacks).
+   */
+  key: string;
+  /** 1-based document-order position — the ADR-015 mc coordinate. */
+  mc: number;
+}
+
+/**
+ * Walk every <measure> in a parsed MEI document and derive barN, endingN,
+ * deduplicated ghost key, and mc for each, in document order.
+ *
+ * This is the single derivation shared by buildGhosts(), the selection
+ * barrier/volta builders (annotator.ts), and buildMcIndex() (selection.ts),
+ * so their key spaces can never drift apart (§6A.1).
+ */
+export function walkMeasureKeys(meiDoc: Document): MeasureWalkInfo[] {
+  const out: MeasureWalkInfo[] = [];
+  const seenBaseKeys = new Map<string, number>();
+  const measures = meiDoc.getElementsByTagName('measure');
+  let lastFiniteBarN = 0;
+
+  for (let i = 0; i < measures.length; i++) {
+    const el = measures[i]!;
+    const parsed = parseInt(el.getAttribute('n') ?? '', 10);
+    const hasFiniteN = Number.isFinite(parsed);
+    const barN = hasFiniteN ? parsed : lastFiniteBarN;
+    if (hasFiniteN) lastFiniteBarN = parsed;
+
+    const endingN = getEndingN(el);
+    const baseKey = measureGhostKey(barN, endingN);
+    const cnt     = seenBaseKeys.get(baseKey) ?? 0;
+    seenBaseKeys.set(baseKey, cnt + 1);
+    const key = cnt === 0 ? baseKey : `${baseKey}#${cnt}`;
+
+    out.push({ el, barN, barNIsFallback: !hasFiniteN, endingN, key, mc: i + 1 });
+  }
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Compound-meter utilities
 // ---------------------------------------------------------------------------
 
@@ -369,6 +432,16 @@ export interface BeatGhostEntry {
   encodedKey: number;
   /** Float encoding for fragment.beat_start / beat_end (1-indexed). */
   beatFloat: number;
+  /**
+   * Exclusive float upper bound of this ghost's own extent (§6A.7): one grid
+   * step past beatFloat, or the measure's full extent (numBeats + 1) for the
+   * synthetic whole-measure ghost of an empty measure. When this entry is a
+   * selection's last entry, fragment.beat_end = endFloat — never estimated
+   * from neighbouring entries.
+   */
+  endFloat: number;
+  /** True for the synthetic whole-measure ghost of an empty measure (§6A.7). */
+  synthetic?: boolean;
   bounds: GhostBounds;
 }
 
@@ -384,6 +457,10 @@ export interface SubBeatGhostEntry {
   /** Encoded key: encodeSubBeat(renderOrder, beatIdx, subBeatIdx). */
   encodedKey: number;
   beatFloat: number;
+  /** Exclusive float upper bound of this ghost's extent (see BeatGhostEntry.endFloat). */
+  endFloat: number;
+  /** True for the synthetic whole-measure ghost of an empty measure (§6A.7). */
+  synthetic?: boolean;
   bounds: GhostBounds;
 }
 
@@ -1010,16 +1087,15 @@ export function buildGhosts(
   // ── Phase 1: collect per-measure geometry and timing data ─────────────────
 
   const measureInfos: MeasureInfo[] = [];
-  const meiMeasures = meiDoc.getElementsByTagName('measure');
-
-  // G2.3: track seen base keys to detect @n collisions from section-reset
-  // measure numbering. When a collision is found, a '#N' suffix disambiguates
-  // the key so no two rendered measures share the same ghost key string.
-  const seenBaseKeys = new Map<string, number>(); // baseKey → occurrence count
   let renderOrder = 0; // 0-indexed render position among SVG-matched measures
 
-  for (let mi = 0; mi < meiMeasures.length; mi++) {
-    const meiMeasure = meiMeasures[mi];
+  // G2.3 / §6A.1: barN (guarded against unparseable @n), endingN, and the
+  // deduplicated ghost key all come from the shared walkMeasureKeys()
+  // derivation so they can never drift from the barrier/volta builders or
+  // the mc index. The dedup counter runs over ALL document measures, matching
+  // those consumers even when a measure has no SVG group.
+  for (const walk of walkMeasureKeys(meiDoc)) {
+    const meiMeasure = walk.el;
     const measureId  = getMeiId(meiMeasure);
     if (!measureId) continue;
 
@@ -1036,15 +1112,7 @@ export function buildGhosts(
     const mLeft  = adjustedMLeft(svgMeasure, mLeft0, containerRect.left);
     const mRight = rightEdgeFromBarline(svgMeasure, mRightRaw, containerRect.left);
 
-    const barN    = parseInt(meiMeasure.getAttribute('n') ?? `${mi + 1}`, 10);
-    const endingN = getEndingN(meiMeasure);
-
-    // Deduplicated measure ghost key. Measures that share @n due to
-    // section-reset numbering get '#1', '#2', … suffixes in encounter order.
-    const baseKey   = measureGhostKey(barN, endingN);
-    const cnt       = seenBaseKeys.get(baseKey) ?? 0;
-    seenBaseKeys.set(baseKey, cnt + 1);
-    const key = cnt === 0 ? baseKey : `${baseKey}#${cnt}`;
+    const { barN, endingN, key } = walk;
 
     const [beatCount, beatUnit] = getMeterForMeasure(
       meiMeasure, globalBeatCount, globalBeatUnit,
@@ -1135,6 +1203,37 @@ export function buildGhosts(
         mLeft, mRight, measureStartTime, beatCount, beatUnit, noteInputs,
       );
 
+      // §6A.7 — empty measure (no note onsets): the only-struck-beats rule
+      // would leave an unselectable hole at beat/sub-beat resolution. Emit one
+      // synthetic whole-measure ghost per fine layer instead: measure-precise
+      // (beatFloat 1.0, endFloat = full extent), spanning the full measure.
+      if (bb.struckBeats.size === 0) {
+        const fullExtent = bb.numBeats + 1;
+        const synthBounds: GhostBounds = {
+          left: mLeft, top: sBounds.top, width: mRight - mLeft, height: ghostHeight,
+        };
+
+        const bKey = encodeBeat(renderOrder, 0);
+        const bEl  = createGhostEl('ghost ghost-beat', synthBounds, `${bKey}`);
+        layer._appendBeatGhost(bEl);
+        layer.beatIndex.set(bKey, {
+          el: bEl, barN, endingN, measureKey: mKey,
+          beatIdx: 0, encodedKey: bKey, beatFloat: 1.0, endFloat: fullExtent,
+          synthetic: true, bounds: synthBounds,
+        });
+
+        const sbKey = encodeSubBeat(renderOrder, 0, 0);
+        const sbEl  = createGhostEl('ghost ghost-subbeat', synthBounds, `${sbKey}`);
+        layer._appendSubBeatGhost(sbEl);
+        layer.subBeatIndex.set(sbKey, {
+          el: sbEl, barN, endingN, measureKey: mKey,
+          beatIdx: 0, subBeatIdx: 0, encodedKey: sbKey,
+          beatFloat: 1.0, endFloat: fullExtent,
+          synthetic: true, bounds: synthBounds,
+        });
+        continue;
+      }
+
       for (const b of bb.struckBeats) {
         const bLeft  = bb.beatLefts[b];
         const bRight = bb.beatRights[b];
@@ -1154,6 +1253,7 @@ export function buildGhosts(
         layer.beatIndex.set(encKey, {
           el: beatEl, barN, endingN, measureKey: mKey,
           beatIdx: b, encodedKey: encKey, beatFloat,
+          endFloat: beatFloat + 1,
           bounds: beatBounds,
         });
 
@@ -1176,6 +1276,7 @@ export function buildGhosts(
             el: sbEl, barN, endingN, measureKey: mKey,
             beatIdx: b, subBeatIdx: sb,
             encodedKey: sbEncKey, beatFloat: sbFloat,
+            endFloat: sbFloat + 1 / subDiv,
             bounds: sbBounds,
           });
         }

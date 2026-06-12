@@ -21,7 +21,7 @@
  * (pointer-events: none on the bracket and its handles).
  */
 
-import type { GhostLayer, MeasureGhostEntry, ResolutionMode } from './ghosts';
+import type { GhostLayer, ResolutionMode } from './ghosts';
 import type { SelectionRange } from './annotator';
 import styles from './MainBracket.module.css';
 
@@ -64,25 +64,97 @@ export interface BracketSegment {
 }
 
 /**
- * Derive one BracketSegment per SVG system row that the selection covers.
+ * Resolve a SelectionRange to its effective measure-key list (§6A.1).
  *
- * Pixel bounds are sourced from the ghost index that matches the active
+ * The committed key list on the selection is authoritative. The fallback for
+ * selections restored from stored human coordinates reconstructs it from the
+ * bar range, applying the repeat_context ending exclusion (§6A.3) and
+ * requiring finite bar numbers (I2) — a derivation keyed on `@n` intervals
+ * alone painted unrelated partial bars and absorbed sibling endings
+ * (fixtures SEL-03/05/08/12/13).
+ */
+function effectiveKeys(sel: SelectionRange, layer: GhostLayer): string[] {
+  if (sel.measureKeys && sel.measureKeys.length > 0) return sel.measureKeys;
+  if (!Number.isFinite(sel.barStart) || !Number.isFinite(sel.barEnd)) return [];
+
+  const keys: string[] = [];
+  for (const entry of layer.measureIndex.values()) {
+    if (entry.barN < sel.barStart || entry.barN > sel.barEnd) continue;
+    if (entry.endingN !== null) {
+      if (sel.repeatContext === 'first_ending' && entry.endingN !== 1) continue;
+      if (sel.repeatContext === 'second_ending' && entry.endingN === 1) continue;
+    }
+    keys.push(entry.key);
+  }
+  return keys;
+}
+
+interface MeasureExtent {
+  /** Document-order position of the measure in the layer's measure index. */
+  pos: number;
+  systemTop: number;
+  left: number;
+  right: number;
+}
+
+/**
+ * Fold per-measure pixel extents (ordered by document position) into bracket
+ * segments. A new segment starts at a system break (systemTop change) or at a
+ * document-order gap — the §6A.3 discontiguous rendering over excluded
+ * sibling endings. Handles go on the very first and very last segment only.
+ */
+function foldSegments(extents: MeasureExtent[]): BracketSegment[] | null {
+  if (extents.length === 0) return null;
+
+  const segments: BracketSegment[] = [];
+  let current: BracketSegment | null = null;
+  let prevPos = Number.NaN;
+
+  for (const ext of extents) {
+    const contiguous = ext.pos === prevPos + 1;
+    if (current && contiguous && current.systemTop === ext.systemTop) {
+      current.left  = Math.min(current.left, ext.left);
+      current.right = Math.max(current.right, ext.right);
+    } else {
+      current = {
+        systemTop: ext.systemTop,
+        left: ext.left,
+        right: ext.right,
+        isFirst: false,
+        isLast: false,
+      };
+      segments.push(current);
+    }
+    prevPos = ext.pos;
+  }
+
+  segments[0]!.isFirst = true;
+  segments[segments.length - 1]!.isLast = true;
+  return segments;
+}
+
+/**
+ * Derive the bracket segments for the committed selection (§6A.1 I1 —
+ * bracket ≡ ghost).
+ *
+ * Geometry derives from the selection's effective measure-key list — the
+ * same committed ghost range the highlights render — never from `@n`
+ * intervals. Pixel bounds come from the ghost index matching the active
  * resolution so the bracket is coincident with the highlighted ghosts at
  * every granularity (G3.2):
  *
- *  - resolution === 'measure': measure index (full-measure bounds, existing
- *    behaviour). Also used when sel.beatStart is null regardless of resolution
- *    because there are no fine-grained coords to derive bounds from.
- *  - resolution === 'beat': beat ghost bounds filtered by beatFloat range.
- *  - resolution === 'subbeat': sub-beat ghost bounds, same filter.
+ *  - resolution === 'measure' (or no beat-precision coords): full-measure
+ *    bounds from the measure index.
+ *  - resolution === 'beat' / 'subbeat': fine ghost bounds, with the
+ *    beat-precision constraints applied only to the first and last measure
+ *    of the selection (by key, not by barN — duplicate @n values must not
+ *    truncate middle bars).
  *
  * For beat/sub-beat entries the systemTop used to anchor the bracket above
  * note content is borrowed from the parent measure ghost via entry.measureKey.
  *
- * Grouping by systemTop is reliable because buildGhosts assigns the same
- * systemTop to every ghost on a given system row. Measures in different repeat
- * endings produce different visual positions (different systemTop values) and
- * form distinct groups without any special endingN handling here.
+ * Segments split at system breaks and at document-order gaps (excluded
+ * sibling endings render as a visible gap — §6A.3 discontiguous rendering).
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function resolveSegments(
@@ -90,71 +162,69 @@ export function resolveSegments(
   layer: GhostLayer,
   resolution: ResolutionMode,
 ): BracketSegment[] | null {
-  // Measure resolution or no beat-precision coords: use measure index.
+  const keys = effectiveKeys(sel, layer);
+  if (keys.length === 0) return null;
+
+  const pos = new Map<string, number>();
+  {
+    let i = 0;
+    for (const k of layer.measureIndex.keys()) pos.set(k, i++);
+  }
+
+  // Measure resolution or no beat-precision coords: full-measure bounds.
   if (resolution === 'measure' || sel.beatStart === null) {
-    const inRange: MeasureGhostEntry[] = [];
-    for (const entry of layer.measureIndex.values()) {
-      if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
-        inRange.push(entry);
-      }
+    const extents: MeasureExtent[] = [];
+    for (const k of keys) {
+      const entry = layer.measureIndex.get(k);
+      const p = pos.get(k);
+      if (!entry || p === undefined) continue;
+      extents.push({
+        pos: p,
+        systemTop: entry.systemTop,
+        left: entry.bounds.left,
+        right: entry.bounds.left + entry.bounds.width,
+      });
     }
-    if (inRange.length === 0) return null;
-
-    const bySystem = new Map<number, MeasureGhostEntry[]>();
-    for (const entry of inRange) {
-      const grp = bySystem.get(entry.systemTop) ?? [];
-      grp.push(entry);
-      bySystem.set(entry.systemTop, grp);
-    }
-
-    const tops = [...bySystem.keys()].sort((a, b) => a - b);
-    return tops.map((sysTop, i) => {
-      const grp  = bySystem.get(sysTop)!;
-      const left = Math.min(...grp.map(e => e.bounds.left));
-      const right = Math.max(...grp.map(e => e.bounds.left + e.bounds.width));
-      return { systemTop: sysTop, left, right, isFirst: i === 0, isLast: i === tops.length - 1 };
-    });
+    return foldSegments(extents);
   }
 
   // Beat or sub-beat resolution with precise beatFloat coordinates.
   const index = resolution === 'beat' ? layer.beatIndex : layer.subBeatIndex;
+  const keySet = new Set(keys);
+  const firstKey  = keys[0]!;
+  const lastKey   = keys[keys.length - 1]!;
   const beatStart = sel.beatStart;
   const beatEnd   = sel.beatEnd ?? Infinity;
 
-  interface SystemBounds { left: number; right: number; systemTop: number; }
-  const bySystem = new Map<number, SystemBounds>();
-
+  const byMeasure = new Map<string, MeasureExtent>();
   for (const entry of index.values()) {
-    if (entry.barN < sel.barStart || entry.barN > sel.barEnd) continue;
-    // Beat-precision constraints apply only to the endpoint measures:
-    //   barStart — left boundary: exclude beats before beatStart.
-    //   barEnd   — right boundary: exclude beats from beatEnd onward.
-    // Intermediate measures contribute all their ghosts so the bracket
-    // spans the full system width between the two beat-precise endpoints.
-    if (entry.barN === sel.barStart && entry.beatFloat < beatStart) continue;
-    if (entry.barN === sel.barEnd   && entry.beatFloat >= beatEnd)  continue;
+    if (!keySet.has(entry.measureKey)) continue;
+    // Beat-precision constraints apply only to the endpoint measures;
+    // intermediate measures contribute all their ghosts so the bracket spans
+    // the full system width between the two beat-precise endpoints.
+    if (entry.measureKey === firstKey && entry.beatFloat < beatStart) continue;
+    if (entry.measureKey === lastKey  && entry.beatFloat >= beatEnd)  continue;
 
+    const p = pos.get(entry.measureKey);
+    if (p === undefined) continue;
     const measureEntry = layer.measureIndex.get(entry.measureKey);
     const sysTop = measureEntry?.systemTop ?? entry.bounds.top;
     const eLeft  = entry.bounds.left;
     const eRight = entry.bounds.left + entry.bounds.width;
 
-    const existing = bySystem.get(sysTop);
+    const existing = byMeasure.get(entry.measureKey);
     if (!existing) {
-      bySystem.set(sysTop, { left: eLeft, right: eRight, systemTop: sysTop });
+      byMeasure.set(entry.measureKey, {
+        pos: p, systemTop: sysTop, left: eLeft, right: eRight,
+      });
     } else {
       existing.left  = Math.min(existing.left, eLeft);
       existing.right = Math.max(existing.right, eRight);
     }
   }
 
-  if (bySystem.size === 0) return null;
-
-  const tops = [...bySystem.keys()].sort((a, b) => a - b);
-  return tops.map((sysTop, i) => {
-    const sys = bySystem.get(sysTop)!;
-    return { systemTop: sys.systemTop, left: sys.left, right: sys.right, isFirst: i === 0, isLast: i === tops.length - 1 };
-  });
+  const extents = [...byMeasure.values()].sort((a, b) => a.pos - b.pos);
+  return foldSegments(extents);
 }
 
 // ---------------------------------------------------------------------------

@@ -6,9 +6,9 @@ import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
 import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
 import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
-import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
+import { AnnotationSession, buildDirectiveBarriers, buildVoltaIndex } from '../components/score/annotator';
 import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
-import { buildMcIndex, commitSelection } from '../components/score/selection';
+import { buildMcIndex, commitSelection, measureKeysForMcRange } from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
 import type { BeatSlot, StageBounds, StageAssignment, SubPartTag } from '../components/score/stages';
 import {
@@ -1448,9 +1448,13 @@ export default function ScoreViewer() {
     // state), so the score remains fully interactive for reading and MIDI
     // playback with no selection affordances.
     if (tagMode === 'tag') {
-      const barriers    = buildRepeatBarriers(mei);
+      // ADR-025: barriers are D.C./D.S. directives only; volta gates and
+      // effective-range exclusions come from the MEI-derived volta index.
+      const barriers = buildDirectiveBarriers(mei);
+      const volta    = buildVoltaIndex(mei);
       const sessionOpts: AnnotationSessionOptions = {
-        closeRepeatMeasures: barriers,
+        barrierMeasures: barriers,
+        voltaIndex: volta,
         resolution: resolutionRef.current,
       };
 
@@ -1459,12 +1463,19 @@ export default function ScoreViewer() {
       if (editFragment !== null) {
         // Edit flow: restore the stored fragment's bar/beat selection on the
         // score so the bracket appears immediately when FormPanel mounts.
+        // The effective key list is reconstructed from the stored machine
+        // interval (mc is exact where @n values repeat — §6A.1).
+        const repeatContext =
+          editFragment.repeat_context as SelectionRange['repeatContext'];
         sessionOpts.initialSelection = {
           barStart:      editFragment.bar_start,
           barEnd:        editFragment.bar_end,
           beatStart:     editFragment.beat_start,
           beatEnd:       editFragment.beat_end,
-          repeatContext: editFragment.repeat_context as SelectionRange['repeatContext'],
+          repeatContext,
+          measureKeys:   measureKeysForMcRange(
+            mcIdx, editFragment.mc_start, editFragment.mc_end, repeatContext,
+          ),
         };
         // No flags — FormPanel will set them as the user confirms concept/stages.
         sessionOpts.initialFlags = {

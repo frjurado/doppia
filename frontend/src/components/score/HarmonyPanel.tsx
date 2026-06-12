@@ -268,6 +268,18 @@ export default function HarmonyPanel({
       setLoadState('idle');
       return;
     }
+    // §6A.1 I2 — the client validates coordinates before emitting any API
+    // request. A non-finite bar number can no longer be committed, but no
+    // request may ever carry one regardless.
+    if (
+      !Number.isFinite(selectionRange.barStart) ||
+      !Number.isFinite(selectionRange.barEnd)
+    ) {
+      setEvents([]);
+      setLoadState('error');
+      setLoadError('Selection has no resolvable bar range');
+      return;
+    }
     setLoadState('loading');
     setLoadError(null);
     try {

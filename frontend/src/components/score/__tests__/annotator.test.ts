@@ -1,10 +1,11 @@
 /**
  * Unit tests for frontend/src/components/score/annotator.ts.
  *
- * Covers: buildRepeatBarriers, ghostFromTarget, measureKeyRange,
- * numericKeyRange, and AnnotationSession interaction (measure drag,
- * endpoint re-selection, barrier clamping, beat drag, repeat context,
- * resolution toggle, flag management).
+ * Covers: buildDirectiveBarriers, buildVoltaIndex, computeSelectionKeys,
+ * deriveRepeatContext, ghostFromTarget, measureKeyRange, numericKeyRange,
+ * and AnnotationSession interaction (measure drag, endpoint re-selection,
+ * barrier clamping, volta gates and effective-range exclusion, beat drag,
+ * repeat context, resolution toggle, flag management).
  *
  * The AnnotationSession tests use a minimal GhostLayer constructed in
  * jsdom, with ghost elements appended via the public _appendXxxGhost methods
@@ -16,49 +17,50 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AnnotationSession,
-  buildEndingBarriers,
-  buildRepeatBarriers,
+  buildDirectiveBarriers,
+  buildVoltaIndex,
+  computeSelectionKeys,
+  deriveRepeatContext,
   ghostFromTarget,
   handleFromTarget,
   measureKeyRange,
   numericKeyRange,
 } from '../annotator';
-import { GhostLayer, encodeBeat, measureGhostKey } from '../ghosts';
-import type { BeatGhostEntry, MeasureGhostEntry } from '../ghosts';
+import type { VoltaIndex } from '../annotator';
+import { GhostLayer, encodeBeat, encodeSubBeat, measureGhostKey } from '../ghosts';
+import type { BeatGhostEntry, MeasureGhostEntry, SubBeatGhostEntry } from '../ghosts';
 
 // ---------------------------------------------------------------------------
-// buildRepeatBarriers
+// buildDirectiveBarriers (ADR-025: D.C./D.S. only — repeat barlines are free)
 // ---------------------------------------------------------------------------
 
-describe('buildRepeatBarriers', () => {
-  it('returns an empty set when the MEI has no repeat barlines or directions', () => {
+describe('buildDirectiveBarriers', () => {
+  it('returns an empty set when the MEI has no D.C./D.S. directions', () => {
     const mei = `<mei><music><body><mdiv><score>
       <measure n="1"/><measure n="2"/><measure n="3"/>
     </score></mdiv></body></music></mei>`;
-    expect(buildRepeatBarriers(mei).size).toBe(0);
+    expect(buildDirectiveBarriers(mei).size).toBe(0);
   });
 
-  it('identifies a measure with @right="rptend"', () => {
+  it('does NOT mark a measure with @right="rptend" (ADR-025)', () => {
     const mei = `<mei><music><body><mdiv><score>
       <measure n="4" right="rptend"/>
     </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
-    expect(barriers.has(measureGhostKey(4, null))).toBe(true);
+    expect(buildDirectiveBarriers(mei).size).toBe(0);
   });
 
-  it('identifies a measure with @right="rptboth"', () => {
+  it('does NOT mark a measure with @right="rptboth" (ADR-025)', () => {
     const mei = `<mei><music><body><mdiv><score>
       <measure n="8" right="rptboth"/>
     </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
-    expect(barriers.has(measureGhostKey(8, null))).toBe(true);
+    expect(buildDirectiveBarriers(mei).size).toBe(0);
   });
 
   it('identifies a da capo direction inside a measure', () => {
     const mei = `<mei><music><body><mdiv><score>
       <measure n="16"><dir>D.C. al Fine</dir></measure>
     </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
+    const barriers = buildDirectiveBarriers(mei);
     expect(barriers.has(measureGhostKey(16, null))).toBe(true);
   });
 
@@ -66,7 +68,7 @@ describe('buildRepeatBarriers', () => {
     const mei = `<mei><music><body><mdiv><score>
       <measure n="32"><dir>D.S. al Coda</dir></measure>
     </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
+    const barriers = buildDirectiveBarriers(mei);
     expect(barriers.has(measureGhostKey(32, null))).toBe(true);
   });
 
@@ -74,16 +76,237 @@ describe('buildRepeatBarriers', () => {
     const mei = `<mei><music><body><mdiv><score>
       <measure n="1" right="rptstart"/><measure n="2"/>
     </score></mdiv></body></music></mei>`;
-    expect(buildRepeatBarriers(mei).size).toBe(0);
+    expect(buildDirectiveBarriers(mei).size).toBe(0);
   });
 
   it('includes ending context in the barrier key when measure is inside an ending', () => {
     const mei = `<mei><music><body><mdiv><score>
-      <ending n="1"><measure n="12" right="rptend"/></ending>
+      <ending n="1"><measure n="12"><dir>D.C.</dir></measure></ending>
     </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
+    const barriers = buildDirectiveBarriers(mei);
     expect(barriers.has(measureGhostKey(12, 1))).toBe(true);
     expect(barriers.has(measureGhostKey(12, null))).toBe(false);
+  });
+
+  it('uses the deduplicated key for a D.C. measure whose @n was seen before', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/>
+      <measure n="1"><dir>D.C. al Fine</dir></measure>
+    </score></mdiv></body></music></mei>`;
+    const barriers = buildDirectiveBarriers(mei);
+    expect(barriers.has('m1#1')).toBe(true);
+    expect(barriers.has('m1')).toBe(false);
+    expect(barriers.size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildVoltaIndex (§6A.3)
+// ---------------------------------------------------------------------------
+
+describe('buildVoltaIndex', () => {
+  it('returns no groups for ending-free MEI', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/><measure n="2"/>
+    </score></mdiv></body></music></mei>`;
+    const volta = buildVoltaIndex(mei);
+    expect(volta.groups.length).toBe(0);
+    expect(volta.byKey.size).toBe(0);
+  });
+
+  it('groups contiguous endings and records ending membership and finalN', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/>
+      <ending n="1"><measure n="2"/><measure n="3"/></ending>
+      <ending n="2"><measure n="2"/><measure n="3"/></ending>
+      <measure n="4"/>
+    </score></mdiv></body></music></mei>`;
+    const volta = buildVoltaIndex(mei);
+    expect(volta.groups.length).toBe(1);
+    const g = volta.groups[0]!;
+    expect(g.finalN).toBe(2);
+    expect(g.endings.get(1)).toEqual(['m2-e1', 'm3-e1']);
+    expect(g.endings.get(2)).toEqual(['m2-e2', 'm3-e2']);
+    expect(g.allKeys).toEqual(['m2-e1', 'm3-e1', 'm2-e2', 'm3-e2']);
+    expect(volta.byKey.get('m3-e2')).toEqual({ groupIdx: 0, endingN: 2 });
+  });
+
+  it('resolves the jump target from a preceding @left="rptstart"', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/>
+      <measure n="2" left="rptstart"/>
+      <measure n="3"/>
+      <ending n="1"><measure n="4" right="rptend"/></ending>
+      <ending n="2"><measure n="4"/></ending>
+    </score></mdiv></body></music></mei>`;
+    const volta = buildVoltaIndex(mei);
+    expect(volta.groups[0]!.jumpTargetKey).toBe('m2');
+  });
+
+  it('resolves the jump target after a @right="rptboth" measure', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1" right="rptboth"/>
+      <measure n="2"/>
+      <ending n="1"><measure n="3" right="rptend"/></ending>
+      <ending n="2"><measure n="3"/></ending>
+    </score></mdiv></body></music></mei>`;
+    const volta = buildVoltaIndex(mei);
+    expect(volta.groups[0]!.jumpTargetKey).toBe('m2');
+  });
+
+  it('defaults the jump target to the first measure when no repeat-start exists', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1"/>
+      <ending n="1"><measure n="2" right="rptend"/></ending>
+      <ending n="2"><measure n="2"/></ending>
+    </score></mdiv></body></music></mei>`;
+    const volta = buildVoltaIndex(mei);
+    expect(volta.groups[0]!.jumpTargetKey).toBe('m1');
+  });
+
+  it('separates two volta groups split by body measures', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="1" left="rptstart"/>
+      <ending n="1"><measure n="2"/></ending>
+      <ending n="2"><measure n="2"/></ending>
+      <measure n="3" left="rptstart"/>
+      <ending n="1"><measure n="4"/></ending>
+      <ending n="2"><measure n="4"/></ending>
+    </score></mdiv></body></music></mei>`;
+    const volta = buildVoltaIndex(mei);
+    expect(volta.groups.length).toBe(2);
+    expect(volta.groups[0]!.jumpTargetKey).toBe('m1');
+    expect(volta.groups[1]!.jumpTargetKey).toBe('m3');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeSelectionKeys (§6A.2–6A.3)
+// ---------------------------------------------------------------------------
+
+describe('computeSelectionKeys', () => {
+  // Layout: m1 m2 | ending1: m3-e1 m4-e1 | ending2: m3-e2 m4-e2 | m5
+  const keys = ['m1', 'm2', 'm3-e1', 'm4-e1', 'm3-e2', 'm4-e2', 'm5'];
+  const noBarriers = new Set<string>();
+
+  function makeVolta(jumpTargetKey: string | null): VoltaIndex {
+    return {
+      byKey: new Map([
+        ['m3-e1', { groupIdx: 0, endingN: 1 }],
+        ['m4-e1', { groupIdx: 0, endingN: 1 }],
+        ['m3-e2', { groupIdx: 0, endingN: 2 }],
+        ['m4-e2', { groupIdx: 0, endingN: 2 }],
+      ]),
+      groups: [{
+        endings: new Map([
+          [1, ['m3-e1', 'm4-e1']],
+          [2, ['m3-e2', 'm4-e2']],
+        ]),
+        allKeys: ['m3-e1', 'm4-e1', 'm3-e2', 'm4-e2'],
+        finalN: 2,
+        jumpTargetKey,
+      }],
+    };
+  }
+
+  it('returns the plain interval when no volta groups exist', () => {
+    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, null))
+      .toEqual(keys);
+  });
+
+  it('still clamps at directive barriers', () => {
+    const barriers = new Set(['m2']);
+    expect(computeSelectionKeys('m1', 'm5', keys, barriers, makeVolta('m1')))
+      .toEqual(['m1', 'm2']);
+  });
+
+  it('clamps a forward drag from ending 1 at the sibling-ending gate', () => {
+    expect(computeSelectionKeys('m3-e1', 'm3-e2', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m3-e1', 'm4-e1']);
+  });
+
+  it('clamps a non-final-ending anchor extended past its group', () => {
+    expect(computeSelectionKeys('m3-e1', 'm5', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m3-e1', 'm4-e1']);
+  });
+
+  it('allows a final-ending anchor to extend past the group', () => {
+    expect(computeSelectionKeys('m3-e2', 'm5', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m3-e2', 'm4-e2', 'm5']);
+  });
+
+  it('entering ending 2 from the body excludes ending 1 (row 2, discontiguous)', () => {
+    expect(computeSelectionKeys('m1', 'm4-e2', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m1', 'm2', 'm3-e2', 'm4-e2']);
+  });
+
+  it('entering ending 1 from the body keeps ending 1 only (row 2)', () => {
+    expect(computeSelectionKeys('m1', 'm4-e1', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m1', 'm2', 'm3-e1', 'm4-e1']);
+  });
+
+  it('backward drag from ending 2 into the body skips ending 1', () => {
+    expect(computeSelectionKeys('m4-e2', 'm1', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m1', 'm2', 'm3-e2', 'm4-e2']);
+  });
+
+  it('backward drag from ending 2 hovering inside ending 1 clamps at the gate', () => {
+    expect(computeSelectionKeys('m4-e2', 'm4-e1', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m3-e2', 'm4-e2']);
+  });
+
+  it('wholly contained group including its repeat-start keeps all endings (row 3)', () => {
+    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, makeVolta('m2')))
+      .toEqual(['m1', 'm2', 'm3-e1', 'm4-e1', 'm3-e2', 'm4-e2', 'm5']);
+  });
+
+  it('wholly contained group without its repeat-start excludes non-final endings (row 4)', () => {
+    expect(computeSelectionKeys('m2', 'm5', keys, noBarriers, makeVolta('m1')))
+      .toEqual(['m2', 'm3-e2', 'm4-e2', 'm5']);
+  });
+
+  it('unknown jump target (null) takes the conservative row-4 path', () => {
+    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, makeVolta(null)))
+      .toEqual(['m1', 'm2', 'm3-e2', 'm4-e2', 'm5']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deriveRepeatContext (§6A.3)
+// ---------------------------------------------------------------------------
+
+describe('deriveRepeatContext', () => {
+  const volta: VoltaIndex = {
+    byKey: new Map([
+      ['m3-e1', { groupIdx: 0, endingN: 1 }],
+      ['m3-e2', { groupIdx: 0, endingN: 2 }],
+    ]),
+    groups: [{
+      endings: new Map([[1, ['m3-e1']], [2, ['m3-e2']]]),
+      allKeys: ['m3-e1', 'm3-e2'],
+      finalN: 2,
+      jumpTargetKey: 'm1',
+    }],
+  };
+
+  it('returns null for a selection without ending measures', () => {
+    expect(deriveRepeatContext(['m1', 'm2'], volta)).toBeNull();
+  });
+
+  it('returns first_ending when only ending 1 is represented', () => {
+    expect(deriveRepeatContext(['m2', 'm3-e1'], volta)).toBe('first_ending');
+  });
+
+  it('returns second_ending when only the final ending is represented', () => {
+    expect(deriveRepeatContext(['m2', 'm3-e2'], volta)).toBe('second_ending');
+  });
+
+  it('returns null when the full group is represented (row 3)', () => {
+    expect(deriveRepeatContext(['m2', 'm3-e1', 'm3-e2', 'm4'], volta)).toBeNull();
+  });
+
+  it('returns null without a volta index', () => {
+    expect(deriveRepeatContext(['m3-e1'], null)).toBeNull();
   });
 });
 
@@ -310,6 +533,7 @@ function makeLayerWithBeats(
         beatIdx: b,
         encodedKey: encKey,
         beatFloat,
+        endFloat: beatFloat + 1,
         bounds: { left: 0, top: 0, width: 50, height: 20 },
       } satisfies BeatGhostEntry);
       beatEls.set(encKey, el);
@@ -524,10 +748,10 @@ describe('AnnotationSession — measure drag', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AnnotationSession — repeat barrier clamping
+// AnnotationSession — directive barrier clamping (D.C./D.S., §6A.2)
 // ---------------------------------------------------------------------------
 
-describe('AnnotationSession — close-repeat barrier clamping', () => {
+describe('AnnotationSession — directive barrier clamping', () => {
   let container: HTMLDivElement;
   let layer: GhostLayer;
   let els: HTMLDivElement[];
@@ -535,11 +759,11 @@ describe('AnnotationSession — close-repeat barrier clamping', () => {
 
   beforeEach(() => {
     ({ container, layer, els } = makeLayerWithMeasures([1, 2, 3, 4, 5]));
-    // Measure m3 has a close-repeat barline.
+    // Measure m3 carries a D.C./D.S. directive.
     const barriers = new Set([measureGhostKey(3, null)]);
     session = new AnnotationSession(layer, {
       resolution: 'measure',
-      closeRepeatMeasures: barriers,
+      barrierMeasures: barriers,
     });
   });
 
@@ -835,65 +1059,19 @@ describe('AnnotationSession — concurrent flags', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildEndingBarriers (G2.2)
+// AnnotationSession — volta ending gates and effective range (§6A.2–6A.3)
 // ---------------------------------------------------------------------------
 
-describe('buildEndingBarriers', () => {
-  afterEach(() => {
-    document.body.innerHTML = '';
-  });
-
-  it('returns an empty set when no measures have endings', () => {
-    const { layer, container } = makeLayerWithMeasures([1, 2, 3]);
-    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
-    layer.destroy(); container.remove();
-  });
-
-  it('returns an empty set when all measures are in the same ending', () => {
-    const { layer, container } = makeLayerWithMeasures([1, 2, 3], [1, 1, 1]);
-    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
-    layer.destroy(); container.remove();
-  });
-
-  it('marks the last measure of ending 1 as a barrier when followed by ending 2', () => {
-    // m1(null), m2-e1, m3-e1, m2-e2, m3-e2 — transition at m3-e1 → m2-e2.
-    const { layer, container } = makeLayerWithMeasures([1, 2, 3, 2, 3], [null, 1, 1, 2, 2]);
-    const barriers = buildEndingBarriers(layer.measureIndex);
-    expect(barriers.has(measureGhostKey(3, 1))).toBe(true);   // last of ending 1
-    expect(barriers.has(measureGhostKey(2, 1))).toBe(false);  // not last of ending 1
-    expect(barriers.has(measureGhostKey(3, 2))).toBe(false);  // ending 2 — not a barrier
-    expect(barriers.size).toBe(1);
-    layer.destroy(); container.remove();
-  });
-
-  it('does not block null → non-null (entering an ending from the main body)', () => {
-    // m1(null) → m2-e1: entering ending 1 is permitted.
-    const { layer, container } = makeLayerWithMeasures([1, 2, 3], [null, 1, 1]);
-    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
-    layer.destroy(); container.remove();
-  });
-
-  it('does not block non-null → null (exiting an ending back to the main body)', () => {
-    // m2-e1, m3(null): leaving ending 1 is permitted.
-    const { layer, container } = makeLayerWithMeasures([1, 2, 3], [1, 1, null]);
-    expect(buildEndingBarriers(layer.measureIndex).size).toBe(0);
-    layer.destroy(); container.remove();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// AnnotationSession — ending-boundary barrier (G2.2)
-// ---------------------------------------------------------------------------
-
-describe('AnnotationSession — ending-boundary barrier', () => {
+describe('AnnotationSession — volta ending gates', () => {
   let container: HTMLDivElement;
   let layer: GhostLayer;
   let els: HTMLDivElement[];
   let session: AnnotationSession;
 
-  // Alla Turca fixture: m1–m5 main body, m6-e1/m7-e1 first ending,
-  // m6-e2/m7-e2 second ending, m8 continuation.
-  // Close-repeat on m7-e1; ending barrier is also auto-derived at m7-e1.
+  // Volta fixture: m1–m5 main body, m6-e1/m7-e1 first ending,
+  // m6-e2/m7-e2 second ending, m8 continuation. No directive barriers —
+  // the :| closing ending 1 is NOT a gate (ADR-025); the volta index is
+  // auto-derived from the layer (jump target unknown → row-4 default).
   // Index:  0   1   2   3   4    5      6      7      8     9
   // Key:    m1  m2  m3  m4  m5  m6-e1  m7-e1  m6-e2  m7-e2  m8
   beforeEach(() => {
@@ -901,10 +1079,7 @@ describe('AnnotationSession — ending-boundary barrier', () => {
       [1, 2, 3, 4, 5, 6, 7, 6, 7, 8],
       [null, null, null, null, null, 1, 1, 2, 2, null],
     ));
-    session = new AnnotationSession(layer, {
-      resolution: 'measure',
-      closeRepeatMeasures: new Set([measureGhostKey(7, 1)]),
-    });
+    session = new AnnotationSession(layer, { resolution: 'measure' });
   });
 
   afterEach(() => {
@@ -919,41 +1094,72 @@ describe('AnnotationSession — ending-boundary barrier', () => {
     expect(layer.measureIndex.has(measureGhostKey(6, 2))).toBe(true);
   });
 
-  it('forward drag from main body is clamped at the close-repeat of ending 1', () => {
-    // Anchor at m1 (idx 0), drag to m8 (idx 9) — barrier at m7-e1 (idx 6).
+  it('forward drag across the whole group excludes the non-final ending (row 4)', () => {
+    // Anchor at m1 (idx 0), drag to m8 (idx 9). The repeat-end of ending 1 no
+    // longer clamps (ADR-025); the group is wholly contained with an unknown
+    // jump target, so ending 1 is excluded from the effective range.
     measureDrag(els, 0, [9]);
     expect(session.selection?.barStart).toBe(1);
-    expect(session.selection?.barEnd).toBe(7); // m7-e1.barN = 7
+    expect(session.selection?.barEnd).toBe(8);
+    expect(session.selection?.measureKeys).toEqual(
+      ['m1', 'm2', 'm3', 'm4', 'm5', 'm6-e2', 'm7-e2', 'm8'],
+    );
+    expect(session.selection?.repeatContext).toBe('second_ending');
+    // Ending-1 ghosts must not be highlighted.
+    expect(els[5]!.classList.contains('dark')).toBe(false);
+    expect(els[6]!.classList.contains('dark')).toBe(false);
+    expect(els[9]!.classList.contains('dark')).toBe(true);
   });
 
-  it('drag within ending 1 is unaffected by barriers', () => {
+  it('drag within ending 1 works and captures first_ending context', () => {
     measureDrag(els, 5, [6]); // m6-e1 → m7-e1
     expect(session.selection?.barStart).toBe(6);
     expect(session.selection?.barEnd).toBe(7);
     expect(session.selection?.repeatContext).toBe('first_ending');
   });
 
-  it('drag within ending 2 is unaffected by barriers', () => {
+  it('drag within ending 2 works and captures second_ending context', () => {
     measureDrag(els, 7, [8]); // m6-e2 → m7-e2
     expect(session.selection?.barStart).toBe(6);
     expect(session.selection?.barEnd).toBe(7);
     expect(session.selection?.repeatContext).toBe('second_ending');
   });
 
-  it('forward drag from ending 1 cannot cross the boundary into ending 2', () => {
-    // Anchor at m6-e1 (idx 5), drag to m6-e2 (idx 7).
-    // Ending barrier at m7-e1 clamps the selection.
+  it('forward drag from ending 1 clamps at the sibling-ending gate', () => {
+    // Anchor at m6-e1 (idx 5), drag to m6-e2 (idx 7) — clamped at end of e1.
     measureDrag(els, 5, [7]);
     expect(session.selection?.barEnd).toBe(7); // m7-e1.barN = 7
     expect(session.selection?.repeatContext).toBe('first_ending');
   });
 
-  it('backward drag from ending 2 cannot cross the boundary into ending 1', () => {
-    // Anchor at m6-e2 (idx 7), drag backward past barrier to m1 (idx 0).
-    // Barrier at m7-e1 prevents the crossing — selection collapses to [m6-e2].
+  it('forward drag from ending 1 cannot extend past its group', () => {
+    // Anchor at m6-e1 (idx 5), drag to m8 (idx 9) — a first ending closes
+    // into the repeat jump, never the continuation.
+    measureDrag(els, 5, [9]);
+    expect(session.selection?.measureKeys).toEqual(['m6-e1', 'm7-e1']);
+    expect(session.selection?.repeatContext).toBe('first_ending');
+  });
+
+  it('backward drag from ending 2 into the body skips ending 1 (row 2)', () => {
+    // Anchor at m6-e2 (idx 7), drag backward to m1 (idx 0). Ending 1 is
+    // excluded from the effective range; the selection is discontiguous.
     measureDrag(els, 7, [6, 5, 4, 3, 2, 1, 0]);
-    expect(session.selection?.barStart).toBe(6);
-    expect(session.selection?.barEnd).toBe(6);
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(6); // m6-e2.barN = 6
+    expect(session.selection?.measureKeys).toEqual(
+      ['m1', 'm2', 'm3', 'm4', 'm5', 'm6-e2'],
+    );
+    expect(session.selection?.repeatContext).toBe('second_ending');
+    expect(els[5]!.classList.contains('dark')).toBe(false); // m6-e1
+    expect(els[6]!.classList.contains('dark')).toBe(false); // m7-e1
+    expect(els[0]!.classList.contains('dark')).toBe(true);  // m1
+  });
+
+  it('backward drag from ending 2 hovering inside ending 1 clamps at the gate', () => {
+    // Anchor at m6-e2 (idx 7), current inside ending 1 (idx 6) — illegal
+    // interval, clamped to the anchor side of the gate.
+    measureDrag(els, 7, [6]);
+    expect(session.selection?.measureKeys).toEqual(['m6-e2']);
     expect(session.selection?.repeatContext).toBe('second_ending');
   });
 
@@ -967,63 +1173,121 @@ describe('AnnotationSession — ending-boundary barrier', () => {
     expect(session.selection?.repeatContext).toBe('second_ending');
   });
 
-  it('ending-boundary barrier is auto-derived even without a close-repeat barline', () => {
-    // Layer with two endings and NO close-repeat; relying solely on auto-derived barrier.
+  it('volta gates apply without any explicit volta index (layer-derived)', () => {
     const { container: c2, layer: l2, els: e2 } = makeLayerWithMeasures(
       [1, 2, 1, 2],
       [1, 1, 2, 2],
     );
-    const s2 = new AnnotationSession(l2, { resolution: 'measure' /* no closeRepeatMeasures */ });
+    const s2 = new AnnotationSession(l2, { resolution: 'measure' });
 
-    // Drag from m1-e1 (idx 0) to m1-e2 (idx 2) — crosses ending boundary.
-    // Auto-derived barrier at m2-e1 (idx 1) must clamp the selection.
+    // Drag from m1-e1 (idx 0) to m1-e2 (idx 2) — sibling crossing, clamped
+    // at the end of ending 1.
     e2[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     e2[2]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
-    expect(s2.selection?.barEnd).toBe(2); // m2-e1.barN = 2 (clamped at ending barrier)
+    expect(s2.selection?.barEnd).toBe(2); // m2-e1.barN = 2
     expect(s2.selection?.repeatContext).toBe('first_ending');
     s2.destroy(); c2.remove();
   });
 });
 
 // ---------------------------------------------------------------------------
-// buildRepeatBarriers — section-reset @n deduplication (G2.3)
+// AnnotationSession — sub-beat endpoint exactness (§6A.7, SEL-09/SEL-14)
 // ---------------------------------------------------------------------------
 
-describe('buildRepeatBarriers — section-reset @n deduplication', () => {
-  it('uses deduplicated key for a barrier measure whose @n was seen before', () => {
-    // m1 (normal) then m2 (@right=rptend) then m1 again (section-reset).
-    // buildRepeatBarriers should NOT mark the second m1 as a barrier, and the
-    // barrier key for m2 should be the plain "m2" (first occurrence, no suffix).
-    const mei = `<mei><music><body><mdiv><score>
-      <measure n="1"/>
-      <measure n="2" right="rptend"/>
-      <measure n="1"/>
-    </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
-    // m2 is a barrier — first occurrence, so key is "m2".
-    expect(barriers.has(measureGhostKey(2, null))).toBe(true);
-    // The second m1 is NOT a barrier (no @right=rptend).
-    expect(barriers.size).toBe(1);
+describe('AnnotationSession — sub-beat endpoint exactness', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
   });
 
-  it('correctly keys a barrier on the second occurrence of a repeated @n', () => {
-    // m1 (no barrier), m1 again (@right=rptend, section-reset).
-    // The barrier key must be "m1#1" (second occurrence, not plain "m1").
-    const mei = `<mei><music><body><mdiv><score>
-      <measure n="1"/>
-      <measure n="1" right="rptend"/>
-    </score></mdiv></body></music></mei>`;
-    const barriers = buildRepeatBarriers(mei);
-    expect(barriers.has('m1#1')).toBe(true);
-    expect(barriers.has(measureGhostKey(1, null))).toBe(false);
-    expect(barriers.size).toBe(1);
+  /** Two 4/4 measures with sub-beat ghosts (subDiv=2 → floats 1.0…4.5). */
+  function makeSubBeatLayer(): {
+    container: HTMLDivElement;
+    layer: GhostLayer;
+    subBeatEls: Map<number, HTMLDivElement>;
+  } {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const layer = new GhostLayer(container);
+    const subBeatEls = new Map<number, HTMLDivElement>();
+
+    [1, 2].forEach((barN, renderOrder) => {
+      const mKey = measureGhostKey(barN, null);
+      const el = document.createElement('div');
+      el.className = 'ghost ghost-measure';
+      el.dataset['key'] = mKey;
+      layer._appendMeasureGhost(el);
+      layer.measureIndex.set(mKey, {
+        el, barN, endingN: null, key: mKey,
+        bounds: { left: renderOrder * 200, top: 0, width: 200, height: 50 },
+        systemTop: 0,
+        renderOrder,
+      } satisfies MeasureGhostEntry);
+
+      for (let b = 0; b < 4; b++) {
+        for (let sb = 0; sb < 2; sb++) {
+          const encKey = encodeSubBeat(renderOrder, b, sb);
+          const beatFloat = b + 1 + sb / 2;
+          const sbEl = document.createElement('div');
+          sbEl.className = 'ghost ghost-subbeat';
+          sbEl.dataset['key'] = `${encKey}`;
+          layer._appendSubBeatGhost(sbEl);
+          layer.subBeatIndex.set(encKey, {
+            el: sbEl, barN, endingN: null, measureKey: mKey,
+            beatIdx: b, subBeatIdx: sb, encodedKey: encKey,
+            beatFloat, endFloat: beatFloat + 0.5,
+            bounds: { left: renderOrder * 200 + b * 50 + sb * 25, top: 0, width: 25, height: 50 },
+          } satisfies SubBeatGhostEntry);
+          subBeatEls.set(encKey, sbEl);
+        }
+      }
+    });
+
+    return { container, layer, subBeatEls };
+  }
+
+  it('a selection ending on the first sub-beat of a measure commits beatEnd = 1.5', () => {
+    // Regression for SEL-09/SEL-14: the old neighbour-difference estimate
+    // produced a negative step when the last two entries straddled a barline
+    // (1.0 − 4.5 = −3.5 → beatEnd = −2.5), dropping the final measure from
+    // every derived surface.
+    const { container, layer, subBeatEls } = makeSubBeatLayer();
+    const session = new AnnotationSession(layer, { resolution: 'subbeat' });
+
+    const start = encodeSubBeat(0, 2, 0); // m1, beat 3 (float 3.0)
+    const end   = encodeSubBeat(1, 0, 0); // m2, beat 1, first sub-beat (float 1.0)
+    subBeatEls.get(start)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    subBeatEls.get(end)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(2);
+    expect(session.selection?.beatStart).toBe(3.0);
+    expect(session.selection?.beatEnd).toBe(1.5); // exactly one sub-beat into m2
+    expect(session.selection?.measureKeys).toEqual(['m1', 'm2']);
+
+    session.destroy(); container.remove();
+  });
+
+  it('a selection ending mid-beat commits beatEnd at the exact sub-beat boundary', () => {
+    // Regression for SEL-10: no rounding up to complete the beat.
+    const { container, layer, subBeatEls } = makeSubBeatLayer();
+    const session = new AnnotationSession(layer, { resolution: 'subbeat' });
+
+    const start = encodeSubBeat(0, 0, 0); // m1 float 1.0
+    const end   = encodeSubBeat(0, 2, 1); // m1, beat 3, second sub-beat (float 3.5)
+    subBeatEls.get(start)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    subBeatEls.get(end)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup'));
+
+    expect(session.selection?.beatEnd).toBe(4.0); // 3.5 + 0.5, not 4.5
+    session.destroy(); container.remove();
   });
 });
 
 // ---------------------------------------------------------------------------
-// AnnotationSession — beat barrier enforcement (G2.3)
+// AnnotationSession — directive barrier enforcement at beat resolution (G2.3)
 // ---------------------------------------------------------------------------
 
 describe('AnnotationSession — beat barrier enforcement', () => {
@@ -1085,6 +1349,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
           el, barN, endingN, measureKey: mKey,
           beatIdx: b, encodedKey: encKey,
           beatFloat: b + 1,
+          endFloat: b + 2,
           bounds: { left: renderOrder * 100 + b * 20, top: 0, width: 20, height: 30 },
         } satisfies BeatGhostEntry);
         beatEls.set(encKey, el);
@@ -1103,7 +1368,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
-      closeRepeatMeasures: barrier,
+      barrierMeasures: barrier,
     });
 
     // Anchor at m1 beat 0 (renderOrder=0, b=0), drag to m3 beat 0 (renderOrder=2, b=0).
@@ -1129,7 +1394,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
-      closeRepeatMeasures: barrier,
+      barrierMeasures: barrier,
     });
 
     // Anchor at m3 beat 0 (renderOrder=2), drag backward through barrier to m1 beat 0.
@@ -1154,7 +1419,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
-      closeRepeatMeasures: barrier,
+      barrierMeasures: barrier,
     });
 
     // Drag entirely within m3 (renderOrder=2).
@@ -1178,7 +1443,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
-      closeRepeatMeasures: barrier,
+      barrierMeasures: barrier,
     });
 
     // Drag from m1 beat 0 to m1 beat 1 — does not cross m2 barrier.
