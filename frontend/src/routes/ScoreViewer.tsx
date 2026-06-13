@@ -534,6 +534,12 @@ export default function ScoreViewer() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Step 5 — unmissable post-submit confirmation. Owned here (not in FormPanel)
+  // so it survives the form remount that the success reset triggers. Auto-
+  // dismisses after a generous delay and is cleared as soon as the annotator
+  // starts a new fragment; the banner is also manually dismissible.
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const submitSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Stored-fragment overlay (Component 7 Step 10) ─────────────────────────
   // Fetches all stored fragments for the current movement so the overlay can
@@ -969,7 +975,18 @@ export default function ScoreViewer() {
    * Any previously saved draft persists on the backend (no DELETE request is
    * made); it becomes an orphaned draft until a future delete endpoint removes it.
    */
-  const handleDeleteFragment = useCallback(() => {
+  /**
+   * Return the annotation surface to its initial blank state: clears the
+   * selection, all four concurrent flags, stage assignments, sub-part tags,
+   * prose annotation, and remounts FormPanel to a blank concept/property
+   * state. Shared by Delete (G1.2) and the post-submit reset (Step 5).
+   *
+   * Does not touch the backend: Delete leaves any saved draft orphaned, and
+   * the submit path has already persisted the fragment by the time it calls
+   * this. submitSuccess is intentionally left untouched so the caller controls
+   * the confirmation banner independently of the reset.
+   */
+  const resetAnnotation = useCallback(() => {
     annotationSessionRef.current?.reset();
     setSelectionRange(null);
     setCommittedSelection(null);
@@ -985,6 +1002,30 @@ export default function ScoreViewer() {
     activeSchemaTreeRef.current = null;
     setFragmentResetKey(k => k + 1);
   }, []);
+
+  const handleDeleteFragment = useCallback(() => {
+    resetAnnotation();
+  }, [resetAnnotation]);
+
+  // ── Post-submit confirmation (Step 5) ──────────────────────────────────────
+  /** Raise the success banner and arm its auto-dismiss timer. */
+  const showSubmitSuccess = useCallback(() => {
+    if (submitSuccessTimerRef.current) clearTimeout(submitSuccessTimerRef.current);
+    setSubmitSuccess(true);
+    submitSuccessTimerRef.current = setTimeout(() => setSubmitSuccess(false), 6000);
+  }, []);
+
+  // Clear the pending auto-dismiss timer on unmount.
+  useEffect(
+    () => () => { if (submitSuccessTimerRef.current) clearTimeout(submitSuccessTimerRef.current); },
+    [],
+  );
+
+  // Dismiss the confirmation the moment the annotator starts a new fragment —
+  // the banner has served its purpose once a fresh selection exists.
+  useEffect(() => {
+    if (selectionRange && submitSuccess) setSubmitSuccess(false);
+  }, [selectionRange, submitSuccess]);
 
   // ── Fragment detail panel handlers (Component 7 Step 12) ────────────────
 
@@ -1248,19 +1289,23 @@ export default function ScoreViewer() {
         }
 
         await submitFragment(draftId);
-        // Reset draft ID on success — the submitted fragment is immutable
-        // until a reviewer rejects it; a new annotation starts clean.
-        setFragmentDraftId(null);
         // Refresh stored-fragment overlay so the newly submitted fragment
         // appears immediately (Component 7 Step 10).
         refreshStoredFragments();
+        // Step 5 — Submit returns the surface to its initial state (form and
+        // ghosts both cleared; the submitted fragment is immutable until a
+        // reviewer acts) and raises an unmissable confirmation. This replaces
+        // the old "draft saved" flash that left the annotator unsure whether
+        // the submission landed. resetAnnotation clears fragmentDraftId too.
+        resetAnnotation();
+        showSubmitSuccess();
       } catch (err) {
         setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
       } finally {
         setIsSubmitting(false);
       }
     },
-    [committedSelection, movementId, fragmentDraftId, buildPayload, refreshStoredFragments],
+    [committedSelection, movementId, fragmentDraftId, buildPayload, refreshStoredFragments, resetAnnotation, showSubmitSuccess],
   );
 
   // Mirror stageAssignments into a ref so callbacks can read .length without
@@ -2029,6 +2074,26 @@ export default function ScoreViewer() {
         {isRerendering && (
           <div className={styles.rerenderOverlay} role="status" aria-live="polite">
             <Type variant="label-md" as="span">Re-rendering…</Type>
+          </div>
+        )}
+
+        {/* Post-submit confirmation (Step 5): an unmissable banner shown after
+            a fragment is submitted and the surface has reset to blank. Uses the
+            submitted-status token family (secondary). Auto-dismisses after a
+            few seconds, clears on the next selection, and is dismissible. */}
+        {submitSuccess && (
+          <div className={styles.submitSuccessBanner} role="status" aria-live="assertive">
+            <Type variant="label-md" as="span" className={styles.submitSuccessText}>
+              Fragment submitted for review.
+            </Type>
+            <button
+              type="button"
+              className={styles.submitSuccessDismiss}
+              onClick={() => setSubmitSuccess(false)}
+              aria-label="Dismiss confirmation"
+            >
+              <Type variant="label-sm" as="span">Dismiss</Type>
+            </button>
           </div>
         )}
       </div>

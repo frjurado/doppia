@@ -432,9 +432,11 @@ The state machine simplifies accordingly: `stagesComplete` is trivially true for
 
 ## 9. Validation and Save States
 
-**Save Draft** commits the current annotation state to the database with `status: 'draft'`. All fields may be incomplete. The annotation is saved exactly as-is, including partially-assigned stages and missing properties. Drafts can be resumed in a later session.
+**Save Draft** commits the current annotation state to the database with `status: 'draft'`. All fields may be incomplete. The annotation is saved exactly as-is, including partially-assigned stages and missing properties. Drafts can be resumed in a later session. **The working state is preserved** — selection, ghosts, concept, stages, and properties all stay on screen so the annotator can keep editing — and the feedback is deliberately quiet: a persistent "Draft saved" note under the checklist.
 
-**Submit for Review** requires all blocking checklist items to be resolved. Sets `status: 'submitted'`.
+**Submit for Review** requires all blocking checklist items to be resolved. Sets `status: 'submitted'`. **On success the surface resets to its initial blank state** (selection cleared, ghosts removed, form remounted) and an unmissable confirmation banner is raised over the score. This is the post-condition that distinguishes Submit from Save Draft: a submitted fragment is immutable until a reviewer acts, so there is nothing left to edit, and the annotator must be left in no doubt that the submission landed before starting the next one.
+
+**As implemented (Component 9 Step 5).** Submit and Save Draft previously converged on the same end state — a brief "Draft saved" flash, no reset — which left annotators unsure whether a submission had succeeded. They are now differentiated as above. The reset is `resetAnnotation()` in `ScoreViewer.tsx`, shared with the Delete control (§6 G1.2); the confirmation is a `submitSuccess` banner owned by `ScoreViewer` (so it survives the form remount), auto-dismissed after a few seconds, cleared the moment a new selection begins, and manually dismissible. The intermediate "Draft saved" note is suppressed while a Submit is in flight (`SubmissionChecklist.tsx`), since Submit creates/updates the draft as an internal step and the note would otherwise flash mid-submit; the Submit button's own "Submitting…" state is the feedback during that window. The banner uses the submitted-status token family (`secondary`), per the Step 17 status-colour mapping.
 
 The server writes parent and all child fragment records atomically in a single transaction. Partial submissions are not possible — if any child write fails, the transaction is rolled back.
 

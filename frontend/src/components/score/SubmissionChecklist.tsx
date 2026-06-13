@@ -145,7 +145,12 @@ export default function SubmissionChecklist({
       </ul>
 
       {/* ── Draft saved indicator ────────────────────────────────────── */}
-      {draftId && !submitError && (
+      {/* Quiet, persistent feedback for Save Draft (Step 5). Suppressed while a
+          Submit is in flight: Submit creates/updates the draft as an
+          intermediate step, and showing "Draft saved" mid-submit was the
+          confusing flash annotators reported — the Submit button's own
+          "Submitting…" state is the relevant feedback there. */}
+      {draftId && !submitError && !isSubmitting && (
         <Type variant="label-sm" as="p" className={styles.draftSavedNote}>
           Draft saved
         </Type>

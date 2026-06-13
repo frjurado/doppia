@@ -356,6 +356,45 @@
   pointer-events: none;
 }
 
+/* ── Post-submit confirmation banner (Step 5) ─────────────────────────────── */
+
+/* Anchored to the top-centre of the score panel wrapper, above both panels.
+   Uses the submitted-status token family (secondary container). Depth comes
+   from the tonal fill + floating shadow — no border, no radius. */
+.submitSuccessBanner {
+  position: absolute;
+  top: var(--spacing-6);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-4);
+  max-width: calc(100% - var(--spacing-8));
+  padding: var(--spacing-3) var(--spacing-5);
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
+  box-shadow: var(--shadow-floating);
+}
+
+.submitSuccessText {
+  color: var(--color-on-secondary-container);
+}
+
+.submitSuccessDismiss {
+  background: none;
+  border: none;
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-on-secondary-container);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.submitSuccessDismiss:hover {
+  opacity: 0.8;
+}
+
 /* ── Playback bar (Step 14.5) ─────────────────────────────────────────────── */
 
 .playbackBar {
