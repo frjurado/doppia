@@ -5,10 +5,13 @@
  * stage bracket in the stage bracket track (Layer 4,
  * tagging-tool-design.md §4).
  *
- * Pre-population, stagesComplete, and reconciliation helpers live here so
- * they can be unit-tested without a DOM or React.
+ * Pre-population, stagesComplete, the absent toggle, and concept-change
+ * reconciliation live here so they can be unit-tested without a DOM or React.
+ * The interaction core — split-handle boundary moves and the main-bracket
+ * resize response — lives in stageFrame.ts (Component 9 Step 4), built on
+ * slot lists over the selection's effective measure keys (§6A.4/§6A.5).
  *
- * References: tagging-tool-design.md §4 §6 §7.3, ADR-011 §1 §3 §6.
+ * References: tagging-tool-design.md §4 §6 §6A.4 §7.3, ADR-011 §1 §3 §6.
  */
 
 import type { ContainsStage, ConceptSchemaTree } from '../../services/conceptApi';
@@ -50,6 +53,16 @@ export interface StageBounds {
   barEnd: number;
   /** Float-encoded exclusive beat upper bound, or null = measure-level. */
   beatEnd: number | null;
+  /**
+   * Deduplicated physical-measure ghost key of the start boundary (§6A.1).
+   * Preferred over barStart for geometry projection and mc resolution —
+   * bar numbers repeat across endings, split measures, and X-numbered
+   * fallbacks. Optional: bounds restored from stored human coordinates may
+   * lack keys, in which case derivations fall back to barN matching.
+   */
+  keyStart?: string;
+  /** Physical-measure ghost key of the end boundary (see keyStart). */
+  keyEnd?: string;
 }
 
 /** State for one stage bracket. Immutable — produce new instances on change. */
@@ -131,6 +144,9 @@ export function stageColor(orderIndex: number): string {
 export interface BeatSlot {
   barN: number;
   beatFloat: number;
+  /** Deduplicated measure ghost key of the slot's parent measure, when the
+   *  caller derives slots from the ghost layer (preferred — see StageBounds). */
+  measureKey?: string;
 }
 
 /**
@@ -153,7 +169,10 @@ export function chooseStageGrid(
   _subBeatSlots = 0,
 ): ResolutionMode {
   if (stageCount <= 0) return 'measure';
-  const measureSlots = selection.barEnd - selection.barStart + 1;
+  // Effective key count when committed (§6A.1) — bar arithmetic over-counts
+  // when @n repeats inside the range and miscounts discontiguous ranges.
+  const measureSlots = selection.measureKeys?.length
+    ?? (selection.barEnd - selection.barStart + 1);
   if (measureSlots >= stageCount) return 'measure';
   if (beatSlots >= stageCount) return 'beat';
   return 'subbeat';
@@ -221,17 +240,23 @@ export function prePopulateStagesAtGrid(
     const beatStart: number | null = isFirst
       ? (selection.beatStart ?? null)
       : positions[slotIdx]!.beatFloat;
+    const keyStart = isFirst
+      ? selection.measureKeys?.[0]
+      : positions[slotIdx]!.measureKey;
 
     // Right boundary: last stage is pinned to the selection's end (outer-edge
     // pinning); others end just before where the next stage starts.
     let barEnd: number;
     let beatEnd: number | null;
+    let keyEnd: string | undefined;
     if (isLast) {
       barEnd = selection.barEnd;
       beatEnd = selection.beatEnd ?? null;
+      keyEnd = selection.measureKeys?.[selection.measureKeys.length - 1];
     } else {
       barEnd = nextSlot!.barN;
       beatEnd = nextSlot!.beatFloat;
+      keyEnd = nextSlot!.measureKey;
     }
 
     // Outer-boundary asymmetry (null beatStart on first stage, null beatEnd on
@@ -247,7 +272,7 @@ export function prePopulateStagesAtGrid(
       displayMode: stage.display_mode,
       containmentMode: stage.containment_mode,
       defaultWeight: stage.default_weight,
-      bounds: { barStart, beatStart, barEnd, beatEnd },
+      bounds: { barStart, beatStart, barEnd, beatEnd, keyStart, keyEnd },
       confirmed: false,
       absent: false,
       orphaned: false,
@@ -264,12 +289,35 @@ export function prePopulateStagesAtGrid(
 // Pre-population (tagging-tool-design.md §4)
 // ---------------------------------------------------------------------------
 
+/** Parse the human bar number out of a measure ghost key (m{barN}[-e{n}][#N]). */
+function _barNFromKey(key: string): number | null {
+  const m = /^m(\d+)/.exec(key);
+  return m ? parseInt(m[1]!, 10) : null;
+}
+
+/**
+ * Return the selection's committed measure-key list when present and fully
+ * parseable, else null (callers fall back to bar-number arithmetic).
+ */
+function _usableKeys(selection: SelectionRange): string[] | null {
+  const keys = selection.measureKeys;
+  if (!keys || keys.length === 0) return null;
+  return keys.every(k => _barNFromKey(k) !== null) ? keys : null;
+}
+
 /**
  * Distribute stage brackets proportionally across the main fragment by
  * default_weight at measure-level resolution.
  *
  * Stages are sorted by order ascending. The last stage absorbs any rounding
- * remainder so the rightmost bracket always reaches selection.barEnd.
+ * remainder so the rightmost bracket always reaches the selection's end.
+ *
+ * Distribution units are the selection's effective measure keys when the
+ * committed key list is present (§6A.1) — bar-number arithmetic over-counts
+ * when @n values repeat inside the range and cannot express the discontiguous
+ * effective range across excluded sibling endings (§6A.3). Selections without
+ * a key list (restored from stored human coordinates) use the legacy bar
+ * arithmetic.
  *
  * Beat-level snapping is left to the caller when the active grid is at beat
  * or sub-beat resolution — this function always returns null beat coordinates.
@@ -281,27 +329,44 @@ export function prePopulateStages(
   if (stages.length === 0) return [];
 
   const sorted = [...stages].sort((a, b) => a.order - b.order);
-  const totalBars = selection.barEnd - selection.barStart + 1;
+  const keys = _usableKeys(selection);
+  const totalUnits = keys ? keys.length : selection.barEnd - selection.barStart + 1;
   const totalWeight = sorted.reduce((s, st) => s + st.default_weight, 0) || 1;
 
   const assignments: StageAssignment[] = [];
-  let currentBar = selection.barStart;
+  let startUnit = 0;
 
   for (let i = 0; i < sorted.length; i++) {
     const stage = sorted[i]!;
     const isLast = i === sorted.length - 1;
 
-    let barEnd: number;
+    let endUnit: number; // inclusive unit index of the stage's last measure
     if (isLast) {
-      barEnd = selection.barEnd;
+      endUnit = totalUnits - 1;
     } else {
-      // Minimum 1 bar per stage; reserve at least 1 bar for each remaining stage.
+      // Minimum 1 unit per stage; reserve at least 1 unit for each remaining stage.
       const remaining = sorted.length - 1 - i; // stages after this one
-      const maxBarEnd = selection.barEnd - remaining;
-      const rawBars = totalBars * stage.default_weight / totalWeight;
-      const barCount = Math.max(1, Math.round(rawBars));
-      barEnd = Math.min(currentBar + barCount - 1, maxBarEnd);
+      const maxEndUnit = totalUnits - 1 - remaining;
+      const rawUnits = totalUnits * stage.default_weight / totalWeight;
+      const unitCount = Math.max(1, Math.round(rawUnits));
+      endUnit = Math.min(startUnit + unitCount - 1, maxEndUnit);
     }
+
+    const bounds: StageBounds = keys
+      ? {
+          barStart: _barNFromKey(keys[startUnit]!)!,
+          beatStart: null,
+          barEnd: _barNFromKey(keys[endUnit]!)!,
+          beatEnd: null,
+          keyStart: keys[startUnit]!,
+          keyEnd: keys[endUnit]!,
+        }
+      : {
+          barStart: selection.barStart + startUnit,
+          beatStart: null,
+          barEnd: selection.barStart + endUnit,
+          beatEnd: null,
+        };
 
     assignments.push({
       stageId: stage.target_id,
@@ -311,226 +376,17 @@ export function prePopulateStages(
       displayMode: stage.display_mode,
       containmentMode: stage.containment_mode,
       defaultWeight: stage.default_weight,
-      bounds: {
-        barStart: currentBar,
-        beatStart: null,
-        barEnd,
-        beatEnd: null,
-      },
+      bounds,
       confirmed: false,
       absent: false,
       orphaned: false,
       error: false,
     });
 
-    currentBar = barEnd + 1;
+    startUnit = endUnit + 1;
   }
 
   return assignments;
-}
-
-// ---------------------------------------------------------------------------
-// Split handle move (contiguous mode — tagging-tool-design.md §6)
-// ---------------------------------------------------------------------------
-
-/**
- * Boundary coordinates for a stage split handle drag result (G4.1).
- *
- * Measure resolution: `barN` is the barEnd of the left stage; `beatFloat` is
- * null. The right stage's barStart = barN + 1, keeping the two stages on
- * separate bars with no gap.
- *
- * Beat / sub-beat resolution: both stages share `barN`; `beatFloat` is the
- * onset at which the split falls. `beatFloat` is the exclusive upper bound
- * for the left stage (beatEnd) and the inclusive lower bound for the right
- * stage (beatStart). The two stages overlap on the same bar number but are
- * distinguished by their beat coordinates.
- */
-export interface StageBeatBoundary {
-  /** Bar number for the boundary. At measure level: leftStage.barEnd. At beat
-   *  level: the shared bar number that both stages reference. */
-  barN: number;
-  /** Beat float at the split point, or null for a measure-level boundary. */
-  beatFloat: number | null;
-}
-
-/**
- * Move the shared boundary between the stage at sortedActiveIdx and the next
- * active stage to newBoundary.
- *
- * sortedActiveIdx is the 0-based index into the sorted (by order), non-absent,
- * non-orphaned list of stage assignments. The boundary sits between
- * sortedActiveIdx and sortedActiveIdx + 1.
- *
- * Measure-level boundary (beatFloat === null):
- *  - leftStage.barEnd  = newBoundary.barN;  leftStage.beatEnd  = null.
- *  - rightStage.barStart = newBoundary.barN + 1; rightStage.beatStart = null.
- *  - Clamped to [leftStage.barStart + 1, rightStage.barEnd] so each side
- *    keeps at least 1 bar.
- *
- * Beat / sub-beat boundary (beatFloat !== null):
- *  - Both stages share barN (the split is within a single measure).
- *  - leftStage.barEnd = barN, leftStage.beatEnd = beatFloat.
- *  - rightStage.barStart = barN, rightStage.beatStart = beatFloat.
- *  - barN is clamped to [leftStage.barStart, rightStage.barEnd].
- *
- * Both flanking stages are marked confirmed (explicitly positioned by the
- * annotator). Only contiguous mode is supported in Phase 1.
- */
-export function moveSplitHandle(
-  assignments: StageAssignment[],
-  sortedActiveIdx: number,
-  newBoundary: StageBeatBoundary,
-): StageAssignment[] {
-  const active = assignments
-    .filter(a => !a.absent && !a.orphaned)
-    .sort((a, b) => a.order - b.order);
-
-  const leftStage = active[sortedActiveIdx];
-  const rightStage = active[sortedActiveIdx + 1];
-
-  if (!leftStage || !rightStage) return assignments;
-  if (!leftStage.bounds || !rightStage.bounds) return assignments;
-
-  const { barN, beatFloat } = newBoundary;
-
-  if (beatFloat !== null) {
-    // Beat / sub-beat boundary: both stages share barN; beatFloat divides them.
-    const clampedBarN = Math.max(
-      leftStage.bounds.barStart,
-      Math.min(rightStage.bounds.barEnd, barN),
-    );
-
-    // beatFloat = 1.0 is the very start of a bar (beatToFloat is 1-indexed:
-    // beat 0, sub-beat 0 → 1.0). A boundary there gives the left stage
-    // beatEnd = 1.0 and no ghosts satisfy beatFloat < 1.0, so resolveSegments
-    // falls back to full-measure rendering — both brackets cover the same bar
-    // (visual overlap). Convert to a measure-level boundary instead:
-    // leftStage.barEnd = clampedBarN − 1, rightStage.barStart = clampedBarN.
-    if (beatFloat <= 1.0) {
-      const measureBarN = clampedBarN - 1;
-      const minMeasureBarN = leftStage.bounds.barStart;     // 1-bar minimum left
-      const maxMeasureBarN = rightStage.bounds.barEnd - 1;  // 1-bar minimum right
-      if (measureBarN < minMeasureBarN) {
-        // Left stage would get 0 bars. Collapse if optional, refuse if required.
-        if (!leftStage.required) {
-          return toggleStageAbsent(assignments, leftStage.stageId, true);
-        }
-        return assignments;
-      }
-      if (measureBarN > maxMeasureBarN) {
-        if (!rightStage.required) {
-          return toggleStageAbsent(assignments, rightStage.stageId, true);
-        }
-        return assignments;
-      }
-
-      return assignments.map(a => {
-        if (a.stageId === leftStage.stageId) {
-          return {
-            ...a,
-            bounds: { ...a.bounds!, barEnd: measureBarN, beatStart: null, beatEnd: null },
-            confirmed: true,
-          };
-        }
-        if (a.stageId === rightStage.stageId) {
-          return {
-            ...a,
-            bounds: { ...a.bounds!, barStart: measureBarN + 1, beatStart: null, beatEnd: null },
-            confirmed: true,
-          };
-        }
-        return a;
-      });
-    }
-
-    // Standard beat / sub-beat boundary (beatFloat > 1.0).
-    // 1-beat (or 1-sub-beat) minimum: block if the boundary would land at or
-    // before leftStage's own start beat within its starting bar.
-    // beatStart = null means the stage starts at the bar beginning (beat 1.0).
-    const leftBeatStart = leftStage.bounds.beatStart ?? 1.0;
-    if (clampedBarN === leftStage.bounds.barStart && beatFloat <= leftBeatStart) {
-      // Zero-width threshold reached for the left stage.
-      // Optional stages collapse to absent; required stages stop at minimum (caller
-      // uses lastValidAssignments to prevent visual bounce-back).
-      if (!leftStage.required) {
-        return toggleStageAbsent(assignments, leftStage.stageId, true);
-      }
-      return assignments;
-    }
-    // Same guard for rightStage: block if boundary lands at or after its beat end.
-    // null beatEnd means the stage ends at the bar boundary (always safe — skip).
-    if (
-      clampedBarN === rightStage.bounds.barEnd &&
-      rightStage.bounds.beatEnd !== null &&
-      beatFloat >= rightStage.bounds.beatEnd
-    ) {
-      if (!rightStage.required) {
-        return toggleStageAbsent(assignments, rightStage.stageId, true);
-      }
-      return assignments;
-    }
-
-    return assignments.map(a => {
-      if (a.stageId === leftStage.stageId) {
-        return {
-          ...a,
-          bounds: { ...a.bounds!, barEnd: clampedBarN, beatEnd: beatFloat },
-          confirmed: true,
-        };
-      }
-      if (a.stageId === rightStage.stageId) {
-        return {
-          ...a,
-          bounds: { ...a.bounds!, barStart: clampedBarN, beatStart: beatFloat },
-          confirmed: true,
-        };
-      }
-      return a;
-    });
-  }
-
-  // Measure-level boundary: enforce 1-bar minimum for required stages.
-  // Optional stages collapse to absent when dragged past their zero-width threshold.
-  const minBarN = leftStage.bounds.barStart;     // barEnd ≥ barStart always
-  const maxBarN = rightStage.bounds.barEnd - 1;  // barStart ≤ barEnd always
-
-  // Collapse checks: dragging past a stage's zero-width point.
-  if (barN < minBarN) {
-    if (!leftStage.required) {
-      return toggleStageAbsent(assignments, leftStage.stageId, true);
-    }
-    // Required: fall through to clamp (handle stops at minimum-width floor).
-  }
-  if (barN > maxBarN) {
-    if (!rightStage.required) {
-      return toggleStageAbsent(assignments, rightStage.stageId, true);
-    }
-    // Required: fall through to clamp.
-  }
-
-  // No valid split position (fewer bars than stages need) — leave unchanged.
-  if (minBarN > maxBarN) return assignments;
-
-  const clampedBarN = Math.max(minBarN, Math.min(maxBarN, barN));
-
-  return assignments.map(a => {
-    if (a.stageId === leftStage.stageId) {
-      return {
-        ...a,
-        bounds: { ...a.bounds!, barEnd: clampedBarN, beatEnd: null },
-        confirmed: true,
-      };
-    }
-    if (a.stageId === rightStage.stageId) {
-      return {
-        ...a,
-        bounds: { ...a.bounds!, barStart: clampedBarN + 1, beatStart: null },
-        confirmed: true,
-      };
-    }
-    return a;
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -544,9 +400,14 @@ export function moveSplitHandle(
  *  - Its bounds are set to null (collapsed).
  *  - In contiguous mode, the nearest active neighbour extends to cover the
  *    absent stage's space: left neighbour takes priority, else right neighbour.
+ *    The absorber inherits the vanishing stage's far boundary exactly — bar,
+ *    beat float, and measure key — so the shared boundary against the stage
+ *    beyond stays a single value and no overlap or gap can appear (§6A.4).
  *
  * When a stage is re-enabled:
  *  - The nearest neighbour gives back proportional space based on default_weight.
+ *    The restored stage takes the donor's old outer boundary exactly; only the
+ *    newly created boundary between donor and restored stage is measure-aligned.
  *  - The re-enabled stage is marked confirmed so it doesn't immediately limbo.
  *
  * Required stages cannot be toggled absent (guard: returns unchanged).
@@ -581,10 +442,26 @@ export function toggleStageAbsent(
         return { ...a, absent: true, bounds: null };
       }
       if (prevActive && a.stageId === prevActive.stageId && absentBounds && a.bounds) {
-        return { ...a, bounds: { ...a.bounds, barEnd: absentBounds.barEnd, beatStart: null, beatEnd: null } };
+        return {
+          ...a,
+          bounds: {
+            ...a.bounds,
+            barEnd:  absentBounds.barEnd,
+            beatEnd: absentBounds.beatEnd,
+            keyEnd:  absentBounds.keyEnd,
+          },
+        };
       }
       if (!prevActive && nextActive && a.stageId === nextActive.stageId && absentBounds && a.bounds) {
-        return { ...a, bounds: { ...a.bounds, barStart: absentBounds.barStart, beatStart: null, beatEnd: null } };
+        return {
+          ...a,
+          bounds: {
+            ...a.bounds,
+            barStart:  absentBounds.barStart,
+            beatStart: absentBounds.beatStart,
+            keyStart:  absentBounds.keyStart,
+          },
+        };
       }
       return a;
     });
@@ -608,16 +485,21 @@ export function toggleStageAbsent(
         const totalWeight = stage.defaultWeight + donor.defaultWeight || 1;
         const stageBars = Math.max(1, Math.round(donorBars * stage.defaultWeight / totalWeight));
 
+        // The restored stage inherits the donor's old outer boundary exactly
+        // (bar, beat, key); the newly created shared boundary between donor
+        // and restored stage is measure-aligned (§6A.4).
         const restoredBounds: StageBounds = donor === prevActive
           ? {
               barStart: donor.bounds.barEnd - stageBars + 1,
               beatStart: null,
               barEnd: donor.bounds.barEnd,
-              beatEnd: null,
+              beatEnd: donor.bounds.beatEnd,
+              keyEnd: donor.bounds.keyEnd,
             }
           : {
               barStart: donor.bounds.barStart,
-              beatStart: null,
+              beatStart: donor.bounds.beatStart,
+              keyStart: donor.bounds.keyStart,
               barEnd: donor.bounds.barStart + stageBars - 1,
               beatEnd: null,
             };
@@ -631,8 +513,8 @@ export function toggleStageAbsent(
         const stageBars = Math.max(1, Math.round(donorBars * stage.defaultWeight / totalWeight));
 
         const newDonorBounds: StageBounds = donor === prevActive
-          ? { ...donor.bounds, barEnd: donor.bounds.barEnd - stageBars, beatEnd: null }
-          : { ...donor.bounds, barStart: donor.bounds.barStart + stageBars, beatStart: null };
+          ? { ...donor.bounds, barEnd: donor.bounds.barEnd - stageBars, beatEnd: null, keyEnd: undefined }
+          : { ...donor.bounds, barStart: donor.bounds.barStart + stageBars, beatStart: null, keyStart: undefined };
 
         return { ...a, bounds: newDonorBounds };
       }
@@ -671,45 +553,6 @@ export function computeStagesComplete(assignments: StageAssignment[]): boolean {
 // ---------------------------------------------------------------------------
 // Reconciliation helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Reconcile stage assignments after the main bracket selection changes.
- *
- * - The first non-absent active stage auto-extends its left edge to barStart.
- * - The last non-absent active stage auto-extends its right edge to barEnd.
- * - Any other stage that falls outside the new bounds is marked error.
- *
- * tagging-tool-design.md §6 §"Main bracket change after stages are committed".
- */
-export function reconcileWithSelection(
-  assignments: StageAssignment[],
-  selection: SelectionRange,
-): StageAssignment[] {
-  if (assignments.length === 0) return assignments;
-
-  const active = assignments
-    .filter(a => !a.absent && !a.orphaned && a.bounds !== null)
-    .sort((a, b) => a.order - b.order);
-
-  const firstId = active[0]?.stageId ?? null;
-  const lastId = active[active.length - 1]?.stageId ?? null;
-
-  return assignments.map(a => {
-    if (a.absent || a.orphaned || !a.bounds) return a;
-
-    const b = a.bounds;
-
-    if (a.stageId === firstId && b.barStart !== selection.barStart) {
-      return { ...a, bounds: { ...b, barStart: selection.barStart, beatStart: null, beatEnd: null }, error: false };
-    }
-    if (a.stageId === lastId && b.barEnd !== selection.barEnd) {
-      return { ...a, bounds: { ...b, barEnd: selection.barEnd, beatStart: null, beatEnd: null }, error: false };
-    }
-
-    const outside = b.barStart < selection.barStart || b.barEnd > selection.barEnd;
-    return outside ? { ...a, error: true } : { ...a, error: false };
-  });
-}
 
 /**
  * Reconcile assignments when the concept or Type Refinement changes.
@@ -757,22 +600,6 @@ export function reconcileWithNewConcept(
 // Main-bracket resize response (Component 7 Step 3)
 // ---------------------------------------------------------------------------
 
-/** Result returned by respondToMainResize. */
-export interface MainResizeResult {
-  /** Updated stage assignments — default stages redistributed; active preserved. */
-  assignments: StageAssignment[];
-  /**
-   * If the resize required switching to a finer grid to fit all stages, this
-   * is the new grid. Null when the current grid already works.
-   */
-  droppedGrid: ResolutionMode | null;
-  /**
-   * True when even sub-beat resolution cannot fit all active stages in the
-   * new selection. The caller should surface a blocking checklist message.
-   */
-  blocked: boolean;
-}
-
 /**
  * Return the tightest bar range that contains all confirmed (active) stage
  * bounds.  Null when no confirmed stages exist, meaning no clamp is needed.
@@ -794,269 +621,3 @@ export function computeResizeClamp(
   const maxBarEnd   = Math.max(...confirmed.map(a => a.bounds!.barEnd));
   return { minBarStart, maxBarEnd };
 }
-
-/** Rebuild ContainsStage metadata from a StageAssignment so prePopulate can reuse it. */
-function _toContainsStage(a: StageAssignment): ContainsStage {
-  return {
-    target_id:        a.stageId,
-    target_name:      a.stageName,
-    order:            a.order,
-    required:         a.required,
-    display_mode:     a.displayMode,
-    containment_mode: a.containmentMode,
-    default_weight:   a.defaultWeight,
-  };
-}
-
-/** A SelectionRange covering a bare bar interval (no beat precision). */
-function _barRange(barStart: number, barEnd: number): SelectionRange {
-  return { barStart, barEnd, beatStart: null, beatEnd: null, repeatContext: null };
-}
-
-/**
- * Respond to a main bracket resize.
- *
- * - **Default stages** (confirmed=false, not absent, not orphaned) are
- *   re-laid out by default_weight across the available space in the new
- *   selection, at the finest grid that fits all stages.
- * - **Active stages** (confirmed=true) keep their bounds unchanged.
- * - Absent and orphaned stages are returned unchanged.
- *
- * The auto-drop escape valve: if all stages fit at a finer resolution,
- * droppedGrid is set so the caller can update the resolution toggle before
- * redistributing (matching the Step 2 pre-population logic).
- *
- * Caller responsibility: enforce the hard-clamp by passing
- * computeResizeClamp(assignments) to AnnotationSession.setMinBarRange()
- * so that confirmed stages are never forced outside the selection by a drag.
- *
- * beatPositions / subBeatPositions must cover only slots inside newSelection,
- * ordered (barN ASC, beatFloat ASC).
- */
-export function respondToMainResize(
-  assignments: StageAssignment[],
-  newSelection: SelectionRange,
-  currentResolution: ResolutionMode,
-  beatPositions: BeatSlot[],
-  subBeatPositions: BeatSlot[],
-): MainResizeResult {
-  if (assignments.length === 0) {
-    return { assignments, droppedGrid: null, blocked: false };
-  }
-
-  const sortedActive = assignments
-    .filter(a => !a.absent && !a.orphaned)
-    .sort((a, b) => a.order - b.order);
-
-  if (sortedActive.length === 0) {
-    return { assignments, droppedGrid: null, blocked: false };
-  }
-
-  // Choose the finest grid that fits the total active stage count.
-  const totalStages = sortedActive.length;
-  const chosenGrid = chooseStageGrid(
-    newSelection, totalStages, beatPositions.length, subBeatPositions.length,
-  );
-
-  const measureSlots = newSelection.barEnd - newSelection.barStart + 1;
-  const blocked =
-    totalStages > 0 &&
-    measureSlots  < totalStages &&
-    beatPositions.length  < totalStages &&
-    subBeatPositions.length < totalStages;
-
-  if (blocked) {
-    return { assignments, droppedGrid: null, blocked: true };
-  }
-
-  // Never coarsen the user's chosen resolution — only drop to a finer grid
-  // when the current grid genuinely cannot fit all stages.
-  const GRID_RANK: Record<ResolutionMode, number> = { measure: 0, beat: 1, subbeat: 2 };
-  const droppedGrid =
-    (GRID_RANK[chosenGrid] ?? 0) > (GRID_RANK[currentResolution] ?? 0)
-      ? chosenGrid
-      : null;
-  // Use the finer of chosen vs. current so stages are placed at the resolution
-  // the annotator already set when it still fits.
-  const effectiveGrid: ResolutionMode =
-    (GRID_RANK[currentResolution] ?? 0) >= (GRID_RANK[chosenGrid] ?? 0)
-      ? currentResolution
-      : chosenGrid;
-
-  const confirmedActive = sortedActive.filter(a => a.confirmed);
-  const defaultActive   = sortedActive.filter(a => !a.confirmed);
-
-  // When all stages are confirmed there is nothing to redistribute, but we
-  // still need outer-edge sync (see below) — fall through to the else branch.
-
-  // Helper: redistribute a group of unconfirmed assignments within [lo, hi] bars.
-  const redistributeRun = (
-    run: StageAssignment[],
-    lo: number,
-    hi: number,
-  ): Map<string, StageAssignment> => {
-    const result = new Map<string, StageAssignment>();
-
-    if (lo > hi) {
-      // No space in this interval.  Optional stages become absent; required
-      // stages are left with their pre-resize bounds so the annotator can
-      // see the stale state and adjust.
-      for (const a of run) {
-        if (!a.required) {
-          result.set(a.stageId, { ...a, absent: true, bounds: null });
-        }
-        // Required: keep unchanged (caller's clamp should prevent this).
-      }
-      return result;
-    }
-
-    const rangeSelection = _barRange(lo, hi);
-    const posns = effectiveGrid === 'beat'
-      ? beatPositions.filter(p => p.barN >= lo && p.barN <= hi)
-      : effectiveGrid === 'subbeat'
-        ? subBeatPositions.filter(p => p.barN >= lo && p.barN <= hi)
-        : [];
-
-    const fresh = effectiveGrid === 'measure'
-      ? prePopulateStages(run.map(_toContainsStage), rangeSelection)
-      : prePopulateStagesAtGrid(run.map(_toContainsStage), rangeSelection, posns);
-
-    for (const a of fresh) result.set(a.stageId, a);
-    return result;
-  };
-
-  const updatedMap = new Map<string, StageAssignment>();
-
-  // All stages unconfirmed.
-  if (confirmedActive.length === 0) {
-    // If all stage bounds already fit in the new selection, only extend the
-    // outer edges (grow / small shrink case) — no redistribution.  This keeps
-    // pre-populated positions stable until the user actually drags stages.
-    // If any stage falls outside the new selection, full redistribution is
-    // needed so every stage ends up within the new range.
-    const allFit = defaultActive.every(
-      a => a.bounds !== null
-        && a.bounds.barStart >= newSelection.barStart
-        && a.bounds.barEnd   <= newSelection.barEnd,
-    );
-
-    if (allFit) {
-      const firstId = sortedActive[0]!.stageId;
-      const lastId  = sortedActive[sortedActive.length - 1]!.stageId;
-      for (const a of defaultActive) {
-        if (a.stageId === firstId) {
-          updatedMap.set(a.stageId, {
-            ...a,
-            bounds: {
-              ...a.bounds!,
-              barStart:  newSelection.barStart,
-              beatStart: newSelection.beatStart ?? null,
-            },
-          });
-        } else if (a.stageId === lastId) {
-          updatedMap.set(a.stageId, {
-            ...a,
-            bounds: {
-              ...a.bounds!,
-              barEnd:  newSelection.barEnd,
-              beatEnd: newSelection.beatEnd ?? null,
-            },
-          });
-        } else {
-          updatedMap.set(a.stageId, a);
-        }
-      }
-    } else {
-      // Shrink past at least one stage — redistribute across the full new range.
-      const repopulated = redistributeRun(
-        defaultActive, newSelection.barStart, newSelection.barEnd,
-      );
-      for (const [id, a] of repopulated) updatedMap.set(id, a);
-    }
-  } else {
-    // Mixed (or all-confirmed): walk sortedActive in order, grouping
-    // consecutive unconfirmed stages between confirmed anchors.  Each
-    // confirmed stage pins a segment boundary; unconfirmed groups fill the gaps.
-    let runLo = newSelection.barStart;
-    let currentRun: StageAssignment[] = [];
-
-    for (const stage of sortedActive) {
-      if (!stage.confirmed) {
-        currentRun.push(stage);
-      } else {
-        // Flush any accumulated unconfirmed stages before this anchor.
-        if (currentRun.length > 0) {
-          const hi = stage.bounds!.barStart - 1;
-          for (const [id, a] of redistributeRun(currentRun, runLo, hi)) {
-            updatedMap.set(id, a);
-          }
-          currentRun = [];
-        }
-        // Confirmed stage: preserve in place.
-        updatedMap.set(stage.stageId, stage);
-        runLo = stage.bounds!.barEnd + 1;
-      }
-    }
-    // Flush trailing unconfirmed stages (after the last confirmed anchor).
-    if (currentRun.length > 0) {
-      for (const [id, a] of redistributeRun(currentRun, runLo, newSelection.barEnd)) {
-        updatedMap.set(id, a);
-      }
-    }
-
-    // Outer-edge sync: the first and last active stages must always be flush
-    // with the selection boundaries — both at bar AND beat precision.
-    // Confirmed stages' INTERNAL split points are preserved; only the
-    // outward-facing edge of the boundary stages is updated.
-    //
-    // Bar-only comparison is insufficient: a fragment resize within the same
-    // bar (e.g., changing beatEnd from 5.0 to 3.0 while barEnd stays at 8)
-    // would not be caught and would leave the stage bracket extending past the
-    // fragment at beat/sub-beat resolution.
-    const firstActive = sortedActive[0]!;
-    const lastActive  = sortedActive[sortedActive.length - 1]!;
-
-    const firstInMap = updatedMap.get(firstActive.stageId);
-    if (firstInMap?.bounds) {
-      const bsDiffers =
-        firstInMap.bounds.barStart !== newSelection.barStart ||
-        (firstInMap.bounds.beatStart ?? null) !== (newSelection.beatStart ?? null);
-      if (bsDiffers) {
-        updatedMap.set(firstActive.stageId, {
-          ...firstInMap,
-          bounds: {
-            ...firstInMap.bounds,
-            barStart:  newSelection.barStart,
-            beatStart: newSelection.beatStart ?? null,
-          },
-        });
-      }
-    }
-
-    const lastInMap = updatedMap.get(lastActive.stageId);
-    if (lastInMap?.bounds) {
-      const beDiffers =
-        lastInMap.bounds.barEnd !== newSelection.barEnd ||
-        (lastInMap.bounds.beatEnd ?? null) !== (newSelection.beatEnd ?? null);
-      if (beDiffers) {
-        updatedMap.set(lastActive.stageId, {
-          ...lastInMap,
-          bounds: {
-            ...lastInMap.bounds,
-            barEnd:  newSelection.barEnd,
-            beatEnd: newSelection.beatEnd ?? null,
-          },
-        });
-      }
-    }
-  }
-
-  // Merge: keep absent/orphaned as-is; replace active stages from updatedMap.
-  const updatedAssignments = assignments.map(a => {
-    const upd = updatedMap.get(a.stageId);
-    return upd !== undefined ? upd : a;
-  });
-
-  return { assignments: updatedAssignments, droppedGrid, blocked: false };
-}
-

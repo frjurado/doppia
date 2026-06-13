@@ -21,6 +21,7 @@
  */
 
 import type { SelectionRange } from './annotator';
+import type { GhostLayer } from './ghosts';
 import { measureGhostKey, walkMeasureKeys } from './ghosts';
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,38 @@ export function measureKeysForMcRange(
   }
   // Map iteration follows insertion order = document order; keys are already
   // ordered by mc.
+  return keys;
+}
+
+/**
+ * Resolve a SelectionRange to its effective measure-key list (§6A.1).
+ *
+ * The committed key list on the selection is authoritative. The fallback for
+ * selections restored from stored human coordinates reconstructs it from the
+ * bar range, applying the repeat_context ending exclusion (§6A.3) and
+ * requiring finite bar numbers (I2) — a derivation keyed on `@n` intervals
+ * alone painted unrelated partial bars and absorbed sibling endings
+ * (fixtures SEL-03/05/08/12/13).
+ *
+ * Shared by MainBracket (bracket segments) and the stage layout frame
+ * (stageFrame.ts) so both derive from the identical committed range.
+ */
+export function effectiveMeasureKeys(
+  sel: SelectionRange,
+  layer: GhostLayer,
+): string[] {
+  if (sel.measureKeys && sel.measureKeys.length > 0) return sel.measureKeys;
+  if (!Number.isFinite(sel.barStart) || !Number.isFinite(sel.barEnd)) return [];
+
+  const keys: string[] = [];
+  for (const entry of layer.measureIndex.values()) {
+    if (entry.barN < sel.barStart || entry.barN > sel.barEnd) continue;
+    if (entry.endingN !== null) {
+      if (sel.repeatContext === 'first_ending' && entry.endingN !== 1) continue;
+      if (sel.repeatContext === 'second_ending' && entry.endingN === 1) continue;
+    }
+    keys.push(entry.key);
+  }
   return keys;
 }
 

@@ -18,9 +18,9 @@ import {
   prePopulateStages,
   prePopulateStagesAtGrid,
   reconcileWithNewConcept,
-  respondToMainResize,
   toggleStageAbsent,
 } from '../components/score/stages';
+import { buildStageSlots, respondToMainResize } from '../components/score/stageFrame';
 import FormPanel from '../components/score/FormPanel';
 import type { FormSubmitData } from '../components/score/FormPanel';
 import type { PropertyFormValues } from '../components/score/PropertyForm';
@@ -235,20 +235,15 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
 // Auto-grid pre-population helpers (Component 7 Step 2)
 // ---------------------------------------------------------------------------
 
-/** True when entry falls within the selection bounds (beat-precision aware). */
-function _inSelectionBounds(
-  entry: { barN: number; beatFloat: number },
-  sel: SelectionRange,
-): boolean {
-  if (entry.barN < sel.barStart || entry.barN > sel.barEnd) return false;
-  if (sel.beatStart !== null && entry.barN === sel.barStart && entry.beatFloat < sel.beatStart) return false;
-  if (sel.beatEnd   !== null && entry.barN === sel.barEnd   && entry.beatFloat >= sel.beatEnd) return false;
-  return true;
-}
-
 /**
  * Choose the finest grid that fits stageCount stages, compute beat/sub-beat
  * positions from the ghost layer, and return the pre-populated assignments.
+ *
+ * Positions derive from the stage layout frame's slot builder (§6A.1) — the
+ * selection's effective measure-key range with beat-precision endpoint
+ * filters — so pre-population, the split-handle frame, and the main bracket
+ * all agree on the same grid, including across duplicate `@n` values and
+ * excluded sibling endings.
  *
  * blocked is true when the selection cannot fit stages even at sub-beat
  * resolution — the caller should surface a UI note and keep assignments empty.
@@ -258,25 +253,22 @@ function computeAutoPrePopulate(
   selection: SelectionRange,
   ghostLayer: GhostLayer | null,
 ): { assignments: StageAssignment[]; grid: ResolutionMode; blocked: boolean } {
-  // Collect beat and sub-beat positions within the selection from the ghost layer.
   const beatPositions: BeatSlot[] = [];
   const subBeatPositions: BeatSlot[] = [];
 
   if (ghostLayer) {
-    for (const entry of ghostLayer.beatIndex.values()) {
-      if (_inSelectionBounds(entry, selection)) beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    for (const s of buildStageSlots(selection, ghostLayer, 'beat')) {
+      beatPositions.push({ barN: s.barN, beatFloat: s.beatFloat ?? 1.0, measureKey: s.measureKey });
     }
-    beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
-
-    for (const entry of ghostLayer.subBeatIndex.values()) {
-      if (_inSelectionBounds(entry, selection)) subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    for (const s of buildStageSlots(selection, ghostLayer, 'subbeat')) {
+      subBeatPositions.push({ barN: s.barN, beatFloat: s.beatFloat ?? 1.0, measureKey: s.measureKey });
     }
-    subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
   }
 
   const grid = chooseStageGrid(selection, stages.length, beatPositions.length, subBeatPositions.length);
 
-  const measureSlots = selection.barEnd - selection.barStart + 1;
+  const measureSlots = selection.measureKeys?.length
+    ?? (selection.barEnd - selection.barStart + 1);
   const blocked =
     stages.length > 0 &&
     measureSlots < stages.length &&
@@ -307,6 +299,7 @@ function computeAutoPrePopulate(
 function buildStageAssignmentsFromSubParts(
   subParts: FragmentDetailResponse['sub_parts'],
   stages: ContainsStage[],
+  mcIndex: Map<string, number> | null,
 ): StageAssignment[] {
   const subPartMap = new Map<string, FragmentDetailResponse['sub_parts'][number]>();
   for (const sp of subParts) {
@@ -316,12 +309,26 @@ function buildStageAssignmentsFromSubParts(
 
   return stages.map((stage) => {
     const sp = subPartMap.get(stage.target_id);
+    // Recover the physical measure keys from the stored mc interval (§6A.1)
+    // so restored bounds project exactly even across duplicate bar numbers.
+    let keyStart: string | undefined;
+    let keyEnd: string | undefined;
+    if (sp && mcIndex) {
+      const ctx = sp.repeat_context === 'first_ending' || sp.repeat_context === 'second_ending'
+        ? sp.repeat_context
+        : null;
+      const keys = measureKeysForMcRange(mcIndex, sp.mc_start, sp.mc_end, ctx);
+      keyStart = keys[0];
+      keyEnd   = keys[keys.length - 1];
+    }
     const bounds: StageBounds | null = sp
       ? {
           barStart:  sp.bar_start,
           beatStart: sp.beat_start,
           barEnd:    sp.bar_end,
           beatEnd:   sp.beat_end,
+          keyStart,
+          keyEnd,
         }
       : null;
     return {
@@ -831,7 +838,7 @@ export default function ScoreViewer() {
       const editSubParts = editSubPartsRef.current;
       if (editSubParts !== null) {
         editSubPartsRef.current = null; // consume
-        setStageAssignments(buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages));
+        setStageAssignments(buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages, mcIndexRef.current));
         setStageGridBlocked(false);
         return;
       }
@@ -1117,8 +1124,15 @@ export default function ScoreViewer() {
       for (const a of stageAssignments) {
         if (a.absent || a.orphaned || a.error || !a.bounds) continue;
 
-        const mcStart = resolveBarToMc(a.bounds.barStart);
-        const mcEnd   = resolveBarToMc(a.bounds.barEnd);
+        // mc by physical measure key when the bounds carry one (§6A.1) — bar
+        // numbers are ambiguous across endings, split measures, and section
+        // resets. barN lookup remains the fallback for restored bounds.
+        const mcStart = (a.bounds.keyStart !== undefined
+          ? mcIndexRef.current?.get(a.bounds.keyStart) ?? null
+          : null) ?? resolveBarToMc(a.bounds.barStart);
+        const mcEnd = (a.bounds.keyEnd !== undefined
+          ? mcIndexRef.current?.get(a.bounds.keyEnd) ?? null
+          : null) ?? resolveBarToMc(a.bounds.barEnd);
         if (mcStart === null || mcEnd === null) continue;
 
         const stageProps: Record<string, string | string[]> = {};
@@ -1290,32 +1304,16 @@ export default function ScoreViewer() {
     } else {
       if (stageAssignmentsRef.current.length === 0) return;
 
-      // Component 7 Step 3 — hybrid resize response.
-      // Collect beat/sub-beat positions within the new selection for the grid
-      // auto-drop (same approach as computeAutoPrePopulate in Step 2).
-      const beatPositions: BeatSlot[] = [];
-      const subBeatPositions: BeatSlot[] = [];
-      if (ghostLayerRef.current) {
-        for (const entry of ghostLayerRef.current.beatIndex.values()) {
-          if (_inSelectionBounds(entry, selectionRange)) {
-            beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
-          }
-        }
-        beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
-        for (const entry of ghostLayerRef.current.subBeatIndex.values()) {
-          if (_inSelectionBounds(entry, selectionRange)) {
-            subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
-          }
-        }
-        subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
-      }
-
+      // Component 9 Step 4 — hybrid resize response on the stage layout
+      // frame (§6A.5): the new selection's slot list is rebuilt from the
+      // committed state, confirmed boundaries keep their surviving slots,
+      // unconfirmed runs redistribute by weight, and the frame's outer edges
+      // are the new selection's exact endpoints (I7).
       const { assignments, droppedGrid, blocked } = respondToMainResize(
         stageAssignmentsRef.current,
         selectionRange,
         resolutionRef.current,
-        beatPositions,
-        subBeatPositions,
+        ghostLayerRef.current,
       );
 
       setStageAssignments(assignments);

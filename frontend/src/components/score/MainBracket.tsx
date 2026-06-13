@@ -23,6 +23,7 @@
 
 import type { GhostLayer, ResolutionMode } from './ghosts';
 import type { SelectionRange } from './annotator';
+import { effectiveMeasureKeys } from './selection';
 import styles from './MainBracket.module.css';
 
 // ---------------------------------------------------------------------------
@@ -61,32 +62,6 @@ export interface BracketSegment {
   right: number;
   isFirst: boolean;
   isLast: boolean;
-}
-
-/**
- * Resolve a SelectionRange to its effective measure-key list (§6A.1).
- *
- * The committed key list on the selection is authoritative. The fallback for
- * selections restored from stored human coordinates reconstructs it from the
- * bar range, applying the repeat_context ending exclusion (§6A.3) and
- * requiring finite bar numbers (I2) — a derivation keyed on `@n` intervals
- * alone painted unrelated partial bars and absorbed sibling endings
- * (fixtures SEL-03/05/08/12/13).
- */
-function effectiveKeys(sel: SelectionRange, layer: GhostLayer): string[] {
-  if (sel.measureKeys && sel.measureKeys.length > 0) return sel.measureKeys;
-  if (!Number.isFinite(sel.barStart) || !Number.isFinite(sel.barEnd)) return [];
-
-  const keys: string[] = [];
-  for (const entry of layer.measureIndex.values()) {
-    if (entry.barN < sel.barStart || entry.barN > sel.barEnd) continue;
-    if (entry.endingN !== null) {
-      if (sel.repeatContext === 'first_ending' && entry.endingN !== 1) continue;
-      if (sel.repeatContext === 'second_ending' && entry.endingN === 1) continue;
-    }
-    keys.push(entry.key);
-  }
-  return keys;
 }
 
 interface MeasureExtent {
@@ -162,7 +137,7 @@ export function resolveSegments(
   layer: GhostLayer,
   resolution: ResolutionMode,
 ): BracketSegment[] | null {
-  const keys = effectiveKeys(sel, layer);
+  const keys = effectiveMeasureKeys(sel, layer);
   if (keys.length === 0) return null;
 
   const pos = new Map<string, number>();

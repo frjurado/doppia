@@ -1,33 +1,47 @@
 /**
- * Layer 4 — Stage bracket track (tagging-tool-design.md §4).
+ * Layer 4 — Stage bracket track (tagging-tool-design.md §4, §6A.4).
  *
  * Renders one coloured bracket per stage below the staff once conceptSet is
- * true and the concept has CONTAINS edges. For multi-system selections each
- * stage emits one visual segment per system row that it spans.
+ * true and the concept has CONTAINS edges. Geometry derives from the stage
+ * layout frame (stageFrame.ts): the selection's effective measure-key range
+ * is a slot list, each stage occupies a run of slots, and adjacent stages
+ * share a single boundary index — so brackets tile the main bracket exactly,
+ * with no overlap or gap at any resolution (§6A.4), and a stage straddling an
+ * excluded sibling ending renders segmented like the main bracket (§6A.3).
  *
- * Split handles appear between adjacent non-absent stages in contiguous mode
- * (tagging-tool-design.md §6). Dragging a handle moves the shared boundary
- * between the two flanking stages; the drag snaps to the active resolution
- * grid (G4.1): measure barlines at 'measure' resolution, beat ghost positions
- * at 'beat', sub-beat ghost positions at 'subbeat'.
+ * Split handles appear between adjacent non-absent stages in contiguous mode.
+ * Dragging a handle moves the shared boundary to the nearest slot edge at the
+ * active resolution. The move is total (I9 — the handle clamps visibly at
+ * hard limits, never bounces back on release), moves exactly one boundary
+ * with the growing side absorbing all freed space (I6), and collapses
+ * optional stages it overtakes — restoring them if the drag retreats, since
+ * every tick re-derives from the gesture's initial frame (I10; the collapse
+ * commits on mouseup).
  *
  * Required stages render with a solid bracket; optional stages render dashed.
  * Orphaned stages render grey with reduced opacity and a warning indicator.
- * Stages in an error state (bounds outside the main bracket) render in red.
  *
  * Layer 5 stub: clicking a stage bracket activates it (fires onStageActivate)
  * so the form panel can highlight the corresponding stage card and the caller
  * can restrict beat ghosts to that stage's bar range.
  *
- * References: tagging-tool-design.md §4 §6, ADR-011 §1 §3 §6.
+ * References: tagging-tool-design.md §4 §6 §6A.4, ADR-011 §1 §3 §6.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import type { GhostLayer, MeasureGhostEntry, ResolutionMode } from './ghosts';
+import type { GhostLayer, ResolutionMode } from './ghosts';
 import type { AnnotationSession, SelectionRange } from './annotator';
-import type { StageBounds, StageAssignment } from './stages';
-import { moveSplitHandle, stageColor } from './stages';
-import type { StageBeatBoundary } from './stages';
+import type { StageAssignment } from './stages';
+import { stageColor } from './stages';
+import type { StageSlot, StageSegment } from './stageFrame';
+import {
+  buildStageSlots,
+  projectBoundaries,
+  projectRun,
+  moveBoundary,
+  frameToAssignments,
+  foldStageSegments,
+} from './stageFrame';
 import styles from './StageBrackets.module.css';
 
 // ---------------------------------------------------------------------------
@@ -44,10 +58,8 @@ const BELOW_STAFF_GAP = 20;
 const HANDLE_W = 20;
 /** Half-width of the split handle hit target. */
 const SPLIT_HANDLE_HW = 8;
-/** Max distance (px) to accept a drag snap to a ghost boundary. */
-const SNAP_TOLERANCE = 60;
-/** Tolerance for matching beatFloat values (float comparison). */
-const BEAT_FLOAT_EPS = 0.001;
+/** Max systemBottom distance (px) for a slot to count as "on this system". */
+const SYS_TOLERANCE = 20;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -56,21 +68,21 @@ const BEAT_FLOAT_EPS = 0.001;
 export interface StageBracketsProps {
   /** Stage assignments ordered; provided by ScoreViewer. */
   assignments: StageAssignment[];
-  /** Committed selection — used to anchor bracket rendering. */
+  /** Committed selection — defines the stage layout frame (§6A.1). */
   selection: SelectionRange | null;
   /** Ghost layer for measure / beat / sub-beat pixel positions. */
   layer: GhostLayer | null;
   /** Only render when conceptSet is true and concept has CONTAINS edges. */
   visible: boolean;
-  /** Active ghost resolution — determines snap grid for split handles (G4.1). */
+  /** Active ghost resolution — determines the slot grid (G4.1). */
   resolution: ResolutionMode;
   /** The currently active stage (for bidirectional highlighting). */
   activeStageId: string | null;
   /** Called when the annotator clicks a stage bracket. */
   onStageActivate: (stageId: string | null) => void;
   /**
-   * Called when the split handle drag completes.
-   * Receives the full updated assignments array after moveSplitHandle().
+   * Called on every split-handle drag tick with the full updated assignments
+   * array derived from the moved boundary.
    */
   onSplitHandleMove: (updatedAssignments: StageAssignment[]) => void;
   /**
@@ -85,22 +97,24 @@ export interface StageBracketsProps {
 // Internal types
 // ---------------------------------------------------------------------------
 
-/** One rendered segment for a stage bracket. */
-interface BracketSegment {
-  left: number;
-  right: number;
-  systemBottom: number;
-  isFirst: boolean;
-  isLast: boolean;
-}
-
-/** A split handle between two adjacent stage segments on the same system. */
+/** A split handle between two adjacent active stages. */
 interface SplitHandle {
   x: number;
   systemBottom: number;
-  /** Index into sorted active stages: the left stage's position. */
-  sortedIdx: number;
-  stageId: string;
+  /** Interior boundary index in the frame (= left stage's projection index). */
+  boundaryIdx: number;
+}
+
+/** Gesture state frozen at drag start — every tick re-derives from this. */
+interface DragState {
+  boundaryIdx: number;
+  systemBottom: number;
+  slots: StageSlot[];
+  boundaries: number[];
+  required: boolean[];
+  initialAssignments: StageAssignment[];
+  initialActive: StageAssignment[];
+  flankIds: Set<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,189 +122,34 @@ interface SplitHandle {
 // ---------------------------------------------------------------------------
 
 /**
- * Collect all measure entries in [barStart, barEnd] and group them by
- * systemTop. Returns one BracketSegment per system, sorted top-to-bottom.
- *
- * Used when resolution is 'measure' or stage bounds have no beat precision.
+ * Map a cursor x to the nearest boundary position (slot index 0..N) on the
+ * drag's system. Total: always returns a position — there is no tolerance
+ * radius whose failure would leave the handle behind the cursor (I9).
+ * Boundary k sits at slot k's left edge; boundary N at the last slot's right.
  */
-function resolveSegmentsMeasure(
-  barStart: number,
-  barEnd: number,
-  layer: GhostLayer,
-): BracketSegment[] {
-  const inRange: MeasureGhostEntry[] = [];
-  for (const entry of layer.measureIndex.values()) {
-    if (entry.barN >= barStart && entry.barN <= barEnd) {
-      inRange.push(entry);
-    }
-  }
-  if (inRange.length === 0) return [];
-
-  const bySystem = new Map<number, MeasureGhostEntry[]>();
-  for (const entry of inRange) {
-    const grp = bySystem.get(entry.systemTop) ?? [];
-    grp.push(entry);
-    bySystem.set(entry.systemTop, grp);
-  }
-
-  const tops = [...bySystem.keys()].sort((a, b) => a - b);
-  return tops.map((sysTop, i) => {
-    const grp = bySystem.get(sysTop)!;
-    const left = Math.min(...grp.map(e => e.bounds.left));
-    const right = Math.max(...grp.map(e => e.bounds.left + e.bounds.width));
-    const systemBottom = grp[0]!.bounds.top + grp[0]!.bounds.height;
-    return {
-      left,
-      right,
-      systemBottom,
-      isFirst: i === 0,
-      isLast: i === tops.length - 1,
-    };
-  });
-}
-
-/**
- * Derive one BracketSegment per SVG system that the stage bounds cover,
- * respecting beat/sub-beat precision at the endpoints (G4.1).
- *
- * When the bounds have beatStart/beatEnd coordinates AND resolution is
- * 'beat'/'subbeat', the endpoint x positions are derived from the
- * beat or sub-beat ghost index instead of full measure widths. Intermediate
- * measures between the two endpoints contribute their full width.
- *
- * Falls back to measure-level rendering when:
- *   - resolution === 'measure', OR
- *   - both beatStart and beatEnd are null (stage not yet dragged to beat precision).
- */
-function resolveSegments(
-  bounds: StageBounds,
-  layer: GhostLayer,
-  resolution: ResolutionMode,
-): BracketSegment[] {
-  const { barStart, barEnd, beatStart, beatEnd } = bounds;
-
-  // At beat/sub-beat resolution, always derive pixel extents from the beat or
-  // sub-beat ghost index — never from the enclosing measure ghost.  Null
-  // beatStart/beatEnd default to -Infinity/+Infinity below, which includes the
-  // full bar range so measure-level bounds render at the same pixel positions
-  // while staying consistent with the beat ghost coordinate system.
-  const useBeat = resolution !== 'measure';
-
-  if (!useBeat) {
-    return resolveSegmentsMeasure(barStart, barEnd, layer);
-  }
-
-  const index = resolution === 'beat' ? layer.beatIndex : layer.subBeatIndex;
-  const bsf = beatStart ?? -Infinity;
-  const bef = beatEnd ?? Infinity;
-
-  interface SystemBounds { left: number; right: number; systemTop: number; systemBottom: number; }
-  const bySystem = new Map<number, SystemBounds>();
-
-  for (const entry of index.values()) {
-    if (entry.barN < barStart || entry.barN > barEnd) continue;
-    // Endpoint beat-precision filters (same logic as MainBracket.tsx §resolveSegments).
-    if (entry.barN === barStart && entry.beatFloat < bsf) continue;
-    if (entry.barN === barEnd   && entry.beatFloat >= bef) continue;
-
-    const measureEntry = layer.measureIndex.get(entry.measureKey);
-    const sysTop = measureEntry?.systemTop ?? entry.bounds.top;
-    const sysBottom = entry.bounds.top + entry.bounds.height;
-
-    const existing = bySystem.get(sysTop);
-    if (!existing) {
-      bySystem.set(sysTop, {
-        left: entry.bounds.left,
-        right: entry.bounds.left + entry.bounds.width,
-        systemTop: sysTop,
-        systemBottom: sysBottom,
-      });
-    } else {
-      existing.left  = Math.min(existing.left,  entry.bounds.left);
-      existing.right = Math.max(existing.right, entry.bounds.left + entry.bounds.width);
-    }
-  }
-
-  if (bySystem.size === 0) {
-    // No beat ghosts found in range — fall back to measure-level rendering.
-    return resolveSegmentsMeasure(barStart, barEnd, layer);
-  }
-
-  const tops = [...bySystem.keys()].sort((a, b) => a - b);
-  return tops.map((sysTop, i) => {
-    const sys = bySystem.get(sysTop)!;
-    return {
-      left: sys.left,
-      right: sys.right,
-      systemBottom: sys.systemBottom,
-      isFirst: i === 0,
-      isLast: i === tops.length - 1,
-    };
-  });
-}
-
-/**
- * Find the nearest boundary ghost to pixel x within the given system, at the
- * active resolution, and return it as a StageBeatBoundary.
- *
- * - 'measure': snaps to measure left-edges; returns { barN, beatFloat: null }.
- *   barN is the measure to the RIGHT of the snap point so that the caller can
- *   use barN − 1 as the left stage's barEnd (same convention as the old
- *   nearestBoundaryBarN).
- * - 'beat' / 'subbeat': snaps to beat or sub-beat ghost left-edges; returns
- *   { barN, beatFloat } of the snapped ghost. Both boundary stages share barN.
- *
- * Returns null when no candidate is within SNAP_TOLERANCE.
- */
-function nearestBoundary(
+function nearestBoundaryTarget(
+  slots: StageSlot[],
   x: number,
   systemBottom: number,
-  layer: GhostLayer,
-  resolution: ResolutionMode,
-): StageBeatBoundary | null {
-  const SYS_TOLERANCE = 20;
-
-  if (resolution === 'measure') {
-    let bestBarN: number | null = null;
-    let bestDist = Infinity;
-
-    for (const entry of layer.measureIndex.values()) {
-      const entrySystemBottom = entry.bounds.top + entry.bounds.height;
-      if (Math.abs(entrySystemBottom - systemBottom) > SYS_TOLERANCE) continue;
-
-      const dist = Math.abs(entry.bounds.left - x);
-      if (dist < bestDist && dist < SNAP_TOLERANCE) {
-        bestDist = dist;
-        bestBarN = entry.barN;
-      }
-    }
-
-    if (bestBarN === null) return null;
-    // Convention: barN is the right-side measure, so leftStage.barEnd = barN − 1.
-    return { barN: bestBarN, beatFloat: null };
-  }
-
-  // Beat or sub-beat resolution.
-  const index = resolution === 'beat' ? layer.beatIndex : layer.subBeatIndex;
-
-  let bestBarN: number | null = null;
-  let bestBeatFloat: number | null = null;
+): number {
+  let best = 0;
   let bestDist = Infinity;
+  let bestOnSystem = false;
 
-  for (const entry of index.values()) {
-    const entrySystemBottom = entry.bounds.top + entry.bounds.height;
-    if (Math.abs(entrySystemBottom - systemBottom) > SYS_TOLERANCE) continue;
+  for (let k = 0; k <= slots.length; k++) {
+    const ref = k < slots.length ? slots[k]! : slots[slots.length - 1]!;
+    const edgeX = k < slots.length ? ref.left : ref.right;
+    const onSystem = Math.abs(ref.systemBottom - systemBottom) <= SYS_TOLERANCE;
+    const dist = Math.abs(edgeX - x);
 
-    const dist = Math.abs(entry.bounds.left - x);
-    if (dist < bestDist && dist < SNAP_TOLERANCE) {
+    // Prefer candidates on the drag's system; fall back to any system.
+    if (onSystem === bestOnSystem ? dist < bestDist : onSystem) {
+      best = k;
       bestDist = dist;
-      bestBarN = entry.barN;
-      bestBeatFloat = entry.beatFloat;
+      bestOnSystem = onSystem;
     }
   }
-
-  if (bestBarN === null || bestBeatFloat === null) return null;
-  return { barN: bestBarN, beatFloat: bestBeatFloat };
+  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,67 +168,40 @@ export default function StageBrackets({
   session,
 }: StageBracketsProps) {
   // Drag state for split handles: tracked in a ref to avoid re-renders during
-  // the drag — only onSplitHandleMove triggers a React state update.
-  const dragRef = useRef<{
-    sortedIdx: number;
-    systemBottom: number;
-    initialAssignments: StageAssignment[];
-    /** Last result that actually moved a boundary (not a clamp or no-op).
-     *  Used to stop the bracket at the minimum-width floor rather than bouncing
-     *  back to the drag-start position when a required stage hits its minimum. */
-    lastValidAssignments: StageAssignment[] | null;
-  } | null>(null);
+  // the drag — only onSplitHandleMove triggers a React state update. The
+  // frame (slots + boundary vector) is frozen at drag start; each mousemove
+  // derives a fresh assignments array from it, so an optional stage collapsed
+  // mid-gesture restores when the drag retreats (I10).
+  const dragRef = useRef<DragState | null>(null);
 
   const handleContainerRef = useRef<HTMLDivElement | null>(null);
 
   // ── Mouse handlers for split handle drag ──────────────────────────────────
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!dragRef.current || !layer || !handleContainerRef.current) return;
+    const drag = dragRef.current;
+    if (!drag || !handleContainerRef.current) return;
 
     const containerRect = handleContainerRef.current.getBoundingClientRect();
     const x = e.clientX - containerRect.left;
 
-    const boundary = nearestBoundary(x, dragRef.current.systemBottom, layer, resolution);
-    if (boundary === null) return;
-
-    // For measure resolution: nearestBoundary returns barN of the RIGHT measure,
-    // so we convert to leftStage.barEnd = barN − 1, beatFloat = null.
-    const splitBoundary: StageBeatBoundary =
-      boundary.beatFloat === null
-        ? { barN: boundary.barN - 1, beatFloat: null }
-        : boundary;
-
-    const updated = moveSplitHandle(
-      dragRef.current.initialAssignments,
-      dragRef.current.sortedIdx,
-      splitBoundary,
+    const target = nearestBoundaryTarget(drag.slots, x, drag.systemBottom);
+    const moved = moveBoundary(
+      drag.boundaries,
+      drag.boundaryIdx,
+      target,
+      drag.required,
+      drag.slots.length,
     );
-
-    if (updated === dragRef.current.initialAssignments) {
-      // moveSplitHandle returned unchanged — a required stage hit its minimum-width
-      // floor.  Show the last valid position to prevent a visual bounce-back to
-      // the drag-start position.
-      const stable = dragRef.current.lastValidAssignments ?? dragRef.current.initialAssignments;
-      onSplitHandleMove(stable);
-      return;
-    }
-
-    // Detect whether a stage was collapsed (absent count increased).  If so,
-    // null the drag ref so subsequent mousemove events are no-ops — the handle
-    // no longer exists between the remaining active stages.  handleMouseUp will
-    // remove the event listeners on the next mouseup.
-    const prevAbsent = dragRef.current.initialAssignments.filter(a => a.absent).length;
-    const nextAbsent = updated.filter(a => a.absent).length;
-    if (nextAbsent > prevAbsent) {
-      onSplitHandleMove(updated);
-      dragRef.current = null;
-      return;
-    }
-
-    dragRef.current.lastValidAssignments = updated;
+    const updated = frameToAssignments(
+      drag.initialAssignments,
+      drag.initialActive,
+      drag.slots,
+      moved,
+      drag.flankIds,
+    );
     onSplitHandleMove(updated);
-  }, [layer, resolution, onSplitHandleMove]);
+  }, [onSplitHandleMove]);
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = null;
@@ -379,15 +211,33 @@ export default function StageBrackets({
   }, [handleMouseMove, session]);
 
   const startSplitDrag = useCallback(
-    (e: React.MouseEvent, sortedIdx: number, systemBottom: number) => {
+    (e: React.MouseEvent, boundaryIdx: number, systemBottom: number) => {
+      if (!selection || !layer) return;
       e.stopPropagation();
       e.preventDefault();
-      dragRef.current = { sortedIdx, systemBottom, initialAssignments: assignments, lastValidAssignments: null };
+
+      const slots = buildStageSlots(selection, layer, resolution);
+      if (slots.length === 0) return;
+      const { active, boundaries } = projectBoundaries(assignments, slots);
+      const left  = active[boundaryIdx];
+      const right = active[boundaryIdx + 1];
+      if (!left || !right) return;
+
+      dragRef.current = {
+        boundaryIdx,
+        systemBottom,
+        slots,
+        boundaries,
+        required: active.map(a => a.required),
+        initialAssignments: assignments,
+        initialActive: active,
+        flankIds: new Set([left.stageId, right.stageId]),
+      };
       session?.setStageDragActive(true);
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     },
-    [assignments, handleMouseMove, handleMouseUp, session],
+    [assignments, selection, layer, resolution, handleMouseMove, handleMouseUp, session],
   );
 
   // Cleanup on unmount.
@@ -402,58 +252,35 @@ export default function StageBrackets({
 
   if (!visible || !selection || !layer) return null;
 
-  // Sort non-orphaned stages by order for rendering and split handle placement.
-  const activeStages = [...assignments]
-    .filter(a => !a.orphaned && !a.absent && a.bounds !== null)
-    .sort((a, b) => a.order - b.order);
+  const slots = buildStageSlots(selection, layer, resolution);
+  if (slots.length === 0) return null;
+
+  const { active, boundaries } = projectBoundaries(assignments, slots);
 
   // All stages including orphaned for colour index stability.
   const allSorted = [...assignments].sort((a, b) => a.order - b.order);
 
-  // ── Build split handles (G4.1: position at beat/subbeat ghost when precise) ─
+  // Slot run per active stage from the shared boundary vector (§6A.4).
+  const runs = new Map<string, { lo: number; hi: number }>();
+  for (let j = 0; j < active.length; j++) {
+    const lo = j === 0 ? 0 : boundaries[j - 1]!;
+    const hi = j === active.length - 1 ? slots.length : boundaries[j]!;
+    runs.set(active[j]!.stageId, { lo, hi });
+  }
+
+  // ── Split handles: one per interior boundary (contiguous mode) ───────────
 
   const splitHandles: SplitHandle[] = [];
-  for (let i = 0; i < activeStages.length - 1; i++) {
-    const leftStage = activeStages[i]!;
-    const rightStage = activeStages[i + 1]!;
-    if (leftStage.containmentMode !== 'contiguous') continue;
-    if (!leftStage.bounds || !rightStage.bounds) continue;
-
-    const beatStart = rightStage.bounds.beatStart;
-
-    if (beatStart !== null && resolution !== 'measure') {
-      // Beat-precise boundary: find the beat/subbeat ghost at
-      // (rightStage.barStart, beatStart) and place the handle there.
-      const index = resolution === 'beat' ? layer.beatIndex : layer.subBeatIndex;
-      for (const entry of index.values()) {
-        if (
-          entry.barN === rightStage.bounds.barStart &&
-          Math.abs(entry.beatFloat - beatStart) < BEAT_FLOAT_EPS
-        ) {
-          const systemBottom = entry.bounds.top + entry.bounds.height;
-          splitHandles.push({
-            x: entry.bounds.left,
-            systemBottom,
-            sortedIdx: i,
-            stageId: leftStage.stageId,
-          });
-        }
-      }
-    } else {
-      // Measure-level boundary: left edge of the right stage's first bar.
-      const boundaryBarN = rightStage.bounds.barStart;
-      for (const entry of layer.measureIndex.values()) {
-        if (entry.barN === boundaryBarN) {
-          const systemBottom = entry.bounds.top + entry.bounds.height;
-          splitHandles.push({
-            x: entry.bounds.left,
-            systemBottom,
-            sortedIdx: i,
-            stageId: leftStage.stageId,
-          });
-        }
-      }
-    }
+  for (let j = 0; j < active.length - 1; j++) {
+    if (active[j]!.containmentMode !== 'contiguous') continue;
+    const bIdx = boundaries[j]!;
+    if (bIdx <= 0 || bIdx >= slots.length) continue;
+    const slot = slots[bIdx]!;
+    splitHandles.push({
+      x: slot.left,
+      systemBottom: slot.systemBottom,
+      boundaryIdx: j,
+    });
   }
 
   return (
@@ -468,7 +295,16 @@ export default function StageBrackets({
         if (assignment.absent) return null;
         if (!assignment.bounds) return null;
 
-        const segments = resolveSegments(assignment.bounds, layer, resolution);
+        // Active stages render their frame run; orphaned stages project
+        // their committed bounds individually (they are outside the frame).
+        let segments: StageSegment[] = [];
+        const run = runs.get(assignment.stageId);
+        if (run) {
+          segments = foldStageSegments(slots, run.lo, run.hi);
+        } else if (assignment.orphaned) {
+          const orphanRun = projectRun(slots, assignment.bounds);
+          if (orphanRun) segments = foldStageSegments(slots, orphanRun.lo, orphanRun.hi);
+        }
         if (segments.length === 0) return null;
 
         const color = assignment.orphaned
@@ -537,7 +373,7 @@ export default function StageBrackets({
         const top = sh.systemBottom + BELOW_STAFF_GAP - SPLIT_HANDLE_HW;
         return (
           <div
-            key={`split-${sh.sortedIdx}-${idx}`}
+            key={`split-${sh.boundaryIdx}-${idx}`}
             className={styles.splitHandle}
             style={{
               left: sh.x - SPLIT_HANDLE_HW,
@@ -545,8 +381,8 @@ export default function StageBrackets({
               width: SPLIT_HANDLE_HW * 2,
               height: BRACKET_H + SPLIT_HANDLE_HW * 2,
             }}
-            data-testid={`split-handle-${sh.sortedIdx}`}
-            onMouseDown={e => startSplitDrag(e, sh.sortedIdx, sh.systemBottom)}
+            data-testid={`split-handle-${sh.boundaryIdx}`}
+            onMouseDown={e => startSplitDrag(e, sh.boundaryIdx, sh.systemBottom)}
           />
         );
       })}
