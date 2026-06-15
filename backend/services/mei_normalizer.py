@@ -27,6 +27,10 @@ Normalization rules (applied in this order):
    by either the active key signature or a within-staff/measure/octave carry
    from a prior explicit ``@accid``.  Corrects a MuseScore-to-MEI artefact
    that causes wrong MIDI pitch without affecting SVG display (ADR-022).
+9. **Clef ``sameas`` resolution** — rewrites ``<clef sameas="#id">`` references
+   (per-voice clef restatements emitted by the converter) to explicit
+   ``shape``/``line`` so Verovio 6.1.0 renders them instead of an empty clef
+   group.
 
 Normalization is **idempotent**: running the normalizer on an already-
 normalized file produces byte-identical output and an
@@ -60,6 +64,7 @@ from models.normalization import NormalizationReport
 # ---------------------------------------------------------------------------
 
 _MEI_NS: str = "http://www.music-encoding.org/ns/mei"
+_XML_NS: str = "http://www.w3.org/XML/1998/namespace"
 _NSMAP: dict[str, str] = {"mei": _MEI_NS}
 
 # Regex for suffix-style @n values inside <ending> elements, e.g. "12a", "12b".
@@ -872,6 +877,57 @@ def _strip_spurious_gestural_accidentals(
 
 
 # ---------------------------------------------------------------------------
+# Clef sameas resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_clef_sameas(
+    root: lxml.etree._Element,
+    changes_applied: list[str],
+) -> None:
+    """Pass 9 — Resolve ``<clef sameas="#id">`` references to explicit shape/line.
+
+    The MuseScore-to-MEI converter emits per-voice clef restatements as
+    ``<clef sameas="#other"/>`` carrying no ``shape``/``line`` of their own.
+    Verovio 6.1.0 does not resolve the reference and renders an empty clef group
+    (no glyph).  This pass copies the referenced clef's ``shape``/``line`` (and any
+    octave displacement) onto the referring clef and removes ``@sameas`` so the
+    clef is self-describing and renders.
+
+    Only clefs whose ``@sameas`` target resolves to a clef with explicit
+    ``shape``/``line`` are rewritten; anything unresolved is left untouched.  The
+    pass is idempotent: a resolved clef no longer carries ``@sameas``.
+
+    Args:
+        root: The MEI document root element.
+        changes_applied: Accumulator for human-readable change descriptions.
+    """
+    by_id: dict[str, lxml.etree._Element] = {}
+    for clef in _xpath(root, "//mei:clef"):
+        cid = clef.get(f"{{{_XML_NS}}}id")
+        if cid:
+            by_id[cid] = clef
+
+    for clef in _xpath(root, "//mei:clef[@sameas]"):
+        if clef.get("shape") and clef.get("line"):
+            continue
+        target = by_id.get(clef.get("sameas", "").lstrip("#"))
+        if target is None or not target.get("shape") or not target.get("line"):
+            continue
+        clef.set("shape", target.get("shape"))
+        clef.set("line", target.get("line"))
+        for opt in ("dis", "dis.place"):
+            if target.get(opt):
+                clef.set(opt, target.get(opt))
+        del clef.attrib["sameas"]
+        changes_applied.append(
+            f"Resolved clef sameas reference (xml:id="
+            f"{clef.get(f'{{{_XML_NS}}}id', '?')!r}) -> "
+            f"shape={target.get('shape')} line={target.get('line')}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Duration metadata
 # ---------------------------------------------------------------------------
 
@@ -948,6 +1004,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
     _normalize_ending_measure_ns(root, changes_applied, warnings)
     _normalize_split_measures(root, changes_applied, warnings)
     _strip_spurious_gestural_accidentals(root, changes_applied)
+    _resolve_clef_sameas(root, changes_applied)
 
     duration_bars = _compute_duration_bars(root)
 

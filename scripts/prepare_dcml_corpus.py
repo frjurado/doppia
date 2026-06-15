@@ -361,11 +361,183 @@ def convert_mxl_to_mei(mxl_path: Path, tmpdir: Path) -> bytes:
     #   - @meiversion on the root <mei> element
     #   - @version on <application> inside <appInfo>
     # Both are purely informational and have no effect on musical content.
-    _MEI_NS = "http://www.music-encoding.org/ns/mei"
     root = lxml.etree.fromstring(mei_bytes)
     root.attrib.pop("meiversion", None)
     for app in root.iter(f"{{{_MEI_NS}}}application"):
         app.attrib.pop("version", None)
+    return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+
+
+# ---------------------------------------------------------------------------
+# Measure-start clef recovery (works around a MuseScore MusicXML export defect)
+# ---------------------------------------------------------------------------
+
+_MEI_NS = "http://www.music-encoding.org/ns/mei"
+_XML_NS = "http://www.w3.org/XML/1998/namespace"
+
+# MuseScore base clef letters → (MEI @shape, default @line).
+_CLEF_BASE_LINES: dict[str, str] = {"G": "2", "F": "4", "C": "3"}
+
+# MuseScore octave-displacement suffixes → (MEI @dis, @dis.place).
+_CLEF_DISPLACEMENTS: dict[str, tuple[str, str]] = {
+    "8va": ("8", "above"),
+    "8vb": ("8", "below"),
+    "15ma": ("15", "above"),
+    "15mb": ("15", "below"),
+}
+
+
+def _musescore_clef_to_mei(clef_type: str) -> dict[str, str] | None:
+    """Map a MuseScore ``concertClefType`` token to MEI ``<clef>`` attributes.
+
+    MuseScore clef tokens are a base letter (``G``/``F``/``C``) optionally
+    followed by an octave-displacement suffix (``8va``/``8vb``/``15ma``/
+    ``15mb``), or a numbered C-clef (``C1``..``C5``).
+
+    Args:
+        clef_type: The raw ``<concertClefType>`` text, e.g. ``"G"``, ``"F8vb"``.
+
+    Returns:
+        A dict of MEI ``<clef>`` attributes (``shape``, ``line`` and optionally
+        ``dis``/``dis.place``), or ``None`` if the token is unrecognised.
+    """
+    token = (clef_type or "").strip()
+    if not token:
+        return None
+    # Numbered C-clef, e.g. "C1".."C5".
+    if len(token) == 2 and token[0] == "C" and token[1].isdigit():
+        return {"shape": "C", "line": token[1]}
+    base = token[0]
+    if base not in _CLEF_BASE_LINES:
+        return None
+    attrs = {"shape": base, "line": _CLEF_BASE_LINES[base]}
+    suffix = token[1:]
+    if suffix:
+        if suffix not in _CLEF_DISPLACEMENTS:
+            return None
+        attrs["dis"], attrs["dis.place"] = _CLEF_DISPLACEMENTS[suffix]
+    return attrs
+
+
+def _extract_measure_start_clefs(
+    mscx_path: Path,
+) -> list[tuple[int, str, dict[str, str]]]:
+    """Extract genuine measure-start clef changes from a MuseScore ``.mscx``.
+
+    Walks each staff's measures in document order, tracking the running clef per
+    staff (seeded from the staff's ``<defaultClef>`` — ``G`` when absent).  A
+    ``<Clef>`` that appears before any ``<Chord>``/``<Rest>`` in the measure's
+    first ``<voice>`` and that differs from the running clef is a genuine
+    measure-start change — the kind MuseScore drops from its MusicXML export.
+    Mid-measure changes (which survive the export) and system-break courtesy-clef
+    repeats (which equal the running clef) are both filtered out.
+
+    Args:
+        mscx_path: Path to the ``.mscx`` source file.
+
+    Returns:
+        A list of ``(measure_index, staff_id, mei_clef_attrs)`` tuples, where
+        ``measure_index`` is the 1-based document-order measure position.
+    """
+    import lxml.etree
+
+    score = lxml.etree.parse(str(mscx_path)).getroot().find("Score")
+    if score is None:
+        return []
+
+    # Per-staff initial clef from the Part/Staff <defaultClef> (G when absent).
+    initial: dict[str, str] = {}
+    for part in score.findall("Part"):
+        for staff_def in part.findall("Staff"):
+            sid = staff_def.get("id")
+            if sid is not None:
+                initial[sid] = staff_def.findtext("defaultClef", "G")
+
+    changes: list[tuple[int, str, dict[str, str]]] = []
+    for staff in score.findall("Staff"):
+        sid = staff.get("id")
+        measures = staff.findall("Measure")
+        if sid is None or not measures:
+            continue
+        running = initial.get(sid, "G")
+        for idx, measure in enumerate(measures, start=1):
+            voice = measure.find("voice")
+            if voice is None:
+                continue
+            seen_note = False
+            for child in voice:
+                if not isinstance(child.tag, str):
+                    continue
+                if child.tag in ("Chord", "Rest"):
+                    seen_note = True
+                elif child.tag == "Clef":
+                    ctype = child.findtext("concertClefType") or child.findtext(
+                        "clefType"
+                    )
+                    if not ctype:
+                        continue
+                    if ctype != running and not seen_note:
+                        attrs = _musescore_clef_to_mei(ctype)
+                        if attrs is not None:
+                            changes.append((idx, sid, attrs))
+                    running = ctype
+    return changes
+
+
+def recover_measure_start_clefs(mscx_path: Path, mei_bytes: bytes) -> bytes:
+    """Re-insert measure-initial clef changes dropped by MuseScore's MusicXML export.
+
+    MuseScore (3.6.2 and 4) omits clef changes positioned at the very start of a
+    measure when exporting MusicXML, so Verovio never sees them and the produced
+    MEI lacks them.  Because MEI ``pname``/``oct`` are absolute pitch, the affected
+    notes still render at the correct pitch but on the previous clef (heavily
+    ledger-lined, no clef glyph), which reads as a missing clef change.  This pass
+    reads the genuine measure-start clef changes back out of the ``.mscx`` source —
+    the only artefact that retains them — and injects a ``<clef>`` as the first
+    child of the corresponding MEI measure/staff/layer.  Mid-measure clef changes
+    are exported correctly and are left untouched.
+
+    Injecting clefs changes neither measure count nor document order, so fragment
+    machine coordinates (``mc_start``/``mc_end``) are unaffected (ADR-015).
+
+    Args:
+        mscx_path: The MuseScore ``.mscx`` source for this movement.
+        mei_bytes: The MEI produced by :func:`convert_mxl_to_mei`.
+
+    Returns:
+        MEI bytes with measure-start clefs re-inserted (the input bytes unchanged
+        when no clefs were dropped).
+    """
+    import lxml.etree
+
+    changes = _extract_measure_start_clefs(mscx_path)
+    if not changes:
+        return mei_bytes
+
+    root = lxml.etree.fromstring(mei_bytes)
+    measures = root.findall(f".//{{{_MEI_NS}}}measure")
+
+    for measure_index, staff_id, attrs in changes:
+        if measure_index > len(measures):
+            # Document-order mismatch between .mscx and MEI: skip rather than
+            # risk mis-placing a clef.  Not observed in practice.
+            continue
+        staff = measures[measure_index - 1].find(f"{{{_MEI_NS}}}staff[@n='{staff_id}']")
+        if staff is None:
+            continue
+        layer = staff.find(f"{{{_MEI_NS}}}layer")
+        if layer is None:
+            continue
+        first = next((c for c in layer if isinstance(c.tag, str)), None)
+        if first is not None and first.tag == f"{{{_MEI_NS}}}clef":
+            continue  # a measure-start clef already exists — leave it (idempotent)
+        clef = lxml.etree.SubElement(layer, f"{{{_MEI_NS}}}clef")
+        clef.set(f"{{{_XML_NS}}}id", f"clefrec{measure_index}s{staff_id}")
+        for key, value in attrs.items():
+            clef.set(key, value)
+        layer.remove(clef)
+        layer.insert(0, clef)
+
     return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
 
@@ -568,6 +740,10 @@ def main() -> None:
             except RuntimeError as exc:
                 _err(f"verovio failed for {label}: {exc}")
                 sys.exit(1)
+
+            # Recover measure-start clef changes that MuseScore drops from its
+            # MusicXML export (see recover_measure_start_clefs docstring).
+            mei_bytes = recover_measure_start_clefs(entry.mscx_path, mei_bytes)
 
             report = validate_mei(mei_bytes)
             if not report.is_valid:

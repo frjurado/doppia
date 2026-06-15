@@ -702,3 +702,41 @@ class TestSpuriousGesturalAccidentals:
             tmp_path, first_out, "keysig_section_boundary_change.mei"
         )
         assert first_out == second_out
+
+
+# ---------------------------------------------------------------------------
+# Pass 9 — Clef sameas resolution
+# ---------------------------------------------------------------------------
+
+
+class TestClefSameas:
+    """Pass 9: resolve <clef sameas="#id"> to explicit shape/line."""
+
+    def test_sameas_resolved_to_explicit(self, tmp_path: Path) -> None:
+        """A clef referencing another via @sameas gains explicit shape/line."""
+        report, out_bytes = _run(tmp_path, "clef_sameas.mei")
+
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        ref = tree.xpath("//mei:clef[@xml:id='clef-ref']", namespaces=ns)[0]
+
+        assert ref.get("shape") == "G"
+        assert ref.get("line") == "2"
+        assert "sameas" not in ref.attrib
+        assert any("sameas" in c.lower() for c in report.changes_applied)
+
+    def test_real_clef_untouched(self, tmp_path: Path) -> None:
+        """The referenced (already-explicit) clef is left unchanged."""
+        _, out_bytes = _run(tmp_path, "clef_sameas.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        real = tree.xpath("//mei:clef[@xml:id='clef-real']", namespaces=ns)[0]
+        assert real.get("shape") == "G"
+        assert real.get("line") == "2"
+        assert "sameas" not in real.attrib
+
+    def test_sameas_idempotent(self, tmp_path: Path) -> None:
+        """After resolution the clef carries no @sameas, so a second pass is clean."""
+        _, first_out = _run(tmp_path, "clef_sameas.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_sameas.mei")
+        assert first_out == second_out

@@ -574,3 +574,154 @@ class TestFullSmokePipeline:
         reloaded = IngestMetadata.model_validate(raw)
         assert reloaded.corpus.source_commit == "cafebabe"
         assert len(reloaded.flat_movements()) == 2
+
+
+# ---------------------------------------------------------------------------
+# TestMeasureStartClefRecovery
+# ---------------------------------------------------------------------------
+
+import lxml.etree  # noqa: E402
+
+_MEI_NS = "http://www.music-encoding.org/ns/mei"
+_XML_NS = "http://www.w3.org/XML/1998/namespace"
+
+# Minimal MuseScore .mscx: staff 2 (bass, default F) has a genuine measure-start
+# clef change at m2 (F->G), a courtesy repeat at m3 (G==G, ignored), a mid-measure
+# change at m4 (G->F, exported by MuseScore so not recovered), and another genuine
+# measure-start change at m5 (F->G).  Staff 1 has no changes.
+_MSCX_CLEF = """<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="3.02">
+  <Score>
+    <Part>
+      <Staff id="1"><StaffType group="pitched"/></Staff>
+      <Staff id="2"><StaffType group="pitched"/><defaultClef>F</defaultClef></Staff>
+    </Part>
+    <Staff id="1">
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+    </Staff>
+    <Staff id="2">
+      <Measure><voice><Chord><Note><pitch>48</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Clef><concertClefType>G</concertClefType></Clef><Chord><Note><pitch>60</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Clef><concertClefType>G</concertClefType></Clef><Chord><Note><pitch>60</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>60</pitch></Note></Chord><Clef><concertClefType>F</concertClefType></Clef><Chord><Note><pitch>48</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Clef><concertClefType>G</concertClefType></Clef><Chord><Note><pitch>60</pitch></Note></Chord></voice></Measure>
+    </Staff>
+  </Score>
+</museScore>
+"""
+
+
+def _build_mei(n_measures: int) -> bytes:
+    measures = "".join(
+        f'<measure n="{i}">'
+        f'<staff n="1"><layer n="1"><note dur="4" oct="4" pname="c"/></layer></staff>'
+        f'<staff n="2"><layer n="1"><note dur="4" oct="3" pname="c"/></layer></staff>'
+        f"</measure>"
+        for i in range(1, n_measures + 1)
+    )
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+        f"<section>{measures}</section>"
+        f"</score></mdiv></body></music></mei>"
+    ).encode("utf-8")
+
+
+def _write_mscx(tmp_path: Path) -> Path:
+    p = tmp_path / "clef.mscx"
+    p.write_text(_MSCX_CLEF, encoding="utf-8")
+    return p
+
+
+class TestMusescoreClefToMei:
+    """_musescore_clef_to_mei maps MuseScore clef tokens to MEI attributes."""
+
+    def test_g_clef(self) -> None:
+        assert pdc._musescore_clef_to_mei("G") == {"shape": "G", "line": "2"}
+
+    def test_f_clef(self) -> None:
+        assert pdc._musescore_clef_to_mei("F") == {"shape": "F", "line": "4"}
+
+    def test_c_clef_default_line(self) -> None:
+        assert pdc._musescore_clef_to_mei("C") == {"shape": "C", "line": "3"}
+
+    def test_numbered_c_clef(self) -> None:
+        assert pdc._musescore_clef_to_mei("C1") == {"shape": "C", "line": "1"}
+
+    def test_octave_displaced(self) -> None:
+        assert pdc._musescore_clef_to_mei("G8vb") == {
+            "shape": "G",
+            "line": "2",
+            "dis": "8",
+            "dis.place": "below",
+        }
+
+    def test_unknown_token_returns_none(self) -> None:
+        assert pdc._musescore_clef_to_mei("PERC") is None
+
+    def test_empty_returns_none(self) -> None:
+        assert pdc._musescore_clef_to_mei("") is None
+
+
+class TestExtractMeasureStartClefs:
+    """_extract_measure_start_clefs isolates genuine measure-start changes."""
+
+    def test_only_genuine_starts_recovered(self, tmp_path: Path) -> None:
+        changes = pdc._extract_measure_start_clefs(_write_mscx(tmp_path))
+        # m2 and m5 on staff 2 are genuine; m3 is a courtesy repeat; m4 is
+        # mid-measure (exported by MuseScore); staff 1 has none.
+        assert changes == [
+            (2, "2", {"shape": "G", "line": "2"}),
+            (5, "2", {"shape": "G", "line": "2"}),
+        ]
+
+    def test_no_score_returns_empty(self, tmp_path: Path) -> None:
+        p = tmp_path / "empty.mscx"
+        p.write_text("<museScore version='3.02'></museScore>", encoding="utf-8")
+        assert pdc._extract_measure_start_clefs(p) == []
+
+
+class TestRecoverMeasureStartClefs:
+    """recover_measure_start_clefs injects dropped clefs into the MEI."""
+
+    def _measure(self, root: lxml.etree._Element, index: int) -> lxml.etree._Element:
+        return root.findall(f".//{{{_MEI_NS}}}measure")[index]
+
+    def test_clef_injected_as_first_layer_child(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(_write_mscx(tmp_path), _build_mei(5))
+        root = lxml.etree.fromstring(out)
+
+        staff2 = self._measure(root, 1).find(f"{{{_MEI_NS}}}staff[@n='2']")
+        layer = staff2.find(f"{{{_MEI_NS}}}layer")
+        first = layer[0]
+        assert first.tag == f"{{{_MEI_NS}}}clef"
+        assert first.get("shape") == "G"
+        assert first.get("line") == "2"
+        assert first.get(f"{{{_XML_NS}}}id") == "clefrec2s2"
+
+    def test_other_staff_untouched(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(_write_mscx(tmp_path), _build_mei(5))
+        root = lxml.etree.fromstring(out)
+        staff1 = self._measure(root, 1).find(f"{{{_MEI_NS}}}staff[@n='1']")
+        first = staff1.find(f"{{{_MEI_NS}}}layer")[0]
+        assert first.tag == f"{{{_MEI_NS}}}note"
+
+    def test_two_clefs_injected_total(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(_write_mscx(tmp_path), _build_mei(5))
+        assert out.count(b"<clef") == 2
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        mscx = _write_mscx(tmp_path)
+        first = pdc.recover_measure_start_clefs(mscx, _build_mei(5))
+        second = pdc.recover_measure_start_clefs(mscx, first)
+        assert second.count(b"<clef") == first.count(b"<clef") == 2
+
+    def test_noop_when_no_changes(self, tmp_path: Path) -> None:
+        p = tmp_path / "noclef.mscx"
+        p.write_text("<museScore version='3.02'></museScore>", encoding="utf-8")
+        mei = _build_mei(3)
+        assert pdc.recover_measure_start_clefs(p, mei) is mei

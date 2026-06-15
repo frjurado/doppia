@@ -100,6 +100,14 @@ This means each half is an independently addressable bar in the tagging coordina
 
 **Why beat-counting is not attempted.** Determining a measure's actual duration from raw MEI requires handling chords (take the max duration per simultaneous group, not the sum), multiple layers (parallel voices — take the max across layers), tuplets (scale by `@numbase / @num`), and tied continuations. This is outside the normalizer's `lxml`-only scope, and attempting it would be both fragile and redundant. The tagging tool's ghost construction already resolves this correctly at render time: it queries Verovio for actual note onsets via `getTimesForElement()` and builds ghosts only for struck beats — so a metrically incomplete measure automatically produces the right number of ghosts regardless of whether `@metcon` is set. No ingestion-time beat count is needed to ensure correct tagging behaviour. Cases where a genuine split-measure half lacks `@metcon="false"` will be visible to annotators as a measure with fewer ghosts than the prevailing meter suggests, which is self-evident and does not corrupt any data.
 
+### 9. Clef `sameas` resolution
+
+**Background.** The MuseScore-to-MEI conversion sometimes emits a clef change as a per-voice restatement: one voice carries the explicit `<clef shape="…" line="…">`, while a parallel voice on the same staff carries `<clef sameas="#that-id"/>` with no shape/line of its own. Verovio 6.1.0 does not resolve the `@sameas` reference and renders an **empty clef group** (`<g class="clef"/>` with no glyph).
+
+**Normalizer behavior.** For any `<clef>` carrying `@sameas` and lacking its own `@shape`/`@line`, the normalizer resolves the reference by `xml:id`, copies the target's `shape`/`line` (and any `@dis`/`@dis.place` octave displacement), and removes `@sameas`. The clef is thereby self-describing and renders. Clefs whose target cannot be resolved to an explicit shape/line are left untouched. The pass is idempotent (a resolved clef no longer carries `@sameas`).
+
+This is the MEI-side complement to the **measure-start clef recovery** performed earlier in the corpus-prep pipeline (see `corpus-and-analysis-sources.md`): that step re-inserts clef changes MuseScore drops from its MusicXML export; this step fixes clef changes MuseScore *does* export but in a form Verovio mis-renders.
+
 ---
 
 ## What the normalizer does NOT change

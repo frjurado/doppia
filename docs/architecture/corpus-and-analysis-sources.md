@@ -130,10 +130,20 @@ DCML mozart_piano_sonatas
         → mscore CLI (MuseScore 3.6.2)
         → .mxl
         → Verovio CLI
-        → .mei  →  object storage (R2)
+        → .mei
+        → measure-start clef recovery (reads .mscx)   ← see below
+        →  object storage (R2)
 ```
 
 Measure-number fidelity must be verified at both conversion steps before any tagging begins. The standard MEI validation suite (well-formed XML, measure `@n` integrity, staff count consistency) runs on every output `.mei` file.
+
+#### Measure-start clef recovery (MuseScore MusicXML export defect)
+
+**Defect.** MuseScore's MusicXML exporter — **both 3.6.2 and 4** — silently omits clef changes positioned at the very start of a measure (the `<Clef>` is the first element of the measure's voice, before any note). Mid-measure clef changes export correctly. Verovio therefore never sees the dropped clefs and the produced MEI lacks them. Because MEI `pname`/`oct` are absolute pitch, the affected notes still render at the correct pitch but on the *previous* clef — heavily ledger-lined, with no clef glyph — which reads as a missing clef change. (Verified end-to-end on K279/i, whose hand-crossing development has ~11 such changes; cross-reference the investigation in `docs/investigations/accidentals-k279-mvt1/`.)
+
+**Recovery.** `recover_measure_start_clefs` in `scripts/prepare_dcml_corpus.py` runs immediately after the Verovio conversion. It reads the genuine measure-start clef changes back out of the `.mscx` source — the only artefact that retains them — by walking each staff's measures in document order, tracking the running clef per staff (seeded from `<defaultClef>`, `G` when absent), and keeping only clefs that (a) appear before any note/rest in the measure and (b) differ from the running clef. This filter removes system-break courtesy-clef repeats and ignores mid-measure changes (which already survive). Each recovered change is injected as a `<clef>` at the start of the corresponding MEI measure/staff/layer.
+
+Injecting clefs changes neither measure count nor document-order positions, so fragment machine coordinates (`mc_start`/`mc_end`, ADR-015) are unaffected — but re-ingestion of already-tagged movements still verifies this per the Component 9 re-ingestion protocol. The complementary `<clef sameas>` case (clefs MuseScore *does* export but Verovio mis-renders) is handled in the normalizer; see `mei-ingest-normalization.md` §9.
 
 ### Analysis
 
