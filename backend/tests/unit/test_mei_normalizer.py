@@ -487,12 +487,102 @@ class TestDurationBars:
 
 
 # ---------------------------------------------------------------------------
-# Pass 8 — Spurious gestural accidentals
+# Pass 8 — Cross-barline tie completion
+# ---------------------------------------------------------------------------
+
+
+class TestCrossBarlineTieCompletion:
+    """Pass 8: complete endpoint-less cross-barline ties (ADR-026)."""
+
+    _NS = {"mei": "http://www.music-encoding.org/ns/mei"}
+    _XML = {"xml": "http://www.w3.org/XML/1998/namespace"}
+
+    def _by_id(self, tree: lxml.etree._Element, xml_id: str) -> lxml.etree._Element:
+        """Return the single element with the given ``xml:id`` (asserts existence)."""
+        els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=self._XML)
+        assert len(els) == 1, f"Expected exactly one element xml:id={xml_id!r}"
+        return els[0]
+
+    def test_endid_resolved_to_next_measure_note(self, tmp_path: Path) -> None:
+        """An endid-less tie points at the first same-pitch note in the next bar."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        tie = self._by_id(tree, "t_bb_m1")
+        assert tie.get("endid") == "#n_bb_m2"
+
+    def test_decoy_pitch_not_chosen(self, tmp_path: Path) -> None:
+        """The continuation, not a later explicit B-natural in the bar, is chosen."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "t_bb_m1").get("endid") == "#n_bb_m2"
+        assert self._by_id(tree, "t_bb_m1").get("endid") != "#n_decoy_b"
+
+    def test_second_tie_resolved(self, tmp_path: Path) -> None:
+        """A chained second endid-less tie resolves into the following measure."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "t_bb_m2").get("endid") == "#n_bb_m3"
+
+    def test_accid_ges_propagated_to_continuation(self, tmp_path: Path) -> None:
+        """Each continuation note gains accid.ges matching the tie origin's flat."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "a_bb_m2").get("accid.ges") == "f"
+        assert self._by_id(tree, "a_bb_m3").get("accid.ges") == "f"
+        # No notated accidental is added — the original engraving showed none.
+        assert "accid" not in self._by_id(tree, "a_bb_m2").attrib
+        assert "accid" not in self._by_id(tree, "a_bb_m3").attrib
+
+    def test_propagated_accid_ges_survives_pass9(self, tmp_path: Path) -> None:
+        """Pass 9 must not strip the tie continuation's accid.ges (C major, no key sig)."""
+        report, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        assert not any(
+            "spurious" in c.lower() for c in report.changes_applied
+        ), f"Pass 9 wrongly stripped a tied continuation: {report.changes_applied}"
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "a_bb_m2").get("accid.ges") == "f"
+
+    def test_complete_tie_untouched(self, tmp_path: Path) -> None:
+        """A tie that already has both endpoints is left exactly as-is."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        e5_tie = self._by_id(tree, "t_e5_m1")
+        assert e5_tie.get("endid") == "#n_e5_m2"
+        # The natural E continuation gains no gestural accidental.
+        assert "accid.ges" not in self._by_id(tree, "a_e5_m2").attrib
+
+    def test_completion_recorded(self, tmp_path: Path) -> None:
+        """Both completions are reported in changes_applied; no warnings."""
+        report, _ = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        completed = [
+            c for c in report.changes_applied if "cross-barline tie" in c.lower()
+        ]
+        assert len(completed) == 2
+        assert not report.warnings
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on completed ties applies no further changes."""
+        _, first_out = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        second_out = _round_trip(tmp_path, first_out, "tie_incomplete_crossbar.mei")
+        assert first_out == second_out
+
+    def test_unresolvable_tie_warns_and_is_left_alone(self, tmp_path: Path) -> None:
+        """No continuation in the next bar: warn, leave the tie endid-less."""
+        report, out_bytes = _run(tmp_path, "tie_incomplete_no_target.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        tie = self._by_id(tree, "t_bb_solo")
+        assert "endid" not in tie.attrib
+        assert not report.changes_applied
+        assert any("unresolved" in w.lower() for w in report.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Pass 9 — Spurious gestural accidentals
 # ---------------------------------------------------------------------------
 
 
 class TestSpuriousGesturalAccidentals:
-    """Pass 8: strip spurious accid.ges+glyph.auth from MEI conversion artefacts."""
+    """Pass 9: strip spurious accid.ges+glyph.auth from MEI conversion artefacts."""
 
     _NS = {"mei": "http://www.music-encoding.org/ns/mei"}
 
@@ -705,12 +795,12 @@ class TestSpuriousGesturalAccidentals:
 
 
 # ---------------------------------------------------------------------------
-# Pass 9 — Clef sameas resolution
+# Pass 10 — Clef sameas resolution
 # ---------------------------------------------------------------------------
 
 
 class TestClefSameas:
-    """Pass 9: resolve <clef sameas="#id"> to explicit shape/line."""
+    """Pass 10: resolve <clef sameas="#id"> to explicit shape/line."""
 
     def test_sameas_resolved_to_explicit(self, tmp_path: Path) -> None:
         """A clef referencing another via @sameas gains explicit shape/line."""

@@ -47,8 +47,8 @@ for robustness.
   changes from the `.mscx` (running-state filtered to drop courtesy-clef
   repeats) and injects them into the MEI. See
   `docs/architecture/corpus-and-analysis-sources.md`.
-- **`sameas` resolution** — normalizer Pass 9 rewrites `<clef sameas>` to
-  explicit shape/line. See `docs/architecture/mei-ingest-normalization.md` §9.
+- **`sameas` resolution** — normalizer Pass 10 rewrites `<clef sameas>` to
+  explicit shape/line. See `docs/architecture/mei-ingest-normalization.md` §10.
 
 ## Verification (this file)
 

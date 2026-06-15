@@ -143,7 +143,7 @@ Measure-number fidelity must be verified at both conversion steps before any tag
 
 **Recovery.** `recover_measure_start_clefs` in `scripts/prepare_dcml_corpus.py` runs immediately after the Verovio conversion. It reads the genuine measure-start clef changes back out of the `.mscx` source — the only artefact that retains them — by walking each staff's measures in document order, tracking the running clef per staff (seeded from `<defaultClef>`, `G` when absent), and keeping only clefs that (a) appear before any note/rest in the measure and (b) differ from the running clef. This filter removes system-break courtesy-clef repeats and ignores mid-measure changes (which already survive). Each recovered change is injected as a `<clef>` at the start of the corresponding MEI measure/staff/layer.
 
-Injecting clefs changes neither measure count nor document-order positions, so fragment machine coordinates (`mc_start`/`mc_end`, ADR-015) are unaffected — but re-ingestion of already-tagged movements still verifies this per the Component 9 re-ingestion protocol. The complementary `<clef sameas>` case (clefs MuseScore *does* export but Verovio mis-renders) is handled in the normalizer; see `mei-ingest-normalization.md` §9.
+Injecting clefs changes neither measure count nor document-order positions, so fragment machine coordinates (`mc_start`/`mc_end`, ADR-015) are unaffected — but re-ingestion of already-tagged movements still verifies this per the Component 9 re-ingestion protocol. The complementary `<clef sameas>` case (clefs MuseScore *does* export but Verovio mis-renders) is handled in the normalizer; see `mei-ingest-normalization.md` §10.
 
 ### Analysis
 

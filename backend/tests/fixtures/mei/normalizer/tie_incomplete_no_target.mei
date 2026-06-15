@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: an endpoint-less tie whose continuation note does not exist in the
+     following measure's matching staff/layer.  The completion pass must leave
+     the tie untouched and record a warning rather than fabricate an endpoint.
+-->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Unresolvable incomplete tie fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="n_bb_solo" dur="1" oct="4" pname="b">
+                    <accid xml:id="a_bb_solo" accid="f" accid.ges="f"/>
+                  </note>
+                </layer>
+              </staff>
+              <tie xml:id="t_bb_solo" startid="#n_bb_solo"/>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="n_c_only" dur="1" oct="5" pname="c">
+                    <accid xml:id="a_c_only"/>
+                  </note>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

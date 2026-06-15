@@ -100,7 +100,19 @@ This means each half is an independently addressable bar in the tagging coordina
 
 **Why beat-counting is not attempted.** Determining a measure's actual duration from raw MEI requires handling chords (take the max duration per simultaneous group, not the sum), multiple layers (parallel voices — take the max across layers), tuplets (scale by `@numbase / @num`), and tied continuations. This is outside the normalizer's `lxml`-only scope, and attempting it would be both fragile and redundant. The tagging tool's ghost construction already resolves this correctly at render time: it queries Verovio for actual note onsets via `getTimesForElement()` and builds ghosts only for struck beats — so a metrically incomplete measure automatically produces the right number of ghosts regardless of whether `@metcon` is set. No ingestion-time beat count is needed to ensure correct tagging behaviour. Cases where a genuine split-measure half lacks `@metcon="false"` will be visible to annotators as a measure with fewer ghosts than the prevailing meter suggests, which is self-evident and does not corrupt any data.
 
-### 9. Clef `sameas` resolution
+### 8. Cross-barline tie completion
+
+**Background.** The MuseScore-to-MEI conversion sometimes emits a tie across a barline as a `<tie>` control event carrying only `@startid` — no `@endid` (and no `@tstamp2`). Verovio cannot render an endpoint-less tie, so the tie silently disappears. Worse, the continuation note in the next measure was written *without* a fresh `@accid` precisely because it relied on the tie to carry the pitch; with the tie gone, Verovio falls back to the default accidental for that pitch class, so an altered note (e.g. a tied B♭) reappears as a natural in both the SVG and the MIDI. This was first diagnosed on K. 279 mvt 1, mm. 12–14 (see `docs/investigations/accidentals-k279-mvt1/tie-findings.md`).
+
+**Normalizer behavior.** For each `<tie>` carrying `@startid` but neither `@endid` nor `@tstamp2`, the normalizer:
+
+- Resolves the continuation note as the **first** note of the same `(pname, oct)` in the **following** measure's matching `<staff @n>` / `<layer @n>` (document order) — the legitimate cross-barline target.
+- Sets `@endid` to that note's `xml:id`.
+- If the tie's start note carries an alteration (notated `@accid` or gestural `accid.ges`) and the continuation note carries neither, adds `accid.ges` to the continuation matching the start note's alteration — preserving sounding pitch and MIDI without printing a redundant accidental (matching the original engraving).
+
+If no continuation note can be located in the following measure, the tie is left untouched and a warning is recorded rather than fabricating an endpoint. Ties already carrying `@endid`/`@tstamp2` are left untouched, so the pass is idempotent. This pass runs **before** the accidental pass (§9 below) so that the completed ties inform its tie-continuation legitimacy rule (a tied continuation's `accid.ges` is never stripped). See ADR-026.
+
+### 10. Clef `sameas` resolution
 
 **Background.** The MuseScore-to-MEI conversion sometimes emits a clef change as a per-voice restatement: one voice carries the explicit `<clef shape="…" line="…">`, while a parallel voice on the same staff carries `<clef sameas="#that-id"/>` with no shape/line of its own. Verovio 6.1.0 does not resolve the `@sameas` reference and renders an **empty clef group** (`<g class="clef"/>` with no glyph).
 
@@ -115,7 +127,7 @@ This is the MEI-side complement to the **measure-start clef recovery** performed
 - **Musical content**: pitches, durations, dynamics, articulations, text underlay, and all other content nodes are never touched.
 - **`xml:id` values**: these are globally unique identifiers relied on by Verovio. The normalizer never reassigns them.
 - **`<ending>` measure content**: measures inside `<ending>` elements are not renumbered or restructured, except for the two auto-corrections described in §3 (assigning sequential `@n` to `<ending>` elements that lack it) and §6 (stripping alphabetic suffixes from measure `@n` values inside endings).
-- **Encoding style**: the normalizer does not convert between MEI encoding conventions (e.g. `@tie` vs. `<tie>` elements). Both styles are valid MEI and the tagging tool handles both.
+- **Encoding style**: the normalizer does not convert between MEI encoding conventions (e.g. `@tie` attributes vs. `<tie>` elements). Both styles are valid MEI and the tagging tool handles both. The one exception is §8 above, which *completes* an already-present `<tie>` element that the converter left endpoint-less (setting `@endid`) — it repairs malformed control-event data rather than converting between encoding styles.
 
 ---
 

@@ -1,6 +1,6 @@
 """MEI normalization pipeline.
 
-Applies eight normalization passes to an MEI file, writing the result to
+Applies ten normalization passes to an MEI file, writing the result to
 ``output_path`` and returning a :class:`~models.normalization.NormalizationReport`.
 
 Normalization rules (applied in this order):
@@ -21,13 +21,21 @@ Normalization rules (applied in this order):
 7. **Incomplete measures at repeat boundaries** — when a measure at an
    ``rptend``/``rptboth`` has ``@metcon="false"``, locates the complement
    measure and sets ``@metcon="false"`` on it if missing.
-8. **Spurious gestural accidentals** — strips ``accid.ges`` (and orphaned
+8. **Cross-barline tie completion** — resolves ``<tie>`` elements that carry a
+   ``@startid`` but no ``@endid``/``@tstamp2`` (a MuseScore-to-MEI export
+   artefact) by pointing ``@endid`` at the first same-pitch note in the
+   following measure's matching staff/layer, and propagating the start note's
+   alteration onto that continuation note as ``accid.ges`` so its pitch is
+   preserved.  Corrects a lost tie (and the consequent wrong accidental) that
+   Verovio cannot render from an endpoint-less tie (ADR-026).
+9. **Spurious gestural accidentals** — strips ``accid.ges`` (and orphaned
    ``glyph.auth``) from ``<accid>`` elements where ``accid.ges`` is present
    but ``@accid`` is absent and the gestural alteration is *not* explained
-   by either the active key signature or a within-staff/measure/octave carry
-   from a prior explicit ``@accid``.  Corrects a MuseScore-to-MEI artefact
-   that causes wrong MIDI pitch without affecting SVG display (ADR-022).
-9. **Clef ``sameas`` resolution** — rewrites ``<clef sameas="#id">`` references
+   by either the active key signature, a within-staff/measure/octave carry
+   from a prior explicit ``@accid``, or a tie from a note that carries the
+   same alteration.  Corrects a MuseScore-to-MEI artefact that causes wrong
+   MIDI pitch without affecting SVG display (ADR-022).
+10. **Clef ``sameas`` resolution** — rewrites ``<clef sameas="#id">`` references
    (per-voice clef restatements emitted by the converter) to explicit
    ``shape``/``line`` so Verovio 6.1.0 renders them instead of an empty clef
    group.
@@ -37,9 +45,10 @@ normalized file produces byte-identical output and an
 :attr:`~models.normalization.NormalizationReport.is_clean` report.
 
 The normalizer never touches musical content (pitches, durations, dynamics),
-``xml:id`` values, or encoding style, with the exception of pass 8 which
-removes spurious ``accid.ges`` values introduced by the MEI conversion
-pipeline (see ADR-022, which supersedes ADR-021).
+``xml:id`` values, or encoding style, with two exceptions that repair MEI
+conversion-pipeline damage: pass 8 completes endpoint-less ties and restores
+the tied continuation's pitch (ADR-026), and pass 9 removes spurious
+``accid.ges`` values (ADR-022, which supersedes ADR-021).
 
 Example usage::
 
@@ -736,11 +745,216 @@ def _build_measure_key_sigs(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Cross-barline tie completion
+# ---------------------------------------------------------------------------
+
+
+def _note_alteration(note: lxml.etree._Element) -> str | None:
+    """Return the chromatic alteration carried by *note*, or ``None``.
+
+    Reads the note's ``<accid>`` child, preferring the notated ``@accid`` over
+    the gestural ``accid.ges``.  Returns ``None`` when the note has no accidental
+    child or the child carries neither attribute (a natural in context).
+
+    Args:
+        note: An MEI ``<note>`` element.
+
+    Returns:
+        The alteration token (e.g. ``"f"``, ``"s"``, ``"n"``) or ``None``.
+    """
+    accid_el = note.find(f"{{{_MEI_NS}}}accid")
+    if accid_el is None:
+        return None
+    if "accid" in accid_el.attrib:
+        return accid_el.get("accid")
+    if "accid.ges" in accid_el.attrib:
+        return accid_el.get("accid.ges")
+    return None
+
+
+def _build_tie_targets(root: lxml.etree._Element) -> dict[str, str]:
+    """Map each completed tie's continuation-note id to its expected alteration.
+
+    Considers only ``<tie>`` elements carrying both ``@startid`` and ``@endid``
+    whose start note has an explicit or gestural alteration.  Used by pass 9 to
+    treat a tied continuation's ``accid.ges`` as legitimate carry (ADR-026).
+
+    Args:
+        root: Document root element.
+
+    Returns:
+        Mapping of ``@endid`` target ``xml:id`` → alteration token.
+    """
+    note_by_id: dict[str, lxml.etree._Element] = {}
+    for note in _xpath(root, "//mei:note"):
+        nid = note.get(_XML_ID_KEY)
+        if nid:
+            note_by_id[nid] = note
+
+    targets: dict[str, str] = {}
+    for tie in _xpath(root, "//mei:tie"):
+        start_ref = tie.get("startid")
+        end_ref = tie.get("endid")
+        if not start_ref or not end_ref:
+            continue
+        start = note_by_id.get(start_ref.lstrip("#"))
+        if start is None:
+            continue
+        alt = _note_alteration(start)
+        if alt is not None:
+            targets[end_ref.lstrip("#")] = alt
+    return targets
+
+
+def _find_continuation_note(
+    measure: lxml.etree._Element,
+    staff_n: str,
+    layer_n: str,
+    pname: str,
+    oct_: str,
+) -> lxml.etree._Element | None:
+    """Return the first ``(pname, oct)`` note in *measure*'s matching staff/layer.
+
+    Searches the staff with ``@n == staff_n`` and the layer with
+    ``@n == layer_n`` in document order, which (for a cross-barline tie) is the
+    note the tie continues into.
+
+    Args:
+        measure: The ``<measure>`` to search (the one following the tie start).
+        staff_n: Target ``@n`` of the containing ``<staff>``.
+        layer_n: Target ``@n`` of the containing ``<layer>``.
+        pname: Pitch name to match.
+        oct_: Octave to match.
+
+    Returns:
+        The first matching ``<note>`` element, or ``None``.
+    """
+    for staff in measure.findall(f"{{{_MEI_NS}}}staff"):
+        if staff.get("n", "") != staff_n:
+            continue
+        for layer in staff.findall(f"{{{_MEI_NS}}}layer"):
+            if layer.get("n", "") != layer_n:
+                continue
+            for note in layer.findall(f".//{{{_MEI_NS}}}note"):
+                if note.get("pname", "") == pname and note.get("oct", "") == oct_:
+                    return note
+    return None
+
+
+def _complete_cross_barline_ties(
+    root: lxml.etree._Element,
+    changes_applied: list[str],
+    warnings: list[str],
+) -> None:
+    """Pass 8 — Complete endpoint-less cross-barline ties (ADR-026).
+
+    The MuseScore-to-MEI converter sometimes emits a ``<tie>`` with a
+    ``@startid`` but no ``@endid`` (and no ``@tstamp2``).  Verovio cannot render
+    such an endpoint-less tie, so the tie disappears; the continuation note —
+    written without a fresh ``@accid`` because it relied on the tie to carry the
+    pitch — then renders with the default (often wrong) accidental.
+
+    For each such tie this pass resolves the continuation note as the first
+    same-``(pname, oct)`` note in the *following* measure's matching
+    ``staff``/``layer`` (the legitimate cross-barline target), sets ``@endid``
+    accordingly, and — when the start note carries an alteration and the
+    continuation note carries none — adds ``accid.ges`` to the continuation so
+    its sounding pitch and MIDI match the tie's origin (no notated accidental is
+    added, matching the original engraving).
+
+    Ties that already carry ``@endid``/``@tstamp2`` are left untouched, making
+    the pass idempotent.  When no continuation note can be located in the
+    following measure, the tie is left untouched and a warning is recorded
+    rather than fabricating an endpoint.  Runs before the accidental pass so the
+    completed ties inform its tie-continuation rule.
+
+    Args:
+        root: Document root element.
+        changes_applied: Mutable list; completions are appended here.
+        warnings: Mutable list; unresolved ties are appended here.
+    """
+    measures = _xpath(root, "//mei:measure")
+
+    # Index every note by xml:id → (measure index, staff @n, layer @n, element).
+    note_index: dict[str, tuple[int, str, str, lxml.etree._Element]] = {}
+    for m_idx, measure in enumerate(measures):
+        for staff in measure.findall(f"{{{_MEI_NS}}}staff"):
+            staff_n = staff.get("n", "")
+            for layer in staff.findall(f"{{{_MEI_NS}}}layer"):
+                layer_n = layer.get("n", "")
+                for note in layer.findall(f".//{{{_MEI_NS}}}note"):
+                    nid = note.get(_XML_ID_KEY)
+                    if nid:
+                        note_index[nid] = (m_idx, staff_n, layer_n, note)
+
+    for tie in _xpath(root, "//mei:tie"):
+        if tie.get("endid") or tie.get("tstamp2"):
+            continue
+        start_ref = tie.get("startid")
+        if not start_ref:
+            continue
+        tie_id = tie.get(_XML_ID_KEY, "?")
+        sid = start_ref.lstrip("#")
+        info = note_index.get(sid)
+        if info is None:
+            warnings.append(
+                f"Endpoint-less tie (xml:id={tie_id!r}) references unknown "
+                f"start note {start_ref!r}; left unresolved."
+            )
+            continue
+
+        m_idx, staff_n, layer_n, start_note = info
+        pname = start_note.get("pname", "")
+        oct_ = start_note.get("oct", "")
+        if m_idx + 1 >= len(measures):
+            warnings.append(
+                f"Endpoint-less tie (xml:id={tie_id!r}) on {pname}{oct_} has no "
+                f"following measure to continue into; left unresolved."
+            )
+            continue
+
+        next_measure = measures[m_idx + 1]
+        target = _find_continuation_note(next_measure, staff_n, layer_n, pname, oct_)
+        target_id = target.get(_XML_ID_KEY) if target is not None else None
+        if target is None or not target_id:
+            warnings.append(
+                f"Endpoint-less tie (xml:id={tie_id!r}) on {pname}{oct_} "
+                f"(staff {staff_n}, layer {layer_n}): no continuation note found "
+                f"in measure {next_measure.get('n', '?')}; left unresolved."
+            )
+            continue
+
+        tie.set("endid", f"#{target_id}")
+        msg = (
+            f"Completed cross-barline tie (xml:id={tie_id!r}) on {pname}{oct_}: "
+            f"endid -> {target_id!r} in measure {next_measure.get('n', '?')}"
+        )
+
+        # Preserve the continuation note's pitch: a tied note inheriting an
+        # altered pitch must carry accid.ges if it has no notated accidental.
+        alteration = _note_alteration(start_note)
+        if alteration is not None:
+            t_accid = target.find(f"{{{_MEI_NS}}}accid")
+            if t_accid is None:
+                t_accid = lxml.etree.SubElement(target, f"{{{_MEI_NS}}}accid")
+            if "accid" not in t_accid.attrib and "accid.ges" not in t_accid.attrib:
+                t_accid.set("accid.ges", alteration)
+                msg += f"; added accid.ges={alteration!r} to continuation note"
+
+        changes_applied.append(msg)
+
+
+# ---------------------------------------------------------------------------
+# Spurious gestural accidentals
+# ---------------------------------------------------------------------------
+
+
 def _strip_spurious_gestural_accidentals(
     root: lxml.etree._Element,
     changes_applied: list[str],
 ) -> None:
-    """Pass 8 — Strip spurious gestural accidentals from MEI conversion artefacts.
+    """Pass 9 — Strip spurious gestural accidentals from MEI conversion artefacts.
 
     The MuseScore-to-MEI converter incorrectly propagates accidentals across
     staves: a treble-staff explicit accidental (``@accid``) sometimes causes
@@ -751,7 +965,7 @@ def _strip_spurious_gestural_accidentals(
 
     **Algorithm** (ADR-022, supersedes ADR-021): a ``<accid>`` element with
     ``accid.ges`` set and ``@accid`` absent is *legitimate* when the gestural
-    alteration is explained by *either* of two sources:
+    alteration is explained by *any* of three sources:
 
     1. **Active key signature** — the staff's key signature at this position
        alters this pitch class (e.g. F# in G major).  The key sig is read from
@@ -760,6 +974,11 @@ def _strip_spurious_gestural_accidentals(
        overriding the global default.
     2. **Within-staff/measure/octave carry** — the same ``(pname, oct)`` in this
        staff already carries an explicit ``@accid`` earlier in the same measure.
+    3. **Tie continuation** — the note is the ``@endid`` target of a ``<tie>``
+       whose start note carries the same alteration (ADR-026).  A tied
+       continuation inherits its predecessor's pitch and is written without a
+       fresh ``@accid``; its ``accid.ges`` must not be stripped or the pitch
+       would change.  This includes the gestural accidental added by pass 8.
 
     Within-staff carry takes precedence over the key signature (a natural sign
     written in the measure overrides the key-sig alteration for its octave).
@@ -778,6 +997,7 @@ def _strip_spurious_gestural_accidentals(
         changes_applied: Mutable list; stripped elements are recorded here.
     """
     key_sig_index = _build_measure_key_sigs(root)
+    tie_targets = _build_tie_targets(root)
     tree = root.getroottree()
 
     for measure in _xpath(root, "//mei:measure"):
@@ -835,6 +1055,10 @@ def _strip_spurious_gestural_accidentals(
                     glyph = accid_el.get("glyph.auth", "")
                     glyph_note = f" (glyph.auth={glyph!r})" if glyph else ""
 
+                    if tie_targets.get(note_id) == ges_val:
+                        # Tie continuation inherits its predecessor's pitch
+                        # (ADR-026) — legitimate; do not touch.
+                        continue
                     if carry_expected is not None:
                         # Within-staff carry takes precedence over key sig.
                         if carry_expected == ges_val:
@@ -885,7 +1109,7 @@ def _resolve_clef_sameas(
     root: lxml.etree._Element,
     changes_applied: list[str],
 ) -> None:
-    """Pass 9 — Resolve ``<clef sameas="#id">`` references to explicit shape/line.
+    """Pass 10 — Resolve ``<clef sameas="#id">`` references to explicit shape/line.
 
     The MuseScore-to-MEI converter emits per-voice clef restatements as
     ``<clef sameas="#other"/>`` carrying no ``shape``/``line`` of their own.
@@ -1003,6 +1227,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
     _check_measure_n_outside_endings(root, warnings)
     _normalize_ending_measure_ns(root, changes_applied, warnings)
     _normalize_split_measures(root, changes_applied, warnings)
+    _complete_cross_barline_ties(root, changes_applied, warnings)
     _strip_spurious_gestural_accidentals(root, changes_applied)
     _resolve_clef_sameas(root, changes_applied)
 
