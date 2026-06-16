@@ -149,6 +149,13 @@ async def _render_fragment_preview_async(fragment_id: str) -> None:
                 "adjustPageHeight": True,
                 "breaks": "none",
                 "scale": 35,
+                # Suppress Verovio's auto-generated page header (the encoded
+                # movement title).  Verovio renders it on the first page
+                # regardless of the selected measure range, so it would
+                # otherwise appear above every fragment preview thumbnail
+                # without adding information the surrounding UI lacks.
+                # Same rationale as the incipit task — see component-9 Step 8b.
+                "header": "none",
             }
         )
         # Strip XML comments before loading — Verovio's XML parser does not

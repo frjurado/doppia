@@ -246,6 +246,14 @@ class TestRenderFragmentPreviewHappyPath:
         )
         assert called_key == expected_key
 
+    async def test_header_suppressed_in_options(self) -> None:
+        """Step 8b: setOptions disables the movement-title page header."""
+        fragment_id = str(uuid.uuid4())
+        mocks = await self._run_happy(fragment_id, _make_row(status="submitted"))
+
+        options = mocks["tk"].setOptions.call_args.args[0]
+        assert options["header"] == "none"
+
     async def test_measure_range_select_uses_mc_bounds(self) -> None:
         """Verovio select is called with the fragment's mc_start–mc_end range."""
         fragment_id = str(uuid.uuid4())
