@@ -12,6 +12,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildFragmentPlayback,
   buildHighlightSchedule,
   buildNoteInfoMap,
   getTimemapTempo,
@@ -369,6 +370,109 @@ describe('buildHighlightSchedule', () => {
     const parsed = [{ tstamp: 0, on: ['note1'] }];
     tk.renderToTimemap.mockReturnValue(parsed as unknown as string);
     expect(buildHighlightSchedule(tk)).toEqual([{ timeMs: 0, ids: ['note1'] }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildFragmentPlayback — Step 18 (fragment-scoped playback window)
+// ---------------------------------------------------------------------------
+
+/**
+ * buildFragmentPlayback windows the whole-movement timemap (renderToMIDI and
+ * renderToTimemap ignore the fragment select(), so both emit the whole
+ * movement). The window is keyed on the rendered measure range via the
+ * timemap's `measureOn` field. readMeasureIdsInOrder parses the MEI with
+ * jsdom's DOMParser to map mc position-index → measure xml:id.
+ */
+describe('buildFragmentPlayback', () => {
+  // 4 measures, ids m1..m4 in document order (mc 1..4).
+  const MEI_4_MEASURES = `<?xml version="1.0" encoding="UTF-8"?>
+    <mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <section>
+          <measure xml:id="m1" n="1"/>
+          <measure xml:id="m2" n="2"/>
+          <measure xml:id="m3" n="3"/>
+          <measure xml:id="m4" n="4"/>
+        </section>
+      </score></mdiv></body></music>
+    </mei>`;
+
+  // Whole-movement timemap: one measure-onset entry + one note per measure.
+  const TIMEMAP_4 = JSON.stringify([
+    { tstamp: 0,    measureOn: 'm1', on: ['n1'] },
+    { tstamp: 1000, measureOn: 'm2', on: ['n2'] },
+    { tstamp: 2000, measureOn: 'm3', on: ['n3'] },
+    { tstamp: 3000, measureOn: 'm4', on: ['n4'] },
+    { tstamp: 3500, on: ['n4b'] },
+  ]);
+
+  let tk: ReturnType<typeof makeMockToolkit>;
+  beforeEach(() => {
+    tk = makeMockToolkit();
+    tk.renderToTimemap.mockReturnValue(TIMEMAP_4);
+  });
+
+  it('requests measure onsets from the timemap (includeMeasures)', () => {
+    buildFragmentPlayback(tk, MEI_4_MEASURES, 2, 3);
+    expect(tk.renderToTimemap).toHaveBeenCalledWith({ includeMeasures: true });
+  });
+
+  it('windows to the rendered measure range and shifts the schedule to 0', () => {
+    const { window, schedule } = buildFragmentPlayback(tk, MEI_4_MEASURES, 2, 3);
+    // mc 2 starts at 1000 ms; the measure after mc 3 (mc 4) starts at 3000 ms.
+    expect(window).toEqual({ startMs: 1000, endMs: 3000 });
+    // Only n2 (1000) and n3 (2000) fall in [1000, 3000), shifted to start at 0.
+    expect(schedule).toEqual([
+      { timeMs: 0,    ids: ['n2'] },
+      { timeMs: 1000, ids: ['n3'] },
+    ]);
+  });
+
+  it('runs to the end of the movement when the fragment ends on the last measure', () => {
+    const { window, schedule } = buildFragmentPlayback(tk, MEI_4_MEASURES, 3, 4);
+    expect(window.startMs).toBe(2000);
+    expect(window.endMs).toBe(Number.POSITIVE_INFINITY);
+    // n3 (2000), n4 (3000), n4b (3500) all included, shifted by 2000.
+    expect(schedule).toEqual([
+      { timeMs: 0,    ids: ['n3'] },
+      { timeMs: 1000, ids: ['n4'] },
+      { timeMs: 1500, ids: ['n4b'] },
+    ]);
+  });
+
+  it('produces a zero-offset window for a fragment starting at mc 1', () => {
+    const { window } = buildFragmentPlayback(tk, MEI_4_MEASURES, 1, 2);
+    expect(window.startMs).toBe(0);
+    expect(window.endMs).toBe(2000);
+  });
+
+  it('falls back to the whole-movement schedule when measureOn is absent', () => {
+    // Timemap without measureOn fields (e.g. includeMeasures unsupported).
+    tk.renderToTimemap.mockReturnValue(
+      JSON.stringify([
+        { tstamp: 0,    on: ['n1'] },
+        { tstamp: 1000, on: ['n2'] },
+      ]),
+    );
+    const { window, schedule } = buildFragmentPlayback(tk, MEI_4_MEASURES, 2, 3);
+    expect(window).toEqual({ startMs: 0, endMs: Number.POSITIVE_INFINITY });
+    expect(schedule).toEqual([
+      { timeMs: 0,    ids: ['n1'] },
+      { timeMs: 1000, ids: ['n2'] },
+    ]);
+  });
+
+  it('strips -rendN repeat suffixes from windowed schedule ids', () => {
+    tk.renderToTimemap.mockReturnValue(
+      JSON.stringify([
+        { tstamp: 0,    measureOn: 'm1', on: ['n1'] },
+        { tstamp: 1000, measureOn: 'm2', on: ['n2-rend2'] },
+        { tstamp: 2000, measureOn: 'm3', on: ['n3'] },
+      ]),
+    );
+    const { schedule } = buildFragmentPlayback(tk, MEI_4_MEASURES, 2, 3);
+    expect(schedule[0]).toEqual({ timeMs: 0, ids: ['n2'] });
   });
 });
 

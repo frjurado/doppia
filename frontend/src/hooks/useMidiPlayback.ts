@@ -27,11 +27,23 @@
  *   - string: base64 MIDI from Verovio renderToMIDI(). When this changes
  *     (e.g. after transposition), the hook stops playback and prepares to
  *     reschedule on the next `play()` call.
+ *
+ * Fragment window (Component 9 Step 18):
+ *   `options.window` constrains playback to a time span of the supplied MIDI.
+ *   Verovio's renderToMIDI() ignores the fragment `select()`, so the fragment
+ *   viewer passes the *whole-movement* MIDI plus the fragment's
+ *   `{ startMs, endMs }` window (from `buildFragmentPlayback`). The hook
+ *   schedules only the notes inside the window, shifted so the fragment starts
+ *   at transport time 0, and schedules an automatic stop at the window's end so
+ *   playback never spills past the fragment. With no window (the full score
+ *   viewer) playback is unchanged. `options.onEnded` fires when playback
+ *   reaches the window's end, letting the caller clear its own highlights.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
+import type { FragmentTimeWindow } from '../services/verovio';
 
 // ---------------------------------------------------------------------------
 // SoundFont configuration
@@ -82,6 +94,17 @@ export interface PlaybackPosition {
   bar: number;
   /** 1-indexed beat within the measure. */
   beat: number;
+}
+
+/** Optional behaviour modifiers for fragment-scoped playback (Step 18). */
+export interface MidiPlaybackOptions {
+  /**
+   * Constrain playback to a window of the supplied MIDI (whole-movement) so
+   * only the fragment sounds. `null`/omitted plays the entire MIDI.
+   */
+  window?: FragmentTimeWindow | null;
+  /** Called when playback reaches the window end (auto-stop). */
+  onEnded?: () => void;
 }
 
 export interface UseMidiPlaybackResult {
@@ -149,6 +172,7 @@ function parseTransportPosition(posStr: string): PlaybackPosition {
 export function useMidiPlayback(
   midiBase64: string | null,
   onPositionUpdate: (timeMs: number) => void,
+  options: MidiPlaybackOptions = {},
 ): UseMidiPlaybackResult {
   const [status, setStatus] = useState<PlaybackStatus>('idle');
   const [position, setPosition] = useState<PlaybackPosition>({ bar: 1, beat: 1 });
@@ -161,6 +185,9 @@ export function useMidiPlayback(
   const onPositionUpdateRef = useRef(onPositionUpdate);
   // Keep midiBase64 current without making it a play() dep.
   const midiBase64Ref = useRef(midiBase64);
+  // Fragment window + end callback, read at play() time (no play() deps).
+  const windowRef = useRef<FragmentTimeWindow | null>(options.window ?? null);
+  const onEndedRef = useRef<MidiPlaybackOptions['onEnded']>(options.onEnded);
 
   useEffect(() => {
     onPositionUpdateRef.current = onPositionUpdate;
@@ -169,6 +196,14 @@ export function useMidiPlayback(
   useEffect(() => {
     midiBase64Ref.current = midiBase64;
   }, [midiBase64]);
+
+  useEffect(() => {
+    windowRef.current = options.window ?? null;
+  }, [options.window]);
+
+  useEffect(() => {
+    onEndedRef.current = options.onEnded;
+  }, [options.onEnded]);
 
   // ── RAF position tracking ──────────────────────────────────────────────────
 
@@ -217,6 +252,24 @@ export function useMidiPlayback(
   }, [midiBase64, stopTracking]);
 
   // ── Transport controls ─────────────────────────────────────────────────────
+
+  /**
+   * Reset transport to the fragment start and return to 'ready' when playback
+   * reaches the window end. Held in a ref so the transport-scheduled callback
+   * always calls the latest closure. Mirrors stop() but also fires onEnded so
+   * the caller can clear its own highlight state.
+   */
+  const endPlaybackRef = useRef<() => void>(() => {});
+  endPlaybackRef.current = () => {
+    const transport = Tone.getTransport();
+    transport.stop();
+    transport.cancel();
+    transport.position = '0:0:0';
+    stopTracking();
+    setPosition({ bar: 1, beat: 1 });
+    setStatus(midiBase64Ref.current !== null ? 'ready' : 'idle');
+    onEndedRef.current?.();
+  };
 
   /**
    * Start playback. On the first call, starts the AudioContext (requires user
@@ -282,22 +335,41 @@ export function useMidiPlayback(
     const bytes = base64ToUint8Array(midi64);
     const midiData = new Midi(bytes.buffer as ArrayBuffer);
 
+    // Fragment window (Step 18): when set, only the notes between startSec and
+    // endSec sound, shifted so the fragment starts at transport time 0. With no
+    // window, startSec=0 / endSec=∞ reproduces whole-movement playback exactly.
+    const win = windowRef.current;
+    const startSec = (win?.startMs ?? 0) / 1000;
+    const endSec =
+      win && Number.isFinite(win.endMs) ? win.endMs / 1000 : Number.POSITIVE_INFINITY;
+    const EPS_SEC = 1e-4;
+
     // Sync the Tone.js Transport tempo and time signature with the actual MIDI
     // header so the position display counts bars and beats at the correct
     // musical rate. Without this, the transport always assumes 120 BPM and 4/4,
     // making the position display wrong for any other tempo or meter.
     //
     // Multiple tempo changes are scheduled via bpm.setValueAtTime() so a ritard
-    // or accelerando mid-piece is reflected in the position display.
+    // or accelerando mid-piece is reflected in the position display. Within a
+    // window, the initial BPM is the tempo in force at the fragment start and
+    // later changes are shifted into fragment-relative time.
     // Tone.js supports only a single static time signature — mid-piece meter
     // changes are not tracked in the display (acceptable limitation).
     const tempos = midiData.header?.tempos ?? [];
     const timeSignatures = midiData.header?.timeSignatures ?? [];
     if (tempos.length > 0) {
       transport.bpm.cancelScheduledValues(0);
-      transport.bpm.value = tempos[0].bpm;
-      for (let i = 1; i < tempos.length; i++) {
-        transport.bpm.setValueAtTime(tempos[i].bpm, tempos[i].time ?? 0);
+      // Initial BPM = the last tempo at or before the window start.
+      let initialBpm = tempos[0].bpm;
+      for (const t of tempos) {
+        if ((t.time ?? 0) <= startSec + EPS_SEC) initialBpm = t.bpm;
+      }
+      transport.bpm.value = initialBpm;
+      for (const t of tempos) {
+        const tt = t.time ?? 0;
+        if (tt > startSec + EPS_SEC && tt < endSec) {
+          transport.bpm.setValueAtTime(t.bpm, tt - startSec);
+        }
       }
     }
     if (timeSignatures.length > 0) {
@@ -306,6 +378,7 @@ export function useMidiPlayback(
 
     midiData.tracks.forEach((track) => {
       track.notes.forEach((note) => {
+        if (note.time < startSec - EPS_SEC || note.time >= endSec - EPS_SEC) return;
         transport.schedule((audioTime) => {
           samplerRef.current?.triggerAttackRelease(
             note.name,
@@ -313,9 +386,14 @@ export function useMidiPlayback(
             audioTime,
             note.velocity,
           );
-        }, note.time);
+        }, note.time - startSec);
       });
     });
+
+    // Auto-stop at the window end so playback never spills past the fragment.
+    if (Number.isFinite(endSec)) {
+      transport.scheduleOnce(() => { endPlaybackRef.current(); }, endSec - startSec);
+    }
 
     transport.start();
     setStatus('playing');

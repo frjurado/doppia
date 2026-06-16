@@ -51,7 +51,7 @@ import { ApiError } from '../services/api';
 import type { FragmentDetailResponse } from '../services/fragmentApi';
 import { getFragment } from '../services/fragmentApi';
 import {
-  buildHighlightSchedule,
+  buildFragmentPlayback,
   buildNoteInfoMap,
   getTimemapTempo,
   getVerovioToolkit,
@@ -59,7 +59,7 @@ import {
   renderFragment,
   renderMidi,
 } from '../services/verovio';
-import type { NoteInfo } from '../services/verovio';
+import type { FragmentTimeWindow, NoteInfo } from '../services/verovio';
 import { formatFragmentRange } from '../utils/fragmentRange';
 import styles from './FragmentDetail.module.css';
 
@@ -322,6 +322,10 @@ export default function FragmentDetail() {
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
   const [geometry, setGeometry] = useState<FragmentGeometry>(EMPTY_GEOMETRY);
   const [displayPosition, setDisplayPosition] = useState({ bar: 1, beat: 1 });
+  // Fragment playback window into the whole-movement MIDI (Step 18). Verovio's
+  // renderToMIDI ignores the fragment select(), so playback is constrained by
+  // windowing the whole-movement MIDI to the rendered measure range.
+  const [fragmentWindow, setFragmentWindow] = useState<FragmentTimeWindow | null>(null);
   // Bumped by the ResizeObserver when the container width changes; a render
   // effect dependency so the SVG re-renders at the new width.
   const [widthEpoch, setWidthEpoch] = useState(0);
@@ -396,15 +400,22 @@ export default function FragmentDetail() {
 
       const midi = await renderMidi(tk);
       if (cancelled) return;
-      highlightScheduleRef.current = buildHighlightSchedule(tk);
+      // renderToMIDI/renderToTimemap ignore the fragment select(): both emit the
+      // whole movement. buildFragmentPlayback windows that output to the rendered
+      // measure range (mc_start..mc_end) — note that this is the *rendered*
+      // fragment (whole measures), not the beat-precise tagged range — and
+      // returns a fragment-relative highlight schedule plus the time window.
+      const playback = buildFragmentPlayback(tk, meiText!, fragment!.mc_start, fragment!.mc_end);
+      highlightScheduleRef.current = playback.schedule;
       const tempo     = getTimemapTempo(tk);
-      const meterUnit = parseMeiMeterUnit(meiText);
+      const meterUnit = parseMeiMeterUnit(meiText!);
       beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
 
       // Clear any stale playback highlight from a previous fragment.
       for (const el of highlightedElsRef.current) el.classList.remove('is-playing');
       highlightedElsRef.current = [];
 
+      setFragmentWindow(playback.window);
       setMidiBase64(midi);
       setRenderStatus('ready');
     }
@@ -504,17 +515,26 @@ export default function FragmentDetail() {
     }
   }, []);
 
+  // Clear the SVG playback highlight — used both by the Stop button and as the
+  // hook's onEnded callback when fragment playback reaches the window end.
+  const clearPlaybackHighlights = useCallback(() => {
+    for (const el of highlightedElsRef.current) el.classList.remove('is-playing');
+    highlightedElsRef.current = [];
+  }, []);
+
   const {
     status:   playbackStatus,
     position: playbackPosition,
     play, pause, stop,
-  } = useMidiPlayback(midiBase64, handlePositionUpdate);
+  } = useMidiPlayback(midiBase64, handlePositionUpdate, {
+    window: fragmentWindow,
+    onEnded: clearPlaybackHighlights,
+  });
 
   const handleStop = useCallback(() => {
     stop();
-    for (const el of highlightedElsRef.current) el.classList.remove('is-playing');
-    highlightedElsRef.current = [];
-  }, [stop]);
+    clearPlaybackHighlights();
+  }, [stop, clearPlaybackHighlights]);
 
   // Reset transport display when playback returns to idle/ready.
   useEffect(() => {

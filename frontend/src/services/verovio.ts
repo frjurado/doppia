@@ -583,3 +583,156 @@ export function buildHighlightSchedule(
     return [];
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fragment-scoped playback (Component 9 Step 18)
+// ---------------------------------------------------------------------------
+
+/**
+ * A fragment's playback time window, expressed in the **whole movement's** MIDI
+ * time (milliseconds).
+ *
+ * `startMs` is the onset of the first rendered measure; `endMs` is the onset of
+ * the measure immediately after the fragment (its exclusive upper bound), or
+ * `Number.POSITIVE_INFINITY` when the fragment runs to the end of the movement.
+ */
+export interface FragmentTimeWindow {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Fragment playback bundle: the time window into the whole-movement MIDI plus a
+ * highlight schedule already clipped to that window and shifted so the fragment
+ * starts at 0 ms.
+ */
+export interface FragmentPlayback {
+  window: FragmentTimeWindow;
+  /** Windowed, fragment-relative highlight schedule (timeMs measured from the
+   *  fragment's first onset). */
+  schedule: Array<{ timeMs: number; ids: string[] }>;
+}
+
+/** Tolerance for ms comparisons against measure-onset boundaries. */
+const WINDOW_EPS_MS = 0.5;
+
+/** Read every `<measure>` xml:id in document order (= 1-based mc position). */
+function readMeasureIdsInOrder(meiText: string): string[] {
+  const ids: string[] = [];
+  try {
+    if (typeof DOMParser === 'undefined') {
+      // Node / non-DOM environments (some test runners): regex fallback.
+      for (const m of meiText.matchAll(/<measure\b[^>]*?\bxml:id="([^"]+)"/g)) {
+        ids.push(m[1]!);
+      }
+      return ids;
+    }
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+    const measures = doc.getElementsByTagName('measure');
+    for (let i = 0; i < measures.length; i++) {
+      const el = measures[i]!;
+      const id =
+        el.getAttribute('xml:id') ??
+        el.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
+      ids.push(id ?? '');
+    }
+  } catch {
+    // Return whatever was collected before the failure.
+  }
+  return ids;
+}
+
+/**
+ * Build a fragment-scoped playback bundle from the whole-movement timemap.
+ *
+ * **Why windowing rather than `select()`.** `renderFragment()` constrains the
+ * *rendered SVG* via `select()` + `redoLayout()`, but Verovio's
+ * `renderToMIDI()` and `renderToTimemap()` ignore the selection — they always
+ * emit the whole movement (empirically confirmed in 6.1.0: identical byte-for-
+ * byte MIDI and identical timemap with or without an active selection). So
+ * fragment playback windows the whole-movement output to the fragment's measure
+ * span instead. This also preserves Verovio's running clef/key/meter/tempo
+ * context at `mc_start`, which an MEI slice would lose.
+ *
+ * The window is keyed on the rendered measure range (`mc_start`/`mc_end`), not
+ * on the beat-precise tagged range: playback follows the *rendered* fragment
+ * (whole measures), matching what the viewer shows.
+ *
+ * Boundaries come from the timemap's `measureOn` field (present when
+ * `includeMeasures: true`), which carries each `<measure>`'s xml:id at its onset.
+ * `mc` is the 1-based document-order index of `<measure>` elements, so
+ * `measureIds[mc - 1]` is the fragment's first measure and `measureIds[mcEnd]`
+ * the measure after it.
+ *
+ * Repeats (Verovio expands them in the timemap) fall out naturally: a repeat
+ * wholly inside the fragment spans both passes within the window; a fragment
+ * inside a larger repeat keeps only the first pass (its `endMs` is the next
+ * measure's first onset after `startMs`) — i.e. it plays once, straight
+ * through, matching the final-pass policy in `playback-coordinates.md`.
+ *
+ * Falls back to a whole-movement window + `buildHighlightSchedule` on any
+ * failure (missing measureOn, unparseable MEI), so playback degrades to the
+ * previous behaviour rather than breaking.
+ *
+ * @param tk      - Toolkit with the fragment's movement already loaded/rendered.
+ * @param meiText - Normalized MEI for the loaded movement.
+ * @param mcStart - 1-based position index of the fragment's first measure.
+ * @param mcEnd   - 1-based position index of the fragment's last measure.
+ */
+export function buildFragmentPlayback(
+  tk: VerovioToolkitInstance,
+  meiText: string,
+  mcStart: number,
+  mcEnd: number,
+): FragmentPlayback {
+  const fallback = (): FragmentPlayback => ({
+    window: { startMs: 0, endMs: Number.POSITIVE_INFINITY },
+    schedule: buildHighlightSchedule(tk),
+  });
+
+  try {
+    const raw = tk.renderToTimemap({ includeMeasures: true });
+    const entries = (
+      typeof raw === 'string'
+        ? (JSON.parse(raw) as Array<{ tstamp?: number; on?: string[]; measureOn?: string }>)
+        : (raw as Array<{ tstamp?: number; on?: string[]; measureOn?: string }>)
+    );
+
+    const measureIds = readMeasureIdsInOrder(meiText);
+    const startId = measureIds[mcStart - 1];
+    if (!startId) return fallback();
+
+    // startMs: first onset of the fragment's first measure.
+    let startMs: number | null = null;
+    for (const e of entries) {
+      if (e.measureOn === startId && e.tstamp !== undefined) { startMs = e.tstamp; break; }
+    }
+    if (startMs === null) return fallback();
+
+    // endMs: first onset of the measure after the fragment that falls after
+    // startMs (so a repeated "next" measure resolves to the correct pass).
+    // Absent (fragment ends the movement) → play to the end.
+    let endMs = Number.POSITIVE_INFINITY;
+    const afterId = measureIds[mcEnd]; // (mcEnd + 1)-th measure, 0-based index mcEnd
+    if (afterId) {
+      for (const e of entries) {
+        if (e.measureOn === afterId && e.tstamp !== undefined && e.tstamp > startMs) {
+          endMs = e.tstamp;
+          break;
+        }
+      }
+    }
+
+    const schedule: Array<{ timeMs: number; ids: string[] }> = [];
+    for (const e of entries) {
+      if (!e.on || e.on.length === 0 || e.tstamp === undefined) continue;
+      if (e.tstamp < startMs - WINDOW_EPS_MS || e.tstamp >= endMs - WINDOW_EPS_MS) continue;
+      schedule.push({ timeMs: e.tstamp - startMs, ids: e.on.map(stripRendSuffix) });
+    }
+    schedule.sort((a, b) => a.timeMs - b.timeMs);
+
+    return { window: { startMs, endMs }, schedule };
+  } catch {
+    return fallback();
+  }
+}

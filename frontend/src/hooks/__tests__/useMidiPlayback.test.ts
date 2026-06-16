@@ -24,6 +24,7 @@ const mockTransport = {
   pause: vi.fn(function (this: typeof mockTransport) { this.state = 'paused'; }),
   cancel: vi.fn(),
   schedule: vi.fn(),
+  scheduleOnce: vi.fn(),
 };
 
 vi.mock('tone', () => ({
@@ -307,5 +308,60 @@ describe('useMidiPlayback — position display', () => {
   it('starts with bar 1, beat 1', () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
     expect(result.current.position).toEqual({ bar: 1, beat: 1 });
+  });
+});
+
+describe('useMidiPlayback — fragment window (Step 18)', () => {
+  // The mock Midi has notes at time 0 s and 0.5 s. A window of [500, 1000] ms
+  // (0.5–1.0 s) excludes the first note and keeps the second.
+  const WINDOW = { startMs: 500, endMs: 1000 };
+
+  function renderWindowed(
+    win: { startMs: number; endMs: number } | null = WINDOW,
+    onEnded = vi.fn(),
+  ) {
+    const result = renderHook(
+      ({ w }: { w: { startMs: number; endMs: number } | null }) =>
+        useMidiPlayback(MOCK_MIDI_BASE64, vi.fn(), { window: w, onEnded }),
+      { initialProps: { w: win } },
+    );
+    return { ...result, onEnded };
+  }
+
+  it('schedules only the notes that fall inside the window', async () => {
+    const { result } = renderWindowed();
+    await act(async () => { await result.current.play(); });
+    // Of the two mock notes (0 s, 0.5 s) only the second is inside [0.5, 1.0] s.
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('schedules an auto-stop at the window end', async () => {
+    const { result } = renderWindowed();
+    await act(async () => { await result.current.play(); });
+    expect(mockTransport.scheduleOnce).toHaveBeenCalledTimes(1);
+    // Stop is scheduled at (endSec - startSec) = (1.0 - 0.5) = 0.5 s.
+    expect(mockTransport.scheduleOnce.mock.calls[0][1]).toBeCloseTo(0.5);
+  });
+
+  it('returns to ready and fires onEnded when the window end is reached', async () => {
+    const { result, onEnded } = renderWindowed();
+    await act(async () => { await result.current.play(); });
+    expect(result.current.status).toBe('playing');
+
+    // Invoke the auto-stop callback Tone would fire at the window end.
+    const endCallback = mockTransport.scheduleOnce.mock.calls[0][0] as () => void;
+    act(() => { endCallback(); });
+
+    expect(result.current.status).toBe('ready');
+    expect(onEnded).toHaveBeenCalledTimes(1);
+    expect(mockTransport.stop).toHaveBeenCalled();
+  });
+
+  it('does not schedule an auto-stop when no window is given (whole movement)', async () => {
+    const { result } = renderWindowed(null);
+    await act(async () => { await result.current.play(); });
+    // Both notes scheduled; no windowed auto-stop.
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(2);
+    expect(mockTransport.scheduleOnce).not.toHaveBeenCalled();
   });
 });

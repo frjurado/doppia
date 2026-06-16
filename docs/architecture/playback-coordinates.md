@@ -60,13 +60,16 @@ The timemap schedule is built once after each render by `buildHighlightSchedule(
 ```
 fragment.mc_start / mc_end
         │
-        ▼  tk.select({ measureRange })
+        ▼  tk.select({ measureRange })   ← constrains the rendered SVG only
 Verovio render
         │
         ▼  tk.renderToMIDI()       tk.renderToTimemap()
 base64 MIDI                     timemap schedule
+ (whole movement)               (whole movement)
         │                               │
-        ▼                               │
+        ▼  buildFragmentPlayback(mc_start, mc_end) windows both to the
+        │  fragment's measure span (startMs..endMs) and shifts to 0
+        ▼                               ▼
 Tone.js transport (ms)  ───────────────►  binary search → DOM .is-playing
         │
         ▼
@@ -74,6 +77,14 @@ Tone.Sampler (audio)
 ```
 
 `fragment.bar_start` / `bar_end` live entirely outside this chain — display only.
+
+> **`select()` does not constrain MIDI or the timemap.** Empirically confirmed
+> in Verovio 6.1.0 (Component 9 Step 18): `tk.select({ measureRange }) +
+> redoLayout()` constrains `renderToSVG()` but `renderToMIDI()` and
+> `renderToTimemap()` return byte-for-byte identical whole-movement output with
+> or without an active selection. Fragment playback therefore **windows** the
+> whole-movement output to the rendered measure range rather than relying on the
+> selection. See §"Fragment-scoped playback" below.
 
 ---
 
@@ -97,9 +108,9 @@ Verovio expands all repeats (first/second endings, da capo, dal segno) in MIDI a
 - `renderToTimemap()` produces two entries at different millisecond offsets for the same MEI element IDs — one per pass. `buildHighlightSchedule` preserves both entries; the binary search selects the correct one at playback time.
 - `getElementsAtTime()` is **not** used for highlights in the production path. The timemap schedule is preferred because `getElementsAtTime` can return structural element IDs (barlines, render elements) at repeat boundaries, causing stale highlights between note onsets.
 
-Fragment rendering uses `mc_start`/`mc_end`, which identify a specific physical measure (including which volta variant). A fragment that spans a first ending has `mc_start`/`mc_end` values pointing unambiguously into the first-ending measures; its MIDI is generated for that measure range only. The repeat expansion in `renderToMIDI` therefore plays only the selected range (the selection is applied before MIDI generation via `select()` + `redoLayout()`).
+Fragment rendering uses `mc_start`/`mc_end`, which identify a specific physical measure (including which volta variant). A fragment that spans a first ending has `mc_start`/`mc_end` values pointing unambiguously into the first-ending measures. Its playback covers that measure range only — but because `renderToMIDI()` ignores the selection, the range is enforced by **windowing** the whole-movement MIDI (see §"Fragment-scoped playback" below), not by the selection.
 
-**Fragments containing unpaired repeat structure (ADR-025).** Selections may cross repeat barlines (but not D.C./D.S. markers or volta-ending boundaries), so a fragment can contain a `:|` whose paired `|:` lies outside the fragment. Honouring it would jump playback out of the fragment, so it is ignored: fragment playback uses **final-pass semantics** — no jump, the fragment plays once, straight through its effective range. Volta endings need no playback special-casing: when a truncated repeat has endings, the non-final endings are already excluded from the fragment's effective range at the selection layer. A repeat structure wholly contained in the fragment (including its `|:`) expands normally, both passes. A D.C./D.S. directive can only sit on a fragment's last bar and is ignored. Full-movement playback is unaffected. The implementation lands with fragment-scoped playback in Component 9; the likely mechanism is stripping unpaired repeat/ending markup from the fragment-scoped toolkit state before `renderToMIDI()`, decided at implementation time. Normative statement: `tagging-tool-design.md` §6A.6.
+**Fragments containing unpaired repeat structure (ADR-025).** Selections may cross repeat barlines (but not D.C./D.S. markers or volta-ending boundaries), so a fragment can contain a `:|` whose paired `|:` lies outside the fragment. Honouring it would jump playback out of the fragment, so it is ignored: fragment playback uses **final-pass semantics** — no jump, the fragment plays once, straight through its effective range. Volta endings need no playback special-casing: when a truncated repeat has endings, the non-final endings are already excluded from the fragment's effective range at the selection layer. A repeat structure wholly contained in the fragment (including its `|:`) expands normally, both passes. A D.C./D.S. directive can only sit on a fragment's last bar and is ignored. Full-movement playback is unaffected. **As implemented (Step 18), the time-window mechanism gives these semantics for free:** the window runs from the first onset of `mc_start` to the first onset of the measure after `mc_end`, so a contained repeat (both passes between those onsets) is included, while a fragment inside a larger repeat keeps only its first pass. Normative statement: `tagging-tool-design.md` §6A.6.
 
 ---
 
@@ -191,11 +202,21 @@ The timemap (used for the highlight schedule) is also regenerated after each re-
 
 ---
 
-## Forward-compatibility hooks
+## Fragment-scoped playback
 
-The following items are deferred but should be revisited before the score viewer is used for fragment-level playback (Component 7/8):
+Implemented in Component 9 Step 18 for the fragment detail view (`FragmentDetail.tsx`).
 
-- **Fragment-scoped playback**: MIDI is currently generated for the entire movement. For fragment-level playback, `renderFragment()` should be called first (with `select()` + `redoLayout()`), then `renderMidi()` called on the fragment-scoped toolkit state. The MIDI will then contain only the selected measures.
-- **Beat-level scrubbing**: `beat_start`/`beat_end` are stored but not yet displayed or used as playback start points. When fragment-level playback is added, `Tone.getTransport().position` can be set to the beat offset derived from the timemap schedule before calling `transport.start()`.
-- **Timemap + transposition**: `renderToTimemap()` is not currently re-called after transposition in the fragment render path (`renderFragment`). Add a `buildHighlightSchedule(tk)` call after `renderFragment` completes in the fragment viewer component.
+`renderToMIDI()` and `renderToTimemap()` ignore the fragment `select()` and always emit the whole movement (see §"Coordinate chain"). So fragment playback keeps the whole-movement MIDI/timemap — which preserves Verovio's running clef/key/meter/tempo context at `mc_start` that an MEI slice would lose — and **windows** it to the rendered measure range:
+
+1. `buildFragmentPlayback(tk, meiText, mc_start, mc_end)` (`services/verovio.ts`) reads the whole-movement timemap with `includeMeasures: true`. The `measureOn` field carries each `<measure>`'s xml:id at its onset; `mc` is the 1-based document-order index of `<measure>` elements, so `measureIds[mc_start - 1]` and `measureIds[mc_end]` (the measure *after* the fragment) give the window `{ startMs, endMs }`. `endMs` is `+∞` when the fragment ends the movement. It also returns the highlight schedule clipped to `[startMs, endMs)` and shifted so the fragment starts at 0 ms.
+2. `useMidiPlayback(midi, onUpdate, { window, onEnded })` schedules only the notes inside the window, shifted by `-startMs`, and registers a `Transport.scheduleOnce` auto-stop at the window length so audio never spills past the fragment. With no window (the full score viewer) playback is unchanged.
+
+The window is keyed on the **rendered** measure range (`mc_start`/`mc_end`), not the beat-precise tagged range — playback follows what the viewer renders (whole measures). This is deliberate: the rendered excerpt and the significant (possibly beat-precise) fragment are not the same thing (see the fragment-bracket note in `FragmentDetail.tsx`).
+
+### Forward-compatibility hooks
+
+The following items remain deferred:
+
+- **Beat-level scrubbing**: `beat_start`/`beat_end` are stored but not yet used as playback start points. `Tone.getTransport().position` can be set to a beat offset derived from the timemap schedule before `transport.start()` — the natural extension point for Step 20 (play-from-position).
+- **Timemap + transposition**: the fragment viewer rebuilds the schedule on every render via `buildFragmentPlayback(tk, …)` (which calls `renderToTimemap`), so a future transpose control there would already pick up the new timing. The fragment viewer does not yet expose transposition (`transpose: ''`); when it does, confirm the window onsets still align after the reflow.
 - **`getElementsAtTime` fallback removal**: The `VerovioToolkitInstance` interface still declares `getElementsAtTime`. It is no longer called in the production highlight path (replaced by the timemap schedule). Remove it from the interface once the timemap schedule has been validated across the full corpus — the dead declaration is a maintenance hazard.

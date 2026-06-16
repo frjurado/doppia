@@ -45,7 +45,10 @@ vi.mock('../../services/verovio', () => ({
   getVerovioToolkit: vi.fn(),
   renderFragment: vi.fn(),
   renderMidi: vi.fn(),
-  buildHighlightSchedule: vi.fn().mockReturnValue([]),
+  buildFragmentPlayback: vi.fn().mockReturnValue({
+    window: { startMs: 0, endMs: Number.POSITIVE_INFINITY },
+    schedule: [],
+  }),
   buildNoteInfoMap: vi.fn().mockReturnValue(new Map()),
   getTimemapTempo: vi.fn().mockReturnValue(120),
   parseMeiMeterUnit: vi.fn().mockReturnValue(4),
