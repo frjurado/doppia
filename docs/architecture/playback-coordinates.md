@@ -51,7 +51,7 @@ These fields are nullable: `null` means "full extent of the measure range", not 
 
 `useMidiPlayback` tracks position in milliseconds via `Tone.getTransport().seconds * 1000`. This is the unit consumed by `getElementsAtTime()` (for fallback queries) and the pre-built timemap schedule (the production path).
 
-The timemap schedule is built once after each render by `buildHighlightSchedule()`, which calls `tk.renderToTimemap()`. Each schedule entry maps a millisecond onset to the set of MEI element IDs sounding at that time. During playback, `handlePositionUpdate` binary-searches this schedule at ~60 fps and applies the `.is-playing` CSS class to matching DOM elements without React state updates.
+The timemap schedule is built once after each render by `buildHighlightSchedule()`, which calls `tk.renderToTimemap()`. Each schedule entry maps a millisecond onset to the set of MEI element IDs sounding at that time. During playback, `handlePositionUpdate` binary-searches this schedule at ~60 fps. Since Component 9 Step 19 the schedule drives a **moving caret** (an overlay element), not the former `.is-playing` note highlight — see §"Playback caret".
 
 ---
 
@@ -220,3 +220,42 @@ The following items remain deferred:
 - **Beat-level scrubbing**: `beat_start`/`beat_end` are stored but not yet used as playback start points. `Tone.getTransport().position` can be set to a beat offset derived from the timemap schedule before `transport.start()` — the natural extension point for Step 20 (play-from-position).
 - **Timemap + transposition**: the fragment viewer rebuilds the schedule on every render via `buildFragmentPlayback(tk, …)` (which calls `renderToTimemap`), so a future transpose control there would already pick up the new timing. The fragment viewer does not yet expose transposition (`transpose: ''`); when it does, confirm the window onsets still align after the reflow.
 - **`getElementsAtTime` fallback removal**: The `VerovioToolkitInstance` interface still declares `getElementsAtTime`. It is no longer called in the production highlight path (replaced by the timemap schedule). Remove it from the interface once the timemap schedule has been validated across the full corpus — the dead declaration is a maintenance hazard.
+
+---
+
+## Playback caret
+
+Implemented in Component 9 Step 19 for both the full-score viewer (`ScoreViewer.tsx`) and the fragment detail view (`FragmentDetail.tsx`). It replaces the former `.is-playing` note highlight.
+
+The playback indicator is a moving **caret**: a thin, absolutely-positioned overlay `<div>` layered over `.scoreContent` at z-index 27 (between the harmony overlay at 25 and the fragment/stage brackets at 30), `pointer-events: none`. Per the CLAUDE.md overlay rule it is **never** injected into Verovio's SVG; it is an HTML element whose `transform` and `height` are mutated imperatively each frame — no React state update on the 60 fps path, matching the previous highlight's performance profile. The caret is driven by the existing `onPositionUpdate(timeMs)` signal and the same timemap-derived schedule (`buildHighlightSchedule` for the whole movement; the windowed `buildFragmentPlayback` schedule for a fragment). `getElementsAtTime()` is **not** used (it is not on the production path — see §"Forward-compatibility hooks").
+
+### Caret track
+
+Once per render — rebuilt whenever the geometry signal (`ghostLayer` in the score viewer, `geometry` in the fragment viewer) **and** the schedule are both ready, so it survives the Verovio re-renders that discard overlay geometry — `buildCaretTrack(container, schedule)` (`components/score/caret.ts`) walks the schedule and resolves each entry to a caret **anchor**:
+
+- **x** = the minimum notehead left edge across the entry's note ids (container-relative px, via the same `noteheadLeftEdge` the ghost layer uses, so accidentals don't shift the onset left).
+- **system** = the enclosing `g.system` (`el.closest('g.system')`), grouped by its container-relative top. Each system records `top`, `height`, and `rightEdge` (the system's right edge). A grand-staff system encloses both staves, so the caret spans the full system height.
+
+Anchors are sorted ascending by `timeMs`; systems are ordered top→bottom.
+
+### Interpolation
+
+`resolveCaret(track, t, interpolate)` (pure, unit-tested) returns the caret `{ x, top, height }` at time `t` from the bracketing anchors `a` (latest with `timeMs ≤ t`) and `b`:
+
+- **Before the first anchor** → `null` (caret hidden).
+- **At/after the last anchor** → pinned at the last anchor.
+- **Forward within one system** (`b.system === a.system`, `b.x ≥ a.x`) → x is linearly interpolated `lerp(a.x, b.x, frac)`.
+- **System break** (`b.system !== a.system`) → x sweeps from `a.x` toward `systems[a.system].rightEdge` over the interval, then **jumps** to `b.x` at `t = b.timeMs`. No interpolation across the break.
+- **Backward x — repeat seam** (`b.x < a.x`, e.g. a `:|` returning to its `|:`) → **hold** at `a.x` until the next onset; never sweep the caret backwards.
+
+### Repeats
+
+Verovio expands repeats in the timemap, so a repeated section replays as later entries with the same (suffix-stripped) note ids and therefore the same anchor x. The caret retraces the section automatically on the second pass; only the seam between passes is a snap, never a backward sweep (the rule above). This matches the repeat policy already documented for playback audio.
+
+### Fallback (caret without interpolation)
+
+`resolveCaret(track, t, false)` snaps the caret to the current anchor's x (a discrete step per onset). The active mode is the `CARET_INTERPOLATE` constant in `caret.ts` (default `true`). The trade-off, per the Step 19 brief: interpolation reads as smooth continuous motion but can drift slightly between onsets under uneven tempo; the discrete fallback is always exactly on a note but visibly steppy. Interpolation is the chosen default; the fallback is retained as a one-line switch should interpolation artifacts surface during the tagging campaign.
+
+### Relationship to play-from-position (Step 20)
+
+`resolveCaret` is time-addressable: it resolves any `t`, so a playback that starts mid-score (Step 20) drives the caret correctly with no extra work — the caret simply resolves from the first anchor at or before the seek time.

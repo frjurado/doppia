@@ -24,10 +24,9 @@
  *     (which may be beat-precise, and which future ADR-024 context modes may
  *     embed in surrounding music).
  *
- * Overlay rule (CLAUDE.md): all bracket overlays are absolutely-positioned HTML
- * elements above the SVG; Verovio's SVG is never modified. The one exception is
- * the .is-playing CSS class toggled on SVG note elements during playback — it
- * adds no nodes and is cleared automatically when Verovio re-renders.
+ * Overlay rule (CLAUDE.md): all overlays — the bracket overlays and the Step 19
+ * playback caret (PlaybackCaret) — are absolutely-positioned HTML elements above
+ * the SVG; Verovio's SVG is never modified.
  *
  * Bracket geometry (ADR-011 two-level display limit for sub-parts): after the
  * SVG renders, readFragmentGeometry() walks the MEI DOM to find each measure's
@@ -43,6 +42,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
+import PlaybackCaret from '../components/score/PlaybackCaret';
+import { applyCaretPlacement, buildCaretTrack, CARET_INTERPOLATE, hideCaretEl, resolveCaret } from '../components/score/caret';
+import type { CaretTrack } from '../components/score/caret';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -337,7 +339,9 @@ export default function FragmentDetail() {
   // the fetch and re-render from meiTextRef.current instead.
   const lastFragIdRef          = useRef<string | null>(null);
   const highlightScheduleRef   = useRef<Array<{ timeMs: number; ids: string[] }>>([]);
-  const highlightedElsRef      = useRef<Element[]>([]);
+  // Playback caret (Step 19): overlay element + caret track, driven imperatively.
+  const caretElRef             = useRef<HTMLDivElement | null>(null);
+  const caretTrackRef          = useRef<CaretTrack | null>(null);
   const noteInfoMapRef         = useRef<Map<string, NoteInfo>>(new Map());
   const scoreContainerRef      = useRef<HTMLDivElement | null>(null);
   const currentBarRef          = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
@@ -411,9 +415,9 @@ export default function FragmentDetail() {
       const meterUnit = parseMeiMeterUnit(meiText!);
       beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
 
-      // Clear any stale playback highlight from a previous fragment.
-      for (const el of highlightedElsRef.current) el.classList.remove('is-playing');
-      highlightedElsRef.current = [];
+      // Hide the caret from any previous fragment; its track is rebuilt against
+      // the new geometry by the caret-track effect.
+      hideCaretEl(caretElRef.current);
 
       setFragmentWindow(playback.window);
       setMidiBase64(midi);
@@ -473,13 +477,35 @@ export default function FragmentDetail() {
     return () => cancelAnimationFrame(raf);
   }, [svgString]);
 
-  // ── Playback highlight (mirrors ScoreViewer.handlePositionUpdate) ────────
-  const handlePositionUpdate = useCallback((timeMs: number) => {
-    // Clear previous highlights unconditionally so they never stick.
-    for (const el of highlightedElsRef.current) el.classList.remove('is-playing');
-    highlightedElsRef.current = [];
+  // ── Caret track (Step 19) ────────────────────────────────────────────────
+  // Rebuild the caret track once the geometry (post-paint) and the windowed
+  // highlight schedule are both ready — and again on every re-render — so the
+  // caret survives Verovio re-renders that discard overlay geometry. `geometry`
+  // is set after the SVG is laid out; `midiBase64` after the schedule is built.
+  useEffect(() => {
+    const container = scoreContainerRef.current;
+    if (!container || highlightScheduleRef.current.length === 0) {
+      caretTrackRef.current = null;
+      return;
+    }
+    caretTrackRef.current = buildCaretTrack(container, highlightScheduleRef.current);
+  }, [geometry, midiBase64]);
 
+  // ── Position update (mirrors ScoreViewer.handlePositionUpdate) ───────────
+  const handlePositionUpdate = useCallback((timeMs: number) => {
     const schedule = highlightScheduleRef.current;
+
+    // Playback caret (Step 19): driven imperatively from the caret track.
+    const caretEl = caretElRef.current;
+    if (caretEl) {
+      const placement = caretTrackRef.current
+        ? resolveCaret(caretTrackRef.current, timeMs, CARET_INTERPOLATE)
+        : null;
+      if (placement) applyCaretPlacement(caretEl, placement);
+      else hideCaretEl(caretEl);
+    }
+
+    // Update transport bar display from MEI @n / @tstamp (not Tone.js linear bar).
     if (schedule.length > 0) {
       let lo = 0, hi = schedule.length - 1, idx = -1;
       while (lo <= hi) {
@@ -487,17 +513,8 @@ export default function FragmentDetail() {
         if (schedule[mid].timeMs <= timeMs) { idx = mid; lo = mid + 1; }
         else hi = mid - 1;
       }
-      if (idx >= 0) {
-        for (const id of schedule[idx].ids) {
-          const el = document.getElementById(id);
-          if (el) { el.classList.add('is-playing'); highlightedElsRef.current.push(el); }
-        }
-      }
-    }
-
-    // Update transport bar display from MEI @n / @tstamp (not Tone.js linear bar).
-    if (highlightedElsRef.current.length > 0) {
-      const info = noteInfoMapRef.current.get(highlightedElsRef.current[0].id);
+      const firstId = idx >= 0 ? schedule[idx].ids[0] : undefined;
+      const info = firstId ? noteInfoMapRef.current.get(firstId) : undefined;
       if (info) {
         if (info.beat > 0) {
           setDisplayPosition({ bar: info.barN, beat: info.beat });
@@ -515,11 +532,10 @@ export default function FragmentDetail() {
     }
   }, []);
 
-  // Clear the SVG playback highlight — used both by the Stop button and as the
-  // hook's onEnded callback when fragment playback reaches the window end.
-  const clearPlaybackHighlights = useCallback(() => {
-    for (const el of highlightedElsRef.current) el.classList.remove('is-playing');
-    highlightedElsRef.current = [];
+  // Hide the caret — used both by the Stop button and as the hook's onEnded
+  // callback when fragment playback reaches the window end.
+  const hideCaret = useCallback(() => {
+    hideCaretEl(caretElRef.current);
   }, []);
 
   const {
@@ -528,13 +544,13 @@ export default function FragmentDetail() {
     play, pause, stop,
   } = useMidiPlayback(midiBase64, handlePositionUpdate, {
     window: fragmentWindow,
-    onEnded: clearPlaybackHighlights,
+    onEnded: hideCaret,
   });
 
   const handleStop = useCallback(() => {
     stop();
-    clearPlaybackHighlights();
-  }, [stop, clearPlaybackHighlights]);
+    hideCaret();
+  }, [stop, hideCaret]);
 
   // Reset transport display when playback returns to idle/ready.
   useEffect(() => {
@@ -782,6 +798,11 @@ export default function FragmentDetail() {
                     })}
                   </div>
                 )}
+
+                {/* Playback caret (Step 19): moving overlay bar driven by
+                    handlePositionUpdate. Inside the position:relative score
+                    container so it shares the bracket overlays' origin. */}
+                <PlaybackCaret ref={caretElRef} />
               </div>
 
               {/* Playback bar */}

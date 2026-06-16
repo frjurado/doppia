@@ -39,12 +39,5 @@ a:focus-visible {
   outline-offset: -2px;
 }
 
-/* Playback highlight (Step 14.4) — applied via direct DOM mutation to Verovio
-   SVG elements identified by tk.getElementsAtTime(). The class is removed on
-   the next position update (or stop) and cleared automatically by Verovio
-   re-renders. Global (not a CSS Module) because Verovio SVG lives outside
-   React's component tree. */
-.is-playing path,
-.is-playing use {
-  fill: var(--color-primary) !important;
-}
+/* The playback indicator is the moving caret (Component 9 Step 19), an HTML
+   overlay styled in PlaybackCaret.module.css — no SVG class mutation. */

@@ -164,10 +164,10 @@ function parseTransportPosition(posStr: string): PlaybackPosition {
  * @param midiBase64 - Base64-encoded MIDI from Verovio renderToMIDI(), or
  *   null when the score is not yet rendered or MIDI generation failed.
  * @param onPositionUpdate - Called on each animation frame during playback
- *   with the current MIDI time in milliseconds. The score viewer binary-searches
- *   the pre-built timemap schedule (from `buildHighlightSchedule`) to find the
- *   active notes and applies the `.is-playing` CSS class to the matching SVG
- *   elements. No Verovio calls happen at playback time.
+ *   with the current MIDI time in milliseconds. The score viewer uses it to
+ *   drive the playback caret (Step 19) from the pre-built timemap schedule /
+ *   caret track, and to update the transport bar. No Verovio calls happen at
+ *   playback time.
  */
 export function useMidiPlayback(
   midiBase64: string | null,

@@ -2,8 +2,7 @@
    All positioning is applied inline (computed from SVG pixel bounds).
    These classes handle visual state and pointer-events management only.
    Global CSS (not a CSS Module) because ghost elements are created
-   imperatively outside React's component tree — same pattern as .is-playing
-   in base.css. */
+   imperatively outside React's component tree. */
 
 /* --- Base ghost element --- */
 .ghost {

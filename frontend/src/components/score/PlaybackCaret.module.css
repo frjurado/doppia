@@ -1,0 +1,18 @@
+/* Playback caret (Component 9 Step 19).
+   Absolutely positioned over .scoreContent; driven imperatively via transform.
+   Sits between the harmony overlay (z 25) and the fragment/stage brackets (z 30).
+   0px radius per DESIGN.md; no transition — position is set per frame. */
+.caret {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 0;
+  background-color: var(--color-primary, #3f5f77);
+  border-radius: 0;
+  pointer-events: none;
+  visibility: hidden;
+  z-index: 27;
+  will-change: transform;
+  transform: translate(0, 0);
+}

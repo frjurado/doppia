@@ -4,6 +4,9 @@ import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
+import PlaybackCaret from '../components/score/PlaybackCaret';
+import { applyCaretPlacement, buildCaretTrack, CARET_INTERPOLATE, hideCaretEl, resolveCaret } from '../components/score/caret';
+import type { CaretTrack } from '../components/score/caret';
 import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
 import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
 import { AnnotationSession, buildDirectiveBarriers, buildVoltaIndex } from '../components/score/annotator';
@@ -138,16 +141,17 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  * overlay until the new render is complete. After re-render, renderMidi() is
  * called again so the MIDI follows the transposition (Step 14.6).
  *
- * Playback highlight (Step 14.4):
+ * Playback caret (Step 14.4; caret since Step 19):
  *   useMidiPlayback fires onPositionUpdate(timeMs) on each animation frame.
  *   handlePositionUpdate binary-searches a pre-built schedule (from
- *   buildHighlightSchedule / renderToTimemap) and toggles the global
- *   `.is-playing` CSS class on matching SVG elements via direct DOM mutation
- *   (not React state — avoids re-render at RAF frequency). The timemap-derived
- *   schedule correctly expands repeats so both passes are highlighted.
- *   Note: modifying a class on an existing Verovio SVG element is the one
- *   exception to the CLAUDE.md HTML-overlay rule; it adds no new nodes and is
- *   cleared automatically when Verovio re-renders the SVG.
+ *   buildHighlightSchedule / renderToTimemap) and drives a moving caret overlay
+ *   (PlaybackCaret) via direct style mutation (not React state — avoids
+ *   re-render at RAF frequency). The caret track (buildCaretTrack) maps the
+ *   schedule's onsets to pixel anchors; resolveCaret interpolates between them.
+ *   The timemap-derived schedule correctly expands repeats so the caret retraces
+ *   repeated sections. See docs/architecture/playback-coordinates.md §"Playback
+ *   caret". The caret is an HTML overlay above the SVG (CLAUDE.md overlay rule),
+ *   never injected into Verovio's output.
  *
  * Container width measurement:
  *   A ResizeObserver watches the .scoreContent element. On resize (debounced
@@ -417,10 +421,11 @@ export default function ScoreViewer() {
   const pageWidthRef = useRef<number>(DEFAULT_PAGE_WIDTH);
   // Ref to the .scoreContent element for width measurement.
   const scorePanelRef = useRef<HTMLDivElement | null>(null);
-  // Currently highlighted SVG elements (is-playing class). One entry per
-  // sounding note (multiple staves, chords). Cleared on stop and on each
-  // position update. Using a ref avoids React re-renders at RAF freq.
-  const highlightedElsRef = useRef<Element[]>([]);
+  // Playback caret (Step 19): the overlay element, driven imperatively, and the
+  // caret track rebuilt after each render. Using refs avoids React re-renders at
+  // RAF frequency — the caret's transform is mutated directly per frame.
+  const caretElRef = useRef<HTMLDivElement | null>(null);
+  const caretTrackRef = useRef<CaretTrack | null>(null);
   // Highlight schedule from renderToTimemap(), rebuilt after each render.
   // Sorted { timeMs, ids } entries with repeats fully expanded — the same note
   // IDs appear twice (once per pass) at different timeMs values.
@@ -576,11 +581,11 @@ export default function ScoreViewer() {
     propertyValues: PropertyFormValues;
   } | null>(null);
 
-  // ── Position update callback (Step 14.4) ─────────────────────────────────
+  // ── Position update callback (Step 14.4; caret since Step 19) ────────────
   /**
    * Called by useMidiPlayback on each animation frame. Binary-searches the
-   * timemap-derived highlight schedule for the latest onset ≤ timeMs, then
-   * applies the `.is-playing` CSS class to matching DOM elements.
+   * timemap-derived highlight schedule for the latest onset ≤ timeMs, drives the
+   * playback caret (Step 19) from the caret track, and updates the transport bar.
    *
    * The schedule is built from renderToTimemap() after each render, which
    * expands repeats correctly: both passes of a repeated section have entries
@@ -588,15 +593,37 @@ export default function ScoreViewer() {
    * at playback time.
    */
   const handlePositionUpdate = useCallback((timeMs: number) => {
-    // ── SVG note highlight ───────────────────────────────────────────────────
     const schedule = highlightScheduleRef.current;
 
-    // Clear previous highlights unconditionally so they never get stuck.
-    for (const el of highlightedElsRef.current) {
-      el.classList.remove('is-playing');
+    // ── Playback caret (Step 19) ─────────────────────────────────────────────
+    // Drive the caret overlay imperatively from the caret track. resolveCaret
+    // interpolates x between onsets within a system and jumps at system breaks /
+    // repeat seams. Hidden before the first onset and when no track is built.
+    const caretEl = caretElRef.current;
+    if (caretEl) {
+      const placement = caretTrackRef.current
+        ? resolveCaret(caretTrackRef.current, timeMs, CARET_INTERPOLATE)
+        : null;
+      if (placement) applyCaretPlacement(caretEl, placement);
+      else hideCaretEl(caretEl);
     }
-    highlightedElsRef.current = [];
 
+    // ── Transport bar display (Step 18) ──────────────────────────────────────
+    // Look up the current onset's first note id in noteInfoMapRef to get the
+    // MEI @n bar number and the @tstamp-derived beat (in the time signature's
+    // denominator unit). This fixes all three transport-bar sub-defects:
+    //
+    //   1. Pickup bars: barN = 0 (from MEI @n="0"), beats renumbered from 1.
+    //      Tone.js calls the pickup "bar 1" and makes every subsequent bar wrong.
+    //
+    //   2. Repeats: Step 17 stripped -rendN so the same id resolves on both
+    //      passes; the map returns the same barN on both passes.
+    //      Tone.js would count linearly (bar 9, 10 … instead of 1, 2 …).
+    //
+    //   3. 6/8 beats: MEI @tstamp is in eighth-note units, so beat 1–6 are
+    //      returned directly. Tone.js counts only 3 quarter-note beats.
+    //
+    // setDisplayPosition is stable (useState setter) — no extra deps needed.
     if (schedule.length > 0) {
       // Binary-search for the latest onset at or before the current time.
       let lo = 0, hi = schedule.length - 1, idx = -1;
@@ -606,35 +633,8 @@ export default function ScoreViewer() {
         else hi = mid - 1;
       }
 
-      if (idx >= 0) {
-        for (const id of schedule[idx].ids) {
-          const el = document.getElementById(id);
-          if (el) {
-            el.classList.add('is-playing');
-            highlightedElsRef.current.push(el);
-          }
-        }
-      }
-    }
-
-    // ── Transport bar display (Step 18) ──────────────────────────────────────
-    // Look up the first highlighted element's id in noteInfoMapRef to get the
-    // MEI @n bar number and the @tstamp-derived beat (in the time signature's
-    // denominator unit). This fixes all three transport-bar sub-defects:
-    //
-    //   1. Pickup bars: barN = 0 (from MEI @n="0"), beats renumbered from 1.
-    //      Tone.js calls the pickup "bar 1" and makes every subsequent bar wrong.
-    //
-    //   2. Repeats: Step 17 stripped -rendN so the same element is highlighted
-    //      on both passes; the map returns the same barN on both passes.
-    //      Tone.js would count linearly (bar 9, 10 … instead of 1, 2 …).
-    //
-    //   3. 6/8 beats: MEI @tstamp is in eighth-note units, so beat 1–6 are
-    //      returned directly. Tone.js counts only 3 quarter-note beats.
-    //
-    // setDisplayPosition is stable (useState setter) — no extra deps needed.
-    if (highlightedElsRef.current.length > 0) {
-      const info = noteInfoMapRef.current.get(highlightedElsRef.current[0].id);
+      const firstId = idx >= 0 ? schedule[idx].ids[0] : undefined;
+      const info = firstId ? noteInfoMapRef.current.get(firstId) : undefined;
       if (info) {
         if (info.beat > 0) {
           // @tstamp present — use directly (already in denominator units).
@@ -665,16 +665,28 @@ export default function ScoreViewer() {
   } = useMidiPlayback(midiBase64, handlePositionUpdate);
 
   /**
-   * Stop playback and also clear the SVG highlight immediately.
-   * Wraps stop() because the hook's stop() has no access to highlightedElsRef.
+   * Stop playback and also hide the caret immediately.
+   * Wraps stop() because the hook's stop() has no access to caretElRef.
    */
   const handleStop = useCallback(() => {
     stop();
-    for (const el of highlightedElsRef.current) {
-      el.classList.remove('is-playing');
-    }
-    highlightedElsRef.current = [];
+    hideCaretEl(caretElRef.current);
   }, [stop]);
+
+  // ── Caret track (Step 19) ────────────────────────────────────────────────
+  // Rebuild the caret track once the geometry (ghostLayer) and the highlight
+  // schedule are both ready — and again on every re-render (scale/transpose/
+  // resize change both signals), so the caret survives Verovio re-renders that
+  // discard overlay geometry. ghostLayer is set after the SVG is laid out;
+  // midiBase64 is set right after the schedule is built.
+  useEffect(() => {
+    const container = scorePanelRef.current;
+    if (!container || highlightScheduleRef.current.length === 0) {
+      caretTrackRef.current = null;
+      return;
+    }
+    caretTrackRef.current = buildCaretTrack(container, highlightScheduleRef.current);
+  }, [ghostLayer, midiBase64]);
 
   // ── displayPosition sync (Step 18) ──────────────────────────────────────
 
@@ -751,11 +763,9 @@ export default function ScoreViewer() {
           beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
           setMidiBase64(midi);
 
-          // Clear stale highlights — SVG element IDs may differ in new render.
-          for (const el of highlightedElsRef.current) {
-            el.classList.remove('is-playing');
-          }
-          highlightedElsRef.current = [];
+          // Hide the caret — its track is rebuilt against the new geometry by
+          // the caret-track effect (keyed on ghostLayer + midiBase64).
+          hideCaretEl(caretElRef.current);
         } catch {
           // Keep existing pages on render failure.
         } finally {
@@ -2019,6 +2029,11 @@ export default function ScoreViewer() {
                 session={annotationSessionRef.current}
               />
             </FragmentOverlay>
+
+            {/* Playback caret (Step 19): a moving overlay bar driven imperatively
+                by handlePositionUpdate. Sibling of the fragment overlay so it
+                shares the .scoreContent coordinate origin. */}
+            <PlaybackCaret ref={caretElRef} />
           </div>
         </div>
 

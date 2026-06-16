@@ -1,7 +1,6 @@
 // Side-effect import: includes ghost highlight CSS (.ghost.light / .ghost.dark)
 // in the Vite bundle. Plain CSS (not a CSS Module) because ghost elements are
-// created imperatively outside React's component tree — same pattern as
-// .is-playing in base.css.
+// created imperatively outside React's component tree.
 import './ghosts.css';
 
 /**
@@ -698,8 +697,11 @@ export class GhostLayer {
  *  1. Direct <g class="noteHead"> child (Verovio default).
  *  2. Leftmost non-accidental child with non-zero width.
  *  3. Note group's own left edge.
+ *
+ * Exported for reuse by the playback caret (caret.ts), which resolves onset
+ * x-positions from the same notehead geometry.
  */
-function noteheadLeftEdge(svgNote: Element, containerLeft: number): number {
+export function noteheadLeftEdge(svgNote: Element, containerLeft: number): number {
   const notehead =
     svgNote.querySelector(':scope > g.noteHead') ??
     svgNote.querySelector(':scope > g.notehead');

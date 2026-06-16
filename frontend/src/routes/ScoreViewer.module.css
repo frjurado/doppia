@@ -469,6 +469,5 @@
   min-width: 4ch;
 }
 
-/* Note: the .is-playing playback highlight class (Step 14.4) is defined in
-   src/styles/base.css, not here — Verovio SVG elements live outside React's
-   component tree so a global stylesheet is required. */
+/* Note: the playback indicator is the moving caret (Step 19), styled in
+   PlaybackCaret.module.css and mounted as an overlay over .scoreContent. */

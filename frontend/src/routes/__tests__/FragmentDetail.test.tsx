@@ -625,7 +625,10 @@ describe('FragmentDetail — sub-part bracket overlay', () => {
 
     await screen.findByText('PAC');
     // The sub-part overlay layer renders only when measureRects.size > 0.
-    // Since jsdom returns zero rects, the overlay is not present.
-    expect(document.querySelector('[aria-hidden="true"]')).not.toBeInTheDocument();
+    // Since jsdom returns zero rects, the overlay is not present. (Exclude the
+    // always-present playback caret, which is also aria-hidden — Step 19.)
+    expect(
+      document.querySelector('[aria-hidden="true"]:not([data-testid="playback-caret"])'),
+    ).not.toBeInTheDocument();
   });
 });
