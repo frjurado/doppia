@@ -407,6 +407,36 @@ describe('buildFragmentPlayback', () => {
     { tstamp: 3500, on: ['n4b'] },
   ]);
 
+  // 6 measures, ids m1..m6 (mc 1..6).
+  const MEI_6_MEASURES = `<?xml version="1.0" encoding="UTF-8"?>
+    <mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score>
+        <section>
+          <measure xml:id="m1" n="1"/>
+          <measure xml:id="m2" n="2"/>
+          <measure xml:id="m3" n="3"/>
+          <measure xml:id="m4" n="4"/>
+          <measure xml:id="m5" n="5"/>
+          <measure xml:id="m6" n="6"/>
+        </section>
+      </score></mdiv></body></music>
+    </mei>`;
+
+  // Expanded timemap for a movement whose section m1..m3 carries a repeat
+  // (played twice) before m4..m6. On the second pass Verovio appends a -rendN
+  // suffix to both `measureOn` and `on` ids — confirmed against K279/i 6.1.0.
+  const TIMEMAP_REPEAT = JSON.stringify([
+    { tstamp: 0,    measureOn: 'm1',       on: ['n1'] },
+    { tstamp: 1000, measureOn: 'm2',       on: ['n2'] },
+    { tstamp: 2000, measureOn: 'm3',       on: ['n3'] },
+    { tstamp: 3000, measureOn: 'm1-rend2', on: ['n1-rend2'] },
+    { tstamp: 4000, measureOn: 'm2-rend2', on: ['n2-rend2'] },
+    { tstamp: 5000, measureOn: 'm3-rend2', on: ['n3-rend2'] },
+    { tstamp: 6000, measureOn: 'm4',       on: ['n4'] },
+    { tstamp: 7000, measureOn: 'm5',       on: ['n5'] },
+    { tstamp: 8000, measureOn: 'm6',       on: ['n6'] },
+  ]);
+
   let tk: ReturnType<typeof makeMockToolkit>;
   beforeEach(() => {
     tk = makeMockToolkit();
@@ -473,6 +503,55 @@ describe('buildFragmentPlayback', () => {
     );
     const { schedule } = buildFragmentPlayback(tk, MEI_4_MEASURES, 2, 3);
     expect(schedule[0]).toEqual({ timeMs: 0, ids: ['n2'] });
+  });
+
+  // ─ Repeat handling (ADR-025 final-pass semantics) ───────────────────────────
+
+  it('plays a fragment ending on an unpaired repeat-end once, from the final pass', () => {
+    // Fragment mc 2..3 ends on the repeat-end (m3); its repeat-start (m1) is
+    // outside the fragment. ADR-025: the repeat is ignored — the fragment sounds
+    // once, as on the final pass. The window must start at the *second* (final)
+    // pass of m2 (4000 ms), NOT the first (1000 ms), so playback never jumps
+    // back to m1.
+    tk.renderToTimemap.mockReturnValue(TIMEMAP_REPEAT);
+    const { window, schedule } = buildFragmentPlayback(tk, MEI_6_MEASURES, 2, 3);
+    expect(window).toEqual({ startMs: 4000, endMs: 6000 });
+    // n2-rend2 (4000) and n3-rend2 (5000), suffix-stripped, shifted to 0.
+    expect(schedule).toEqual([
+      { timeMs: 0,    ids: ['n2'] },
+      { timeMs: 1000, ids: ['n3'] },
+    ]);
+  });
+
+  it('expands a repeat wholly contained in the fragment (both passes)', () => {
+    // Fragment mc 1..3 contains the whole repeated section, so both passes play.
+    // The window starts at the first onset (the repeat re-enters m1 from *inside*
+    // the range, so the second m1 onset is not chosen as the start) and ends at
+    // the first measure outside the range (m4, 6000 ms).
+    tk.renderToTimemap.mockReturnValue(TIMEMAP_REPEAT);
+    const { window, schedule } = buildFragmentPlayback(tk, MEI_6_MEASURES, 1, 3);
+    expect(window).toEqual({ startMs: 0, endMs: 6000 });
+    expect(schedule).toEqual([
+      { timeMs: 0,    ids: ['n1'] },
+      { timeMs: 1000, ids: ['n2'] },
+      { timeMs: 2000, ids: ['n3'] },
+      { timeMs: 3000, ids: ['n1'] },
+      { timeMs: 4000, ids: ['n2'] },
+      { timeMs: 5000, ids: ['n3'] },
+    ]);
+  });
+
+  it('elides across a section join: final pass of the truncated repeat, no jump back', () => {
+    // Fragment mc 3..4 spans the repeat-end (m3) into the next section (m4).
+    // The repeat-start (m1) is outside, so playback takes the final pass of m3
+    // (5000 ms) and continues straight into m4 (6000 ms) — it never jumps back.
+    tk.renderToTimemap.mockReturnValue(TIMEMAP_REPEAT);
+    const { window, schedule } = buildFragmentPlayback(tk, MEI_6_MEASURES, 3, 4);
+    expect(window).toEqual({ startMs: 5000, endMs: 7000 });
+    expect(schedule).toEqual([
+      { timeMs: 0,    ids: ['n3'] },
+      { timeMs: 1000, ids: ['n4'] },
+    ]);
   });
 });
 

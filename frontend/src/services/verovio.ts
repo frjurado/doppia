@@ -658,17 +658,32 @@ function readMeasureIdsInOrder(meiText: string): string[] {
  * on the beat-precise tagged range: playback follows the *rendered* fragment
  * (whole measures), matching what the viewer shows.
  *
- * Boundaries come from the timemap's `measureOn` field (present when
- * `includeMeasures: true`), which carries each `<measure>`'s xml:id at its onset.
- * `mc` is the 1-based document-order index of `<measure>` elements, so
- * `measureIds[mc - 1]` is the fragment's first measure and `measureIds[mcEnd]`
- * the measure after it.
+ * **Repeat handling (ADR-025 final-pass semantics).** Verovio fully expands
+ * repeats in the timemap: a measure played twice yields two `measureOn` onsets
+ * at different `tstamp` values (on the second pass Verovio appends a `-rendN`
+ * suffix to the measure id, stripped here before matching). Naively windowing
+ * from the *first* onset of `mcStart` to the next-measure onset would sweep up
+ * any repeat jump that lands before the fragment — e.g. a fragment ending on a
+ * repeat-end barline whose repeat-start lies earlier in the movement would
+ * play, then jump back outside itself. ADR-025 requires the opposite: a
+ * repeat-end whose paired start is *outside* the fragment is ignored (the
+ * fragment sounds once, as on the final pass), while a repeat *wholly
+ * contained* in the fragment still expands.
  *
- * Repeats (Verovio expands them in the timemap) fall out naturally: a repeat
- * wholly inside the fragment spans both passes within the window; a fragment
- * inside a larger repeat keeps only the first pass (its `endMs` is the next
- * measure's first onset after `startMs`) — i.e. it plays once, straight
- * through, matching the final-pass policy in `playback-coordinates.md`.
+ * Both fall out of a single rule on the expanded measure-onset sequence:
+ *   - **start** at the *last* onset of `mcStart` that is entered *from outside*
+ *     `[mcStart, mcEnd]` (its preceding played measure is `< mcStart` or
+ *     `> mcEnd`, or it is the very first onset). For a contained repeat this is
+ *     still the first onset (the repeat's internal jump re-enters from *inside*
+ *     the range, so later `mcStart` onsets are skipped); for a fragment sitting
+ *     inside a larger repeat it is the final pass.
+ *   - **end** at the first onset thereafter whose measure leaves
+ *     `[mcStart, mcEnd]` (a forward exit past `mcEnd`, or a backward jump below
+ *     `mcStart`). Absent (the fragment runs to the movement end) → play to the
+ *     end.
+ *
+ * Within that window, backward jumps that stay inside the range (a contained
+ * repeat) are preserved, so contained repeats play expanded.
  *
  * Falls back to a whole-movement window + `buildHighlightSchedule` on any
  * failure (missing measureOn, unparseable MEI), so playback degrades to the
@@ -698,29 +713,47 @@ export function buildFragmentPlayback(
         : (raw as Array<{ tstamp?: number; on?: string[]; measureOn?: string }>)
     );
 
+    // Map each measure xml:id → its 1-based document-order position (mc).
     const measureIds = readMeasureIdsInOrder(meiText);
-    const startId = measureIds[mcStart - 1];
-    if (!startId) return fallback();
+    if (measureIds.length === 0) return fallback();
+    const idToMc = new Map<string, number>();
+    measureIds.forEach((id, i) => { if (id) idToMc.set(id, i + 1); });
 
-    // startMs: first onset of the fragment's first measure.
-    let startMs: number | null = null;
+    // Reconstruct the expanded playback measure-onset sequence in time order:
+    // [{ mc, tstamp }, …], one entry per measure onset (repeats expanded).
+    const onsets: Array<{ mc: number; tstamp: number }> = [];
     for (const e of entries) {
-      if (e.measureOn === startId && e.tstamp !== undefined) { startMs = e.tstamp; break; }
+      if (e.measureOn === undefined || e.tstamp === undefined) continue;
+      const mc = idToMc.get(stripRendSuffix(e.measureOn));
+      if (mc !== undefined) onsets.push({ mc, tstamp: e.tstamp });
     }
-    if (startMs === null) return fallback();
+    if (onsets.length === 0) return fallback();
 
-    // endMs: first onset of the measure after the fragment that falls after
-    // startMs (so a repeated "next" measure resolves to the correct pass).
-    // Absent (fragment ends the movement) → play to the end.
+    const inRange = (mc: number): boolean => mc >= mcStart && mc <= mcEnd;
+
+    // startIndex: the last onset of mcStart entered from *outside* the range.
+    // The first occurrence (preceded by an out-of-range measure or nothing) is
+    // always a candidate; a contained repeat's internal jump re-enters from
+    // inside, so it is not. Falls back to the first mcStart onset, then to the
+    // whole-movement window if mcStart never sounds.
+    let startIndex = -1;
+    for (let i = 0; i < onsets.length; i++) {
+      if (onsets[i]!.mc !== mcStart) continue;
+      const enteredFromOutside = i === 0 || !inRange(onsets[i - 1]!.mc);
+      if (enteredFromOutside) startIndex = i;
+    }
+    if (startIndex === -1) {
+      startIndex = onsets.findIndex(o => o.mc === mcStart);
+    }
+    if (startIndex === -1) return fallback();
+    const startMs = onsets[startIndex]!.tstamp;
+
+    // endMs: the first onset after startIndex whose measure leaves the range
+    // (forward past mcEnd, or backward below mcStart). Contained backward jumps
+    // that stay in range are kept, so wholly-contained repeats expand.
     let endMs = Number.POSITIVE_INFINITY;
-    const afterId = measureIds[mcEnd]; // (mcEnd + 1)-th measure, 0-based index mcEnd
-    if (afterId) {
-      for (const e of entries) {
-        if (e.measureOn === afterId && e.tstamp !== undefined && e.tstamp > startMs) {
-          endMs = e.tstamp;
-          break;
-        }
-      }
+    for (let i = startIndex + 1; i < onsets.length; i++) {
+      if (!inRange(onsets[i]!.mc)) { endMs = onsets[i]!.tstamp; break; }
     }
 
     const schedule: Array<{ timeMs: number; ids: string[] }> = [];
