@@ -504,8 +504,15 @@ async def _upsert_movement(
     Returns:
         The ``movement.id`` UUID (existing or newly inserted).
     """
+    # Persist the column only when there is at least one actionable
+    # (``"warning"``-severity) issue, i.e. when the report is not clean.  The
+    # full issue list (including accepted ``"info"`` advisories) is stored for
+    # context.  ``"info"``-only movements (e.g. K331/ii's written-out repeat)
+    # therefore leave the column null and raise no per-movement indicator.
     normalization_warnings: dict[str, Any] | None = (
-        {"warnings": norm_report.warnings} if norm_report.warnings else None
+        {"warnings": [w.model_dump() for w in norm_report.warnings]}
+        if not norm_report.is_clean
+        else None
     )
     ins = pg_insert(Movement).values(
         work_id=work_id,

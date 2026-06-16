@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
+from models.normalization import NormalizationIssue
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
@@ -436,7 +437,7 @@ class MovementAccepted(BaseModel):
     """
 
     movement_slug: str
-    warnings: list[str] = []
+    warnings: list[NormalizationIssue] = []
     changes_applied: list[str] = []
 
 

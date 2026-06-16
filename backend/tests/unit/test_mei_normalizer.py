@@ -204,9 +204,27 @@ class TestEndingNs:
         assert first_out == second_out
 
     def test_non_sequential_endings_warned(self, tmp_path: Path) -> None:
-        """Endings with @n=[1,3] (missing 2) produce a warning."""
+        """Endings with @n=[1,3] (missing 2) — a genuine gap stays a warning."""
         report, _ = _run(tmp_path, "ending_non_sequential.mei")
-        assert any("sequential" in w.lower() for w in report.warnings)
+        non_seq = [w for w in report.warnings if w.code == "ENDING_NON_SEQUENTIAL"]
+        assert non_seq, "Non-contiguous ending @n should still warn"
+        assert non_seq[0].severity == "warning"
+        assert report.is_clean is False
+
+    def test_repeated_volta_endings_info(self, tmp_path: Path) -> None:
+        """Endings with repeated volta numbers [1,1,2,2] are accepted (info)."""
+        report, _ = _run(tmp_path, "ending_repeated_volta.mei")
+        repeated = [w for w in report.warnings if w.code == "ENDING_REPEATED_VOLTA"]
+        assert repeated, "Repeated-volta endings should produce an info advisory"
+        assert repeated[0].severity == "info"
+        # No genuine defect → the file is clean despite the info advisory.
+        assert report.is_clean is True
+
+    def test_repeated_volta_idempotent(self, tmp_path: Path) -> None:
+        """Repeated-volta endings: second pass is byte-identical."""
+        _, first_out = _run(tmp_path, "ending_repeated_volta.mei")
+        second_out = _round_trip(tmp_path, first_out, "ending_repeated_volta.mei")
+        assert first_out == second_out
 
     def test_non_sequential_idempotent(self, tmp_path: Path) -> None:
         """Non-sequential endings: second pass is byte-identical."""
@@ -229,7 +247,7 @@ class TestRepeatBarlinePairing:
         paired_warnings = [
             w
             for w in report.warnings
-            if "unpaired" in w.lower() or "unmatched" in w.lower()
+            if "unpaired" in w.message.lower() or "unmatched" in w.message.lower()
         ]
         assert paired_warnings == []
 
@@ -239,10 +257,18 @@ class TestRepeatBarlinePairing:
         second_out = _round_trip(tmp_path, first_out, "rptend_unpaired_first.mei")
         assert first_out == second_out
 
-    def test_second_rptend_unpaired_warns(self, tmp_path: Path) -> None:
-        """Second rptend without a preceding rptstart produces a warning."""
+    def test_second_rptend_unpaired_info(self, tmp_path: Path) -> None:
+        """A second unpaired rptend is accepted (info), not actionable (ADR-025).
+
+        It is a benign artefact of written-out repeats / multi-section
+        movements, so it is downgraded from a warning to an info advisory and
+        does not make the report unclean.
+        """
         report, _ = _run(tmp_path, "rptend_unpaired_second.mei")
-        assert any("unpaired" in w.lower() for w in report.warnings)
+        unpaired = [w for w in report.warnings if w.code == "REPEAT_UNPAIRED_END"]
+        assert unpaired, "Second unpaired rptend should still be recorded"
+        assert unpaired[0].severity == "info"
+        assert report.is_clean is True
 
     def test_second_rptend_idempotent(self, tmp_path: Path) -> None:
         """Second unpaired rptend: second pass byte-identical."""
@@ -254,7 +280,8 @@ class TestRepeatBarlinePairing:
         """An rptstart with no matching rptend produces a warning."""
         report, _ = _run(tmp_path, "rptstart_no_close.mei")
         assert any(
-            "unclosed" in w.lower() or "rptstart" in w.lower() for w in report.warnings
+            "unclosed" in w.message.lower() or "rptstart" in w.message.lower()
+            for w in report.warnings
         )
 
     def test_rptstart_no_close_idempotent(self, tmp_path: Path) -> None:
@@ -269,7 +296,7 @@ class TestRepeatBarlinePairing:
         paired_warnings = [
             w
             for w in report.warnings
-            if "unpaired" in w.lower() or "unclosed" in w.lower()
+            if "unpaired" in w.message.lower() or "unclosed" in w.message.lower()
         ]
         assert paired_warnings == []
 
@@ -291,7 +318,7 @@ class TestMeasureNOutsideEndings:
     def test_duplicate_n_warns(self, tmp_path: Path) -> None:
         """Duplicate @n=2 outside endings produces a warning."""
         report, _ = _run(tmp_path, "duplicate_n_outside_ending.mei")
-        assert any("duplicate" in w.lower() for w in report.warnings)
+        assert any("duplicate" in w.message.lower() for w in report.warnings)
 
     def test_duplicate_n_idempotent(self, tmp_path: Path) -> None:
         """Duplicate @n: second pass byte-identical (no mutations in pass 5)."""
@@ -313,7 +340,10 @@ class TestMeasureNOutsideEndings:
         assert (
             "12a" in n_values
         ), "Pass 5 should NOT strip suffix from @n outside endings"
-        assert any("non-integer" in w.lower() or "12a" in w for w in report.warnings)
+        assert any(
+            "non-integer" in w.message.lower() or "12a" in w.message
+            for w in report.warnings
+        )
 
     def test_non_integer_n_idempotent(self, tmp_path: Path) -> None:
         """Non-integer @n outside ending: second pass byte-identical."""
@@ -326,12 +356,49 @@ class TestMeasureNOutsideEndings:
     def test_large_gap_warns(self, tmp_path: Path) -> None:
         """Gap of 14 (from @n=1 to @n=15) produces a warning."""
         report, _ = _run(tmp_path, "large_gap_n.mei")
-        assert any("gap" in w.lower() for w in report.warnings)
+        assert any("gap" in w.message.lower() for w in report.warnings)
 
     def test_large_gap_idempotent(self, tmp_path: Path) -> None:
         """Large gap: second pass byte-identical."""
         _, first_out = _run(tmp_path, "large_gap_n.mei")
         second_out = _round_trip(tmp_path, first_out, "large_gap_n.mei")
+        assert first_out == second_out
+
+    def test_dcml_x_n_outside_ending_info(self, tmp_path: Path) -> None:
+        """DCML X-prefixed @n outside endings is accepted (info), not warned."""
+        report, out_bytes = _run(tmp_path, "dcml_x_measure_n.mei")
+        x_issues = [w for w in report.warnings if w.code == "MEASURE_N_DCML_X"]
+        assert x_issues, "X-prefixed @n should be recorded as an advisory"
+        assert x_issues[0].severity == "info"
+        # Accepted, not corrected: the value is left as 'X1' (mc keys it; ADR-015).
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        bare = tree.xpath("//mei:measure[not(ancestor::mei:ending)]", namespaces=ns)
+        assert "X1" in [m.get("n") for m in bare]
+        assert report.is_clean is True
+
+    def test_dcml_x_n_idempotent(self, tmp_path: Path) -> None:
+        """DCML X-prefixed @n: second pass byte-identical (no mutation)."""
+        _, first_out = _run(tmp_path, "dcml_x_measure_n.mei")
+        second_out = _round_trip(tmp_path, first_out, "dcml_x_measure_n.mei")
+        assert first_out == second_out
+
+    def test_multi_section_duplicate_collapsed_to_info(self, tmp_path: Path) -> None:
+        """A clean @n restart (1-3 twice) collapses to one info, not per-bar warnings."""
+        report, _ = _run(tmp_path, "multi_section_duplicate_n.mei")
+        summary = [
+            w for w in report.warnings if w.code == "MEASURE_N_MULTI_SECTION_DUPLICATE"
+        ]
+        assert len(summary) == 1, "Expected exactly one collapsed advisory"
+        assert summary[0].severity == "info"
+        # No per-value MEASURE_N_DUPLICATE warnings are emitted in this case.
+        assert not [w for w in report.warnings if w.code == "MEASURE_N_DUPLICATE"]
+        assert report.is_clean is True
+
+    def test_multi_section_duplicate_idempotent(self, tmp_path: Path) -> None:
+        """Multi-section restart: second pass byte-identical."""
+        _, first_out = _run(tmp_path, "multi_section_duplicate_n.mei")
+        second_out = _round_trip(tmp_path, first_out, "multi_section_duplicate_n.mei")
         assert first_out == second_out
 
 
@@ -369,14 +436,35 @@ class TestEndingMeasureNs:
     def test_duplicate_within_ending_warns(self, tmp_path: Path) -> None:
         """Two measures with @n=2 inside the same ending produce a warning."""
         report, _ = _run(tmp_path, "ending_duplicate_n_within.mei")
-        assert any("duplicate" in w.lower() for w in report.warnings)
+        assert any("duplicate" in w.message.lower() for w in report.warnings)
 
     def test_duplicate_across_endings_no_warn(self, tmp_path: Path) -> None:
         """@n=2 appearing in ending n='1' and ending n='2' is expected — no warning."""
         report, _ = _run(tmp_path, "ending_suffix_n.mei")
         # After stripping, both endings have @n=2 — this is the shared-slot convention.
-        cross_ending_warnings = [w for w in report.warnings if "duplicate" in w.lower()]
+        cross_ending_warnings = [
+            w for w in report.warnings if "duplicate" in w.message.lower()
+        ]
         assert cross_ending_warnings == []
+
+    def test_dcml_x_n_inside_ending_info(self, tmp_path: Path) -> None:
+        """DCML X-prefixed @n inside an ending is accepted (info), not warned."""
+        report, out_bytes = _run(tmp_path, "ending_dcml_x_measure_n.mei")
+        x_issues = [w for w in report.warnings if w.code == "ENDING_MEASURE_N_DCML_X"]
+        assert x_issues, "X-prefixed ending @n should be recorded as an advisory"
+        assert x_issues[0].severity == "info"
+        # Accepted, not renumbered: the value is left as 'X1' (mc keys it; ADR-015).
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        ending_measures = tree.xpath("//mei:ending/mei:measure", namespaces=ns)
+        assert "X1" in [m.get("n") for m in ending_measures]
+        assert report.is_clean is True
+
+    def test_dcml_x_n_inside_ending_idempotent(self, tmp_path: Path) -> None:
+        """DCML X-prefixed ending @n: second pass byte-identical (no mutation)."""
+        _, first_out = _run(tmp_path, "ending_dcml_x_measure_n.mei")
+        second_out = _round_trip(tmp_path, first_out, "ending_dcml_x_measure_n.mei")
+        assert first_out == second_out
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +511,7 @@ class TestSplitMeasures:
     def test_no_complement_warns(self, tmp_path: Path) -> None:
         """When the close rptend is the very first measure, no complement exists → warn."""
         report, _ = _run(tmp_path, "split_measure_no_complement.mei")
-        assert any("complement" in w.lower() for w in report.warnings)
+        assert any("complement" in w.message.lower() for w in report.warnings)
 
     def test_no_complement_idempotent(self, tmp_path: Path) -> None:
         """No-complement warning case: second pass byte-identical."""
@@ -573,7 +661,7 @@ class TestCrossBarlineTieCompletion:
         tie = self._by_id(tree, "t_bb_solo")
         assert "endid" not in tie.attrib
         assert not report.changes_applied
-        assert any("unresolved" in w.lower() for w in report.warnings)
+        assert any("unresolved" in w.message.lower() for w in report.warnings)
 
 
 # ---------------------------------------------------------------------------

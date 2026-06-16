@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 from models.ingestion import IngestionReport
-from models.normalization import NormalizationReport
+from models.normalization import NormalizationIssue, NormalizationReport
 from models.validation import ValidationIssue, ValidationReport
 from services.ingestion import ingest_corpus
 from tests.fixtures.builders import HARMONIES_TSV_PATH
@@ -595,12 +595,15 @@ class TestReport:
         meta = _minimal_metadata()
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
+        issue = NormalizationIssue(
+            code="REPEAT_UNCLOSED_START",
+            message="Unclosed rptstart at measure 5",
+            severity="warning",
+        )
+
         def _normalize_with_warnings(src: str, dst: str) -> NormalizationReport:
             Path(dst).write_bytes(Path(src).read_bytes())
-            return NormalizationReport(
-                duration_bars=3,
-                warnings=["Unpaired rptstart at measure 5"],
-            )
+            return NormalizationReport(duration_bars=3, warnings=[issue])
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
             with patch(
@@ -611,9 +614,8 @@ class TestReport:
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
                     )
 
-        assert report.movements_accepted[0].warnings == [
-            "Unpaired rptstart at measure 5"
-        ]
+        assert report.movements_accepted[0].warnings == [issue]
+        assert report.movements_accepted[0].warnings[0].severity == "warning"
 
     async def test_partial_accept_shows_rejected_entry(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage

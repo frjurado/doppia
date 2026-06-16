@@ -146,11 +146,18 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
 
 `NormalizationReport` is a Pydantic model containing:
 - `changes_applied: list[str]` — human-readable descriptions of each auto-correction made
-- `warnings: list[str]` — issues flagged but not auto-corrected
-- `is_clean: bool` — True if no warnings were raised (the file was already normalized or required only minor auto-corrections)
+- `warnings: list[NormalizationIssue]` — issues flagged but not auto-corrected, each carrying a `code`, `message`, `severity`, and optional `xpath`
+- `is_clean: bool` — True if no **`"warning"`-severity** issue was raised (`"info"`-severity advisories do not count against cleanliness)
 - `duration_bars: int` — maximum integer `@n` value found across all measures; stored as `movement.duration_bars`
 
-The ingest pipeline calls `normalize_mei()` after schema validation. If `report.warnings` is non-empty, the ingestion report surfaced to the admin includes those warnings. Files with warnings are stored with structured warnings written to `movement.normalization_warnings` (JSONB; null when clean). The tagging tool reads this column and surfaces a status indicator to annotators when it is non-null, so they can interpret unexpected ghost behaviour in context.
+**Issue severity (`NormalizationIssue.severity`).** Each finding carries a severity so the Component 9 Step 8 triage can downgrade accepted encoding patterns without discarding the record (mirrors `models.validation.ValidationIssue`, minus the `"error"` level — the normalizer never rejects):
+
+- **`"warning"`** — a genuine, actionable issue (missing `@n`, an unresolvable split-measure complement, a broken `@join`, an unclosed `rptstart`). Surfaced in the ingestion report, persisted to `movement.normalization_warnings`, and makes `is_clean` `False`.
+- **`"info"`** — a recognised, accepted encoding pattern that is harmless under the dual coordinate system (ADR-015): DCML `X`-prefixed `@n`, duplicate `@n` from a written-out repeat, repeated volta numbers, and unpaired-beyond-first `rptend`. Recorded for context but does not affect `is_clean` and does not, on its own, raise the per-movement attention indicator.
+
+The ingest pipeline calls `normalize_mei()` after schema validation. The full issue list (both severities) is returned in the admin-facing ingestion report (`IngestionReport.movements_accepted[].warnings`) — this is the artefact serialised to `docs/reports/component-9-reports/ingestion-warnings.json`. The `movement.normalization_warnings` column (JSONB) is written **only when the report is not clean** (i.e. at least one `"warning"`-severity issue is present); the full list is stored there for context, under the `warnings` key. The DCML harmony-alignment pass writes separately under the `harmony_alignment_warnings` key of the same column. The tagging tool surfaces a per-movement status indicator from `"warning"`-severity entries, so a movement whose only findings are accepted `"info"` patterns (e.g. K331/ii) leaves the column null and raises no indicator.
+
+> **Note — duplicated check (validator vs. normalizer).** The outside-`<ending>` measure-number integrity rules (missing / non-integer / duplicate / gap) are implemented in both `mei_validator.validate_mei` (Check 3) and the normalizer (Pass 5). The ingestion report and `normalization_warnings` are sourced **solely from the normalizer**; the validator's warning list is computed but not surfaced in the ingest path (only `validate_mei().is_valid` is consulted, to reject on hard errors). The duplication is therefore harmless today and is left as a Phase-2 cleanup (extract a shared helper) rather than refactored mid-corpus.
 
 **Duration metadata.** `normalize_mei()` also returns the **maximum integer `@n` value found across all measures in the document** (inside and outside `<ending>` elements) as `NormalizationReport.duration_bars`. The ingest pipeline stores this as `movement.duration_bars`. Using the maximum rather than the last `@n` outside endings is necessary because pieces frequently end inside a final or second ending; the "last outside endings" value would give the bar before the endings begin, not the actual last bar. Pickup bars (`@n="0"`) are excluded by being the minimum; split measure complements are counted because both halves carry distinct sequential integers.
 
@@ -390,33 +397,55 @@ The spike script bug (missing `redoLayout()`) has been corrected. `tk.select()` 
 
 ---
 
-## § Known DCML encoding quirks: Mozart staging ingest (2026-04-24)
+## § Warning severity and dispositions (Component 9 Step 8 triage, 2026-06-16)
+
+The Mozart staging ingest surfaced five normalizer warning families. Each was triaged (against the live `ingestion-warnings.json`, the ADR-015 dual coordinate model, and ADR-025) as **normalize** (fix the check), **accept** (legitimate encoding — downgrade to `info`), or **defer** (upstream fix). The decisions on the two ambiguous families were taken with Francisco on 2026-06-16: accept + downgrade, no corpus surgery.
+
+| Issue code | Family (movements) | Disposition | Severity |
+|---|---|---|---|
+| `MEASURE_N_DCML_X` | `X`-prefixed `@n` outside `<ending>` — split-measure complements (K279/2,3, K280/3, K283/1) | **Accept** — `mc` keys it (ADR-015); not renumbered | `info` |
+| `ENDING_MEASURE_N_DCML_X` | `X`-prefixed `@n` inside `<ending>` (K283/2, K331/1) | **Accept** — integer base editorially ambiguous; `mc` keys it | `info` |
+| `ENDING_REPEATED_VOLTA` | Repeated volta numbers `[1,1,2,2]` / `[1,1,1,2,2,2]` (K283/2, K331/1) | **Normalize the check** — distinct ending numbers need only form a contiguous run from 1; repetition across passes is legitimate (ADR-025 volta index is the authority) | `info` |
+| `MEASURE_N_MULTI_SECTION_DUPLICATE` | Duplicate `@n` 1–48 twice (K331/ii) | **Accept + collapse** to one summary advisory; ADR-015 amended | `info` (1, not 48) |
+| `REPEAT_UNPAIRED_END` | Unpaired `rptend` beyond the first (K331/ii, ×2) | **Accept** — benign artefact of the same written-out structure; every `rptend` is a selection-neutral barline (ADR-025) | `info` |
+
+Genuinely actionable checks remain at `warning` severity (they did not fire on the staging corpus, but flag real defects): `MEASURE_N_MISSING`, `MEASURE_N_NON_INTEGER` (a non-integer `@n` that is *not* the `X`-pattern), `MEASURE_N_DUPLICATE` (a duplicate that is *not* a clean multi-section restart), `MEASURE_N_GAP`, `ENDING_EMPTY`, `ENDING_SINGLE`, `ENDING_NON_SEQUENTIAL` (a non-contiguous ending set, e.g. `[1,3]`), `ENDING_MEASURE_N_UNPARSEABLE`, `ENDING_MEASURE_N_DUPLICATE`, `SPLIT_MEASURE_NO_COMPLEMENT`, `JOIN_BROKEN_REFERENCE`, `REPEAT_UNCLOSED_START`, `TIE_UNRESOLVED`.
+
+**Acceptance signal (verified at Step 9 re-ingest):** after re-ingestion, the regenerated `ingestion-warnings.json` should contain **zero `"warning"`-severity entries** across the staging corpus; the five families above appear as `info`, with the K331/ii duplicate collapsed to a single summary line.
+
+---
+
+## § Known DCML encoding quirks: Mozart staging ingest (2026-04-24; triaged 2026-06-16)
 
 *Source: ingestion report from `scripts/dcml_corpora/mozart-browser-staging.toml` (K.279, 280, 283, 331, 332 — 15 movements). All movements were accepted; these are warnings, not rejections.*
 
-The following patterns appear across the Mozart corpus and are artefacts of how MuseScore 3.6 encodes repeats and how verovio converts them to MEI. They do not affect musical content or incipit rendering and are flagged by the normalizer as warnings only.
+The following patterns appear across the Mozart corpus and are artefacts of how MuseScore 3.6 encodes repeats and how verovio converts them to MEI. They do not affect musical content or incipit rendering, and — under ADR-015 — they do not affect machine coordinates (`mc`). They are now emitted by the normalizer as `info`-severity advisories (see the severity table above).
 
 ### `@n='X1'`, `'X2'`, … on measures outside `<ending>`
 
 Affects: K.279/2–3, K.280/3, K.283/1, K.331/1,3, K.332/3 (and others).
 
-MuseScore encodes certain repeated sections by writing out repeat-end measures with non-integer `@n` values (`X1`, `X2`, …) rather than using `<ending>` wrappers. These values are not valid as measure numbers outside `<ending>` elements. The normalizer flags them but cannot auto-correct them without knowing the intended bar numbering.
+MuseScore encodes certain repeat-boundary split measures with non-integer `@n` values (`X1`, `X2`, …). These are not valid as integer measure numbers, but `mc` (document-order position index) keys them correctly regardless (ADR-015), and the tagging tool's coordinate model never depends on `@n` being integer.
 
-**Future fix:** A dedicated normalizer pass that detects `X`-prefixed `@n` values, infers whether they belong inside an `<ending>` wrapper, and either rewrites the structure or strips the `X` prefix and renumbers accordingly. K.331/movement-1 is the representative case.
+**Resolved (Step 8):** Accepted and downgraded to `info` (`MEASURE_N_DCML_X`). They are **not** auto-renumbered — the decision (2026-06-16) was to rely on `mc` rather than guess integer bar numbers, keeping the corpus untouched.
 
 ### Duplicate `@n` on all measures outside `<ending>` (K.331/movement-2)
 
-K.331/movement-2 (Menuetto) has every measure `@n` duplicated (1–48 twice). This is the worst case in the staging set: the movement appears to have been written out twice by MuseScore rather than using repeat barlines, producing a full duplicate of the bar sequence. The normalizer warns on all 48 duplicates.
+K.331/movement-2 (Menuetto) has every measure `@n` duplicated — **48 bars, numbered 1–48 twice** (the issue backlog's "51" and "minuet+trio renumbering" descriptions were both inaccurate). The bar sequence is written out twice rather than expressed with a repeat structure; the duplication is a faithful written-out repeat / multi-section restart, not a corruption. Under ADR-015 the machine coordinate (`mc`) remains unique; only the human label (`@n`/`bar_*`) is ambiguous.
 
-**Future fix:** Investigate whether the MuseScore source (`K331-2.mscx`) contains a structural duplication and whether it can be collapsed into a repeat structure before MEI conversion.
+**Resolved (Step 8):** Accepted and downgraded to a single `info` summary (`MEASURE_N_MULTI_SECTION_DUPLICATE`) rather than 48 per-measure warnings. No upstream re-preparation of `K331-2.mscx`; the encoding is musically faithful and `mc` makes it safe. Display-time disambiguation of duplicate bar labels (a section qualifier) is deferred to the fragment-viewer / bracket work (Component 9 Step 15) per the ADR-015 amendment.
 
-### Non-sequential `<ending> @n` values (K.283/2, K.331/1)
+### Non-sequential / repeated `<ending> @n` values (K.283/2, K.331/1)
 
-Endings are numbered `[1, 1, 2, 2]` (K.283/2) and `[1, 1, 1, 2, 2, 2]` (K.331/1) rather than sequentially. These are paired endings across multiple repetitions; the MEI encoding repeats the same ending number for each volta occurrence rather than using unique identifiers.
+Endings are numbered `[1, 1, 2, 2]` (K.283/2) and `[1, 1, 1, 2, 2, 2]` (K.331/1). These are paired endings across multiple repetitions; the same volta number recurs for each occurrence. The original check expected a single global `1..N` sequence and flagged these as defects — a false positive.
+
+**Resolved (Step 8):** The check is now volta-group-aware: it requires only that the *distinct* ending numbers form a contiguous run from 1, and accepts repetition (`ENDING_REPEATED_VOLTA`, `info`). A genuine gap (e.g. `[1,3]`) still warns (`ENDING_NON_SEQUENTIAL`). The runtime authority for volta disambiguation is ADR-025's volta index; this check no longer competes with it.
 
 ### Unpaired `rptend` (K.331/movement-2)
 
-Two `rptend` barlines without matching `rptstart` in K.331/movement-2, consistent with the duplicate-bar issue above.
+Two `rptend` barlines without matching `rptstart`, part of the same written-out structure as the duplicate-`@n` case. Per the pairing convention above, the first unpaired close is already allowed; these are the extra closes.
+
+**Resolved (Step 8):** Downgraded to `info` (`REPEAT_UNPAIRED_END`). An unclosed `rptstart` — the riskier defect — stays a `warning`.
 
 ---
 

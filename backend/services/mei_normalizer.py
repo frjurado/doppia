@@ -57,7 +57,7 @@ Example usage::
     report = normalize_mei("movement-1.mei", "/tmp/movement-1-norm.mei")
     if not report.is_clean:
         for w in report.warnings:
-            print("WARNING:", w)
+            print(f"{w.severity.upper()}: {w.message}")
     print("Duration (bars):", report.duration_bars)
 """
 
@@ -66,7 +66,7 @@ from __future__ import annotations
 import re
 
 import lxml.etree
-from models.normalization import NormalizationReport
+from models.normalization import NormalizationIssue, NormalizationReport
 
 # ---------------------------------------------------------------------------
 # MEI namespace
@@ -78,6 +78,13 @@ _NSMAP: dict[str, str] = {"mei": _MEI_NS}
 
 # Regex for suffix-style @n values inside <ending> elements, e.g. "12a", "12b".
 _SUFFIX_RE: re.Pattern[str] = re.compile(r"^(\d+)[a-zA-Z]+$")
+
+# Regex for DCML/MuseScore X-prefixed @n values, e.g. "X1", "X2".  These appear
+# on split-measure complements and volta-ending bars MuseScore could not integer-
+# number; under ADR-015 the machine coordinate (mc) keys correctly regardless, so
+# they are accepted (downgraded to info) rather than flagged.  See Component 9
+# Step 8 triage in docs/architecture/mei-ingest-normalization.md.
+_DCML_X_RE: re.Pattern[str] = re.compile(r"^X\d+$")
 
 # Standard additive pitch-class order for key signatures (MEI pname values).
 _SHARP_ORDER: tuple[str, ...] = ("f", "c", "g", "d", "a", "e", "b")
@@ -263,7 +270,7 @@ def _propagate_meter_changes(
 def _normalize_ending_ns(
     root: lxml.etree._Element,
     changes_applied: list[str],
-    warnings: list[str],
+    warnings: list[NormalizationIssue],
 ) -> None:
     """Pass 3 — ``<ending>`` @n assignment and structure checks.
 
@@ -295,11 +302,23 @@ def _normalize_ending_ns(
         measures = ending.xpath("mei:measure", namespaces=_NSMAP)
         if not measures:
             warnings.append(
-                f"<ending n='{ending.get('n', '?')}'> contains zero "
-                f"<measure> elements."
+                NormalizationIssue(
+                    code="ENDING_EMPTY",
+                    message=(
+                        f"<ending n='{ending.get('n', '?')}'> contains zero "
+                        f"<measure> elements."
+                    ),
+                    severity="warning",
+                )
             )
 
-    # Flag non-sequential ending numbers.
+    # Check ending numbering.  A single global 1..N sequence is the simple case,
+    # but multi-repetition / multi-section movements legitimately repeat volta
+    # numbers (e.g. [1, 1, 2, 2] or [1, 1, 1, 2, 2, 2]) — the same bracket read
+    # on several passes.  ADR-025's runtime volta index is the authority; here we
+    # only require that the *distinct* ending numbers form a contiguous run from
+    # 1 (no gap, no missing first).  Repeated numbers within that run are an
+    # accepted pattern (info); a non-contiguous set is a genuine defect (warning).
     numbered: list[int] = []
     for ending in endings:
         try:
@@ -307,23 +326,50 @@ def _normalize_ending_ns(
         except ValueError:
             pass  # non-integer @n on ending — leave for upstream handling
     if numbered:
-        expected = list(range(1, len(numbered) + 1))
-        if sorted(numbered) != expected:
+        distinct = set(numbered)
+        expected_set = set(range(1, max(numbered) + 1))
+        if distinct != expected_set:
             warnings.append(
-                f"<ending> @n values are not sequential: "
-                f"{sorted(numbered)} (expected {expected})."
+                NormalizationIssue(
+                    code="ENDING_NON_SEQUENTIAL",
+                    message=(
+                        f"<ending> @n values do not form a contiguous run from 1: "
+                        f"{sorted(numbered)} (expected the set {sorted(expected_set)})."
+                    ),
+                    severity="warning",
+                )
+            )
+        elif len(numbered) != len(distinct):
+            warnings.append(
+                NormalizationIssue(
+                    code="ENDING_REPEATED_VOLTA",
+                    message=(
+                        f"<ending> @n values repeat across passes/sections: "
+                        f"{sorted(numbered)}. Accepted multi-repetition encoding; "
+                        f"volta disambiguation is by document order (mc), per "
+                        f"ADR-015/ADR-025."
+                    ),
+                    severity="info",
+                )
             )
 
     # Flag sections with only one ending.
     if len(endings) == 1:
         warnings.append(
-            "<section> has only one <ending>; second ending appears to be missing."
+            NormalizationIssue(
+                code="ENDING_SINGLE",
+                message=(
+                    "<section> has only one <ending>; second ending appears to "
+                    "be missing."
+                ),
+                severity="warning",
+            )
         )
 
 
 def _check_repeat_barlines(
     root: lxml.etree._Element,
-    warnings: list[str],
+    warnings: list[NormalizationIssue],
 ) -> None:
     """Pass 4 — Repeat-barline pairing check.
 
@@ -362,30 +408,112 @@ def _check_repeat_barlines(
                 open_stack.pop()
             else:
                 event = "rptboth (close)" if right == "rptboth" else "rptend"
+                # Accepted (info), not actionable: an extra unpaired close beyond
+                # the first is a benign artefact of written-out repeats /
+                # multi-section movements (e.g. K331/ii).  The tool already
+                # treats every rptend as a selection-neutral barline (ADR-025),
+                # and mc coordinates are unaffected (ADR-015).
                 warnings.append(
-                    f"Unpaired {event} at {xp}: no matching rptstart found."
+                    NormalizationIssue(
+                        code="REPEAT_UNPAIRED_END",
+                        message=(
+                            f"Unpaired {event} at {xp}: no matching rptstart found. "
+                            f"Accepted (written-out repeat / multi-section); mc is "
+                            f"unaffected."
+                        ),
+                        severity="info",
+                        xpath=xp,
+                    )
                 )
 
             # rptboth also opens a new section
             if right == "rptboth":
                 open_stack.append(measure)
 
-    # Any still-open sections at end of document are flagged.
+    # Any still-open sections at end of document are flagged — an rptstart with
+    # no close is the riskier defect and stays actionable.
     for measure in open_stack:
         xp = _xp(root, measure)
         warnings.append(
-            f"Unclosed rptstart at {xp}: no matching rptend before end of document."
+            NormalizationIssue(
+                code="REPEAT_UNCLOSED_START",
+                message=(
+                    f"Unclosed rptstart at {xp}: no matching rptend before end "
+                    f"of document."
+                ),
+                severity="warning",
+                xpath=xp,
+            )
         )
+
+
+def _split_increasing_runs(ints: list[int]) -> list[list[int]]:
+    """Split *ints* into maximal strictly-increasing runs (document order).
+
+    A new run starts whenever a value is not greater than its predecessor —
+    i.e. wherever the measure numbering restarts or steps back.
+
+    Args:
+        ints: Integer ``@n`` values in document order.
+
+    Returns:
+        List of runs; each run is a strictly-increasing list of integers.
+    """
+    runs: list[list[int]] = []
+    current: list[int] = []
+    prev: int | None = None
+    for n in ints:
+        if prev is not None and n <= prev:
+            runs.append(current)
+            current = []
+        current.append(n)
+        prev = n
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _is_multi_section_restart(ints: list[int]) -> bool:
+    """True if *ints* is a multi-section / written-out-repeat numbering.
+
+    Recognises the K331/ii pattern: the measure numbering restarts at 1 in
+    each of two or more sections (e.g. a written-out da capo, or a
+    Menuetto + Trio whose bar count restarts).  Such files legitimately
+    carry duplicate ``@n`` outside ``<ending>`` — the duplication is
+    explained entirely by the restart, and under ADR-015 the machine
+    coordinate (mc) remains unique.
+
+    The check is deliberately conservative: it requires every run to begin
+    at 1 and be strictly increasing, so genuine duplicate-``@n`` defects
+    (which do not restart cleanly at 1) still fall through to per-value
+    warnings.
+
+    Args:
+        ints: Integer ``@n`` values in document order.
+
+    Returns:
+        ``True`` if the sequence is a clean multi-section restart with
+        duplicates, ``False`` otherwise.
+    """
+    if len(ints) != len(set(ints)):  # there must be duplicates to explain
+        runs = _split_increasing_runs(ints)
+        return len(runs) >= 2 and all(run and run[0] == 1 for run in runs)
+    return False
 
 
 def _check_measure_n_outside_endings(
     root: lxml.etree._Element,
-    warnings: list[str],
+    warnings: list[NormalizationIssue],
 ) -> None:
     """Pass 5 — ``@n`` uniqueness outside ``<ending>`` elements.
 
-    Flags duplicate ``@n`` values, non-integer ``@n`` values, and gaps
+    Flags missing ``@n``, non-integer ``@n``, duplicate ``@n``, and gaps
     greater than 10 in the sorted integer sequence.  No mutations are made.
+
+    Two families are downgraded to ``info`` per the Component 9 Step 8 triage:
+    DCML ``X``-prefixed values (accepted; mc keys correctly under ADR-015) and
+    duplicate ``@n`` arising from a multi-section / written-out-repeat restart
+    (collapsed into a single summary advisory rather than one per measure).
 
     Args:
         root: Document root element.
@@ -395,49 +523,110 @@ def _check_measure_n_outside_endings(
         root, "//mei:measure[not(ancestor::mei:ending)]"
     )
 
-    valid_ns: list[int] = []
-    seen_ns: dict[int, bool] = {}  # n -> already_warned_duplicate
-
+    ordered_ns: list[int] = []  # valid integers in document order
     for measure in bare_measures:
         n_str: str | None = measure.get("n")
         xp = _xp(root, measure)
 
         if n_str is None:
-            warnings.append(f"<measure> outside <ending> at {xp} is missing @n.")
+            warnings.append(
+                NormalizationIssue(
+                    code="MEASURE_N_MISSING",
+                    message=f"<measure> outside <ending> at {xp} is missing @n.",
+                    severity="warning",
+                    xpath=xp,
+                )
+            )
             continue
 
         try:
             n_int = int(n_str)
         except ValueError:
-            warnings.append(
-                f"<measure> outside <ending> at {xp} has non-integer " f"@n={n_str!r}."
-            )
+            if _DCML_X_RE.match(n_str):
+                # Accepted DCML/MuseScore X-prefixed @n (e.g. split-measure
+                # complement at a repeat boundary).  mc keys correctly (ADR-015).
+                warnings.append(
+                    NormalizationIssue(
+                        code="MEASURE_N_DCML_X",
+                        message=(
+                            f"<measure> outside <ending> at {xp} has DCML "
+                            f"X-prefixed @n={n_str!r}. Accepted; machine "
+                            f"coordinate (mc) is unaffected (ADR-015)."
+                        ),
+                        severity="info",
+                        xpath=xp,
+                    )
+                )
+            else:
+                warnings.append(
+                    NormalizationIssue(
+                        code="MEASURE_N_NON_INTEGER",
+                        message=(
+                            f"<measure> outside <ending> at {xp} has non-integer "
+                            f"@n={n_str!r}."
+                        ),
+                        severity="warning",
+                        xpath=xp,
+                    )
+                )
             continue
 
-        if n_int in seen_ns:
-            if not seen_ns[n_int]:
-                # Warn once per duplicate value.
-                warnings.append(f"Duplicate @n={n_int} on <measure> outside <ending>.")
-                seen_ns[n_int] = True
-        else:
-            seen_ns[n_int] = False
-            valid_ns.append(n_int)
+        ordered_ns.append(n_int)
 
-    # Flag gaps > 10 in the sorted sequence.
-    if len(valid_ns) >= 2:
-        sorted_ns = sorted(valid_ns)
-        for prev, curr in zip(sorted_ns, sorted_ns[1:]):
+    # Duplicate handling.  A clean multi-section restart (K331/ii) is collapsed
+    # into a single info advisory; any other duplicate shape stays actionable.
+    if _is_multi_section_restart(ordered_ns):
+        runs = _split_increasing_runs(ordered_ns)
+        warnings.append(
+            NormalizationIssue(
+                code="MEASURE_N_MULTI_SECTION_DUPLICATE",
+                message=(
+                    f"Measure @n restarts across {len(runs)} sections "
+                    f"(runs of length {[len(r) for r in runs]}); duplicate @n "
+                    f"outside <ending> is expected for written-out repeats / "
+                    f"multi-section movements. Machine coordinates (mc) remain "
+                    f"unique (ADR-015)."
+                ),
+                severity="info",
+            )
+        )
+    else:
+        warned: set[int] = set()
+        seen: set[int] = set()
+        for n_int in ordered_ns:
+            if n_int in seen and n_int not in warned:
+                warnings.append(
+                    NormalizationIssue(
+                        code="MEASURE_N_DUPLICATE",
+                        message=f"Duplicate @n={n_int} on <measure> outside <ending>.",
+                        severity="warning",
+                    )
+                )
+                warned.add(n_int)
+            seen.add(n_int)
+
+    # Flag gaps > 10 in the sorted sequence of distinct values.
+    distinct_sorted = sorted(set(ordered_ns))
+    if len(distinct_sorted) >= 2:
+        for prev, curr in zip(distinct_sorted, distinct_sorted[1:]):
             gap = curr - prev
             if gap > 10:
                 warnings.append(
-                    f"Gap of {gap} in measure @n sequence (from {prev} to {curr})."
+                    NormalizationIssue(
+                        code="MEASURE_N_GAP",
+                        message=(
+                            f"Gap of {gap} in measure @n sequence "
+                            f"(from {prev} to {curr})."
+                        ),
+                        severity="warning",
+                    )
                 )
 
 
 def _normalize_ending_measure_ns(
     root: lxml.etree._Element,
     changes_applied: list[str],
-    warnings: list[str],
+    warnings: list[NormalizationIssue],
 ) -> None:
     """Pass 6 — ``@n`` values inside ``<ending>`` elements.
 
@@ -473,18 +662,49 @@ def _normalize_ending_measure_ns(
             try:
                 n_int = int(n_str)
             except ValueError:
-                warnings.append(
-                    f"Unparseable @n={n_str!r} on <measure> inside "
-                    f"<ending> at {xp}."
-                )
+                if _DCML_X_RE.match(n_str):
+                    # Accepted DCML/MuseScore X-prefixed volta-ending bar.
+                    # mc keys correctly (ADR-015); the integer base cannot be
+                    # inferred reliably, so it is left untouched, not renumbered.
+                    warnings.append(
+                        NormalizationIssue(
+                            code="ENDING_MEASURE_N_DCML_X",
+                            message=(
+                                f"<measure> inside <ending> at {xp} has DCML "
+                                f"X-prefixed @n={n_str!r}. Accepted; machine "
+                                f"coordinate (mc) is unaffected (ADR-015)."
+                            ),
+                            severity="info",
+                            xpath=xp,
+                        )
+                    )
+                else:
+                    warnings.append(
+                        NormalizationIssue(
+                            code="ENDING_MEASURE_N_UNPARSEABLE",
+                            message=(
+                                f"Unparseable @n={n_str!r} on <measure> inside "
+                                f"<ending> at {xp}."
+                            ),
+                            severity="warning",
+                            xpath=xp,
+                        )
+                    )
                 continue
 
             # Flag duplicate within this ending (cross-ending duplicates are fine).
             if n_int in seen_in_ending:
                 if not seen_in_ending[n_int]:
                     warnings.append(
-                        f"Duplicate @n={n_int} within same <ending> "
-                        f"(first seen at {xp})."
+                        NormalizationIssue(
+                            code="ENDING_MEASURE_N_DUPLICATE",
+                            message=(
+                                f"Duplicate @n={n_int} within same <ending> "
+                                f"(first seen at {xp})."
+                            ),
+                            severity="warning",
+                            xpath=xp,
+                        )
                     )
                     seen_in_ending[n_int] = True
             else:
@@ -494,7 +714,7 @@ def _normalize_ending_measure_ns(
 def _normalize_split_measures(
     root: lxml.etree._Element,
     changes_applied: list[str],
-    warnings: list[str],
+    warnings: list[NormalizationIssue],
 ) -> None:
     """Pass 7 — Incomplete measures at repeat boundaries.
 
@@ -532,8 +752,16 @@ def _normalize_split_measures(
             if close_idx == 0:
                 xp = _xp(root, close_measure)
                 warnings.append(
-                    f"Split measure at {xp}: @metcon='false' on the first "
-                    f"measure in the document — no complement can be identified."
+                    NormalizationIssue(
+                        code="SPLIT_MEASURE_NO_COMPLEMENT",
+                        message=(
+                            f"Split measure at {xp}: @metcon='false' on the first "
+                            f"measure in the document — no complement can be "
+                            f"identified."
+                        ),
+                        severity="warning",
+                        xpath=xp,
+                    )
                 )
                 continue
             complement = all_measures[0]
@@ -543,8 +771,15 @@ def _normalize_split_measures(
             if next_idx >= len(all_measures):
                 xp = _xp(root, close_measure)
                 warnings.append(
-                    f"Split measure at {xp}: @metcon='false' but no measure "
-                    f"follows the matching rptstart."
+                    NormalizationIssue(
+                        code="SPLIT_MEASURE_NO_COMPLEMENT",
+                        message=(
+                            f"Split measure at {xp}: @metcon='false' but no measure "
+                            f"follows the matching rptstart."
+                        ),
+                        severity="warning",
+                        xpath=xp,
+                    )
                 )
                 continue
             complement = all_measures[next_idx]
@@ -568,8 +803,15 @@ def _normalize_split_measures(
             if not targets:
                 xp = _xp(root, measure)
                 warnings.append(
-                    f"<measure> at {xp} has @join='{join_ref}' referencing "
-                    f"non-existent xml:id."
+                    NormalizationIssue(
+                        code="JOIN_BROKEN_REFERENCE",
+                        message=(
+                            f"<measure> at {xp} has @join='{join_ref}' referencing "
+                            f"non-existent xml:id."
+                        ),
+                        severity="warning",
+                        xpath=xp,
+                    )
                 )
 
 
@@ -845,7 +1087,7 @@ def _find_continuation_note(
 def _complete_cross_barline_ties(
     root: lxml.etree._Element,
     changes_applied: list[str],
-    warnings: list[str],
+    warnings: list[NormalizationIssue],
 ) -> None:
     """Pass 8 — Complete endpoint-less cross-barline ties (ADR-026).
 
@@ -899,8 +1141,14 @@ def _complete_cross_barline_ties(
         info = note_index.get(sid)
         if info is None:
             warnings.append(
-                f"Endpoint-less tie (xml:id={tie_id!r}) references unknown "
-                f"start note {start_ref!r}; left unresolved."
+                NormalizationIssue(
+                    code="TIE_UNRESOLVED",
+                    message=(
+                        f"Endpoint-less tie (xml:id={tie_id!r}) references unknown "
+                        f"start note {start_ref!r}; left unresolved."
+                    ),
+                    severity="warning",
+                )
             )
             continue
 
@@ -909,8 +1157,14 @@ def _complete_cross_barline_ties(
         oct_ = start_note.get("oct", "")
         if m_idx + 1 >= len(measures):
             warnings.append(
-                f"Endpoint-less tie (xml:id={tie_id!r}) on {pname}{oct_} has no "
-                f"following measure to continue into; left unresolved."
+                NormalizationIssue(
+                    code="TIE_UNRESOLVED",
+                    message=(
+                        f"Endpoint-less tie (xml:id={tie_id!r}) on {pname}{oct_} has "
+                        f"no following measure to continue into; left unresolved."
+                    ),
+                    severity="warning",
+                )
             )
             continue
 
@@ -919,9 +1173,16 @@ def _complete_cross_barline_ties(
         target_id = target.get(_XML_ID_KEY) if target is not None else None
         if target is None or not target_id:
             warnings.append(
-                f"Endpoint-less tie (xml:id={tie_id!r}) on {pname}{oct_} "
-                f"(staff {staff_n}, layer {layer_n}): no continuation note found "
-                f"in measure {next_measure.get('n', '?')}; left unresolved."
+                NormalizationIssue(
+                    code="TIE_UNRESOLVED",
+                    message=(
+                        f"Endpoint-less tie (xml:id={tie_id!r}) on {pname}{oct_} "
+                        f"(staff {staff_n}, layer {layer_n}): no continuation note "
+                        f"found in measure {next_measure.get('n', '?')}; left "
+                        f"unresolved."
+                    ),
+                    severity="warning",
+                )
             )
             continue
 
@@ -1218,7 +1479,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
     root = tree.getroot()
 
     changes_applied: list[str] = []
-    warnings: list[str] = []
+    warnings: list[NormalizationIssue] = []
 
     _normalize_pickup_bar(root, changes_applied)
     _propagate_meter_changes(root, changes_applied)
