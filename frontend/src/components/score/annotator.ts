@@ -139,6 +139,14 @@ export interface AnnotationSessionOptions {
    * assignments change.
    */
   minBarRange?: { minBarStart: number; maxBarEnd: number } | null;
+  /**
+   * Component 9 Step 20 — play-from-position. Called when the user Alt-clicks a
+   * measure (or a beat / sub-beat ghost, resolved up to its enclosing measure)
+   * instead of starting a selection drag. The handler arms that measure as the
+   * playback origin; selection state is never touched. Receives the measure
+   * ghost key.
+   */
+  onPlayFromMeasure?: (measureKey: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,9 +280,7 @@ export function buildVoltaIndex(meiText: string): VoltaIndex {
  * jump targets are unknown (null), which makes wholly-contained groups take
  * the conservative §6A.3 row-4 path (non-final endings excluded).
  */
-export function voltaIndexFromLayer(
-  measureIndex: Map<string, MeasureGhostEntry>,
-): VoltaIndex {
+export function voltaIndexFromLayer(measureIndex: Map<string, MeasureGhostEntry>): VoltaIndex {
   const byKey = new Map<string, { groupIdx: number; endingN: number }>();
   const groups: VoltaGroupInfo[] = [];
   let current: VoltaGroupInfo | null = null;
@@ -367,7 +373,7 @@ export function measureKeyRange(
   anchorKey: string,
   currentKey: string,
   orderedKeys: string[],
-  barriers: Set<string>,
+  barriers: Set<string>
 ): string[] {
   const anchorIdx = orderedKeys.indexOf(anchorKey);
   const currentIdx = orderedKeys.indexOf(currentKey);
@@ -426,7 +432,7 @@ export function computeSelectionKeys(
   currentKey: string,
   orderedKeys: string[],
   barriers: Set<string>,
-  volta: VoltaIndex | null,
+  volta: VoltaIndex | null
 ): string[] {
   const anchorIdx = orderedKeys.indexOf(anchorKey);
   if (anchorIdx === -1) return [];
@@ -518,7 +524,7 @@ export function computeSelectionKeys(
   }
 
   const slice = orderedKeys.slice(lo, hi + 1);
-  return excluded.size === 0 ? slice : slice.filter(k => !excluded.has(k));
+  return excluded.size === 0 ? slice : slice.filter((k) => !excluded.has(k));
 }
 
 /**
@@ -531,7 +537,7 @@ export function computeSelectionKeys(
  */
 export function deriveRepeatContext(
   selectedKeys: readonly string[],
-  volta: VoltaIndex | null,
+  volta: VoltaIndex | null
 ): SelectionRange['repeatContext'] {
   if (!volta) return null;
 
@@ -560,12 +566,12 @@ export function deriveRepeatContext(
 export function numericKeyRange(
   anchorKey: number,
   currentKey: number,
-  orderedKeys: number[],
+  orderedKeys: number[]
 ): number[] {
   const lo = Math.min(anchorKey, currentKey);
   const hi = Math.max(anchorKey, currentKey);
 
-  const startIdx = orderedKeys.findIndex(k => k >= lo);
+  const startIdx = orderedKeys.findIndex((k) => k >= lo);
   if (startIdx === -1) return [];
   // If the first candidate key is already above hi, nothing falls in [lo, hi].
   if (orderedKeys[startIdx]! > hi) return [];
@@ -647,6 +653,8 @@ export class AnnotationSession {
   // Subscriber callbacks.
   private _onSelectionChange: ((sel: SelectionRange | null) => void) | null = null;
   private _onFlagsChange: ((flags: AnnotationFlags) => void) | null = null;
+  // Step 20 — play-from-position handoff (Alt-click). Null disables the gesture.
+  private readonly _onPlayFromMeasure: ((measureKey: string) => void) | null;
 
   // Concurrent flags.
   private _flags: AnnotationFlags = {
@@ -667,6 +675,7 @@ export class AnnotationSession {
 
     this._resolution = options.resolution ?? 'measure';
     this._minBarRange = options.minBarRange ?? null;
+    this._onPlayFromMeasure = options.onPlayFromMeasure ?? null;
 
     this._orderedMeasureKeys = [...layer.measureIndex.keys()];
     this._orderedBeatKeys = [...layer.beatIndex.keys()].sort((a, b) => a - b);
@@ -685,8 +694,8 @@ export class AnnotationSession {
     }
     if (options.initialFlags) {
       const { conceptSet, stagesComplete, propertiesComplete } = options.initialFlags;
-      if (conceptSet !== undefined)        this._flags = { ...this._flags, conceptSet };
-      if (stagesComplete !== undefined)    this._flags = { ...this._flags, stagesComplete };
+      if (conceptSet !== undefined) this._flags = { ...this._flags, conceptSet };
+      if (stagesComplete !== undefined) this._flags = { ...this._flags, stagesComplete };
       if (propertiesComplete !== undefined) this._flags = { ...this._flags, propertiesComplete };
     }
   }
@@ -839,7 +848,7 @@ export class AnnotationSession {
    */
   private _effectiveKeysFor(sel: SelectionRange): string[] {
     if (sel.measureKeys && sel.measureKeys.length > 0) return sel.measureKeys;
-    return this._orderedMeasureKeys.filter(k => {
+    return this._orderedMeasureKeys.filter((k) => {
       const e = this._layer.measureIndex.get(k);
       if (!e) return false;
       if (!(e.barN >= sel.barStart && e.barN <= sel.barEnd)) return false;
@@ -876,25 +885,17 @@ export class AnnotationSession {
     }
 
     const keySet = new Set(keys);
-    const firstKey  = keys[0]!;
-    const lastKey   = keys[keys.length - 1]!;
+    const firstKey = keys[0]!;
+    const lastKey = keys[keys.length - 1]!;
     const beatStart = sel.beatStart;
-    const beatEnd   = sel.beatEnd;
-    const index =
-      this._resolution === 'beat' ? this._layer.beatIndex : this._layer.subBeatIndex;
+    const beatEnd = sel.beatEnd;
+    const index = this._resolution === 'beat' ? this._layer.beatIndex : this._layer.subBeatIndex;
 
     for (const entry of index.values()) {
       if (!keySet.has(entry.measureKey)) continue;
-      if (
-        beatStart !== null &&
-        entry.measureKey === firstKey &&
-        entry.beatFloat < beatStart
-      ) continue;
-      if (
-        beatEnd !== null &&
-        entry.measureKey === lastKey &&
-        entry.beatFloat >= beatEnd
-      ) continue;
+      if (beatStart !== null && entry.measureKey === firstKey && entry.beatFloat < beatStart)
+        continue;
+      if (beatEnd !== null && entry.measureKey === lastKey && entry.beatFloat >= beatEnd) continue;
       addClass(entry.el, 'dark');
       this._darkGhosts.add(entry.el);
     }
@@ -951,7 +952,7 @@ export class AnnotationSession {
     if (!this._minBarRange) return currentKey;
 
     const { minBarStart, maxBarEnd } = this._minBarRange;
-    const anchorEntry  = this._layer.measureIndex.get(anchorKey);
+    const anchorEntry = this._layer.measureIndex.get(anchorKey);
     const currentEntry = this._layer.measureIndex.get(currentKey);
     if (!anchorEntry || !currentEntry) return currentKey;
 
@@ -987,12 +988,12 @@ export class AnnotationSession {
   private _clampBeatKey(
     currentKey: number,
     anchorKey: number,
-    index: Map<number, { barN: number }>,
+    index: Map<number, { barN: number }>
   ): number {
     if (!this._minBarRange) return currentKey;
 
     const { minBarStart, maxBarEnd } = this._minBarRange;
-    const anchorEntry  = index.get(anchorKey);
+    const anchorEntry = index.get(anchorKey);
     const currentEntry = index.get(currentKey);
     if (!anchorEntry || !currentEntry) return currentKey;
 
@@ -1039,7 +1040,7 @@ export class AnnotationSession {
       () => overlay.removeEventListener('mousedown', onMouseDown),
       () => overlay.removeEventListener('mouseover', onMouseOver),
       () => overlay.removeEventListener('mouseleave', onMouseLeave),
-      () => document.removeEventListener('mouseup', onMouseUp),
+      () => document.removeEventListener('mouseup', onMouseUp)
     );
   }
 
@@ -1049,6 +1050,19 @@ export class AnnotationSession {
     if (this._hoverGhost) {
       removeClass(this._hoverGhost, 'light');
       this._hoverGhost = null;
+    }
+
+    // Step 20: Alt-click arms play-from-position instead of selecting. Resolve
+    // the ghost under the cursor up to its enclosing measure and hand off; never
+    // start or mutate a selection drag.
+    if (e.altKey) {
+      const ghost = ghostFromTarget(e.target);
+      const measureKey = ghost ? this._measureKeyForGhost(ghost) : null;
+      if (measureKey !== null) {
+        e.preventDefault();
+        this._onPlayFromMeasure?.(measureKey);
+      }
+      return;
     }
 
     // Handle ghost click: endpoint re-anchor from outside the selection boundary.
@@ -1082,10 +1096,42 @@ export class AnnotationSession {
     }
   }
 
+  /**
+   * Resolve the enclosing measure ghost key for any ghost (measure, beat, or
+   * sub-beat). Beat / sub-beat ghosts map up to their parent measure — Step 20
+   * play-from-position is measure-resolution. Returns null when the element is
+   * not a ghost or carries no resolvable key.
+   */
+  private _measureKeyForGhost(ghost: HTMLElement): string | null {
+    const key = ghostDataKey(ghost);
+    if (key === null) return null;
+    if (ghost.classList.contains('ghost-measure')) return key;
+    const num = parseInt(key, 10);
+    if (isNaN(num)) return null;
+    if (ghost.classList.contains('ghost-beat')) {
+      return this._layer.beatIndex.get(num)?.measureKey ?? null;
+    }
+    if (ghost.classList.contains('ghost-subbeat')) {
+      return this._layer.subBeatIndex.get(num)?.measureKey ?? null;
+    }
+    return null;
+  }
+
   private _handleMouseOver(e: MouseEvent): void {
     const ghost = ghostFromTarget(e.target);
 
     if (!this._dragging) {
+      // Step 20: under Alt the armable (play-from-here) affordance is shown by
+      // CSS (data-armable on the panel); suppress the selection hover light and
+      // the handle affordance so the two interactions don't visually collide.
+      if (e.altKey) {
+        if (this._hoverGhost) {
+          removeClass(this._hoverGhost, 'light');
+          this._hoverGhost = null;
+        }
+        this._layer.hideHandles();
+        return;
+      }
       // Light hover is only meaningful before a selection is committed.
       // Once fragmentSet is true, clicking a non-dark ghost does nothing, so
       // showing the hover affordance would imply an incorrect interaction model.
@@ -1150,7 +1196,7 @@ export class AnnotationSession {
     // the committed selection, re-anchor the drag from the opposite end
     // (prototype-tagging-tool.md §"Endpoint re-selection").
     if (this._darkGhosts.size >= 2) {
-      const darkMeasureKeys = this._orderedMeasureKeys.filter(k => {
+      const darkMeasureKeys = this._orderedMeasureKeys.filter((k) => {
         const entry = this._layer.measureIndex.get(k);
         return entry !== undefined && this._darkGhosts.has(entry.el);
       });
@@ -1194,7 +1240,7 @@ export class AnnotationSession {
       effectiveKey,
       this._orderedMeasureKeys,
       this._barriers,
-      this._volta,
+      this._volta
     );
 
     this._clearDark();
@@ -1222,9 +1268,7 @@ export class AnnotationSession {
     if (entries.length === 0) return;
 
     entries.sort(
-      (a, b) =>
-        this._orderedMeasureKeys.indexOf(a.key) -
-        this._orderedMeasureKeys.indexOf(b.key),
+      (a, b) => this._orderedMeasureKeys.indexOf(a.key) - this._orderedMeasureKeys.indexOf(b.key)
     );
 
     const first = entries[0]!;
@@ -1236,7 +1280,7 @@ export class AnnotationSession {
       this._darkGhosts.add(entry.el);
     }
 
-    const measureKeys = entries.map(e => e.key);
+    const measureKeys = entries.map((e) => e.key);
 
     this._selection = {
       barStart: first.barN,
@@ -1287,7 +1331,11 @@ export class AnnotationSession {
     if (this._anchorBeatKey === null) return;
 
     // Component 7 Step 3: clamp beat drag to the min-bar-range.
-    const effectiveBeatKey = this._clampBeatKey(currentKey, this._anchorBeatKey, this._layer.beatIndex);
+    const effectiveBeatKey = this._clampBeatKey(
+      currentKey,
+      this._anchorBeatKey,
+      this._layer.beatIndex
+    );
 
     // G2.3 / §6A.2: enforce measure-level boundaries at beat resolution —
     // directive barriers clamp, volta gates clamp, and excluded sibling
@@ -1298,7 +1346,7 @@ export class AnnotationSession {
     // list) or when the anchor's measureKey is not in the ordered list — that
     // signals a test fixture or a score where ghost building was not run, so
     // there is no boundary information to apply.
-    const anchorEntry  = this._layer.beatIndex.get(this._anchorBeatKey);
+    const anchorEntry = this._layer.beatIndex.get(this._anchorBeatKey);
     const currentEntry = this._layer.beatIndex.get(effectiveBeatKey);
     const allowedMeasureRange =
       anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
@@ -1307,7 +1355,7 @@ export class AnnotationSession {
             currentEntry.measureKey,
             this._orderedMeasureKeys,
             this._barriers,
-            this._volta,
+            this._volta
           )
         : null;
     const allowedMeasureKeys: Set<string> | null =
@@ -1315,11 +1363,7 @@ export class AnnotationSession {
         ? new Set(allowedMeasureRange)
         : null;
 
-    const range = numericKeyRange(
-      this._anchorBeatKey,
-      effectiveBeatKey,
-      this._orderedBeatKeys,
-    );
+    const range = numericKeyRange(this._anchorBeatKey, effectiveBeatKey, this._orderedBeatKeys);
 
     this._clearDark();
     for (const k of range) {
@@ -1420,10 +1464,14 @@ export class AnnotationSession {
     if (this._anchorSubBeatKey === null) return;
 
     // Component 7 Step 3: clamp sub-beat drag to the min-bar-range.
-    const effectiveSubBeatKey = this._clampBeatKey(currentKey, this._anchorSubBeatKey, this._layer.subBeatIndex);
+    const effectiveSubBeatKey = this._clampBeatKey(
+      currentKey,
+      this._anchorSubBeatKey,
+      this._layer.subBeatIndex
+    );
 
     // G2.3 / §6A.2: same boundary enforcement as beat resolution.
-    const anchorEntry  = this._layer.subBeatIndex.get(this._anchorSubBeatKey);
+    const anchorEntry = this._layer.subBeatIndex.get(this._anchorSubBeatKey);
     const currentEntry = this._layer.subBeatIndex.get(effectiveSubBeatKey);
     const allowedMeasureRange =
       anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
@@ -1432,7 +1480,7 @@ export class AnnotationSession {
             currentEntry.measureKey,
             this._orderedMeasureKeys,
             this._barriers,
-            this._volta,
+            this._volta
           )
         : null;
     const allowedMeasureKeys: Set<string> | null =
@@ -1443,7 +1491,7 @@ export class AnnotationSession {
     const range = numericKeyRange(
       this._anchorSubBeatKey,
       effectiveSubBeatKey,
-      this._orderedSubBeatKeys,
+      this._orderedSubBeatKeys
     );
 
     this._clearDark();
@@ -1527,7 +1575,7 @@ export class AnnotationSession {
     this._layer.hideHandles();
 
     if (this._resolution === 'measure') {
-      const darkMeasureKeys = this._orderedMeasureKeys.filter(k => {
+      const darkMeasureKeys = this._orderedMeasureKeys.filter((k) => {
         const entry = this._layer.measureIndex.get(k);
         return entry !== undefined && this._darkGhosts.has(entry.el);
       });
@@ -1621,9 +1669,13 @@ export class AnnotationSession {
     const handleOpacity = this._resolution === 'beat' ? 0.55 : 0.45;
 
     this._layer.positionHandles(
-      firstBounds.left, firstBounds.top, firstBounds.height,
-      lastBounds.left + lastBounds.width, lastBounds.top, lastBounds.height,
-      handleOpacity,
+      firstBounds.left,
+      firstBounds.top,
+      firstBounds.height,
+      lastBounds.left + lastBounds.width,
+      lastBounds.top,
+      lastBounds.height,
+      handleOpacity
     );
     this._handlesReady = true;
     // Handles are positioned at opacity 0 (interactive but invisible) —

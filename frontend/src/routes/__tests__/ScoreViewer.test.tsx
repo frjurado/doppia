@@ -13,6 +13,7 @@ vi.mock('../../services/verovio', () => ({
   renderProgressively: vi.fn(),
   renderMidi: vi.fn(),
   buildHighlightSchedule: vi.fn().mockReturnValue([]),
+  buildMeasureOnsetIndex: vi.fn().mockReturnValue(new Map()),
   buildNoteInfoMap: vi.fn().mockReturnValue(new Map()),
   getTimemapTempo: vi.fn().mockReturnValue(120),
   parseMeiMeterUnit: vi.fn().mockReturnValue(4),
@@ -27,9 +28,15 @@ const mockTransport = {
   state: 'stopped' as string,
   seconds: 0,
   position: '0:0:0',
-  start: vi.fn(function (this: typeof mockTransport) { this.state = 'started'; }),
-  stop: vi.fn(function (this: typeof mockTransport) { this.state = 'stopped'; }),
-  pause: vi.fn(function (this: typeof mockTransport) { this.state = 'paused'; }),
+  start: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'started';
+  }),
+  stop: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'stopped';
+  }),
+  pause: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'paused';
+  }),
   cancel: vi.fn(),
   schedule: vi.fn(),
 };
@@ -39,10 +46,7 @@ const mockTransport = {
  * loading resolves immediately in tests. Must use a regular function (not an
  * arrow function) because the hook instantiates it with `new Tone.Sampler()`.
  */
-function makeSamplerImpl(
-  this: unknown,
-  options?: { onload?: () => void },
-) {
+function makeSamplerImpl(this: unknown, options?: { onload?: () => void }) {
   const onload = options?.onload;
   if (onload) Promise.resolve().then(onload);
   return {
@@ -90,7 +94,7 @@ function renderScoreViewer(movementId = TEST_MOVEMENT_ID, qs = '') {
       <Routes>
         <Route path="/scores/:movementId" element={<ScoreViewer />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -117,7 +121,7 @@ function setupFullLoad() {
     async (_tk, _mei, _opts, onPage, onComplete) => {
       onPage(MOCK_SVG, 1);
       onComplete(1);
-    },
+    }
   );
   vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
 }
@@ -206,7 +210,7 @@ describe('ScoreViewer', () => {
         onPage('<svg data-testid="page-1"><rect /></svg>', 1);
         onPage('<svg data-testid="page-2"><rect /></svg>', 2);
         onComplete(2);
-      },
+      }
     );
 
     renderScoreViewer();
@@ -321,9 +325,7 @@ describe('ScoreViewer', () => {
 
     renderScoreViewer();
 
-    expect(
-      screen.getByRole('heading', { level: 1, name: /score viewer/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /score viewer/i })).toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -377,9 +379,7 @@ describe('ScoreViewer', () => {
   it('shows "Loading instrument…" while the SoundFont is loading', async () => {
     setupFullLoad();
     // Override Sampler so onload is never called (simulates slow/missing SoundFont).
-    vi.mocked(Tone.Sampler).mockImplementation(function neverLoads(
-      this: unknown,
-    ) {
+    vi.mocked(Tone.Sampler).mockImplementation(function neverLoads(this: unknown) {
       return {
         toDestination: vi.fn().mockReturnThis(),
         triggerAttackRelease: vi.fn(),

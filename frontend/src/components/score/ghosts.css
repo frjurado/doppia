@@ -47,6 +47,35 @@
   opacity: 0.45;
 }
 
+/* --- Play-from-position affordance (Step 20) ---
+   When Alt is held over the score (data-armable on the score container), a
+   measure becomes a play-from-here target: pointer cursor + a faint tint and a
+   ▶ glyph on hover, visually distinct from the selection hover ('.light',
+   primary at 0.35). Beat / sub-beat ghosts resolve up to their measure, so they
+   share the pointer cursor. opacity stays 1 so the glyph reads crisply; the
+   tint comes from a translucent background instead. */
+[data-armable='true'] .ghost-measure,
+[data-armable='true'] .ghost-beat,
+[data-armable='true'] .ghost-subbeat {
+  cursor: pointer;
+}
+
+[data-armable='true'] .ghost-measure:hover {
+  opacity: 1;
+  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 18%, transparent);
+}
+
+[data-armable='true'] .ghost-measure:hover::before {
+  content: '▶';
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7em;
+  line-height: 1;
+  color: var(--color-primary, #3f5f77);
+}
+
 /* --- Drag handle ghosts (G3.1) ---
    Absolutely-positioned elements rendered just outside the committed selection
    boundary, within the staves. Clicking either handle re-anchors the endpoint

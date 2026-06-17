@@ -66,13 +66,34 @@ const SOUNDFONT_BASE_URL: string = import.meta.env['VITE_SOUNDFONT_BASE_URL'] ??
  * Value = filename,         e.g. "Ds4.mp3" (sharp with `s`, URL-safe)
  */
 const PIANO_SAMPLE_URLS: Record<string, string> = {
-  'C1': 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', 'A1': 'A1.mp3',
-  'C2': 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', 'A2': 'A2.mp3',
-  'C3': 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', 'A3': 'A3.mp3',
-  'C4': 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3', 'A4': 'A4.mp3',
-  'C5': 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3', 'A5': 'A5.mp3',
-  'C6': 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3', 'A6': 'A6.mp3',
-  'C7': 'C7.mp3', 'D#7': 'Ds7.mp3', 'F#7': 'Fs7.mp3', 'A7': 'A7.mp3',
+  C1: 'C1.mp3',
+  'D#1': 'Ds1.mp3',
+  'F#1': 'Fs1.mp3',
+  A1: 'A1.mp3',
+  C2: 'C2.mp3',
+  'D#2': 'Ds2.mp3',
+  'F#2': 'Fs2.mp3',
+  A2: 'A2.mp3',
+  C3: 'C3.mp3',
+  'D#3': 'Ds3.mp3',
+  'F#3': 'Fs3.mp3',
+  A3: 'A3.mp3',
+  C4: 'C4.mp3',
+  'D#4': 'Ds4.mp3',
+  'F#4': 'Fs4.mp3',
+  A4: 'A4.mp3',
+  C5: 'C5.mp3',
+  'D#5': 'Ds5.mp3',
+  'F#5': 'Fs5.mp3',
+  A5: 'A5.mp3',
+  C6: 'C6.mp3',
+  'D#6': 'Ds6.mp3',
+  'F#6': 'Fs6.mp3',
+  A6: 'A6.mp3',
+  C7: 'C7.mp3',
+  'D#7': 'Ds7.mp3',
+  'F#7': 'Fs7.mp3',
+  A7: 'A7.mp3',
 };
 
 // ---------------------------------------------------------------------------
@@ -81,12 +102,12 @@ const PIANO_SAMPLE_URLS: Record<string, string> = {
 
 /** Playback lifecycle states exposed to the score viewer. */
 export type PlaybackStatus =
-  | 'idle'               // No MIDI available; play button disabled.
+  | 'idle' // No MIDI available; play button disabled.
   | 'loading-instrument' // SoundFont loading on first play click.
-  | 'instrument-error'   // SoundFont failed to load (404, timeout, etc.). Retryable.
-  | 'ready'              // MIDI available, not playing. Play enabled.
-  | 'playing'            // Transport running.
-  | 'paused';            // Transport paused at current position.
+  | 'instrument-error' // SoundFont failed to load (404, timeout, etc.). Retryable.
+  | 'ready' // MIDI available, not playing. Play enabled.
+  | 'playing' // Transport running.
+  | 'paused'; // Transport paused at current position.
 
 /** 1-indexed bar and beat position, updated during playback via RAF. */
 export interface PlaybackPosition {
@@ -105,6 +126,17 @@ export interface MidiPlaybackOptions {
   window?: FragmentTimeWindow | null;
   /** Called when playback reaches the window end (auto-stop). */
   onEnded?: () => void;
+  /**
+   * Play-from-position origin (Component 9 Step 20): start playback at this
+   * offset (ms) into the supplied MIDI, shifted so the origin is transport time
+   * 0. `0`/omitted starts at the beginning. Composes with `window` by taking the
+   * later of the two starts; the window end (if any) still bounds playback.
+   *
+   * The caller's `onPositionUpdate` handler must add `originMs` back when
+   * querying an *absolute* (whole-movement) schedule/caret track, since the
+   * transport time it receives is origin-relative.
+   */
+  originMs?: number;
 }
 
 export interface UseMidiPlaybackResult {
@@ -172,7 +204,7 @@ function parseTransportPosition(posStr: string): PlaybackPosition {
 export function useMidiPlayback(
   midiBase64: string | null,
   onPositionUpdate: (timeMs: number) => void,
-  options: MidiPlaybackOptions = {},
+  options: MidiPlaybackOptions = {}
 ): UseMidiPlaybackResult {
   const [status, setStatus] = useState<PlaybackStatus>('idle');
   const [position, setPosition] = useState<PlaybackPosition>({ bar: 1, beat: 1 });
@@ -188,6 +220,8 @@ export function useMidiPlayback(
   // Fragment window + end callback, read at play() time (no play() deps).
   const windowRef = useRef<FragmentTimeWindow | null>(options.window ?? null);
   const onEndedRef = useRef<MidiPlaybackOptions['onEnded']>(options.onEnded);
+  // Play-from-position origin (Step 20), read at play() time (no play() deps).
+  const originMsRef = useRef<number>(options.originMs ?? 0);
 
   useEffect(() => {
     onPositionUpdateRef.current = onPositionUpdate;
@@ -204,6 +238,10 @@ export function useMidiPlayback(
   useEffect(() => {
     onEndedRef.current = options.onEnded;
   }, [options.onEnded]);
+
+  useEffect(() => {
+    originMsRef.current = options.originMs ?? 0;
+  }, [options.originMs]);
 
   // ── RAF position tracking ──────────────────────────────────────────────────
 
@@ -304,17 +342,28 @@ export function useMidiPlayback(
         // requests go to the Vite dev server which never 404s synchronously).
         let settled = false;
         const timer = setTimeout(() => {
-          if (!settled) { settled = true; resolve('error'); }
+          if (!settled) {
+            settled = true;
+            resolve('error');
+          }
         }, 10_000);
 
         samplerRef.current = new Tone.Sampler({
           urls: PIANO_SAMPLE_URLS,
           baseUrl: `${SOUNDFONT_BASE_URL}/soundfonts/piano/`,
           onload: () => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve('ok'); }
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve('ok');
+            }
           },
           onerror: () => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve('error'); }
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve('error');
+            }
           },
         }).toDestination();
       });
@@ -335,13 +384,14 @@ export function useMidiPlayback(
     const bytes = base64ToUint8Array(midi64);
     const midiData = new Midi(bytes.buffer as ArrayBuffer);
 
-    // Fragment window (Step 18): when set, only the notes between startSec and
-    // endSec sound, shifted so the fragment starts at transport time 0. With no
-    // window, startSec=0 / endSec=∞ reproduces whole-movement playback exactly.
+    // Fragment window (Step 18) + play-from-position origin (Step 20): only the
+    // notes between startSec and endSec sound, shifted so the start is transport
+    // time 0. startSec is the later of the fragment window start and the
+    // play-from-position origin; with neither set, startSec=0 / endSec=∞
+    // reproduces whole-movement playback exactly.
     const win = windowRef.current;
-    const startSec = (win?.startMs ?? 0) / 1000;
-    const endSec =
-      win && Number.isFinite(win.endMs) ? win.endMs / 1000 : Number.POSITIVE_INFINITY;
+    const startSec = Math.max(win?.startMs ?? 0, originMsRef.current) / 1000;
+    const endSec = win && Number.isFinite(win.endMs) ? win.endMs / 1000 : Number.POSITIVE_INFINITY;
     const EPS_SEC = 1e-4;
 
     // Sync the Tone.js Transport tempo and time signature with the actual MIDI
@@ -384,7 +434,7 @@ export function useMidiPlayback(
             note.name,
             note.duration,
             audioTime,
-            note.velocity,
+            note.velocity
           );
         }, note.time - startSec);
       });
@@ -392,7 +442,9 @@ export function useMidiPlayback(
 
     // Auto-stop at the window end so playback never spills past the fragment.
     if (Number.isFinite(endSec)) {
-      transport.scheduleOnce(() => { endPlaybackRef.current(); }, endSec - startSec);
+      transport.scheduleOnce(() => {
+        endPlaybackRef.current();
+      }, endSec - startSec);
     }
 
     transport.start();

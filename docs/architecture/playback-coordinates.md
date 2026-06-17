@@ -217,7 +217,7 @@ The window is keyed on the **rendered** measure range (`mc_start`/`mc_end`), not
 
 The following items remain deferred:
 
-- **Beat-level scrubbing**: `beat_start`/`beat_end` are stored but not yet used as playback start points. `Tone.getTransport().position` can be set to a beat offset derived from the timemap schedule before `transport.start()` — the natural extension point for Step 20 (play-from-position).
+- **Beat-level scrubbing**: `beat_start`/`beat_end` are stored but not yet used as playback start points. *Measure-level* play-from-position shipped in Step 20 (see §"Play-from-position" below); beat precision is the remaining deferral — the same origin-offset machinery would take a beat-derived ms instead of a measure onset.
 - **Timemap + transposition**: the fragment viewer rebuilds the schedule on every render via `buildFragmentPlayback(tk, …)` (which calls `renderToTimemap`), so a future transpose control there would already pick up the new timing. The fragment viewer does not yet expose transposition (`transpose: ''`); when it does, confirm the window onsets still align after the reflow.
 - **`getElementsAtTime` fallback removal**: The `VerovioToolkitInstance` interface still declares `getElementsAtTime`. It is no longer called in the production highlight path (replaced by the timemap schedule). Remove it from the interface once the timemap schedule has been validated across the full corpus — the dead declaration is a maintenance hazard.
 
@@ -259,3 +259,25 @@ Verovio expands repeats in the timemap, so a repeated section replays as later e
 ### Relationship to play-from-position (Step 20)
 
 `resolveCaret` is time-addressable: it resolves any `t`, so a playback that starts mid-score (Step 20) drives the caret correctly with no extra work — the caret simply resolves from the first anchor at or before the seek time.
+
+---
+
+## Play-from-position
+
+Implemented in Component 9 Step 20 for the full-score viewer (`ScoreViewer.tsx`) only. The fragment detail view keeps its Step 18 fragment-from-top playback unchanged. Decided with Francisco (see ADR / roadmap decision 4): **Alt-click to arm an origin, set-then-play, Stop → origin, plus a Rewind control; measure resolution; both view and tag mode.**
+
+### Interaction
+
+- **Gesture.** Alt-click (Option-click on macOS) a measure arms it as the playback **origin**. Because the gesture is modifier-based it is uniform in both modes with no collision: plain click stays inert in view mode and stays fragment selection in tag mode. In tag mode the annotator (`annotator.ts`) bails out of selection on an Alt-modified mousedown and hands the enclosing measure key to `onPlayFromMeasure`; at beat / sub-beat resolution the clicked ghost resolves *up to its measure* (Phase-1 measure resolution). In view mode a lightweight controller in `ScoreViewer` activates the measure ghost layer's pointer-events and routes Alt-clicks the same way.
+- **Affordance.** While Alt is held the score container carries `data-armable` (gated on playback availability); CSS (`ghosts.css`) gives measures a pointer cursor and a play-from-here hover tint + ▶ glyph, visually distinct from the selection hover light.
+- **Set-then-play.** Arming parks a *static* caret at the origin (`resolveCaret(track, originMs)`) and updates the transport readout, but does **not** start audio. Play starts there; **Stop** returns the caret to the armed origin (easy replay-from-here); the transport **Rewind** (`⏮`) button clears the origin back to the movement top.
+
+### Coordinate path
+
+A measure → origin-ms lookup is precomputed per render alongside the highlight schedule: `buildMeasureOnsetIndex(tk, meiText)` (`services/verovio.ts`) returns `mc → earliest-onset ms` over the whole-movement timemap, sharing the expanded measure-onset reconstruction with `buildFragmentPlayback`. An Alt-clicked measure key → `mc` (via the existing `buildMcIndex`) → origin ms.
+
+Playback then reuses the Step 18 windowing: `useMidiPlayback(midi, onUpdate, { originMs })` schedules only notes at/after `originMs`, shifted so the origin is transport time 0 (with `endMs = ∞`, so it runs to the movement end and the fragment auto-stop is skipped). This makes `transport.seconds` **origin-relative**, while the whole-movement schedule and caret track stay **absolute**; the one reconciling rule is in `handlePositionUpdate`, which queries both at `t = timeMs + originMs`. With `originMs = 0` (no origin / after Rewind) every path is byte-for-byte the prior behaviour. The origin resets to 0 on any MIDI change (score load, transpose, scale/font, resize) so a stale origin never survives a re-render.
+
+### Repeats and limitations
+
+The origin is a measure's **first** onset. A measure inside a repeat plays on more than one pass; playback starts at the earliest pass and the caret retraces later passes automatically (the repeat-seam rule above). Targeting a later pass of a repeated measure is out of Phase-1 scope. Beat-precision starts remain deferred (see §"Forward-compatibility hooks").

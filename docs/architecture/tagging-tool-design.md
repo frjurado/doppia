@@ -289,6 +289,8 @@ Because selections may cross repeat barlines (ADR-025), a fragment can contain a
 
 This is a fragment-playback rule only; full-movement playback is unchanged (`playback-coordinates.md` § Repeat policy).
 
+**Play-from-position in tag mode (Step 20).** `Alt`-click (Option-click) on a measure is reserved for measure-level play-from-position and is **never** a selection action: the annotator bails out of the selection drag on an `Alt`-modified mousedown and hands the enclosing measure key to the play-from-position handler (a beat / sub-beat ghost resolves up to its measure). Plain click is unchanged. This is the same gesture the read-only score viewer uses, so it works identically whether or not tagging is active. Full spec: `playback-coordinates.md` § Play-from-position.
+
 ### 6A.7 Edge-case register
 
 - **Partial bars (split measures, `@metcon="false"`).** Each half is an ordinary, independently selectable measure at every resolution; an endpoint on either half is legal; the bracket covers exactly the committed half. Unique per-physical-measure ghost keys (render-order index, G2.3) are the mechanism; any geometry keyed on `@n` alone will paint unrelated partial bars and violates I1.

@@ -197,77 +197,114 @@ describe('computeSelectionKeys', () => {
         ['m3-e2', { groupIdx: 0, endingN: 2 }],
         ['m4-e2', { groupIdx: 0, endingN: 2 }],
       ]),
-      groups: [{
-        endings: new Map([
-          [1, ['m3-e1', 'm4-e1']],
-          [2, ['m3-e2', 'm4-e2']],
-        ]),
-        allKeys: ['m3-e1', 'm4-e1', 'm3-e2', 'm4-e2'],
-        finalN: 2,
-        jumpTargetKey,
-      }],
+      groups: [
+        {
+          endings: new Map([
+            [1, ['m3-e1', 'm4-e1']],
+            [2, ['m3-e2', 'm4-e2']],
+          ]),
+          allKeys: ['m3-e1', 'm4-e1', 'm3-e2', 'm4-e2'],
+          finalN: 2,
+          jumpTargetKey,
+        },
+      ],
     };
   }
 
   it('returns the plain interval when no volta groups exist', () => {
-    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, null))
-      .toEqual(keys);
+    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, null)).toEqual(keys);
   });
 
   it('still clamps at directive barriers', () => {
     const barriers = new Set(['m2']);
-    expect(computeSelectionKeys('m1', 'm5', keys, barriers, makeVolta('m1')))
-      .toEqual(['m1', 'm2']);
+    expect(computeSelectionKeys('m1', 'm5', keys, barriers, makeVolta('m1'))).toEqual(['m1', 'm2']);
   });
 
   it('clamps a forward drag from ending 1 at the sibling-ending gate', () => {
-    expect(computeSelectionKeys('m3-e1', 'm3-e2', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m3-e1', 'm4-e1']);
+    expect(computeSelectionKeys('m3-e1', 'm3-e2', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm3-e1',
+      'm4-e1',
+    ]);
   });
 
   it('clamps a non-final-ending anchor extended past its group', () => {
-    expect(computeSelectionKeys('m3-e1', 'm5', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m3-e1', 'm4-e1']);
+    expect(computeSelectionKeys('m3-e1', 'm5', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm3-e1',
+      'm4-e1',
+    ]);
   });
 
   it('allows a final-ending anchor to extend past the group', () => {
-    expect(computeSelectionKeys('m3-e2', 'm5', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m3-e2', 'm4-e2', 'm5']);
+    expect(computeSelectionKeys('m3-e2', 'm5', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm3-e2',
+      'm4-e2',
+      'm5',
+    ]);
   });
 
   it('entering ending 2 from the body excludes ending 1 (row 2, discontiguous)', () => {
-    expect(computeSelectionKeys('m1', 'm4-e2', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m1', 'm2', 'm3-e2', 'm4-e2']);
+    expect(computeSelectionKeys('m1', 'm4-e2', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm1',
+      'm2',
+      'm3-e2',
+      'm4-e2',
+    ]);
   });
 
   it('entering ending 1 from the body keeps ending 1 only (row 2)', () => {
-    expect(computeSelectionKeys('m1', 'm4-e1', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m1', 'm2', 'm3-e1', 'm4-e1']);
+    expect(computeSelectionKeys('m1', 'm4-e1', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm1',
+      'm2',
+      'm3-e1',
+      'm4-e1',
+    ]);
   });
 
   it('backward drag from ending 2 into the body skips ending 1', () => {
-    expect(computeSelectionKeys('m4-e2', 'm1', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m1', 'm2', 'm3-e2', 'm4-e2']);
+    expect(computeSelectionKeys('m4-e2', 'm1', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm1',
+      'm2',
+      'm3-e2',
+      'm4-e2',
+    ]);
   });
 
   it('backward drag from ending 2 hovering inside ending 1 clamps at the gate', () => {
-    expect(computeSelectionKeys('m4-e2', 'm4-e1', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m3-e2', 'm4-e2']);
+    expect(computeSelectionKeys('m4-e2', 'm4-e1', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm3-e2',
+      'm4-e2',
+    ]);
   });
 
   it('wholly contained group including its repeat-start keeps all endings (row 3)', () => {
-    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, makeVolta('m2')))
-      .toEqual(['m1', 'm2', 'm3-e1', 'm4-e1', 'm3-e2', 'm4-e2', 'm5']);
+    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, makeVolta('m2'))).toEqual([
+      'm1',
+      'm2',
+      'm3-e1',
+      'm4-e1',
+      'm3-e2',
+      'm4-e2',
+      'm5',
+    ]);
   });
 
   it('wholly contained group without its repeat-start excludes non-final endings (row 4)', () => {
-    expect(computeSelectionKeys('m2', 'm5', keys, noBarriers, makeVolta('m1')))
-      .toEqual(['m2', 'm3-e2', 'm4-e2', 'm5']);
+    expect(computeSelectionKeys('m2', 'm5', keys, noBarriers, makeVolta('m1'))).toEqual([
+      'm2',
+      'm3-e2',
+      'm4-e2',
+      'm5',
+    ]);
   });
 
   it('unknown jump target (null) takes the conservative row-4 path', () => {
-    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, makeVolta(null)))
-      .toEqual(['m1', 'm2', 'm3-e2', 'm4-e2', 'm5']);
+    expect(computeSelectionKeys('m1', 'm5', keys, noBarriers, makeVolta(null))).toEqual([
+      'm1',
+      'm2',
+      'm3-e2',
+      'm4-e2',
+      'm5',
+    ]);
   });
 });
 
@@ -281,12 +318,17 @@ describe('deriveRepeatContext', () => {
       ['m3-e1', { groupIdx: 0, endingN: 1 }],
       ['m3-e2', { groupIdx: 0, endingN: 2 }],
     ]),
-    groups: [{
-      endings: new Map([[1, ['m3-e1']], [2, ['m3-e2']]]),
-      allKeys: ['m3-e1', 'm3-e2'],
-      finalN: 2,
-      jumpTargetKey: 'm1',
-    }],
+    groups: [
+      {
+        endings: new Map([
+          [1, ['m3-e1']],
+          [2, ['m3-e2']],
+        ]),
+        allKeys: ['m3-e1', 'm3-e2'],
+        finalN: 2,
+        jumpTargetKey: 'm1',
+      },
+    ],
   };
 
   it('returns null for a selection without ending measures', () => {
@@ -463,7 +505,7 @@ describe('numericKeyRange', () => {
 /** Build a minimal GhostLayer container and populate n measure ghosts. */
 function makeLayerWithMeasures(
   barNs: number[],
-  endingNs?: (number | null)[],
+  endingNs?: (number | null)[]
 ): {
   container: HTMLDivElement;
   layer: GhostLayer;
@@ -485,7 +527,7 @@ function makeLayerWithMeasures(
       barN,
       endingN,
       key,
-      bounds: { left: (i * 100), top: 0, width: 100, height: 50 },
+      bounds: { left: i * 100, top: 0, width: 100, height: 50 },
       systemTop: 0,
       renderOrder: i,
     } satisfies MeasureGhostEntry);
@@ -505,7 +547,7 @@ function makeLayerWithMeasures(
  * measureKey defaults to measureGhostKey(barN, null) but can be overridden per-measure.
  */
 function makeLayerWithBeats(
-  measures: Array<{ barN: number; numBeats: number; subDiv?: number; measureKey?: string }>,
+  measures: Array<{ barN: number; numBeats: number; subDiv?: number; measureKey?: string }>
 ): {
   container: HTMLDivElement;
   layer: GhostLayer;
@@ -545,11 +587,7 @@ function makeLayerWithBeats(
 }
 
 /** Synthesise and dispatch mouse events to simulate a measure drag. */
-function measureDrag(
-  els: HTMLDivElement[],
-  anchorIdx: number,
-  throughIdxs: number[],
-): void {
+function measureDrag(els: HTMLDivElement[], anchorIdx: number, throughIdxs: number[]): void {
   els[anchorIdx]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
   for (const idx of throughIdxs) {
     els[idx]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
@@ -824,10 +862,7 @@ describe('AnnotationSession — repeat context', () => {
   });
 
   it('captures first_ending context when selection spans an ending-1 measure', () => {
-    const { container, layer, els } = makeLayerWithMeasures(
-      [1, 2, 12, 12],
-      [null, null, 1, 2],
-    );
+    const { container, layer, els } = makeLayerWithMeasures([1, 2, 12, 12], [null, null, 1, 2]);
     const session = new AnnotationSession(layer, { resolution: 'measure' });
     // Drag from m1 through m12-e1 (index 2).
     measureDrag(els, 0, [1, 2]);
@@ -956,12 +991,12 @@ describe('AnnotationSession — beat drag', () => {
     // renderOrder 0 = first measure in the array (barN=1).
     const r0b0 = encodeBeat(0, 0); // renderOrder=0, beat 0 (float 1.0)
     const r0b2 = encodeBeat(0, 2); // renderOrder=0, beat 2 (float 3.0)
-    beatEls.get(r0b0)!.dispatchEvent(
-      new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
-    );
-    beatEls.get(r0b2)!.dispatchEvent(
-      new MouseEvent('mouseover', { bubbles: true, cancelable: true }),
-    );
+    beatEls
+      .get(r0b0)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r0b2)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     expect(session.selection?.barStart).toBe(1);
@@ -974,12 +1009,12 @@ describe('AnnotationSession — beat drag', () => {
   it('beat drag spanning two measures sets correct barStart and barEnd', () => {
     const r0b0 = encodeBeat(0, 0); // renderOrder=0 (barN=1), beat 0
     const r1b1 = encodeBeat(1, 1); // renderOrder=1 (barN=2), beat 1
-    beatEls.get(r0b0)!.dispatchEvent(
-      new MouseEvent('mousedown', { bubbles: true, cancelable: true }),
-    );
-    beatEls.get(r1b1)!.dispatchEvent(
-      new MouseEvent('mouseover', { bubbles: true, cancelable: true }),
-    );
+    beatEls
+      .get(r0b0)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r1b1)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     expect(session.selection?.barStart).toBe(1);
@@ -1077,7 +1112,7 @@ describe('AnnotationSession — volta ending gates', () => {
   beforeEach(() => {
     ({ container, layer, els } = makeLayerWithMeasures(
       [1, 2, 3, 4, 5, 6, 7, 6, 7, 8],
-      [null, null, null, null, null, 1, 1, 2, 2, null],
+      [null, null, null, null, null, 1, 1, 2, 2, null]
     ));
     session = new AnnotationSession(layer, { resolution: 'measure' });
   });
@@ -1101,9 +1136,16 @@ describe('AnnotationSession — volta ending gates', () => {
     measureDrag(els, 0, [9]);
     expect(session.selection?.barStart).toBe(1);
     expect(session.selection?.barEnd).toBe(8);
-    expect(session.selection?.measureKeys).toEqual(
-      ['m1', 'm2', 'm3', 'm4', 'm5', 'm6-e2', 'm7-e2', 'm8'],
-    );
+    expect(session.selection?.measureKeys).toEqual([
+      'm1',
+      'm2',
+      'm3',
+      'm4',
+      'm5',
+      'm6-e2',
+      'm7-e2',
+      'm8',
+    ]);
     expect(session.selection?.repeatContext).toBe('second_ending');
     // Ending-1 ghosts must not be highlighted.
     expect(els[5]!.classList.contains('dark')).toBe(false);
@@ -1146,13 +1188,11 @@ describe('AnnotationSession — volta ending gates', () => {
     measureDrag(els, 7, [6, 5, 4, 3, 2, 1, 0]);
     expect(session.selection?.barStart).toBe(1);
     expect(session.selection?.barEnd).toBe(6); // m6-e2.barN = 6
-    expect(session.selection?.measureKeys).toEqual(
-      ['m1', 'm2', 'm3', 'm4', 'm5', 'm6-e2'],
-    );
+    expect(session.selection?.measureKeys).toEqual(['m1', 'm2', 'm3', 'm4', 'm5', 'm6-e2']);
     expect(session.selection?.repeatContext).toBe('second_ending');
     expect(els[5]!.classList.contains('dark')).toBe(false); // m6-e1
     expect(els[6]!.classList.contains('dark')).toBe(false); // m7-e1
-    expect(els[0]!.classList.contains('dark')).toBe(true);  // m1
+    expect(els[0]!.classList.contains('dark')).toBe(true); // m1
   });
 
   it('backward drag from ending 2 hovering inside ending 1 clamps at the gate', () => {
@@ -1174,10 +1214,7 @@ describe('AnnotationSession — volta ending gates', () => {
   });
 
   it('volta gates apply without any explicit volta index (layer-derived)', () => {
-    const { container: c2, layer: l2, els: e2 } = makeLayerWithMeasures(
-      [1, 2, 1, 2],
-      [1, 1, 2, 2],
-    );
+    const { container: c2, layer: l2, els: e2 } = makeLayerWithMeasures([1, 2, 1, 2], [1, 1, 2, 2]);
     const s2 = new AnnotationSession(l2, { resolution: 'measure' });
 
     // Drag from m1-e1 (idx 0) to m1-e2 (idx 2) — sibling crossing, clamped
@@ -1188,7 +1225,8 @@ describe('AnnotationSession — volta ending gates', () => {
 
     expect(s2.selection?.barEnd).toBe(2); // m2-e1.barN = 2
     expect(s2.selection?.repeatContext).toBe('first_ending');
-    s2.destroy(); c2.remove();
+    s2.destroy();
+    c2.remove();
   });
 });
 
@@ -1219,7 +1257,10 @@ describe('AnnotationSession — sub-beat endpoint exactness', () => {
       el.dataset['key'] = mKey;
       layer._appendMeasureGhost(el);
       layer.measureIndex.set(mKey, {
-        el, barN, endingN: null, key: mKey,
+        el,
+        barN,
+        endingN: null,
+        key: mKey,
         bounds: { left: renderOrder * 200, top: 0, width: 200, height: 50 },
         systemTop: 0,
         renderOrder,
@@ -1234,9 +1275,15 @@ describe('AnnotationSession — sub-beat endpoint exactness', () => {
           sbEl.dataset['key'] = `${encKey}`;
           layer._appendSubBeatGhost(sbEl);
           layer.subBeatIndex.set(encKey, {
-            el: sbEl, barN, endingN: null, measureKey: mKey,
-            beatIdx: b, subBeatIdx: sb, encodedKey: encKey,
-            beatFloat, endFloat: beatFloat + 0.5,
+            el: sbEl,
+            barN,
+            endingN: null,
+            measureKey: mKey,
+            beatIdx: b,
+            subBeatIdx: sb,
+            encodedKey: encKey,
+            beatFloat,
+            endFloat: beatFloat + 0.5,
             bounds: { left: renderOrder * 200 + b * 50 + sb * 25, top: 0, width: 25, height: 50 },
           } satisfies SubBeatGhostEntry);
           subBeatEls.set(encKey, sbEl);
@@ -1256,9 +1303,13 @@ describe('AnnotationSession — sub-beat endpoint exactness', () => {
     const session = new AnnotationSession(layer, { resolution: 'subbeat' });
 
     const start = encodeSubBeat(0, 2, 0); // m1, beat 3 (float 3.0)
-    const end   = encodeSubBeat(1, 0, 0); // m2, beat 1, first sub-beat (float 1.0)
-    subBeatEls.get(start)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    subBeatEls.get(end)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    const end = encodeSubBeat(1, 0, 0); // m2, beat 1, first sub-beat (float 1.0)
+    subBeatEls
+      .get(start)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    subBeatEls
+      .get(end)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     expect(session.selection?.barStart).toBe(1);
@@ -1267,7 +1318,8 @@ describe('AnnotationSession — sub-beat endpoint exactness', () => {
     expect(session.selection?.beatEnd).toBe(1.5); // exactly one sub-beat into m2
     expect(session.selection?.measureKeys).toEqual(['m1', 'm2']);
 
-    session.destroy(); container.remove();
+    session.destroy();
+    container.remove();
   });
 
   it('a selection ending mid-beat commits beatEnd at the exact sub-beat boundary', () => {
@@ -1276,13 +1328,18 @@ describe('AnnotationSession — sub-beat endpoint exactness', () => {
     const session = new AnnotationSession(layer, { resolution: 'subbeat' });
 
     const start = encodeSubBeat(0, 0, 0); // m1 float 1.0
-    const end   = encodeSubBeat(0, 2, 1); // m1, beat 3, second sub-beat (float 3.5)
-    subBeatEls.get(start)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    subBeatEls.get(end)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    const end = encodeSubBeat(0, 2, 1); // m1, beat 3, second sub-beat (float 3.5)
+    subBeatEls
+      .get(start)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    subBeatEls
+      .get(end)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     expect(session.selection?.beatEnd).toBe(4.0); // 3.5 + 0.5, not 4.5
-    session.destroy(); container.remove();
+    session.destroy();
+    container.remove();
   });
 });
 
@@ -1307,7 +1364,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
   function makeLayerWithMeasuresAndBeats(
     barNs: number[],
     beatsPerMeasure: number[],
-    endingNs?: (number | null)[],
+    endingNs?: (number | null)[]
   ): {
     container: HTMLDivElement;
     layer: GhostLayer;
@@ -1326,7 +1383,10 @@ describe('AnnotationSession — beat barrier enforcement', () => {
       el.dataset['key'] = key;
       layer._appendMeasureGhost(el);
       layer.measureIndex.set(key, {
-        el, barN, endingN, key,
+        el,
+        barN,
+        endingN,
+        key,
         bounds: { left: i * 100, top: 0, width: 100, height: 50 },
         systemTop: 0,
         renderOrder: i,
@@ -1346,8 +1406,12 @@ describe('AnnotationSession — beat barrier enforcement', () => {
         el.dataset['key'] = `${encKey}`;
         layer._appendBeatGhost(el);
         layer.beatIndex.set(encKey, {
-          el, barN, endingN, measureKey: mKey,
-          beatIdx: b, encodedKey: encKey,
+          el,
+          barN,
+          endingN,
+          measureKey: mKey,
+          beatIdx: b,
+          encodedKey: encKey,
           beatFloat: b + 1,
           endFloat: b + 2,
           bounds: { left: renderOrder * 100 + b * 20, top: 0, width: 20, height: 30 },
@@ -1361,10 +1425,7 @@ describe('AnnotationSession — beat barrier enforcement', () => {
 
   it('forward beat drag clamps at the barrier measure', () => {
     // 3 measures: m1 (2 beats), m2 (2 beats, barrier), m3 (2 beats).
-    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
-      [1, 2, 3],
-      [2, 2, 2],
-    );
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats([1, 2, 3], [2, 2, 2]);
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
@@ -1374,23 +1435,25 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     // Anchor at m1 beat 0 (renderOrder=0, b=0), drag to m3 beat 0 (renderOrder=2, b=0).
     const r0b0 = encodeBeat(0, 0);
     const r2b0 = encodeBeat(2, 0);
-    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    beatEls.get(r2b0)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r0b0)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r2b0)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     // Should clamp at m2 (barrier): barStart=1, barEnd=2.
     expect(session.selection?.barStart).toBe(1);
     expect(session.selection?.barEnd).toBe(2);
 
-    session.destroy(); container.remove();
+    session.destroy();
+    container.remove();
   });
 
   it('backward beat drag clamps at the barrier — anchor stays on its side', () => {
     // Same 3-measure setup: barrier at m2.
-    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
-      [1, 2, 3],
-      [2, 2, 2],
-    );
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats([1, 2, 3], [2, 2, 2]);
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
@@ -1400,22 +1463,24 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     // Anchor at m3 beat 0 (renderOrder=2), drag backward through barrier to m1 beat 0.
     const r2b0 = encodeBeat(2, 0);
     const r0b0 = encodeBeat(0, 0);
-    beatEls.get(r2b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r2b0)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r0b0)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     // Barrier at m2 blocks backward crossing — selection stays on m3 side.
     expect(session.selection?.barStart).toBe(3);
     expect(session.selection?.barEnd).toBe(3);
 
-    session.destroy(); container.remove();
+    session.destroy();
+    container.remove();
   });
 
   it('beat drag within one measure is unaffected by a barrier in another measure', () => {
-    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
-      [1, 2, 3],
-      [4, 4, 4],
-    );
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats([1, 2, 3], [4, 4, 4]);
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
@@ -1425,21 +1490,23 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     // Drag entirely within m3 (renderOrder=2).
     const r2b0 = encodeBeat(2, 0);
     const r2b3 = encodeBeat(2, 3);
-    beatEls.get(r2b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    beatEls.get(r2b3)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r2b0)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r2b3)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     expect(session.selection?.barStart).toBe(3);
     expect(session.selection?.barEnd).toBe(3);
 
-    session.destroy(); container.remove();
+    session.destroy();
+    container.remove();
   });
 
   it('a beat drag that does not reach the barrier is unaffected', () => {
-    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats(
-      [1, 2, 3],
-      [2, 2, 2],
-    );
+    const { container, layer, beatEls } = makeLayerWithMeasuresAndBeats([1, 2, 3], [2, 2, 2]);
     const barrier = new Set([measureGhostKey(2, null)]);
     const session = new AnnotationSession(layer, {
       resolution: 'beat',
@@ -1449,14 +1516,19 @@ describe('AnnotationSession — beat barrier enforcement', () => {
     // Drag from m1 beat 0 to m1 beat 1 — does not cross m2 barrier.
     const r0b0 = encodeBeat(0, 0);
     const r0b1 = encodeBeat(0, 1);
-    beatEls.get(r0b0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    beatEls.get(r0b1)!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r0b0)!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    beatEls
+      .get(r0b1)!
+      .dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
     document.dispatchEvent(new MouseEvent('mouseup'));
 
     expect(session.selection?.barStart).toBe(1);
     expect(session.selection?.barEnd).toBe(1);
 
-    session.destroy(); container.remove();
+    session.destroy();
+    container.remove();
   });
 });
 
@@ -1539,6 +1611,92 @@ describe('AnnotationSession — setStageDragActive', () => {
     session.setStageDragActive(false);
 
     expect(hideSpy).toHaveBeenCalled();
+
+    session.destroy();
+    container.remove();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AnnotationSession — play-from-position Alt-click (Step 20)
+// ---------------------------------------------------------------------------
+
+describe('AnnotationSession — play-from-position (Step 20)', () => {
+  it('Alt-click a measure calls onPlayFromMeasure with its key and starts no selection', () => {
+    const { container, layer, els } = makeLayerWithMeasures([1, 2, 3]);
+    const onPlay = vi.fn();
+    const session = new AnnotationSession(layer, {
+      resolution: 'measure',
+      onPlayFromMeasure: onPlay,
+    });
+
+    els[1]!.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true, altKey: true })
+    );
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    expect(onPlay).toHaveBeenCalledTimes(1);
+    expect(onPlay).toHaveBeenCalledWith(measureGhostKey(2, null));
+    // No selection is started or committed by the Alt gesture.
+    expect(session.selection).toBeNull();
+    expect(session.flags.fragmentSet).toBe(false);
+
+    session.destroy();
+    container.remove();
+  });
+
+  it('plain click still starts a selection (Alt-gesture does not regress selection)', () => {
+    const { container, layer, els } = makeLayerWithMeasures([1, 2, 3]);
+    const onPlay = vi.fn();
+    const session = new AnnotationSession(layer, {
+      resolution: 'measure',
+      onPlayFromMeasure: onPlay,
+    });
+
+    measureDrag(els, 0, [1]); // plain (no altKey) drag m1..m2
+
+    expect(onPlay).not.toHaveBeenCalled();
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(2);
+
+    session.destroy();
+    container.remove();
+  });
+
+  it('Alt-click a beat ghost resolves up to its enclosing measure key', () => {
+    const { container, layer, beatEls } = makeLayerWithBeats([
+      { barN: 1, numBeats: 2 },
+      { barN: 2, numBeats: 2 },
+    ]);
+    const onPlay = vi.fn();
+    const session = new AnnotationSession(layer, { resolution: 'beat', onPlayFromMeasure: onPlay });
+
+    // A beat ghost in the second measure (renderOrder 1, beatIdx 0).
+    const beatEl = beatEls.get(encodeBeat(1, 0))!;
+    beatEl.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true, altKey: true })
+    );
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    expect(onPlay).toHaveBeenCalledTimes(1);
+    expect(onPlay).toHaveBeenCalledWith(measureGhostKey(2, null));
+    expect(session.selection).toBeNull();
+
+    session.destroy();
+    container.remove();
+  });
+
+  it('does nothing when no onPlayFromMeasure handler is supplied', () => {
+    const { container, layer, els } = makeLayerWithMeasures([1, 2]);
+    const session = new AnnotationSession(layer, { resolution: 'measure' });
+
+    els[0]!.dispatchEvent(
+      new MouseEvent('mousedown', { bubbles: true, cancelable: true, altKey: true })
+    );
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    expect(session.selection).toBeNull();
+    expect(session.flags.fragmentSet).toBe(false);
 
     session.destroy();
     container.remove();
