@@ -358,6 +358,7 @@ class FragmentListItem(BaseModel):
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
+    primary_concept_name: str | None = None
     sub_parts: list["FragmentListItem"]
 
 

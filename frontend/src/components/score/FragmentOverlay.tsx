@@ -42,7 +42,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import type { GhostLayer } from './ghosts';
+import type { GhostLayer, ResolutionMode } from './ghosts';
 import { resolveSegments } from './MainBracket';
 import type { BracketSegment } from './MainBracket';
 import type { FragmentListItem } from '../../services/fragmentApi';
@@ -148,6 +148,33 @@ function toSelectionRange(item: FragmentListItem): SelectionRange {
 }
 
 /**
+ * Finest ghost resolution a stored fragment's beat coordinates require.
+ *
+ * Sub-beat-precise endpoints (non-integer beat floats) must project against the
+ * sub-beat index: projecting them at 'beat' snaps each onto a whole-beat ghost,
+ * which in compound meter (6/8 — two beats per bar) makes adjacent stages
+ * sharing a measure collapse to the same beat extent and overlap. Integer-beat
+ * coordinates use 'beat'; measure-only fragments use 'measure'.
+ */
+function storedResolution(
+  beatStart: number | null,
+  beatEnd: number | null,
+): ResolutionMode {
+  if (beatStart === null) return 'measure';
+  const isSubBeat = (v: number | null): boolean => v !== null && !Number.isInteger(v);
+  return isSubBeat(beatStart) || isSubBeat(beatEnd) ? 'subbeat' : 'beat';
+}
+
+/**
+ * Display label for a stored sub-part bracket: the primary concept alias, then
+ * its full name, then a positional fallback — mirroring the fragment viewer
+ * (FragmentDetail) so the whole-score stage lane is never nameless.
+ */
+function subPartLabel(item: FragmentListItem, index: number): string {
+  return item.primary_concept_alias ?? item.primary_concept_name ?? `Part ${index + 1}`;
+}
+
+/**
  * Return a CSS module class name for a fragment status.
  */
 function statusClass(status: FragmentListItem['status']): string {
@@ -234,7 +261,7 @@ export default function FragmentOverlay({
       subPartProjections: Array<{
         id: string;
         status: FragmentListItem['status'];
-        alias: string | null;
+        label: string;
         segments: SubPartSegment[];
       }>;
     }>
@@ -250,7 +277,7 @@ export default function FragmentOverlay({
       subPartProjections: Array<{
         id: string;
         status: FragmentListItem['status'];
-        alias: string | null;
+        label: string;
         segments: SubPartSegment[];
       }>;
     }> = [];
@@ -261,10 +288,12 @@ export default function FragmentOverlay({
       if (state !== undefined && !state.show) continue;
 
       const sel = toSelectionRange(frag);
-      // Use beat resolution when the fragment carries beat coordinates so the
-      // projected bracket aligns with beat ghost bounds — matching the live
-      // selection bracket at the same precision (G3.2).
-      const resolution = frag.beat_start !== null ? 'beat' : 'measure';
+      // Project at the finest resolution the stored beat coordinates require so
+      // the bracket aligns with the matching ghost bounds — matching the live
+      // selection bracket at the same precision (G3.2). Sub-beat endpoints must
+      // use the sub-beat index or they collapse onto whole-beat ghosts and
+      // overlap in compound meter (see storedResolution).
+      const resolution = storedResolution(frag.beat_start, frag.beat_end);
       const segments = resolveSegments(sel, ghostLayer, resolution);
       if (!segments) continue;
 
@@ -272,9 +301,9 @@ export default function FragmentOverlay({
       // sub_parts.sub_parts.  The data model preserves the full depth; only
       // the display is flattened at one visible level.
       const subPartProjections = frag.sub_parts
-        .map(sp => {
+        .map((sp, idx) => {
           const spSel = toSelectionRange(sp);
-          const spRes = sp.beat_start !== null ? 'beat' : 'measure';
+          const spRes = storedResolution(sp.beat_start, sp.beat_end);
           const spSegments = resolveSegments(spSel, ghostLayer, spRes);
           if (!spSegments) return null;
           // Augment with systemBottom so sub-parts can be placed below the staff.
@@ -285,7 +314,7 @@ export default function FragmentOverlay({
           return {
             id: sp.id,
             status: sp.status,
-            alias: sp.primary_concept_alias,
+            label: subPartLabel(sp, idx),
             segments: augmented,
           };
         })
@@ -379,7 +408,7 @@ export default function FragmentOverlay({
         const subPartElements = collapsed
           ? []
           : subPartProjections.flatMap(
-              ({ id: spId, status: spStatus, alias: spAlias, segments: spSegs }) =>
+              ({ id: spId, status: spStatus, label: spLabel, segments: spSegs }) =>
                 spSegs.map((seg, i) => {
                   const top = seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP;
                   const width = seg.right - seg.left;
@@ -396,12 +425,12 @@ export default function FragmentOverlay({
                           : `stored-bracket-${spId}-${i}`
                       }
                     >
-                      {seg.isFirst && spAlias !== null && (
+                      {seg.isFirst && (
                         <span
                           className={bracketStyles.aliasLabel}
                           aria-hidden="true"
                         >
-                          {spAlias}
+                          {spLabel}
                         </span>
                       )}
                     </div>

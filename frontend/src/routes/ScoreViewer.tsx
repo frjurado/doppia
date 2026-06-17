@@ -9,6 +9,7 @@ import { applyCaretPlacement, buildCaretTrack, CARET_INTERPOLATE, hideCaretEl, r
 import type { CaretTrack } from '../components/score/caret';
 import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
 import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
+import { measureExclusiveEndBeat, normalizeStageBeats } from '../components/score/stageBeats';
 import { AnnotationSession, buildDirectiveBarriers, buildVoltaIndex } from '../components/score/annotator';
 import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
 import { buildMcIndex, commitSelection, measureKeysForMcRange } from '../components/score/selection';
@@ -352,6 +353,28 @@ function buildStageAssignmentsFromSubParts(
     } satisfies StageAssignment;
   });
 }
+
+/**
+ * Finest ghost resolution required by a set of stored beat coordinates: sub-beat
+ * for any non-integer endpoint, beat for an integer beat endpoint, else measure.
+ *
+ * Used when restoring a fragment for edit/review so its beat-precise stage
+ * bounds project at their own precision. Without it the active resolution stays
+ * at its default ('measure') and findStartSlot snaps an off-beat-1 stage start
+ * to the whole-measure slot — the stage renders from the bar's left edge.
+ */
+function finestBeatResolution(
+  coords: ReadonlyArray<{ beat_start: number | null; beat_end: number | null }>,
+): ResolutionMode {
+  const isSubBeat = (v: number | null): boolean => v !== null && !Number.isInteger(v);
+  let rank = 0; // measure
+  for (const c of coords) {
+    if (isSubBeat(c.beat_start) || isSubBeat(c.beat_end)) return 'subbeat';
+    if (c.beat_start !== null || c.beat_end !== null) rank = Math.max(rank, 1);
+  }
+  return rank === 1 ? 'beat' : 'measure';
+}
+
 
 export default function ScoreViewer() {
   const { movementId } = useParams<{ movementId: string }>();
@@ -856,6 +879,17 @@ export default function ScoreViewer() {
         editSubPartsRef.current = null; // consume
         setStageAssignments(buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages, mcIndexRef.current));
         setStageGridBlocked(false);
+        // Raise the active resolution to the finest grid the restored fragment
+        // needs, so beat/sub-beat stage bounds render at their own precision.
+        // (The auto-pre-populate branch below does the same for fresh stages.)
+        const editFragment = editPrefillRef.current;
+        const grid = finestBeatResolution(
+          editFragment ? [editFragment, ...editSubParts] : editSubParts,
+        );
+        if ((GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+          resolutionRef.current = grid;
+          setResolution(grid);
+        }
         return;
       }
 
@@ -1195,16 +1229,26 @@ export default function ScoreViewer() {
           }
         }
 
+        // ADR-005 beat pair: both null (measure-level) or both non-null. A
+        // beat-precise stage that is measure-aligned on one side has its null
+        // side filled with the measure boundary so the stored extent matches
+        // what was tagged; a cross-bar pair (beatStart may exceed beatEnd, beats
+        // being 1-indexed per measure) is preserved. See normalizeStageBeats.
+        const { beat_start, beat_end } = normalizeStageBeats(
+          a.bounds.beatStart,
+          a.bounds.beatEnd,
+          a.bounds.barStart,
+          a.bounds.barEnd,
+          measureExclusiveEndBeat(ghostLayerRef.current, a.bounds.keyEnd, meiText),
+        );
+
         subParts.push({
           bar_start:      a.bounds.barStart,
           bar_end:        a.bounds.barEnd,
           mc_start:       mcStart,
           mc_end:         mcEnd,
-          // ADR-005: both beats null (measure-level) or both non-null with
-          // beatStart < beatEnd.  Normalize any invalid pair to both-null here
-          // so backend validation never receives an asymmetric or inverted pair.
-          beat_start:     (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatStart : null,
-          beat_end:       (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatEnd   : null,
+          beat_start,
+          beat_end,
           repeat_context: committedSelection.repeat_context,
           summary: {
             version:            1,

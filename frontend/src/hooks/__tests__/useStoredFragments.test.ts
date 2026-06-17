@@ -47,6 +47,7 @@ function makeItem(id: string, barStart = 1, barEnd = 2): FragmentListItem {
     status: 'approved',
     primary_concept_id: 'cad-pac',
     primary_concept_alias: 'PAC',
+    primary_concept_name: 'Perfect Authentic Cadence',
     sub_parts: [],
   };
 }

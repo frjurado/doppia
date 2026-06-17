@@ -43,6 +43,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import PlaybackCaret from '../components/score/PlaybackCaret';
+import { buildGhosts } from '../components/score/ghosts';
 import { applyCaretPlacement, buildCaretTrack, CARET_INTERPOLATE, hideCaretEl, resolveCaret } from '../components/score/caret';
 import type { CaretTrack } from '../components/score/caret';
 import Surface from '../components/ui/Surface';
@@ -104,7 +105,13 @@ interface MeasureRect {
 /** One onset's horizontal extent, for beat-precise bracket endpoints. */
 interface NoteEdge {
   barN: number;
-  tstamp: number;
+  /**
+   * Onset in the ADR-005 beat-float scale (same as fragment.beat_start). Taken
+   * from the ghost layer's sub-beat index, which derives onset times from
+   * `@dur.ppq` accumulation (not MEI `@tstamp` — notes in the corpus carry no
+   * `@tstamp`). Meter-correct in simple and compound time alike.
+   */
+  beatFloat: number;
   left: number;
   right: number;
 }
@@ -112,18 +119,21 @@ interface NoteEdge {
 interface FragmentGeometry {
   /** @n (integer bar number) → container-relative measure + system rect. */
   measures: Map<number, MeasureRect>;
-  /** Onset rects for note/rest/chord elements carrying @tstamp. */
+  /** Per-onset horizontal extents (one per struck sub-beat) for beat refinement. */
   notes: NoteEdge[];
 }
 
 const EMPTY_GEOMETRY: FragmentGeometry = { measures: new Map(), notes: [] };
 
 /**
- * Read measure, system, and onset bounding rects from the rendered SVG by
- * correlating MEI xml:id values with SVG element IDs.
+ * Read measure/system rects from the rendered SVG, and per-onset extents from
+ * the ghost layer, for bracket positioning in the isolated detail view.
  *
- * Used exclusively for bracket positioning in the isolated detail view. For
- * annotation ghost infrastructure use buildGhosts() instead.
+ * Measure rects come from the SVG measure bounding boxes (full system height for
+ * vertical placement). Note onsets come from buildGhosts()' sub-beat index,
+ * whose onset times are derived by `@dur.ppq` accumulation — the corpus MEI does
+ * not carry `@tstamp` on notes, so reading it would yield nothing and every
+ * beat-precise stage bracket would collapse to the whole measure.
  *
  * @param container - The score content element (position: relative).
  * @param meiText   - Normalized MEI content string for the loaded fragment.
@@ -154,7 +164,6 @@ function readFragmentGeometry(
       const barN = parseInt(m.getAttribute('n') ?? `${mi + 1}`, 10);
       if (isNaN(barN)) continue;
       // Deduplicate: first occurrence wins (first/second ending share @n).
-      // Onset rects are collected only for the kept measure for the same reason.
       if (measures.has(barN)) continue;
 
       const r = svgEl.getBoundingClientRect();
@@ -172,30 +181,20 @@ function readFragmentGeometry(
         systemTop:    sr.top    - cr.top,
         systemBottom: sr.bottom - cr.top,
       });
+    }
 
-      // Onset rects: note/rest/chord elements carrying @tstamp (notes inside
-      // chords inherit the chord's onset; the chord rect covers them).
-      for (const tag of ['note', 'rest', 'chord']) {
-        const els = m.getElementsByTagName(tag);
-        for (let i = 0; i < els.length; i++) {
-          const el = els[i]!;
-          const tsAttr = el.getAttribute('tstamp');
-          if (tsAttr === null) continue;
-          const tstamp = parseFloat(tsAttr);
-          if (Number.isNaN(tstamp)) continue;
-          const id = getId(el);
-          if (!id) continue;
-          const noteEl = container.querySelector(`[id="${CSS.escape(id)}"]`);
-          if (!noteEl) continue;
-          const nr = noteEl.getBoundingClientRect();
-          notes.push({
-            barN,
-            tstamp,
-            left:  nr.left  - cr.left,
-            right: nr.right - cr.left,
-          });
-        }
-      }
+    // Note onsets: derive from the ghost layer (PPQ-accumulated, meter-correct
+    // in simple and compound time). buildGhosts shares this container's
+    // coordinate origin, so the left/right extents line up with the measure
+    // rects above. One entry per struck sub-beat is enough for edge refinement.
+    const layer = buildGhosts(container, meiText);
+    for (const sb of layer.subBeatIndex.values()) {
+      notes.push({
+        barN: sb.barN,
+        beatFloat: sb.beatFloat,
+        left: sb.bounds.left,
+        right: sb.bounds.left + sb.bounds.width,
+      });
     }
   } catch {
     // Return partial geometry on parse / DOM error.
@@ -220,6 +219,10 @@ interface BracketSegment {
  * (annotator.ts): onsets >= beatStart in the start bar are included; onsets
  * >= beatEnd in the end bar are excluded (beat_end is the exclusive bound).
  * When no onset matches (e.g. rects unavailable), the measure edge is kept.
+ *
+ * Onset positions (`note.beatFloat`) are in the ADR-005 beat-float scale — the
+ * same scale as the stored `beatStart`/`beatEnd` — so the comparison holds in
+ * compound meters too (6/8 stages no longer collapse to whole-beat extents).
  */
 function computeBracketSegments(
   geo: FragmentGeometry,
@@ -253,7 +256,7 @@ function computeBracketSegments(
 
   if (beatStart !== null) {
     const xs = geo.notes
-      .filter((n) => n.barN === barStart && n.tstamp >= beatStart - EPS)
+      .filter((n) => n.barN === barStart && n.beatFloat >= beatStart - EPS)
       .map((n) => n.left);
     if (xs.length > 0) {
       const first = segments[0]!;
@@ -263,7 +266,7 @@ function computeBracketSegments(
   }
   if (beatEnd !== null) {
     const xs = geo.notes
-      .filter((n) => n.barN === barEnd && n.tstamp < beatEnd - EPS)
+      .filter((n) => n.barN === barEnd && n.beatFloat < beatEnd - EPS)
       .map((n) => n.right);
     if (xs.length > 0) {
       const last = segments[segments.length - 1]!;

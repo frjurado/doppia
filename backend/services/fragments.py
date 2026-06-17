@@ -927,20 +927,28 @@ class FragmentService:
             | {t.concept_id for tags in sub_tags_by_frag.values() for t in tags}
         )
         alias_map: dict[str, str | None] = {}
+        name_map: dict[str, str | None] = {}
         if all_concept_ids:
             async with self._driver.session() as neo_session:
                 for c in await get_concepts_by_ids(neo_session, all_concept_ids):
                     aliases: list[str] = c.get("aliases", [])
                     alias_map[c["id"]] = aliases[0] if aliases else None
+                    name_map[c["id"]] = c.get("name", c["id"])
 
-        def _primary(frag_id: uuid.UUID, tmap: dict) -> tuple[str | None, str | None]:
+        def _primary(
+            frag_id: uuid.UUID, tmap: dict
+        ) -> tuple[str | None, str | None, str | None]:
             for tag in tmap.get(frag_id, []):
                 if tag.is_primary:
-                    return tag.concept_id, alias_map.get(tag.concept_id)
-            return None, None
+                    return (
+                        tag.concept_id,
+                        alias_map.get(tag.concept_id),
+                        name_map.get(tag.concept_id),
+                    )
+            return None, None, None
 
         def _list_item(f: Fragment, tmap: dict, sp_tmap: dict) -> FragmentListItem:
-            p_id, p_alias = _primary(f.id, tmap)
+            p_id, p_alias, p_name = _primary(f.id, tmap)
             return FragmentListItem(
                 id=f.id,
                 movement_id=f.movement_id,
@@ -955,6 +963,7 @@ class FragmentService:
                 status=f.status,
                 primary_concept_id=p_id,
                 primary_concept_alias=p_alias,
+                primary_concept_name=p_name,
                 sub_parts=[
                     FragmentListItem(
                         id=sp.id,
@@ -970,6 +979,7 @@ class FragmentService:
                         status=sp.status,
                         primary_concept_id=_primary(sp.id, sp_tmap)[0],
                         primary_concept_alias=_primary(sp.id, sp_tmap)[1],
+                        primary_concept_name=_primary(sp.id, sp_tmap)[2],
                         sub_parts=[],
                     )
                     for sp in sub_by_parent.get(f.id, [])

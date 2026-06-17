@@ -28,7 +28,13 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import FragmentOverlay from '../FragmentOverlay';
 import type { FragmentOverlayProps } from '../FragmentOverlay';
-import type { GhostLayer, MeasureGhostEntry } from '../ghosts';
+import { encodeBeat, encodeSubBeat, measureGhostKey } from '../ghosts';
+import type {
+  BeatGhostEntry,
+  GhostLayer,
+  MeasureGhostEntry,
+  SubBeatGhostEntry,
+} from '../ghosts';
 import type { FragmentListItem } from '../../../services/fragmentApi';
 
 // ---------------------------------------------------------------------------
@@ -76,6 +82,7 @@ function makeFragment(
     status,
     primary_concept_id: 'cad-pac',
     primary_concept_alias: 'PAC',
+    primary_concept_name: 'Perfect Authentic Cadence',
     sub_parts: [],
   };
 }
@@ -550,6 +557,41 @@ describe('FragmentOverlay — sub-part brackets', () => {
     expect(subBracket.textContent).toContain('PAC');
   });
 
+  it('sub-part label falls back to the concept name when no alias', async () => {
+    const user = userEvent.setup();
+    const sub: FragmentListItem = {
+      ...makeFragment('sub', 1, 2),
+      primary_concept_alias: null,
+      primary_concept_name: 'Antecedent',
+    };
+    const frag: FragmentListItem = { ...makeFragment('parent', 1, 4), sub_parts: [sub] };
+    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Expand fragment', hidden: true }),
+    );
+
+    // The whole-score lane is never nameless: alias null → concept name shown.
+    expect(screen.getByTestId('stored-bracket-sub').textContent).toContain('Antecedent');
+  });
+
+  it('sub-part label falls back to a positional label when alias and name are both null', async () => {
+    const user = userEvent.setup();
+    const sub: FragmentListItem = {
+      ...makeFragment('sub', 1, 2),
+      primary_concept_alias: null,
+      primary_concept_name: null,
+    };
+    const frag: FragmentListItem = { ...makeFragment('parent', 1, 4), sub_parts: [sub] };
+    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Expand fragment', hidden: true }),
+    );
+
+    expect(screen.getByTestId('stored-bracket-sub').textContent).toContain('Part 1');
+  });
+
   it('two-level display limit: sub_parts.sub_parts are never rendered', async () => {
     const user = userEvent.setup();
 
@@ -575,6 +617,114 @@ describe('FragmentOverlay — sub-part brackets', () => {
     expect(screen.getByTestId('stored-bracket-sub')).toBeInTheDocument();
     // Grandchild does NOT render (two-level limit, ADR-011).
     expect(screen.queryByTestId('stored-bracket-grandchild')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sub-beat stage geometry in compound meter (overlap regression — K331/i)
+// ---------------------------------------------------------------------------
+
+describe('FragmentOverlay — sub-beat stages in compound meter', () => {
+  /**
+   * One 6/8 measure (bar 1): two beats (dotted quarters), three eighth
+   * sub-beats each. Sub-beats tile [0,300) at 50px width; beats tile at 150px.
+   * Floats use the ADR-005 encoding (beatToFloat, subDiv=3): 1.0, 1.333…,
+   * 1.667…, 2.0, 2.333…, 2.667….
+   */
+  function makeCompoundLayer(): GhostLayer {
+    const measureIndex = new Map<string, MeasureGhostEntry>();
+    const beatIndex = new Map<number, BeatGhostEntry>();
+    const subBeatIndex = new Map<number, SubBeatGhostEntry>();
+    const key = measureGhostKey(1, null);
+
+    measureIndex.set(key, {
+      el: document.createElement('div'),
+      barN: 1,
+      endingN: null,
+      key,
+      bounds: { left: 0, top: 54, width: 300, height: 40 },
+      systemTop: 50,
+      renderOrder: 0,
+    });
+
+    for (let b = 0; b < 2; b++) {
+      const bKey = encodeBeat(0, b);
+      beatIndex.set(bKey, {
+        el: document.createElement('div'),
+        barN: 1,
+        endingN: null,
+        measureKey: key,
+        beatIdx: b,
+        encodedKey: bKey,
+        beatFloat: b + 1,
+        endFloat: b + 2,
+        bounds: { left: b * 150, top: 54, width: 150, height: 40 },
+      });
+      for (let sb = 0; sb < 3; sb++) {
+        const sbKey = encodeSubBeat(0, b, sb);
+        const beatFloat = b + 1 + sb / 3;
+        subBeatIndex.set(sbKey, {
+          el: document.createElement('div'),
+          barN: 1,
+          endingN: null,
+          measureKey: key,
+          beatIdx: b,
+          subBeatIdx: sb,
+          encodedKey: sbKey,
+          beatFloat,
+          endFloat: beatFloat + 1 / 3,
+          bounds: { left: b * 150 + sb * 50, top: 54, width: 50, height: 40 },
+        });
+      }
+    }
+
+    return { measureIndex, beatIndex, subBeatIndex } as unknown as GhostLayer;
+  }
+
+  /** A sub-part fragment with explicit beat-precise coordinates in bar 1. */
+  function subBeatPart(
+    id: string,
+    beatStart: number,
+    beatEnd: number,
+  ): FragmentListItem {
+    return {
+      ...makeFragment(id, 1, 1),
+      beat_start: beatStart,
+      beat_end: beatEnd,
+    };
+  }
+
+  it('renders two stages sharing one 6/8 measure without overlap', async () => {
+    const user = userEvent.setup();
+    // Two stages inside beat 1: A = first eighth, B = second eighth. Under the
+    // old whole-beat ('beat') projection A would span the whole beat (width 150)
+    // and B would vanish (no integer beat onset in its range). With sub-beat
+    // projection each is one 50px sub-beat and they abut, never overlap.
+    const parent: FragmentListItem = {
+      ...makeFragment('parent', 1, 1),
+      sub_parts: [
+        subBeatPart('stageA', 1.0, 1 + 1 / 3),
+        subBeatPart('stageB', 1 + 1 / 3, 1 + 2 / 3),
+      ],
+    };
+    render(<FragmentOverlay fragments={[parent]} ghostLayer={makeCompoundLayer()} />);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Expand fragment', hidden: true }),
+    );
+
+    const a = screen.getByTestId('stored-bracket-stageA');
+    const b = screen.getByTestId('stored-bracket-stageB');
+    const aLeft = parseFloat(a.style.left);
+    const aRight = aLeft + parseFloat(a.style.width);
+    const bLeft = parseFloat(b.style.left);
+    const bRight = bLeft + parseFloat(b.style.width);
+
+    // Each stage is a single sub-beat (50px), not the whole beat (150px).
+    expect(aRight - aLeft).toBeCloseTo(50);
+    expect(bRight - bLeft).toBeCloseTo(50);
+    // Abutting, no overlap.
+    expect(aRight).toBeLessThanOrEqual(bLeft + 1e-6);
   });
 });
 

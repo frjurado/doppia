@@ -28,6 +28,7 @@ import type { StageAssignment, SubPartTag } from './stages';
 import { stageColor } from './stages';
 import SubPartForm from './SubPartForm';
 import Type from '../ui/Type';
+import { formatFragmentRange } from '../../utils/fragmentRange';
 import styles from './StageList.module.css';
 
 // ---------------------------------------------------------------------------
@@ -54,12 +55,11 @@ export interface StageListProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Human-readable bounds string for a stage card. */
+/** Human-readable bounds string for a stage card, including beat precision. */
 function boundsLabel(assignment: StageAssignment): string {
   if (!assignment.bounds) return '—';
-  const { barStart, barEnd } = assignment.bounds;
-  if (barStart === barEnd) return `m. ${barStart}`;
-  return `m. ${barStart} – ${barEnd}`;
+  const { barStart, barEnd, beatStart, beatEnd } = assignment.bounds;
+  return formatFragmentRange(barStart, barEnd, beatStart, beatEnd);
 }
 
 // ---------------------------------------------------------------------------
