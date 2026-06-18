@@ -134,13 +134,19 @@ This permission is implemented as a capability on the existing role system, not 
 
 ## What Gets Built When
 
-**Phase 1 (immediately):**
-- `language` column added to `fragment`, `blog_post`, and any future prose-bearing tables; default `'en'`
-- Translation tables for concept, schema, and value nodes scaffolded in PostgreSQL
-- Seeding script populates English records in translation tables for every concept seeded
-- Service layer applies translation overlay on all concept-returning API calls; language parameter accepted but only `'en'` is valid
-- `Accept-Language` header honoured by API from first endpoint written
-- `fragment_annotation_translation` table scaffolded; populated with English records when annotations are submitted
+**Phase 1 (immediately):** — *implemented in Component 9 Step 24 (2026-06).*
+- ✅ `language` column added to `fragment` (migration 0003); default `'en'`, mapped in the ORM and written on every create/sub-part create. `blog_post` and other prose tables follow the same pattern when introduced.
+- ✅ Translation tables for concept, schema, and value nodes scaffolded in PostgreSQL (migration 0003).
+- ✅ Seeding script populates English records in `concept_translation` / `property_schema_translation` / `property_value_translation` for every node seeded (`scripts/seed.py` + `backend/graph/queries/seed.py`). The English row and its Neo4j node are written as a logically atomic unit (per-domain PostgreSQL transaction committed only after the domain's Neo4j seeding succeeds).
+- ✅ Service layer applies the translation overlay (`backend/services/translation.py`) on all concept-returning reads (`ConceptService.search` / `get_schema_tree` / `get_roots` / `get_tree`). Valid languages are `{'en', 'es'}`; `'es'` exercises the fallback (English values + `translation_missing: true`) until Spanish data is seeded in Step 26.
+- ✅ `Accept-Language` header (and an explicit `?language=` override) honoured via the `get_language` dependency on every concept route; resolution degrades to `'en'` rather than erroring.
+- ✅ `fragment_annotation_translation` populated with the canonical English record on fragment create, edit, and submit (`FragmentService._sync_annotation_translations`).
+
+**Implementation notes (Step 24):**
+- **Canonical-English status.** English records are seeded with `status = 'authoritative'`, not `'machine'`: English is the source of record, not machine output. The `source_hash` baseline is the SHA-256 of the English text itself.
+- **English short-circuit.** The overlay does not query PostgreSQL on the `'en'` path — the canonical English values are already carried on the Neo4j rows — so the hot read path adds no round-trip. English records are still seeded so the overlay is uniform for future languages. `translation_missing` is always `false` for `'en'`.
+- **`translation_missing` flag.** Added to every concept response item model; `true` only when a non-English locale lacks a record for that item. Breadcrumb `hierarchy_path` labels remain canonical English in Phase 1 (ancestor ids are not carried on the row; localising them is deferred with the rest of the second-language work).
+- **Tree cache.** The Redis concept-tree cache key is language-scoped (`tree:{root}:{language}`); the seed-time `tree:*` invalidation covers every suffix.
 
 **Before launching a second language:**
 - Translation editorial UI (table view of translation records with edit and status controls)

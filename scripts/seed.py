@@ -61,6 +61,8 @@ from backend.graph.queries.seed import (  # noqa: E402
     merge_property_schema,
     merge_relationship_edge,
     merge_value_references_edge,
+    upsert_concept_translation,
+    upsert_property_schema_translation,
 )
 from backend.seed.schemas import DomainYAML  # noqa: E402
 
@@ -99,6 +101,8 @@ class SeedStats:
     contains_edges_seeded: int = 0
     has_property_schema_edges_seeded: int = 0
     stubs_by_domain: dict[str, int] = field(default_factory=dict)
+    concept_translations_seeded: int = 0
+    schema_translations_seeded: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -424,11 +428,16 @@ def _seed_domain(
     domain: DomainYAML,
     existing_concept_ids: frozenset[str],
     stats: SeedStats,
+    pg_conn: object | None = None,
 ) -> None:
-    """Seed a single domain into Neo4j.
+    """Seed a single domain into Neo4j and its English translation overlay.
 
     Writes nodes and edges in the order required to satisfy Neo4j MATCH
-    constraints (nodes must exist before edges that reference them).
+    constraints (nodes must exist before edges that reference them). When
+    ``pg_conn`` is supplied, the canonical English record for every seeded
+    concept, schema, and value is upserted into the PostgreSQL translation
+    tables (ADR-006); the caller owns the transaction (commit/rollback). When
+    ``pg_conn`` is ``None`` (graph-only tests), the overlay writes are skipped.
 
     Args:
         session: An open synchronous Neo4j session.
@@ -436,12 +445,17 @@ def _seed_domain(
         existing_concept_ids: Concept ids that existed before this run (used
             to compute the ``concepts_new`` counter).
         stats: Accumulated statistics object (mutated in place).
+        pg_conn: An open psycopg2 connection for translation-overlay writes, or
+            ``None`` to skip them.
     """
     # Step 1: PropertyValues + PropertySchemas + HAS_VALUE edges
     for schema in domain.property_schemas:
         merge_property_schema(session, schema)
         stats.property_schemas_seeded += 1
         stats.property_values_seeded += len(schema.values)
+        if pg_conn is not None:
+            upsert_property_schema_translation(pg_conn, schema)
+            stats.schema_translations_seeded += 1
 
     # Step 2: Domain grouping node
     merge_domain_node(session, domain.domain)
@@ -450,6 +464,9 @@ def _seed_domain(
     for concept in domain.concepts:
         merge_concept(session, concept)
         stats.concepts_seeded += 1
+        if pg_conn is not None:
+            upsert_concept_translation(pg_conn, concept)
+            stats.concept_translations_seeded += 1
         if concept.id not in existing_concept_ids:
             stats.concepts_new += 1
         if concept.stub:
@@ -507,11 +524,61 @@ def _print_summary(stats: SeedStats) -> None:
     print(f"[seed]   Relationship edges : {stats.relationship_edges_seeded}")
     print(f"[seed]   CONTAINS edges     : {stats.contains_edges_seeded}")
     print(f"[seed]   HAS_PROPERTY_SCHEMA: {stats.has_property_schema_edges_seeded}")
+    print(
+        f"[seed]   English translations: "
+        f"{stats.concept_translations_seeded} concept(s), "
+        f"{stats.schema_translations_seeded} schema(s)"
+    )
     if stats.stubs_by_domain:
         print("[seed]   Stub counts by domain:")
         for dom, count in sorted(stats.stubs_by_domain.items()):
             print(f"[seed]     {dom}: {count}")
     print("[seed] ────────────────────────────────────────────────────────")
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL connection (translation-overlay writes)
+# ---------------------------------------------------------------------------
+
+
+def _sync_pg_dsn() -> str:
+    """Return a synchronous psycopg2 DSN derived from ``DATABASE_URL``.
+
+    The application uses an async ``postgresql+asyncpg://`` DSN; psycopg2 (the
+    sync driver, already a dependency for Alembic) needs the bare
+    ``postgresql://`` form. Mirrors ``backend/migrations/env.py``.
+
+    Returns:
+        A psycopg2-compatible DSN string.
+
+    Raises:
+        SystemExit(4): If ``DATABASE_URL`` is not set.
+    """
+    import re  # noqa: PLC0415
+
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        print(
+            "[seed] ERROR: DATABASE_URL is not set; required for translation-overlay "
+            "seeding (ADR-006). Export it and re-run.",
+            file=sys.stderr,
+        )
+        sys.exit(4)
+    return re.sub(r"^postgresql\+asyncpg://", "postgresql://", url)
+
+
+def _connect_postgres() -> object:
+    """Open a synchronous psycopg2 connection for translation-overlay writes.
+
+    Autocommit is left off so the seed script controls the per-domain
+    transaction boundary (logical atomicity with the Neo4j writes, ADR-006).
+
+    Returns:
+        An open psycopg2 connection.
+    """
+    import psycopg2  # noqa: PLC0415
+
+    return psycopg2.connect(_sync_pg_dsn())
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +594,19 @@ def main() -> None:
         1  YAML validation error.
         2  Unresolved cross-reference in live-seed mode.
         3  User cancelled id-immutability prompt.
+        4  DATABASE_URL not set (required for translation-overlay seeding).
     """
+    # The summary banner and progress lines use box-drawing / ellipsis glyphs;
+    # force UTF-8 on the streams so the script does not crash on a legacy
+    # Windows console (cp1252) after the seed has already committed.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8")
+            except (ValueError, OSError):
+                pass
+
     args = _parse_args()
 
     # ── Load and validate YAML ───────────────────────────────────────────────
@@ -558,6 +637,13 @@ def main() -> None:
     password = os.environ.get("NEO4J_PASSWORD", "localpassword")
 
     driver = GraphDatabase.driver(uri, auth=(user, password))
+
+    # ── Connect to PostgreSQL (translation-overlay writes, ADR-006) ───────────
+    # The Neo4j node write and its English translation row are logically
+    # atomic: PostgreSQL writes for a domain are committed only after that
+    # domain's Neo4j seeding succeeds. Neo4j MERGE is idempotent, so a re-run
+    # after a partial failure is safe.
+    pg_conn = _connect_postgres()
 
     try:
         with driver.session() as session:
@@ -590,11 +676,20 @@ def main() -> None:
             stats = SeedStats()
             for domain in domains:
                 print(f"\n[seed] Seeding domain: {domain.domain!r} …")
-                _seed_domain(session, domain, existing_concept_ids, stats)
+                _seed_domain(
+                    session, domain, existing_concept_ids, stats, pg_conn=pg_conn
+                )
+                # Commit this domain's English translation rows only after its
+                # Neo4j seeding has succeeded (logical atomicity, ADR-006).
+                pg_conn.commit()
 
             _print_summary(stats)
 
+    except Exception:
+        pg_conn.rollback()
+        raise
     finally:
+        pg_conn.close()
         driver.close()
 
     # â"€â"€ Invalidate the Redis subtree cache â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€

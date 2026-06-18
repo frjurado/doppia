@@ -223,7 +223,7 @@ class TestConceptSearch:
         await client.get("/api/v1/concepts/search?q=PAC&domain=cadences&cursor=abc123")
 
         mock_service.search.assert_awaited_once_with(
-            q="PAC", domain="cadences", cursor="abc123"
+            q="PAC", domain="cadences", cursor="abc123", language="en"
         )
 
     @pytest.mark.asyncio
@@ -720,7 +720,9 @@ class TestConceptSchemas:
 
         await client.get("/api/v1/concepts/PerfectAuthenticCadence/schemas")
 
-        mock_service.get_schema_tree.assert_awaited_once_with("PerfectAuthenticCadence")
+        mock_service.get_schema_tree.assert_awaited_once_with(
+            "PerfectAuthenticCadence", language="en"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +776,7 @@ class TestConceptServiceSchemaTree:
         """Empty children list → show=False, no children."""
         from services.concepts import _compute_type_refinement
 
-        result = _compute_type_refinement([])
+        result = _compute_type_refinement([], "en", {})
         assert result.show is False
         assert result.children == []
 
@@ -790,7 +792,7 @@ class TestConceptServiceSchemaTree:
                 "fingerprint": ["CadentialDominant|3"],
             }
         ]
-        result = _compute_type_refinement(rows)
+        result = _compute_type_refinement(rows, "en", {})
         assert result.show is False
 
     def test_identical_fingerprints_returns_show_false(self) -> None:
@@ -812,7 +814,7 @@ class TestConceptServiceSchemaTree:
                 "fingerprint": fingerprint,
             },
         ]
-        result = _compute_type_refinement(rows)
+        result = _compute_type_refinement(rows, "en", {})
         assert result.show is False
 
     def test_differing_fingerprints_returns_show_true_with_children(self) -> None:
@@ -833,7 +835,7 @@ class TestConceptServiceSchemaTree:
                 "fingerprint": ["StageX|1", "StageZ|2"],
             },
         ]
-        result = _compute_type_refinement(rows)
+        result = _compute_type_refinement(rows, "en", {})
         assert result.show is True
         assert len(result.children) == 2
         assert {c.id for c in result.children} == {"ChildA", "ChildB"}
@@ -856,7 +858,7 @@ class TestConceptServiceSchemaTree:
                 "fingerprint": ["Stage2|2", "Stage1|1"],
             },
         ]
-        result = _compute_type_refinement(rows)
+        result = _compute_type_refinement(rows, "en", {})
         assert result.show is False
 
     def test_build_schema_item_bool_has_empty_values(self) -> None:
@@ -871,7 +873,7 @@ class TestConceptServiceSchemaTree:
             "required": False,
             "values": [],
         }
-        item = _build_schema_item(row)
+        item = _build_schema_item(row, "en", {}, {}, {})
         assert item.id == "ECP"
         assert item.cardinality == "BOOL"
         assert item.values == []
@@ -896,7 +898,7 @@ class TestConceptServiceSchemaTree:
                 }
             ],
         }
-        item = _build_schema_item(row)
+        item = _build_schema_item(row, "en", {}, {}, {})
         assert len(item.values) == 1
         value = item.values[0]
         assert value.id == "ClosesSentence"
@@ -924,5 +926,5 @@ class TestConceptServiceSchemaTree:
                 }
             ],
         }
-        item = _build_schema_item(row)
+        item = _build_schema_item(row, "en", {}, {}, {})
         assert item.values[0].referenced_concept is None

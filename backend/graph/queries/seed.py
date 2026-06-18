@@ -14,7 +14,9 @@ See ``docs/roadmap/component-4-knowledge-graph.md`` § Step 7 for the full spec.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from typing import Any
 
 from neo4j import Session as _Session
 
@@ -399,3 +401,147 @@ def merge_value_references_edge(
         concept_id: The referenced Concept id.
     """
     session.run(_MERGE_VALUE_REFERENCES_EDGE, value_id=value_id, concept_id=concept_id)
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL translation overlay seeding (ADR-006)
+# ---------------------------------------------------------------------------
+#
+# Every seeded knowledge node gets its canonical English record written into
+# the PostgreSQL translation tables. English is the first row in the overlay,
+# not a special-cased column, so the service-layer overlay logic is uniform for
+# all locales. These records are seeded with status ``authoritative``: English
+# is the source of record, not machine output, and the staleness job's
+# ``source_hash`` baseline is the hash of the English text itself.
+#
+# The seed script (sync, CLI) owns the PostgreSQL transaction; these helpers
+# execute one upsert each against a caller-supplied psycopg2 connection. Upsert
+# (ON CONFLICT) — never bare INSERT — keeps re-seeding idempotent, mirroring the
+# Cypher MERGE invariant on the graph side.
+
+_ENGLISH_STATUS: str = "authoritative"
+
+_UPSERT_CONCEPT_TRANSLATION = """\
+INSERT INTO concept_translation
+    (concept_id, language, name, aliases, definition, status, source_hash, translated_at)
+VALUES
+    (%(concept_id)s, %(language)s, %(name)s, %(aliases)s, %(definition)s,
+     %(status)s, %(source_hash)s, now())
+ON CONFLICT (concept_id, language) DO UPDATE SET
+    name          = EXCLUDED.name,
+    aliases       = EXCLUDED.aliases,
+    definition    = EXCLUDED.definition,
+    status        = EXCLUDED.status,
+    source_hash   = EXCLUDED.source_hash,
+    translated_at = EXCLUDED.translated_at
+"""
+
+_UPSERT_PROPERTY_SCHEMA_TRANSLATION = """\
+INSERT INTO property_schema_translation
+    (schema_id, language, name, description, status, source_hash)
+VALUES
+    (%(schema_id)s, %(language)s, %(name)s, %(description)s, %(status)s, %(source_hash)s)
+ON CONFLICT (schema_id, language) DO UPDATE SET
+    name        = EXCLUDED.name,
+    description = EXCLUDED.description,
+    status      = EXCLUDED.status,
+    source_hash = EXCLUDED.source_hash
+"""
+
+_UPSERT_PROPERTY_VALUE_TRANSLATION = """\
+INSERT INTO property_value_translation
+    (value_id, language, name, status, source_hash)
+VALUES
+    (%(value_id)s, %(language)s, %(name)s, %(status)s, %(source_hash)s)
+ON CONFLICT (value_id, language) DO UPDATE SET
+    name        = EXCLUDED.name,
+    status      = EXCLUDED.status,
+    source_hash = EXCLUDED.source_hash
+"""
+
+
+def english_source_hash(*parts: str | None) -> str:
+    """Return a SHA-256 over the English source fields for staleness baselining.
+
+    Fields are joined with a NUL separator so distinct field boundaries cannot
+    collide. ``None`` fields are treated as empty strings.
+
+    Args:
+        *parts: The translatable English fields, in a fixed order.
+
+    Returns:
+        Hex SHA-256 digest of the joined source text.
+    """
+    joined = "\x00".join(p or "" for p in parts)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def concept_translation_params(concept: ConceptYAML) -> dict[str, Any]:
+    """Build the English ``concept_translation`` upsert params for a concept."""
+    aliases = list(concept.aliases)
+    return {
+        "concept_id": concept.id,
+        "language": "en",
+        "name": concept.name,
+        "aliases": aliases,
+        "definition": concept.definition,
+        "status": _ENGLISH_STATUS,
+        "source_hash": english_source_hash(concept.name, *aliases, concept.definition),
+    }
+
+
+def schema_translation_params(schema: PropertySchemaYAML) -> dict[str, Any]:
+    """Build the English ``property_schema_translation`` upsert params for a schema."""
+    return {
+        "schema_id": schema.id,
+        "language": "en",
+        "name": schema.name,
+        "description": schema.description,
+        "status": _ENGLISH_STATUS,
+        "source_hash": english_source_hash(schema.name, schema.description),
+    }
+
+
+def value_translation_params(value_id: str, name: str) -> dict[str, Any]:
+    """Build the English ``property_value_translation`` upsert params for a value."""
+    return {
+        "value_id": value_id,
+        "language": "en",
+        "name": name,
+        "status": _ENGLISH_STATUS,
+        "source_hash": english_source_hash(name),
+    }
+
+
+def upsert_concept_translation(pg_conn: Any, concept: ConceptYAML) -> None:
+    """Upsert the English ``concept_translation`` row for a concept.
+
+    Args:
+        pg_conn: An open psycopg2 connection (transaction managed by the caller).
+        concept: The validated ConceptYAML model.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute(_UPSERT_CONCEPT_TRANSLATION, concept_translation_params(concept))
+
+
+def upsert_property_schema_translation(
+    pg_conn: Any, schema: PropertySchemaYAML
+) -> None:
+    """Upsert the English ``property_schema_translation`` row for a schema.
+
+    Also upserts a ``property_value_translation`` row for each of the schema's
+    values, mirroring :func:`merge_property_schema` on the graph side.
+
+    Args:
+        pg_conn: An open psycopg2 connection (transaction managed by the caller).
+        schema: The validated PropertySchemaYAML model.
+    """
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            _UPSERT_PROPERTY_SCHEMA_TRANSLATION, schema_translation_params(schema)
+        )
+        for pv in schema.values:
+            cur.execute(
+                _UPSERT_PROPERTY_VALUE_TRANSLATION,
+                value_translation_params(pv.id, pv.name),
+            )

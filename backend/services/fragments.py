@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -65,9 +66,30 @@ from services.fragment_validation import (
 )
 from services.object_storage import StorageClient
 from services.tasks.render_fragment_preview import render_fragment_preview
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ADR-006 §4: a fragment's English prose annotation is mirrored into
+# fragment_annotation_translation as the canonical ('en', authoritative) record,
+# so the overlay/staleness machinery is uniform across languages. Upsert keyed
+# on (fragment_id, language); a null annotation deletes the row.
+_UPSERT_ANNOTATION_TRANSLATION = text(
+    """
+    INSERT INTO fragment_annotation_translation
+        (fragment_id, language, prose_annotation, status, source_hash, translated_at)
+    VALUES (:fragment_id, 'en', :prose, 'authoritative', :source_hash, now())
+    ON CONFLICT (fragment_id, language) DO UPDATE SET
+        prose_annotation = EXCLUDED.prose_annotation,
+        status           = EXCLUDED.status,
+        source_hash      = EXCLUDED.source_hash,
+        translated_at    = EXCLUDED.translated_at
+    """
+)
+_DELETE_ANNOTATION_TRANSLATION = text(
+    "DELETE FROM fragment_annotation_translation "
+    "WHERE fragment_id = :fragment_id AND language = 'en'"
+)
 
 
 @dataclass
@@ -272,6 +294,8 @@ class FragmentService:
                     self._db.add(child)
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
+
+                await self._sync_annotation_translations(parent.id)
         except IntegrityError as exc:
             logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
@@ -363,6 +387,8 @@ class FragmentService:
                     self._db.add(child)
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
+
+                await self._sync_annotation_translations(fragment_id)
         except IntegrityError as exc:
             logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
@@ -535,6 +561,10 @@ class FragmentService:
                         await self._db.flush()
                         self._add_concept_tags(child.id, sp.concept_tags)
 
+                # Sync the English annotation overlay for whichever branch ran
+                # (prose-only or analytic), covering parent and sub-parts.
+                await self._sync_annotation_translations(fragment_id)
+
         except IntegrityError as exc:
             logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
@@ -583,6 +613,11 @@ class FragmentService:
             fragment.status = "submitted"
             fragment.updated_at = datetime.now(tz=timezone.utc)
             self._db.add(fragment)
+
+            # Ensure the canonical English annotation record exists at submit
+            # time (ADR-006 §4: English records seeded when annotations are
+            # submitted), covering parent and sub-parts.
+            await self._sync_annotation_translations(fragment_id)
 
         # Enqueue after the transaction commits so the task reads committed state
         # (ADR-008: preview is generated at the draft → submitted transition).
@@ -2167,6 +2202,7 @@ class FragmentService:
             repeat_context=payload.repeat_context,
             summary=payload.summary.model_dump(),
             prose_annotation=payload.prose_annotation,
+            language="en",  # Phase 1: all annotations authored in English (ADR-006)
             data_licence=data_licence,
             status=status,
             created_by=creator_id,
@@ -2192,6 +2228,7 @@ class FragmentService:
             parent_fragment_id=parent_id,
             summary=sp.summary.model_dump(),
             prose_annotation=sp.prose_annotation,
+            language="en",  # Phase 1: all annotations authored in English (ADR-006)
             data_licence=data_licence,
             status="draft",
         )
@@ -2210,6 +2247,46 @@ class FragmentService:
                     is_primary=tag.is_primary,
                 )
             )
+
+    async def _sync_annotation_translations(self, parent_id: uuid.UUID) -> None:
+        """Mirror canonical English prose into ``fragment_annotation_translation``.
+
+        Reads the current prose of the parent fragment and all its sub-parts
+        from the session (so it reflects the writes already flushed in this
+        transaction) and upserts the ('en', authoritative) record for each, or
+        deletes it when the prose is cleared. Idempotent — safe to call once at
+        the end of any mutating fragment operation (ADR-006 §4).
+
+        Must be invoked inside the caller's transaction so the translation
+        rows commit atomically with the fragment write.
+
+        Args:
+            parent_id: The parent fragment id; its sub-parts are synced too.
+        """
+        result = await self._db.execute(
+            select(Fragment.id, Fragment.prose_annotation).where(
+                or_(
+                    Fragment.id == parent_id,
+                    Fragment.parent_fragment_id == parent_id,
+                )
+            )
+        )
+        for fragment_id, prose in result.all():
+            if prose is None:
+                await self._db.execute(
+                    _DELETE_ANNOTATION_TRANSLATION, {"fragment_id": fragment_id}
+                )
+            else:
+                await self._db.execute(
+                    _UPSERT_ANNOTATION_TRANSLATION,
+                    {
+                        "fragment_id": fragment_id,
+                        "prose": prose,
+                        "source_hash": hashlib.sha256(
+                            prose.encode("utf-8")
+                        ).hexdigest(),
+                    },
+                )
 
 
 # ---------------------------------------------------------------------------
