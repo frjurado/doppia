@@ -214,6 +214,11 @@ export interface NotePositionInput {
   /** Pixel x of the leftmost part of the notehead, relative to the container. */
   xLeft: number;
   /**
+   * Pixel x of the notehead's horizontal center, relative to the container.
+   * Used to compute the per-beat notehead centroid for harmony-label centering.
+   */
+  xCenter: number;
+  /**
    * Score-time onset in quarter-note units, relative to the measure start.
    * 0 = first beat of the measure; 1 = one quarter note in, etc.
    */
@@ -233,12 +238,24 @@ export interface BeatBoundaryOutput {
   /** Pixel x of the right edge of each beat (0-indexed, length = numBeats). */
   beatRights: number[];
   /**
+   * Pixel x of the center of the LEFTMOST notehead struck on each beat — the same
+   * head that defines the beat boundary. NaN for unstruck beats. The harmony
+   * overlay centers chord labels on this x. The leftmost head (not an average over
+   * the beat) is used so a later note within the beat cannot drag the label right.
+   */
+  beatCenters: number[];
+  /**
    * Sub-beat left edges: beatRights[b][sb] is beat b, sub-beat sb.
    * Dimensions: numBeats × subDiv.
    */
   subBeatLefts: number[][];
   /** Sub-beat right edges. Same dimensions as subBeatLefts. */
   subBeatRights: number[][];
+  /**
+   * Sub-beat leftmost-notehead centers: subBeatCenters[b][sb] is the center-x of
+   * the leftmost notehead struck on beat b, sub-beat sb. NaN for unstruck sub-beats.
+   */
+  subBeatCenters: number[][];
   /** 0-indexed set of beats that have at least one note onset. */
   struckBeats: Set<number>;
   /**
@@ -291,6 +308,19 @@ export function computeBeatBoundaries(
     new Array(subDiv).fill(mRight),
   );
 
+  // Per beat / sub-beat: the center-x of the LEFTMOST notehead at that metric
+  // position (the same head that defines the beat boundary). The harmony label
+  // centers on this. We track the leftmost head only — averaging over the beat
+  // would drag the label rightward as later notes within the beat are added.
+  const beatLeftSeen: number[] = new Array(numBeats).fill(Infinity);
+  const beatCenters: number[] = new Array(numBeats).fill(NaN);
+  const subBeatLeftSeen: number[][] = Array.from({ length: numBeats }, () =>
+    new Array(subDiv).fill(Infinity),
+  );
+  const subBeatCenters: number[][] = Array.from({ length: numBeats }, () =>
+    new Array(subDiv).fill(NaN),
+  );
+
   beatLefts[0] = mLeft;
   if (subBeatLefts[0]) subBeatLefts[0][0] = mLeft;
 
@@ -337,6 +367,20 @@ export function computeBeatBoundaries(
       }
     }
 
+    // Track the center of the leftmost notehead for the beat / sub-beat (the
+    // label anchor). Compared on raw note.xLeft so the chosen head is the one
+    // that also defines the beat-boundary left edge.
+    if (note.xLeft < beatLeftSeen[beatIdx]!) {
+      beatLeftSeen[beatIdx] = note.xLeft;
+      beatCenters[beatIdx] = note.xCenter;
+    }
+    const sbSeen = subBeatLeftSeen[beatIdx];
+    const sbCenters = subBeatCenters[beatIdx];
+    if (sbSeen && sbCenters && note.xLeft < sbSeen[subBeatIdx]!) {
+      sbSeen[subBeatIdx] = note.xLeft;
+      sbCenters[subBeatIdx] = note.xCenter;
+    }
+
     struckBeats.add(beatIdx);
     struckSubBeats.add(beatIdx * 100 + subBeatIdx);
   }
@@ -369,8 +413,10 @@ export function computeBeatBoundaries(
     numBeats,
     beatLefts,
     beatRights,
+    beatCenters,
     subBeatLefts,
     subBeatRights,
+    subBeatCenters,
     struckBeats,
     struckSubBeats,
   };
@@ -442,6 +488,12 @@ export interface BeatGhostEntry {
   /** True for the synthetic whole-measure ghost of an empty measure (§6A.7). */
   synthetic?: boolean;
   bounds: GhostBounds;
+  /**
+   * Pixel x of the center of the leftmost notehead struck on this beat. Anchors
+   * the harmony label's horizontal center. Falls back to the measure center for
+   * synthetic empty-measure ghosts.
+   */
+  noteheadCenter: number;
 }
 
 /** Entry stored in the sub-beat index. */
@@ -461,6 +513,8 @@ export interface SubBeatGhostEntry {
   /** True for the synthetic whole-measure ghost of an empty measure (§6A.7). */
   synthetic?: boolean;
   bounds: GhostBounds;
+  /** Pixel x of the notehead centroid of this sub-beat (see BeatGhostEntry.noteheadCenter). */
+  noteheadCenter: number;
 }
 
 /** Which ghost layer receives pointer events (resolution toggle, ADR-005). */
@@ -702,10 +756,7 @@ export class GhostLayer {
  * x-positions from the same notehead geometry.
  */
 export function noteheadLeftEdge(svgNote: Element, containerLeft: number): number {
-  const notehead =
-    svgNote.querySelector(':scope > g.noteHead') ??
-    svgNote.querySelector(':scope > g.notehead');
-
+  const notehead = resolveNoteheadEl(svgNote);
   if (notehead) {
     return notehead.getBoundingClientRect().left - containerLeft;
   }
@@ -724,6 +775,55 @@ export function noteheadLeftEdge(svgNote: Element, containerLeft: number): numbe
   if (isFinite(minLeft)) return minLeft;
 
   return svgNote.getBoundingClientRect().left - containerLeft;
+}
+
+/**
+ * Resolve the <g class="noteHead"> child of a Verovio note group, or null.
+ * Shared by noteheadLeftEdge() and noteheadCenter() so both agree on which
+ * element is "the notehead" (accidentals excluded).
+ */
+function resolveNoteheadEl(svgNote: Element): Element | null {
+  return (
+    svgNote.querySelector(':scope > g.noteHead') ??
+    svgNote.querySelector(':scope > g.notehead')
+  );
+}
+
+/**
+ * Container-relative pixel x of a notehead's horizontal center.
+ *
+ * Mirrors noteheadLeftEdge()'s accidental exclusion: uses the <g class="noteHead">
+ * bbox center when present, otherwise the center of the leftmost non-accidental
+ * child, otherwise the note group's own center. Used by the harmony overlay to
+ * center chord labels on the notehead rather than the beat-boundary left edge
+ * (harmony-score-overlay.md §"Coordinate mapping").
+ */
+export function noteheadCenter(svgNote: Element, containerLeft: number): number {
+  const notehead = resolveNoteheadEl(svgNote);
+  if (notehead) {
+    const r = notehead.getBoundingClientRect();
+    return r.left + r.width / 2 - containerLeft;
+  }
+
+  // Fallback: center of the leftmost non-accidental child with non-zero width.
+  let minLeft = Infinity;
+  let bestCenter = NaN;
+  for (const child of svgNote.children) {
+    const cls = child.getAttribute('class') ?? '';
+    if (cls === 'accid' || cls.includes('accid')) continue;
+    const r = child.getBoundingClientRect();
+    if (r.width > 0) {
+      const left = r.left - containerLeft;
+      if (left < minLeft) {
+        minLeft = left;
+        bestCenter = r.left + r.width / 2 - containerLeft;
+      }
+    }
+  }
+  if (isFinite(minLeft)) return bestCenter;
+
+  const r = svgNote.getBoundingClientRect();
+  return r.left + r.width / 2 - containerLeft;
 }
 
 function applyGhostBounds(el: HTMLElement, bounds: GhostBounds): void {
@@ -1007,6 +1107,7 @@ function collectLayerNotes(
           if (svgNote) {
             out.push({
               xLeft:             noteheadLeftEdge(svgNote, containerRect.left),
+              xCenter:           noteheadCenter(svgNote, containerRect.left),
               scoreTimeOnset:    ppq / ppqPerQn,
               scoreTimeDuration: durPpq / ppqPerQn,
             });
@@ -1029,6 +1130,7 @@ function collectLayerNotes(
             if (svgNote) {
               out.push({
                 xLeft:             noteheadLeftEdge(svgNote, containerRect.left),
+                xCenter:           noteheadCenter(svgNote, containerRect.left),
                 scoreTimeOnset:    ppq / ppqPerQn,
                 scoreTimeDuration: durPpq / ppqPerQn,
               });
@@ -1214,6 +1316,8 @@ export function buildGhosts(
         const synthBounds: GhostBounds = {
           left: mLeft, top: sBounds.top, width: mRight - mLeft, height: ghostHeight,
         };
+        // No noteheads to center on: fall back to the measure center.
+        const synthCenter = mLeft + (mRight - mLeft) / 2;
 
         const bKey = encodeBeat(renderOrder, 0);
         const bEl  = createGhostEl('ghost ghost-beat', synthBounds, `${bKey}`);
@@ -1221,7 +1325,7 @@ export function buildGhosts(
         layer.beatIndex.set(bKey, {
           el: bEl, barN, endingN, measureKey: mKey,
           beatIdx: 0, encodedKey: bKey, beatFloat: 1.0, endFloat: fullExtent,
-          synthetic: true, bounds: synthBounds,
+          synthetic: true, bounds: synthBounds, noteheadCenter: synthCenter,
         });
 
         const sbKey = encodeSubBeat(renderOrder, 0, 0);
@@ -1231,7 +1335,7 @@ export function buildGhosts(
           el: sbEl, barN, endingN, measureKey: mKey,
           beatIdx: 0, subBeatIdx: 0, encodedKey: sbKey,
           beatFloat: 1.0, endFloat: fullExtent,
-          synthetic: true, bounds: synthBounds,
+          synthetic: true, bounds: synthBounds, noteheadCenter: synthCenter,
         });
         continue;
       }
@@ -1250,13 +1354,18 @@ export function buildGhosts(
         const beatBounds: GhostBounds = {
           left: bLeft, top: sBounds.top, width: bRight - bLeft, height: ghostHeight,
         };
+        // Leftmost-notehead center for label centering; fall back to ghost center
+        // if it is somehow undefined for a struck beat.
+        const beatCenter = Number.isFinite(bb.beatCenters[b])
+          ? bb.beatCenters[b]!
+          : bLeft + (bRight - bLeft) / 2;
         const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
         layer._appendBeatGhost(beatEl);
         layer.beatIndex.set(encKey, {
           el: beatEl, barN, endingN, measureKey: mKey,
           beatIdx: b, encodedKey: encKey, beatFloat,
           endFloat: beatFloat + 1,
-          bounds: beatBounds,
+          bounds: beatBounds, noteheadCenter: beatCenter,
         });
 
         for (let sb = 0; sb < subDiv; sb++) {
@@ -1272,6 +1381,9 @@ export function buildGhosts(
           const sbBounds: GhostBounds = {
             left: sbLeft, top: sBounds.top, width: sbRight - sbLeft, height: ghostHeight,
           };
+          const sbCenter = Number.isFinite(bb.subBeatCenters[b]?.[sb])
+            ? bb.subBeatCenters[b]![sb]!
+            : sbLeft + (sbRight - sbLeft) / 2;
           const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
           layer._appendSubBeatGhost(sbEl);
           layer.subBeatIndex.set(sbEncKey, {
@@ -1279,7 +1391,7 @@ export function buildGhosts(
             beatIdx: b, subBeatIdx: sb,
             encodedKey: sbEncKey, beatFloat: sbFloat,
             endFloat: sbFloat + 1 / subDiv,
-            bounds: sbBounds,
+            bounds: sbBounds, noteheadCenter: sbCenter,
           });
         }
       }

@@ -13,10 +13,16 @@
 .label {
   position: absolute;
 
-  /* Public Sans — label tier per DESIGN.md */
-  font-family: 'Public Sans', sans-serif;
-  font-size: 10px;
+  /* Newsreader serif — analysis text reads as engraved RN/figured-bass (Step 21,
+     deliberate departure from the Public Sans label tier; confirmed with Francisco). */
+  font-family: var(--font-serif);
+  font-size: 12px;
   line-height: 1.2;
+
+  /* Anchored at the leftmost notehead's center (left = that center-x);
+     translateX(-50%) centers the label horizontally on the notehead. */
+  transform: translateX(-50%);
+  text-align: center;
 
   /* Henle Blue #3f5f77 at 70% opacity: readable but deferential to notation */
   color: rgba(63, 95, 119, 0.70);

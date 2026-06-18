@@ -305,13 +305,20 @@ describe('getMeterForMeasure', () => {
 // computeBeatBoundaries — the core beat inference algorithm
 // ---------------------------------------------------------------------------
 
-// Helpers to build note inputs.
-function note(xLeft: number, onset: number, duration = 1.0): {
+// Helpers to build note inputs. xCenter defaults to xLeft + 5 (≈ half a notehead
+// width); pass an explicit center to exercise the centroid logic.
+function note(
+  xLeft: number,
+  onset: number,
+  duration = 1.0,
+  xCenter = xLeft + 5,
+): {
   xLeft: number;
+  xCenter: number;
   scoreTimeOnset: number;
   scoreTimeDuration: number;
 } {
-  return { xLeft, scoreTimeOnset: onset, scoreTimeDuration: duration };
+  return { xLeft, xCenter, scoreTimeOnset: onset, scoreTimeDuration: duration };
 }
 
 const grace = (xLeft: number, onset: number) => note(xLeft, onset, 0);
@@ -389,6 +396,66 @@ describe('computeBeatBoundaries — 4/4 (simple meter)', () => {
       note(110, 0), note(210, 1), note(310, 2), note(410, 3),
     ]);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Leftmost-notehead center — harmony-label centering (Step 21)
+// ---------------------------------------------------------------------------
+
+describe('computeBeatBoundaries — leftmost-notehead center', () => {
+  const MLEFT = 100;
+  const MRIGHT = 500;
+  const MSTART = 0;
+
+  it('beatCenters[b] is the center of the notehead for a single struck note', () => {
+    // note(xLeft=210, onset=1, xCenter=218) → beat index 1.
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 1.0, 116), note(210, 1, 1.0, 218),
+    ]);
+    expect(bb.beatCenters[0]).toBe(116);
+    expect(bb.beatCenters[1]).toBe(218);
+  });
+
+  it('beatCenters[b] follows the LEFTMOST head, not an average, for a 2nd interval', () => {
+    // Two notes at the same onset (beat 2) whose heads are offset off the stem:
+    // leftmost head xLeft=210/center=218, displaced head xLeft=222/center=230.
+    // Centering must use the leftmost head (218), not the centroid (224).
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 1.0, 116),
+      note(210, 1, 1.0, 218),
+      note(222, 1, 1.0, 230),
+    ]);
+    expect(bb.beatCenters[1]).toBe(218);
+  });
+
+  it('a later note within the beat does not drag beatCenters right', () => {
+    // Downbeat note at beat 1 (xLeft=110/center=116) plus an eighth on the "&"
+    // (onset 0.5, xLeft=160/center=166) — both bucket into beat index 0. The beat
+    // label must stay on the downbeat head (116), not move toward the "&".
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 0.5, 116),
+      note(160, 0.5, 0.5, 166),
+    ]);
+    expect(bb.beatCenters[0]).toBe(116);
+  });
+
+  it('beatCenters is NaN for unstruck beats', () => {
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 1.0, 116),
+    ]);
+    expect(bb.beatCenters[0]).toBe(116);
+    expect(Number.isNaN(bb.beatCenters[1]!)).toBe(true);
+  });
+
+  it('subBeatCenters carries the leftmost head per sub-beat', () => {
+    // Beat 1 downbeat (sub-beat 0) and its "&" (onset 0.5, sub-beat 1) in 4/4.
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 0.5, 116),
+      note(160, 0.5, 0.5, 166),
+    ]);
+    expect(bb.subBeatCenters[0]![0]).toBe(116);
+    expect(bb.subBeatCenters[0]![1]).toBe(166);
+  });
 });
 
 // ---------------------------------------------------------------------------

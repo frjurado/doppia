@@ -62,8 +62,26 @@ if (mc == null) return;
 const beatIdx = Math.floor(event.beat) - 1;                 // 0-indexed
 const beatEntry = ghostLayer.beatIndex.get(encodeBeat(mc, beatIdx));
 if (!beatEntry) return;                                      // beat not present in this measure
-const x = beatEntry.bounds.left;                             // pixel x relative to the container
+const x = beatEntry.noteheadCenter;                          // leftmost-notehead center (see below)
 ```
+
+**Centering on the notehead (Step 21).** `x` is the horizontal **center of the leftmost
+notehead** at that metric position — the same head that defines the beat-boundary left
+edge — *not* the beat-boundary left edge (`bounds.left`) itself. The label element is
+positioned `left: x` and centered on it in CSS via `transform: translateX(-50%)`.
+
+It is computed in `computeBeatBoundaries()` (`beatCenters[]` / `subBeatCenters[][]`) from
+each note's `noteheadCenter()` x and stored on `BeatGhostEntry.noteheadCenter` /
+`SubBeatGhostEntry.noteheadCenter` by `buildGhosts()`. Accidentals and ornaments are
+excluded (it uses the `<g class="noteHead">` geometry, the same accidental-aware
+resolution as `noteheadLeftEdge()`).
+
+The **leftmost** head is used deliberately rather than an average over the beat: notes
+bucket into a beat by onset, so averaging would pull the label rightward as later notes
+within the beat (e.g. an eighth on the "&") are added. When a beat has displaced
+simultaneous noteheads — a 2nd interval, where Verovio offsets one head off the stem —
+the label centers on the leftmost (stem-side) head. Empty measures (no onsets) fall back
+to the measure center.
 
 ### Step 3 — vertical position
 
@@ -123,7 +141,7 @@ Label content is the **primary label** format used by `HarmonyPanel`: `numeral +
 
 This keeps the panel and in-score labels lexically identical so annotators can cross-reference without translation.
 
-CSS rules live in `harmonyOverlay.module.css`. Font: Public Sans (label tier per `DESIGN.md`). Colour: Henle Blue `#3f5f77` at reduced opacity (≈70%) so labels read but do not compete with the notation. `0px border-radius`, no border. Unreviewed events may carry a faint amber tint to match the `HarmonyPanel` review badge — implementation detail, not a hard requirement.
+CSS rules live in `harmonyOverlay.module.css`. Font: **Newsreader serif at 12px**, centered on the notehead-centroid anchor x via `transform: translateX(-50%)` (Step 21). This is a deliberate departure from the Public Sans label tier in `DESIGN.md`: in-score analysis text reads as engraved Roman-numeral / figured-bass, which is conventionally serif (confirmed with Francisco, 2026-06-18). Colour: Henle Blue `#3f5f77` at reduced opacity (≈70%) so labels read but do not compete with the notation. `0px border-radius`, no border. Unreviewed events may carry a faint amber tint to match the `HarmonyPanel` review badge — implementation detail, not a hard requirement.
 
 ---
 

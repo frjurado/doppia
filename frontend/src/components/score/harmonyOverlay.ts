@@ -133,7 +133,8 @@ export class HarmonyOverlay {
       const beatIdx = Math.floor(event.beat) - 1; // 1-indexed beat → 0-indexed ghost slot
       const subBeatFrac = event.beat - Math.floor(event.beat);
 
-      let resolvedBounds: { left: number } | undefined;
+      // Center-x of the leftmost notehead at the resolved beat/sub-beat (label anchor x).
+      let resolvedCenter: number | undefined;
 
       if (subBeatFrac >= 0.01) {
         // Sub-beat event: probe sb=1 and sb=2 (covers simple subDiv=2 and
@@ -147,14 +148,14 @@ export class HarmonyOverlay {
             const dist = Math.abs(sbEntry.beatFloat - event.beat);
             if (dist < bestDist) {
               bestDist = dist;
-              resolvedBounds = sbEntry.bounds;
+              resolvedCenter = sbEntry.noteheadCenter;
             }
           }
         }
       }
 
       // Fall back to beat ghost (with walk-back) when no sub-beat slot matched.
-      if (!resolvedBounds) {
+      if (resolvedCenter === undefined) {
         let beatEntry = this._ghostLayer.beatIndex.get(encodeBeat(renderOrder, beatIdx));
         if (!beatEntry) {
           for (let b = beatIdx - 1; b >= 0; b--) {
@@ -163,11 +164,13 @@ export class HarmonyOverlay {
           }
         }
         if (!beatEntry) continue; // unreachable: beat 0 is always anchored at measure start
-        resolvedBounds = beatEntry.bounds;
+        resolvedCenter = beatEntry.noteheadCenter;
       }
 
-      // Step 3 — pixel position: x from beat/sub-beat ghost, y from system bottom
-      const x = resolvedBounds.left;
+      // Step 3 — pixel position: x = leftmost-notehead center (CSS centers the
+      // label on it via translateX(-50%)); y from the system bottom. See
+      // harmony-score-overlay.md §"Coordinate mapping".
+      const x = resolvedCenter;
       const y = measureEntry.bounds.top + measureEntry.bounds.height + LANE_OFFSET_PX;
 
       const span = document.createElement('span');
