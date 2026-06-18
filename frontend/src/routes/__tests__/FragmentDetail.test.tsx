@@ -541,6 +541,51 @@ describe('FragmentDetail — scale controls', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Harmony label toggle (Component 9 Step 23)
+// ---------------------------------------------------------------------------
+
+/** One movement_analysis event in the loose detail-response shape. */
+function makeHarmonyEvent(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    mc: 1, mn: 1, volta: null, beat: 1,
+    local_key: 'C', numeral: 'I', applied_to: null,
+    extensions: [], source: 'dcml', auto: true, reviewed: false,
+    ...overrides,
+  };
+}
+
+describe('FragmentDetail — harmony label toggle (Step 23)', () => {
+  it('renders the Harmony toggle, pressed by default, when the fragment has events', async () => {
+    setupFullLoad(makeFragmentDetail({ harmony_events: [makeHarmonyEvent()] }));
+    renderDetail();
+    await screen.findByText('PAC');
+    const toggle = screen.getByRole('button', { name: /harmony/i });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not render the Harmony toggle when the fragment has no events', async () => {
+    setupFullLoad(); // default fixture: harmony_events: []
+    renderDetail();
+    await screen.findByText('PAC');
+    expect(screen.queryByRole('button', { name: /harmony/i })).not.toBeInTheDocument();
+  });
+
+  it('flips aria-pressed when the Harmony toggle is clicked', async () => {
+    setupFullLoad(makeFragmentDetail({ harmony_events: [makeHarmonyEvent()] }));
+    renderDetail();
+    await screen.findByText('PAC');
+    const toggle = screen.getByRole('button', { name: /harmony/i });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Playback controls
 // ---------------------------------------------------------------------------
 

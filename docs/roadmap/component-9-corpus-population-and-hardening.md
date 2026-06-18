@@ -196,6 +196,8 @@ Roman numeral + stacked inversion/figure digits (e.g. V with 6/5 stacked) instea
 
 The fragment viewer shows harmonic data in the record below but not on the score, while the score viewer shows in-score labels only in tag mode (an intentional gate per `harmony-score-overlay.md`). Resolve the incongruence deliberately: the options are (a) keep the asymmetry (viewer is a reading surface; labels are an annotator aid), (b) show labels in the fragment viewer only (a fragment is a study object — harmony is part of what it teaches), or (c) add a user toggle in both. The leaning going in is (b) with a toggle defaulting to on for fragments — the fragment viewer exists precisely to study the tagged phenomenon — but this is a product decision: write the short options note, decide with Francisco, record the outcome in `harmony-score-overlay.md` § Mode gating, and implement.
 
+**Decision (2026-06-19, with Francisco): option (b).** Score viewer keeps its tag-mode-only gate; the fragment viewer shows in-score labels on load with a "Harmony" toggle defaulting to on. Recorded in `harmony-score-overlay.md` § Mode gating; implemented in `FragmentDetail.tsx` (reuses the response's sliced `harmony_events` and the bracket ghost layer; non-interactive labels).
+
 ---
 
 ## Part 7 — Spanish: i18n Completion + UI Translation

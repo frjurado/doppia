@@ -167,6 +167,13 @@
   justify-content: flex-end;
 }
 
+/* Harmony-label toggle floats to the left of the staff-size group (which stays
+   right via the strip's flex-end). */
+.harmonyToggleGroup {
+  display: flex;
+  margin-right: auto;
+}
+
 .scaleGroup {
   display: flex;
   gap: 1px;

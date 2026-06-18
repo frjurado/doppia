@@ -44,6 +44,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import PlaybackCaret from '../components/score/PlaybackCaret';
 import { buildGhosts } from '../components/score/ghosts';
+import type { GhostLayer } from '../components/score/ghosts';
+import { HarmonyOverlay } from '../components/score/harmonyOverlay';
 import { applyCaretPlacement, buildCaretTrack, CARET_INTERPOLATE, hideCaretEl, resolveCaret } from '../components/score/caret';
 import type { CaretTrack } from '../components/score/caret';
 import Surface from '../components/ui/Surface';
@@ -53,6 +55,7 @@ import { useMidiPlayback } from '../hooks/useMidiPlayback';
 import { ApiError } from '../services/api';
 import type { FragmentDetailResponse } from '../services/fragmentApi';
 import { getFragment } from '../services/fragmentApi';
+import type { HarmonyEventOut } from '../services/analysisApi';
 import {
   buildFragmentPlayback,
   buildNoteInfoMap,
@@ -126,22 +129,57 @@ interface FragmentGeometry {
 const EMPTY_GEOMETRY: FragmentGeometry = { measures: new Map(), notes: [] };
 
 /**
+ * Coerce the loosely-typed `harmony_events` from the fragment detail response
+ * (Record<string, unknown>[], sliced server-side over the fragment's bar range)
+ * into the HarmonyEventOut shape the in-score overlay consumes. Only the fields
+ * the overlay reads are mapped; the optional chord/pitch fields are dropped.
+ *
+ * These events come from the same `movement_analysis` serialization as the
+ * tagging tool's overlay (analysisApi.getHarmonyEvents), so reusing the
+ * already-fetched slice avoids a second round-trip in the read-only viewer.
+ */
+function toOverlayHarmonyEvents(
+  raw: Record<string, unknown>[],
+): HarmonyEventOut[] {
+  return raw.map((e) => ({
+    mn:         typeof e['mn']         === 'number'  ? (e['mn'] as number)         : 0,
+    beat:       typeof e['beat']       === 'number'  ? (e['beat'] as number)       : 0,
+    volta:      typeof e['volta']      === 'number'  ? (e['volta'] as number)      : null,
+    numeral:    typeof e['numeral']    === 'string'  ? (e['numeral'] as string)    : null,
+    applied_to: typeof e['applied_to'] === 'string'  ? (e['applied_to'] as string) : null,
+    local_key:  typeof e['local_key']  === 'string'  ? (e['local_key'] as string)  : null,
+    extensions: Array.isArray(e['extensions'])
+      ? (e['extensions'] as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
+    source:     typeof e['source']     === 'string'  ? (e['source'] as string)     : '',
+    auto:       typeof e['auto']       === 'boolean' ? (e['auto'] as boolean)      : false,
+    reviewed:   typeof e['reviewed']   === 'boolean' ? (e['reviewed'] as boolean)  : false,
+  }));
+}
+
+/**
  * Read measure/system rects from the rendered SVG, and per-onset extents from
  * the ghost layer, for bracket positioning in the isolated detail view.
  *
  * Measure rects come from the SVG measure bounding boxes (full system height for
- * vertical placement). Note onsets come from buildGhosts()' sub-beat index,
- * whose onset times are derived by `@dur.ppq` accumulation — the corpus MEI does
- * not carry `@tstamp` on notes, so reading it would yield nothing and every
- * beat-precise stage bracket would collapse to the whole measure.
+ * vertical placement). Note onsets come from the supplied ghost layer's sub-beat
+ * index, whose onset times are derived by `@dur.ppq` accumulation — the corpus
+ * MEI does not carry `@tstamp` on notes, so reading it would yield nothing and
+ * every beat-precise stage bracket would collapse to the whole measure.
+ *
+ * The ghost layer is built once by the caller and reused here and by the harmony
+ * overlay (Step 23), so the bracket and label surfaces share one coordinate
+ * origin and no layer leaks across re-renders.
  *
  * @param container - The score content element (position: relative).
  * @param meiText   - Normalized MEI content string for the loaded fragment.
+ * @param layer     - Ghost layer from buildGhosts() over the same container.
  * @returns Geometry maps; partial on parse/DOM error.
  */
 function readFragmentGeometry(
   container: HTMLElement,
   meiText: string,
+  layer: GhostLayer,
 ): FragmentGeometry {
   const measures = new Map<number, MeasureRect>();
   const notes: NoteEdge[] = [];
@@ -184,10 +222,9 @@ function readFragmentGeometry(
     }
 
     // Note onsets: derive from the ghost layer (PPQ-accumulated, meter-correct
-    // in simple and compound time). buildGhosts shares this container's
+    // in simple and compound time). The layer shares this container's
     // coordinate origin, so the left/right extents line up with the measure
     // rects above. One entry per struck sub-beat is enough for edge refinement.
-    const layer = buildGhosts(container, meiText);
     for (const sb of layer.subBeatIndex.values()) {
       notes.push({
         barN: sb.barN,
@@ -325,6 +362,10 @@ export default function FragmentDetail() {
   const [renderStatus, setRenderStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [renderError, setRenderError] = useState<string | null>(null);
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
+  // In-score harmony labels (Step 23). The fragment viewer is a study surface,
+  // so labels render by default; the user can hide them. (The score viewer keeps
+  // its tag-mode-only gate — harmony-score-overlay.md §"Mode gating".)
+  const [showHarmony, setShowHarmony] = useState(true);
   const [geometry, setGeometry] = useState<FragmentGeometry>(EMPTY_GEOMETRY);
   const [displayPosition, setDisplayPosition] = useState({ bar: 1, beat: 1 });
   // Fragment playback window into the whole-movement MIDI (Step 18). Verovio's
@@ -346,6 +387,11 @@ export default function FragmentDetail() {
   const caretElRef             = useRef<HTMLDivElement | null>(null);
   const caretTrackRef          = useRef<CaretTrack | null>(null);
   const noteInfoMapRef         = useRef<Map<string, NoteInfo>>(new Map());
+  // Ghost layer + harmony overlay (Step 23): the layer is built once per render
+  // (shared with bracket geometry); the overlay is mounted/torn down by the
+  // harmony-label effect below.
+  const ghostLayerRef          = useRef<GhostLayer | null>(null);
+  const harmonyOverlayRef      = useRef<HarmonyOverlay | null>(null);
   const scoreContainerRef      = useRef<HTMLDivElement | null>(null);
   const currentBarRef          = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
   const beatDurationMsRef      = useRef<number>(500);
@@ -465,17 +511,27 @@ export default function FragmentDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragment?.id]);
 
-  // ── Bracket geometry ────────────────────────────────────────────────────
-  // Rebuild measure/system/onset rects after each SVG render (post-paint via RAF).
+  // ── Bracket geometry + ghost layer ──────────────────────────────────────
+  // Rebuild the ghost layer and measure/system/onset rects after each SVG
+  // render (post-paint via RAF). The ghost layer is rebuilt (and the previous
+  // one destroyed) on every render so its `.ghost-overlay` element does not
+  // accumulate across scale/resize re-renders, and is reused by the harmony
+  // overlay (Step 23). On unmount React removes the score container, taking the
+  // overlay with it, so no explicit teardown is needed here.
   useEffect(() => {
     if (!svgString || !scoreContainerRef.current || !meiTextRef.current) {
+      ghostLayerRef.current?.destroy();
+      ghostLayerRef.current = null;
       setGeometry(EMPTY_GEOMETRY);
       return;
     }
     const container = scoreContainerRef.current;
     const meiText   = meiTextRef.current;
     const raf = requestAnimationFrame(() => {
-      setGeometry(readFragmentGeometry(container, meiText));
+      ghostLayerRef.current?.destroy();
+      const layer = buildGhosts(container, meiText);
+      ghostLayerRef.current = layer;
+      setGeometry(readFragmentGeometry(container, meiText, layer));
     });
     return () => cancelAnimationFrame(raf);
   }, [svgString]);
@@ -493,6 +549,36 @@ export default function FragmentDetail() {
     }
     caretTrackRef.current = buildCaretTrack(container, highlightScheduleRef.current);
   }, [geometry, midiBase64]);
+
+  // ── In-score harmony labels (Step 23) ────────────────────────────────────
+  // Mount the harmony overlay on the read-only viewer when enabled. It reuses
+  // the harmony_events already sliced into the fragment detail response over the
+  // rendered bar range, and the ghost layer built for bracket geometry above.
+  // Keyed on `geometry` (signals the ghost layer is freshly built/post-paint),
+  // `showHarmony` (the user toggle), and `scale` (label font scales with the
+  // staff size). Labels are non-interactive (no onLabelClick) — a reading aid,
+  // not an editing surface.
+  useEffect(() => {
+    const container = scoreContainerRef.current;
+    const layer = ghostLayerRef.current;
+    if (!showHarmony || !container || !layer || !fragment) return;
+    const events = toOverlayHarmonyEvents(fragment.harmony_events);
+    if (events.length === 0) return;
+
+    const overlay = new HarmonyOverlay({
+      container,
+      ghostLayer: layer,
+      // The overlay derives positions from the ghost layer; mcIndex is unused.
+      mcIndex: new Map(),
+      events,
+      scale,
+    });
+    harmonyOverlayRef.current = overlay;
+    return () => {
+      overlay.destroy();
+      harmonyOverlayRef.current = null;
+    };
+  }, [geometry, showHarmony, scale, fragment]);
 
   // ── Position update (mirrors ScoreViewer.handlePositionUpdate) ───────────
   const handlePositionUpdate = useCallback((timeMs: number) => {
@@ -703,8 +789,22 @@ export default function FragmentDetail() {
             {/* ── Notation area ───────────────────────────────────────────── */}
             <Surface layer="container-low" className={styles.notationSection}>
 
-              {/* Scale toggle */}
+              {/* Controls: harmony-label toggle (left) + staff-size (right) */}
               <div className={styles.scoreControls}>
+                {fragment.harmony_events.length > 0 && (
+                  <div className={styles.harmonyToggleGroup}>
+                    <button
+                      type="button"
+                      className={showHarmony
+                        ? `${styles.scaleBtn} ${styles.scaleBtnActive}`
+                        : styles.scaleBtn}
+                      aria-pressed={showHarmony}
+                      onClick={() => setShowHarmony((v) => !v)}
+                    >
+                      <Type variant="label-sm" as="span">Harmony</Type>
+                    </button>
+                  </div>
+                )}
                 <div className={styles.scaleGroup} role="group" aria-label="Staff size">
                   {([35, 45, 55] as const).map((s) => (
                     <button
