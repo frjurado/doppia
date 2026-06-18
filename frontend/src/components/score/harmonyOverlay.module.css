@@ -16,6 +16,8 @@
   /* Newsreader serif — analysis text reads as engraved RN/figured-bass (Step 21,
      deliberate departure from the Public Sans label tier; confirmed with Francisco). */
   font-family: var(--font-serif);
+  /* Base size (Small staff preset); harmonyOverlay.ts overrides font-size inline
+     so labels scale linearly with the staff size (Step 22). */
   font-size: 12px;
   line-height: 1.2;
 
@@ -31,6 +33,27 @@
   padding: 0;
   pointer-events: none;
   user-select: none;
+}
+
+/* Stacked figured-bass figure (Step 22): a vertical column of digit rows
+   sitting beside the Roman numeral (e.g. V with 6 over 5). Inherits the
+   Newsreader serif from .label; the whole composite stays centred on the
+   notehead via .label's translateX(-50%). */
+.figure {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  /* Centre the stack on the Roman numeral so the top digit reads as a
+     superscript and the bottom as a subscript, rather than sitting on the
+     RN baseline. */
+  vertical-align: middle;
+  font-size: 0.72em;
+  line-height: 0.82;
+  margin-left: 0.06em;
+}
+
+.figureRow {
+  display: block;
 }
 
 /* Click-to-focus variant — pointer-events enabled, hover emphasis */

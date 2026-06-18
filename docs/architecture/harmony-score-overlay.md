@@ -141,6 +141,48 @@ Label content is the **primary label** format used by `HarmonyPanel`: `numeral +
 
 This keeps the panel and in-score labels lexically identical so annotators can cross-reference without translation.
 
+### Stacked figures (Step 22)
+
+The Roman numeral's inversion / figured-bass digits render as a **vertical stack**
+beside the numeral (engraved figured-bass convention), not as linear text. The numeral
+base is an inline text node; the figure is a child `<span data-figure="true">` of
+`flex-direction: column` digit rows (`.figure` / `.figureRow` in
+`harmonyOverlay.module.css`), at `0.72em` and tight line-height. The figure column uses
+`vertical-align: middle` so it straddles the numeral — the top digit reads as a
+superscript and the bottom as a subscript, rather than the first digit sitting on the RN
+baseline. The whole composite still centres on the notehead via the `.label`
+`translateX(-50%)` anchor from Step 21.
+
+**Font size scales with the staff size.** The label base size is 12px at the smallest
+staff preset (Verovio scale 35); `harmonyOverlay.ts` computes `12 × scale / 35` and sets
+it inline per label (≈15.4px at Medium/45, ≈18.9px at Large/55), so labels stay
+proportional to the engraving. The figure rows inherit it via their `em` sizing. The
+overlay is reconstructed on every Verovio re-render (the effect keys on `svgPages`), so a
+staff-size change picks up the new scale at construction.
+
+**Implemented grammar (everything else falls back to today's rendering):**
+
+1. **Figbass inversion figures** carried in the `numeral` string. A whole-corpus survey of
+   the Mozart piano sonatas confirms exactly seven figbass values — `""`, `6`, `7`, `65`,
+   `43`, `2`, `64` (all in `ingest_analysis._FIGBASS_MAP`); **two stacked digits is the
+   maximum.** `harmonyOverlay.ts` splits the numeral into base RN + trailing digits via
+   `splitNumeralFigure()`; recognised digits split to single-digit rows (`V65` → `6`/`5`,
+   `I64` → `6`/`4`, `V7` → `7`).
+2. **The cadential six-four.** DCML encodes it as `numeral="V"`, `figbass=""`,
+   `changes="64"` — i.e. it arrives as a figure-less numeral with `extensions=["64"]`
+   (835 of 889 `"64"` changes in the corpus), so the overlay previously rendered a bare
+   `"V"` and dropped the 6/4. When the numeral has no figbass figure **and**
+   `extensions === ["64"]`, the figure stacks as `6`/`4`. A figbass figure on the numeral
+   always wins; the extension is then ignored.
+
+Every other `extensions` value — accidentals/markers (`b3`, `#7`, `+4`, `6v5`),
+multi-token concatenations (`#4#2`, `9#74`), and two-digit intervals (`11`, `13`, `112`,
+`1311`) — is **out of scope by design**: the numeral renders linearly and the extension is
+not shown (the pre-Step-22 behaviour). The `changes` field's long tail is not a clean
+single/double-digit stack (e.g. `974` is three rows), so it is deliberately not parsed.
+This is a rendering refinement of the existing surface, not a new architectural decision —
+no ADR (consistent with Step 21); confirmed with Francisco 2026-06-18.
+
 CSS rules live in `harmonyOverlay.module.css`. Font: **Newsreader serif at 12px**, centered on the notehead-centroid anchor x via `transform: translateX(-50%)` (Step 21). This is a deliberate departure from the Public Sans label tier in `DESIGN.md`: in-score analysis text reads as engraved Roman-numeral / figured-bass, which is conventionally serif (confirmed with Francisco, 2026-06-18). Colour: Henle Blue `#3f5f77` at reduced opacity (≈70%) so labels read but do not compete with the notation. `0px border-radius`, no border. Unreviewed events may carry a faint amber tint to match the `HarmonyPanel` review badge — implementation detail, not a hard requirement.
 
 ---

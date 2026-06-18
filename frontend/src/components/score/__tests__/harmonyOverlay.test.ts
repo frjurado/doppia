@@ -98,6 +98,9 @@ function makeMockGhostLayer(
         encodedKey: encoded,
         beatFloat: b.beatFloat,
         bounds: { left: b.left, top: m.bounds.top, width: 20, height: m.bounds.height ?? 40 },
+        // Step 21 positions labels on the leftmost notehead center; the mock
+        // treats the provided `left` as that center so positioning assertions hold.
+        noteheadCenter: b.left,
       });
     }
 
@@ -113,6 +116,7 @@ function makeMockGhostLayer(
         encodedKey: encoded,
         beatFloat: sb.beatFloat,
         bounds: { left: sb.left, top: m.bounds.top, width: 10, height: m.bounds.height ?? 40 },
+        noteheadCenter: sb.left,
       });
     }
   }
@@ -174,6 +178,7 @@ function createOverlay(
   overrides: {
     ghostLayer?: GhostLayer;
     events?: HarmonyEventOut[];
+    scale?: number;
     onLabelClick?: (mn: number, volta: number | null, beat: number) => void;
   } = {},
 ): { overlay: HarmonyOverlay; container: HTMLDivElement } {
@@ -184,6 +189,7 @@ function createOverlay(
     ghostLayer: overrides.ghostLayer ?? defaultGhostLayer(),
     mcIndex: new Map(),
     events: overrides.events ?? [],
+    scale: overrides.scale,
     onLabelClick: overrides.onLabelClick,
   });
   return { overlay, container };
@@ -292,6 +298,126 @@ describe('HarmonyOverlay — label text', () => {
     const labels = container.firstElementChild!.children;
     expect(labels[0]!.textContent).toBe('I (C)');
     expect(labels[1]!.textContent).toBe('V (G)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stacked figures (Step 22)
+// ---------------------------------------------------------------------------
+
+describe('HarmonyOverlay — stacked figures', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  /** Return the stacked-figure rows (digit strings) of the first label, or null. */
+  function figureRows(container: HTMLElement): string[] | null {
+    const label = container.firstElementChild!.children[0] as HTMLElement | undefined;
+    if (!label) return null;
+    const figure = label.querySelector('[data-figure]');
+    if (!figure) return null;
+    return Array.from(figure.children).map(c => c.textContent ?? '');
+  }
+
+  it('stacks a figbass figure: V65 → rows 6,5; textContent unchanged', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V65', local_key: 'C' })],
+    });
+    expect(figureRows(container)).toEqual(['6', '5']);
+    expect(container.firstElementChild!.children[0]!.textContent).toBe('V65 (C)');
+  });
+
+  it('stacks V43 → rows 4,3', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V43' })],
+    });
+    expect(figureRows(container)).toEqual(['4', '3']);
+  });
+
+  it('stacks I64 → rows 6,4', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'I64' })],
+    });
+    expect(figureRows(container)).toEqual(['6', '4']);
+  });
+
+  it('stacks a single-digit figbass figure: V7 → row 7', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V7' })],
+    });
+    expect(figureRows(container)).toEqual(['7']);
+  });
+
+  it('cadential six-four: V + extensions ["64"] → rows 6,4; textContent "V64 (C)"', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V', extensions: ['64'], local_key: 'C' })],
+    });
+    expect(figureRows(container)).toEqual(['6', '4']);
+    expect(container.firstElementChild!.children[0]!.textContent).toBe('V64 (C)');
+  });
+
+  it('plain root-position numeral with no extensions has no figure', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V', extensions: [], local_key: 'C' })],
+    });
+    expect(figureRows(container)).toBeNull();
+    expect(container.firstElementChild!.children[0]!.textContent).toBe('V (C)');
+  });
+
+  it('figbass wins over a "64" extension: V7 + ["64"] → rows 7 only', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V7', extensions: ['64'] })],
+    });
+    expect(figureRows(container)).toEqual(['7']);
+  });
+
+  it('non-cadential extension is ignored (renders as today)', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V', extensions: ['b3'], local_key: 'C' })],
+    });
+    expect(figureRows(container)).toBeNull();
+    expect(container.firstElementChild!.children[0]!.textContent).toBe('V (C)');
+  });
+
+  it('applied chord keeps slash after the stacked figure', () => {
+    const { container } = createOverlay({
+      events: [makeEvent({ numeral: 'V65', applied_to: 'V', local_key: 'C' })],
+    });
+    expect(figureRows(container)).toEqual(['6', '5']);
+    expect(container.firstElementChild!.children[0]!.textContent).toBe('V65/V (C)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Font size scales with staff size (Step 22)
+// ---------------------------------------------------------------------------
+
+describe('HarmonyOverlay — label font size', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('uses the 12px base at the Small staff preset (scale 35)', () => {
+    const { container } = createOverlay({ scale: 35, events: [makeEvent()] });
+    const label = container.firstElementChild!.children[0] as HTMLElement;
+    expect(label.style.fontSize).toBe('12px');
+  });
+
+  it('scales the font up proportionally for larger staff presets', () => {
+    const med = createOverlay({ scale: 45, events: [makeEvent()] });
+    const lbl45 = med.container.firstElementChild!.children[0] as HTMLElement;
+    expect(lbl45.style.fontSize).toBe('15.4px'); // 12 * 45/35, rounded to 0.1
+    document.body.innerHTML = '';
+
+    const lg = createOverlay({ scale: 55, events: [makeEvent()] });
+    const lbl55 = lg.container.firstElementChild!.children[0] as HTMLElement;
+    expect(lbl55.style.fontSize).toBe('18.9px'); // 12 * 55/35, rounded to 0.1
+  });
+
+  it('falls back to the base size when no scale is provided', () => {
+    const { container } = createOverlay({ events: [makeEvent()] });
+    const label = container.firstElementChild!.children[0] as HTMLElement;
+    expect(label.style.fontSize).toBe('12px');
   });
 });
 

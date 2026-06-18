@@ -1854,6 +1854,7 @@ export default function ScoreViewer() {
         ghostLayer: layer,
         mcIndex: mcIdx,
         events: allHarmonyEventsRef.current,
+        scale: scaleRef.current,
         onLabelClick: (mn, volta, beat) => {
           setHarmonyFocusKey(`${mn}:${volta ?? ''}:${beat}`);
         },
