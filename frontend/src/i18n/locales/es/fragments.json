@@ -19,7 +19,7 @@
     "pageTitle": "Fragmento — Doppia",
     "backToBrowser": "← Explorador de fragmentos",
     "loadingNotation": "Cargando notación…",
-    "couldNotRender": "No se pudo representar la notación.",
+    "couldNotRender": "No se pudo renderizar la notación.",
     "meiUnavailable": "URL de MEI no disponible para este fragmento.",
     "harmonyToggle": "Armonía",
     "sources": "Fuentes: {{list}}",

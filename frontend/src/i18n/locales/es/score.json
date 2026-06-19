@@ -249,7 +249,7 @@
     "loadingScore": "Cargando partitura…",
     "loadingRenderer": "Cargando el motor de partitura…",
     "failedLoadScore": "No se pudo cargar la partitura",
-    "rerendering": "Volviendo a representar…",
+    "rerendering": "Volviendo a renderizar…",
     "submitSuccess": "Fragmento enviado a revisión.",
     "dismissConfirmationAria": "Descartar confirmación",
     "dismiss": "Descartar",
