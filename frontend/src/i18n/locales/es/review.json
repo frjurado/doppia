@@ -1,13 +1,13 @@
 {
-  "pageTitle": "Review Queue — Doppia",
-  "submittedFragments": "Submitted fragments",
-  "itemCount_one": "{{count}}{{plus}} item",
-  "itemCount_other": "{{count}}{{plus}} items",
-  "empty": "No fragments awaiting your review",
-  "barRange": "bars {{start}}–{{end}}",
-  "submittedPrefix": "Submitted {{when}}",
-  "submittedToday": "today",
-  "submittedYesterday": "yesterday",
-  "submittedDaysAgo_one": "{{count}} day ago",
-  "submittedDaysAgo_other": "{{count}} days ago"
+  "pageTitle": "Cola de revisión — Doppia",
+  "submittedFragments": "Fragmentos enviados",
+  "itemCount_one": "{{count}}{{plus}} elemento",
+  "itemCount_other": "{{count}}{{plus}} elementos",
+  "empty": "No hay fragmentos pendientes de tu revisión",
+  "barRange": "compases {{start}}–{{end}}",
+  "submittedPrefix": "Enviado {{when}}",
+  "submittedToday": "hoy",
+  "submittedYesterday": "ayer",
+  "submittedDaysAgo_one": "hace {{count}} día",
+  "submittedDaysAgo_other": "hace {{count}} días"
 }

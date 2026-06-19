@@ -1,6 +1,7 @@
 import { Link, NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getSession } from '../../services/auth';
+import LanguageSwitcher from './LanguageSwitcher';
 import styles from './NavBar.module.css';
 
 /**
@@ -55,8 +56,9 @@ export default function NavBar() {
         </NavLink>
       </div>
 
-      {/* Right slot: user badge when logged in, login entry point otherwise */}
+      {/* Right slot: language switcher + (user badge when logged in, login otherwise) */}
       <div className={styles.actions}>
+        <LanguageSwitcher />
         {isAuthenticated ? (
           <div className={styles.userBadge} aria-label={t('ariaUserMenu')}>
             {t('account')}

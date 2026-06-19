@@ -6,5 +6,10 @@
   "review": "Review",
   "ariaUserMenu": "User menu",
   "account": "Account ▾",
-  "login": "Login"
+  "login": "Login",
+  "language": "Language",
+  "languageNames": {
+    "en": "English",
+    "es": "Español"
+  }
 }

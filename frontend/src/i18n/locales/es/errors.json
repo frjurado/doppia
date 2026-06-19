@@ -1,4 +1,4 @@
 {
-  "somethingWentWrong": "Something went wrong: {{message}}",
-  "unexpected": "An unexpected error occurred."
+  "somethingWentWrong": "Algo salió mal: {{message}}",
+  "unexpected": "Ocurrió un error inesperado."
 }

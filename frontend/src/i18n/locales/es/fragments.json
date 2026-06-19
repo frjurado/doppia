@@ -1,29 +1,29 @@
 {
-  "movementShort": "mvt. {{number}}",
+  "movementShort": "mov. {{number}}",
   "browser": {
-    "pageTitle": "Fragment Browser — Doppia",
-    "concepts": "Concepts",
-    "clearSelectionAria": "Clear selection: {{name}}",
-    "searchPlaceholder": "Search for a concept root…",
-    "searchAria": "Search concept roots",
-    "searchToBrowse": "Search for a concept to browse",
-    "includeSubtypes": "Include subtypes",
-    "loadingFragments": "Loading fragments…",
-    "noApprovedFound": "No approved fragments found",
-    "selectFromTree": "Select a concept from the tree",
-    "searchToStart": "Search for a concept to get started",
-    "previewGenerating": "Preview generating…",
-    "openFragmentAria": "Open fragment {{concept}} {{range}}"
+    "pageTitle": "Explorador de fragmentos — Doppia",
+    "concepts": "Conceptos",
+    "clearSelectionAria": "Borrar selección: {{name}}",
+    "searchPlaceholder": "Busca la raíz de un concepto…",
+    "searchAria": "Buscar raíces de conceptos",
+    "searchToBrowse": "Busca un concepto para explorar",
+    "includeSubtypes": "Incluir subtipos",
+    "loadingFragments": "Cargando fragmentos…",
+    "noApprovedFound": "No se encontraron fragmentos aprobados",
+    "selectFromTree": "Selecciona un concepto del árbol",
+    "searchToStart": "Busca un concepto para empezar",
+    "previewGenerating": "Generando vista previa…",
+    "openFragmentAria": "Abrir fragmento {{concept}} {{range}}"
   },
   "detail": {
-    "pageTitle": "Fragment — Doppia",
-    "backToBrowser": "← Fragment Browser",
-    "loadingNotation": "Loading notation…",
-    "couldNotRender": "Could not render notation.",
-    "meiUnavailable": "MEI URL unavailable for this fragment.",
-    "harmonyToggle": "Harmony",
-    "sources": "Sources: {{list}}",
-    "partLabel": "Part {{number}}",
-    "alsoTagged": "Also tagged"
+    "pageTitle": "Fragmento — Doppia",
+    "backToBrowser": "← Explorador de fragmentos",
+    "loadingNotation": "Cargando notación…",
+    "couldNotRender": "No se pudo representar la notación.",
+    "meiUnavailable": "URL de MEI no disponible para este fragmento.",
+    "harmonyToggle": "Armonía",
+    "sources": "Fuentes: {{list}}",
+    "partLabel": "Parte {{number}}",
+    "alsoTagged": "También etiquetado"
   }
 }
