@@ -39,6 +39,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getConceptSchemas } from '../../services/conceptApi';
 import type {
   ConceptSchemaTree,
@@ -265,6 +266,7 @@ export default function FormPanel({
   onHarmonyUpdated,
   harmonyFocusKey,
 }: FormPanelProps) {
+  const { t } = useTranslation(['score', 'common']);
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -342,7 +344,7 @@ export default function FormPanel({
         }
         onConceptChange?.(concept, tree);
       } catch {
-        setSchemaError('Could not load concept schema. Try again.');
+        setSchemaError(t('score:formPanel.conceptSchemaError'));
         setSchemaTree(null);
         setPropertyValues({});
         onConceptChange?.(concept, null);
@@ -350,7 +352,7 @@ export default function FormPanel({
         setIsLoadingSchema(false);
       }
     },
-    [session, onConceptChange, onRefinementChange],
+    [session, onConceptChange, onRefinementChange, t],
   );
 
   const handleRefinementChange = useCallback(
@@ -364,7 +366,7 @@ export default function FormPanel({
   const typeRefinements = schemaTree?.type_refinement.children ?? [];
 
   return (
-    <aside className={styles.panel} style={{ width: panelWidth }} aria-label="Annotation form">
+    <aside className={styles.panel} style={{ width: panelWidth }} aria-label={t('score:formPanel.annotationFormAria')}>
       {/* ── Resize handle (G6.1) ─────────────────────────────────────── */}
       <div
         className={styles.resizeHandle}
@@ -378,15 +380,15 @@ export default function FormPanel({
       {flags.fragmentSet && (
         <div className={styles.fragmentHeader}>
           <Type variant="label-sm" as="span" className={styles.fragmentHeaderLabel}>
-            Fragment
+            {t('score:formPanel.fragmentLabel')}
           </Type>
           <button
             type="button"
             className={styles.deleteButton}
             onClick={onDeleteFragment}
-            aria-label="Delete fragment and start over"
+            aria-label={t('score:formPanel.deleteAria')}
           >
-            <Type variant="label-sm" as="span">Delete</Type>
+            <Type variant="label-sm" as="span">{t('common:delete')}</Type>
           </button>
         </div>
       )}
@@ -394,7 +396,7 @@ export default function FormPanel({
       {/* ── Section: Concept ─────────────────────────────────────────── */}
       <section className={styles.section}>
         <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-          Concept
+          {t('score:formPanel.sectionConcept')}
         </Type>
         <ConceptPicker
           selectedConceptId={selectedConcept?.id ?? null}
@@ -402,7 +404,7 @@ export default function FormPanel({
         />
         {isLoadingSchema && (
           <Type variant="label-sm" as="p" className={styles.schemaStatus}>
-            Loading schema…
+            {t('score:formPanel.loadingSchema')}
           </Type>
         )}
         {schemaError && (
@@ -432,13 +434,13 @@ export default function FormPanel({
       {schemaTree && schemaTree.stages.length > 0 && (
         <section className={styles.section}>
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Stages
+            {t('score:formPanel.sectionStages')}
           </Type>
           {assignments.some(
             a => !a.required && !a.absent && !a.confirmed && !a.orphaned,
           ) && (
             <Type variant="label-sm" as="p" className={styles.stagesHint}>
-              Drag brackets to confirm bounds, or toggle to mark absent.
+              {t('score:formPanel.stagesHint')}
             </Type>
           )}
           <StageList
@@ -461,7 +463,7 @@ export default function FormPanel({
       {schemaTree && schemaTree.schemas.length > 0 && (
         <section className={styles.section}>
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Properties
+            {t('score:formPanel.sectionProperties')}
           </Type>
           <PropertyForm
             schemas={schemaTree.schemas}
@@ -479,7 +481,7 @@ export default function FormPanel({
       {flags.fragmentSet && movementId && (
         <section className={styles.section}>
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Harmony
+            {t('score:formPanel.sectionHarmony')}
           </Type>
           <HarmonyPanel
             movementId={movementId}
@@ -497,12 +499,11 @@ export default function FormPanel({
       {flags.fragmentSet && (
         <section className={styles.section}>
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Commentary
+            {t('score:formPanel.sectionCommentary')}
           </Type>
           <label htmlFor="prose-annotation" className={styles.proseLabel}>
             <Type variant="label-sm" as="span" className={styles.proseDescription}>
-              Expert commentary on this fragment. Stored verbatim; becomes the
-              searchable annotation corpus in Phase 3.
+              {t('score:formPanel.commentaryDescription')}
             </Type>
           </label>
           <textarea
@@ -510,9 +511,9 @@ export default function FormPanel({
             className={styles.proseTextarea}
             value={proseAnnotation}
             onChange={e => onProseChange?.(e.target.value)}
-            placeholder="Add analytical commentary…"
+            placeholder={t('score:formPanel.commentaryPlaceholder')}
             rows={5}
-            aria-label="Prose annotation"
+            aria-label={t('score:formPanel.proseAria')}
           />
         </section>
       )}

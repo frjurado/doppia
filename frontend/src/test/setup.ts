@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom';
+// Initialise i18next with the bundled English resources so components rendered
+// in tests resolve real strings (not raw keys). Resources load synchronously
+// (initImmediate: false), so no async test setup is required.
+import '../i18n';
 
 // jsdom does not implement ResizeObserver; provide a no-op stub so components
 // that attach ResizeObservers (e.g. ScoreViewer's container-width measurement)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
@@ -100,7 +101,12 @@ const DEFAULT_SCALE = 45 as const;
 
 type ScalePreset = 35 | 45 | 55;
 
-const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 55: 'Large' };
+/** i18n keys (score namespace) for the staff-size preset labels. */
+const SCALE_LABEL_KEYS: Record<ScalePreset, string> = {
+  35: 'viewer.scale.small',
+  45: 'viewer.scale.medium',
+  55: 'viewer.scale.large',
+};
 
 /**
  * Transposition intervals mapped to Verovio transposition string format.
@@ -110,24 +116,27 @@ const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 5
  * Ordered as up/down pairs by ascending interval size, per
  * docs/architecture/playback-coordinates.md § Dropdown ordering.
  */
-const TRANSPOSE_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: 'No transposition', value: '' },
-  { label: 'Minor 2nd up', value: 'm2' },
-  { label: 'Minor 2nd down', value: '-m2' },
-  { label: 'Major 2nd up', value: 'M2' },
-  { label: 'Major 2nd down', value: '-M2' },
-  { label: 'Minor 3rd up', value: 'm3' },
-  { label: 'Minor 3rd down', value: '-m3' },
-  { label: 'Major 3rd up', value: 'M3' },
-  { label: 'Major 3rd down', value: '-M3' },
-  { label: 'Perfect 4th up', value: 'P4' },
-  { label: 'Perfect 4th down', value: '-P4' },
-  { label: 'Tritone up', value: 'A4' },
-  { label: 'Tritone down', value: '-A4' },
+const TRANSPOSE_OPTIONS: ReadonlyArray<{ labelKey: string; value: string }> = [
+  { labelKey: 'viewer.transposeOptions.none', value: '' },
+  { labelKey: 'viewer.transposeOptions.m2up', value: 'm2' },
+  { labelKey: 'viewer.transposeOptions.m2down', value: '-m2' },
+  { labelKey: 'viewer.transposeOptions.maj2up', value: 'M2' },
+  { labelKey: 'viewer.transposeOptions.maj2down', value: '-M2' },
+  { labelKey: 'viewer.transposeOptions.m3up', value: 'm3' },
+  { labelKey: 'viewer.transposeOptions.m3down', value: '-m3' },
+  { labelKey: 'viewer.transposeOptions.maj3up', value: 'M3' },
+  { labelKey: 'viewer.transposeOptions.maj3down', value: '-M3' },
+  { labelKey: 'viewer.transposeOptions.p4up', value: 'P4' },
+  { labelKey: 'viewer.transposeOptions.p4down', value: '-P4' },
+  { labelKey: 'viewer.transposeOptions.tritoneUp', value: 'A4' },
+  { labelKey: 'viewer.transposeOptions.tritoneDown', value: '-A4' },
 ];
 
 /** Pinned music notation font for all Verovio renders. */
 const DEFAULT_FONT = 'Bravura';
+
+/** Env var name shown verbatim in the audio-unavailable notice (not translated). */
+const SOUNDFONT_ENV_VAR = 'VITE_SOUNDFONT_BASE_URL';
 
 /**
  * Fallback page width (pixels) used before the container is measured.
@@ -205,7 +214,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
 
 interface TransposeSelectProps {
   id: string;
-  options: ReadonlyArray<{ label: string; value: string }>;
+  options: ReadonlyArray<{ labelKey: string; value: string }>;
   value: string;
   onChange: (v: string) => void;
   /** Source key signature (e.g. "G major"). When provided, each option shows
@@ -214,6 +223,7 @@ interface TransposeSelectProps {
 }
 
 function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeSelectProps) {
+  const { t } = useTranslation('score');
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -241,13 +251,13 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
           if (e.key === 'Escape') setOpen(false);
         }}
       >
-        <span>{selected.label}</span>
+        <span>{t(selected.labelKey)}</span>
         {selectedResultKey && (
           <span className={styles.transposeKeyHint}> ({selectedResultKey})</span>
         )}
       </button>
       {open && (
-        <ul role="listbox" aria-label="Transposition" className={styles.transposeDropdown}>
+        <ul role="listbox" aria-label={t('viewer.transpositionAria')} className={styles.transposeDropdown}>
           {options.map((opt) => {
             const resultKey = sourceKey && opt.value ? transposeKey(sourceKey, opt.value) : null;
             return (
@@ -265,7 +275,7 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
                   setOpen(false);
                 }}
               >
-                <span>{opt.label}</span>
+                <span>{t(opt.labelKey)}</span>
                 {resultKey && <span className={styles.transposeKeyHint}> ({resultKey})</span>}
               </li>
             );
@@ -425,17 +435,18 @@ function finestBeatResolution(
 }
 
 export default function ScoreViewer() {
+  const { t } = useTranslation(['score', 'common']);
   const { movementId } = useParams<{ movementId: string }>();
   const [searchParams] = useSearchParams();
   /** Source key from the ?key= query param, e.g. "G major". Null if not provided. */
   const sourceKey = searchParams.get('key');
   /** Fragment UUID from ?fragmentId= — set by the review queue to auto-open a fragment. */
   const focusFragmentId = searchParams.get('fragmentId');
-  usePageTitle('Score Viewer — Doppia');
+  usePageTitle(t('score:viewer.pageTitle'));
 
   // ── Viewer state ────────────────────────────────────────────────────────
   const [status, setStatus] = useState<ViewerStatus>('loading');
-  const [loadingLabel, setLoadingLabel] = useState('Loading score…');
+  const [loadingLabel, setLoadingLabel] = useState(() => t('score:viewer.loadingScore'));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [svgPages, setSvgPages] = useState<string[]>([]);
   const [isRerendering, setIsRerendering] = useState(false);
@@ -1049,12 +1060,17 @@ export default function ScoreViewer() {
   // Show a brief inline note when pre-population auto-drops the resolution.
   const showGridNote = useCallback((grid: ResolutionMode, stageCount: number) => {
     if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
-    const label = grid === 'beat' ? 'beat' : grid === 'subbeat' ? 'sub-beat' : 'measure';
+    const label =
+      grid === 'beat'
+        ? t('score:viewer.resolutionLabel.beat')
+        : grid === 'subbeat'
+          ? t('score:viewer.resolutionLabel.subbeat')
+          : t('score:viewer.resolutionLabel.measure');
     setGridAutoSwitchNote(
-      `Switched to ${label} resolution to fit ${stageCount} stage${stageCount === 1 ? '' : 's'}`
+      t('score:viewer.gridAutoSwitch', { label, count: stageCount })
     );
     gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
-  }, []);
+  }, [t]);
   // Clear the timer on unmount.
   useEffect(
     () => () => {
@@ -1517,7 +1533,7 @@ export default function ScoreViewer() {
 
       try {
         const fields = buildPayload(formData, mei);
-        if (!fields) throw new Error('Incomplete annotation — cannot save yet.');
+        if (!fields) throw new Error(t('score:viewer.incompleteSave'));
 
         if (fragmentDraftId) {
           await updateFragment(fragmentDraftId, fields);
@@ -1526,12 +1542,12 @@ export default function ScoreViewer() {
           setFragmentDraftId(response.id);
         }
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : 'Failed to save draft.');
+        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
       } finally {
         setIsSavingDraft(false);
       }
     },
-    [committedSelection, movementId, fragmentDraftId, buildPayload]
+    [committedSelection, movementId, fragmentDraftId, buildPayload, t]
   );
 
   /**
@@ -1549,7 +1565,7 @@ export default function ScoreViewer() {
 
       try {
         const fields = buildPayload(formData, mei);
-        if (!fields) throw new Error('Incomplete annotation — cannot submit.');
+        if (!fields) throw new Error(t('score:viewer.incompleteSubmit'));
 
         let draftId = fragmentDraftId;
         if (draftId) {
@@ -1572,7 +1588,7 @@ export default function ScoreViewer() {
         resetAnnotation();
         showSubmitSuccess();
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
+        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.submitError'));
       } finally {
         setIsSubmitting(false);
       }
@@ -1585,6 +1601,7 @@ export default function ScoreViewer() {
       refreshStoredFragments,
       resetAnnotation,
       showSubmitSuccess,
+      t,
     ]
   );
 
@@ -1958,7 +1975,7 @@ export default function ScoreViewer() {
 
     const load = async () => {
       setStatus('loading');
-      setLoadingLabel('Loading score…');
+      setLoadingLabel(t('score:viewer.loadingScore'));
       setSvgPages([]);
       setScoreTitle(null);
       setErrorMessage(null);
@@ -1995,7 +2012,7 @@ export default function ScoreViewer() {
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
 
         // 2. Load Verovio WASM (singleton — loads at most once per session).
-        setLoadingLabel('Loading score renderer…');
+        setLoadingLabel(t('score:viewer.loadingRenderer'));
         const tk = await getVerovioToolkit();
         if (cancelled) return;
         tkRef.current = tk;
@@ -2051,7 +2068,7 @@ export default function ScoreViewer() {
         }
       } catch (err) {
         if (!cancelled) {
-          setErrorMessage(err instanceof Error ? err.message : 'Failed to load score');
+          setErrorMessage(err instanceof Error ? err.message : t('score:viewer.failedLoadScore'));
           setStatus('error');
         }
       }
@@ -2061,6 +2078,9 @@ export default function ScoreViewer() {
     return () => {
       cancelled = true;
     };
+  // Re-run only when the movement changes; `t` is read for loading/error labels
+  // but a language switch should not reload the score.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movementId]);
 
   // ── Control handlers ─────────────────────────────────────────────────────
@@ -2089,23 +2109,23 @@ export default function ScoreViewer() {
       {/* Visually-hidden h1 for screen readers: provides a page landmark
           without affecting the visual toolbar layout. */}
       <Type variant="headline" as="h1" className={styles.srOnly}>
-        Score Viewer
+        {t('score:viewer.srTitle')}
       </Type>
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <Surface layer="container-high" className={styles.toolbar}>
         <Link to="/" className={styles.backLink}>
           <Type variant="label-md" as="span">
-            ← Browse
+            {t('score:viewer.backToBrowse')}
           </Type>
         </Link>
 
         {/* Centred controls group — middle column of the 1fr/auto/1fr grid */}
         <div className={styles.toolbarControls}>
           {/* Staff size presets */}
-          <div className={styles.staffSizeControl} role="group" aria-label="Staff size">
+          <div className={styles.staffSizeControl} role="group" aria-label={t('common:staffSize')}>
             <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Size
+              {t('score:viewer.size')}
             </Type>
             {([35, 45, 55] as ScalePreset[]).map((s) => (
               <button
@@ -2118,7 +2138,7 @@ export default function ScoreViewer() {
                 aria-pressed={scale === s}
               >
                 <Type variant="label-sm" as="span">
-                  {SCALE_LABELS[s]}
+                  {t(`score:${SCALE_LABEL_KEYS[s]}`)}
                 </Type>
               </button>
             ))}
@@ -2132,7 +2152,7 @@ export default function ScoreViewer() {
                 as="span"
                 style={{ color: 'var(--color-on-surface-variant)' }}
               >
-                Transpose
+                {t('score:viewer.transpose')}
               </Type>
             </label>
             <TransposeSelect
@@ -2149,20 +2169,20 @@ export default function ScoreViewer() {
             <div
               className={styles.resolutionControl}
               role="group"
-              aria-label="Selection resolution"
+              aria-label={t('score:viewer.selectionResolutionAria')}
             >
               <Type
                 variant="label-md"
                 as="span"
                 style={{ color: 'var(--color-on-surface-variant)' }}
               >
-                Select
+                {t('score:viewer.selectLabel')}
               </Type>
               {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
                 const ARIA_LABELS: Record<ResolutionMode, string> = {
-                  measure: 'Measure resolution',
-                  beat: 'Beat resolution',
-                  subbeat: 'Sub-beat resolution',
+                  measure: t('score:viewer.resolutionAria.measure'),
+                  beat: t('score:viewer.resolutionAria.beat'),
+                  subbeat: t('score:viewer.resolutionAria.subbeat'),
                 };
                 return (
                   <button
@@ -2219,7 +2239,7 @@ export default function ScoreViewer() {
               aria-pressed={tagMode === 'tag'}
             >
               <Type variant="label-sm" as="span">
-                {tagMode === 'tag' ? 'Done' : 'Tag'}
+                {tagMode === 'tag' ? t('score:viewer.done') : t('score:viewer.tag')}
               </Type>
             </button>
           </div>
@@ -2230,7 +2250,7 @@ export default function ScoreViewer() {
       {isNarrow && (
         <div className={styles.narrowNotice}>
           <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Score is best viewed at wider widths.
+            {t('score:viewer.narrowNotice')}
           </Type>
         </div>
       )}
@@ -2251,7 +2271,7 @@ export default function ScoreViewer() {
         {status === 'error' && (
           <Surface layer="base" className={styles.statusPanel}>
             <Type variant="body-lg" as="p">
-              {errorMessage ?? 'Failed to load score'}
+              {errorMessage ?? t('score:viewer.failedLoadScore')}
             </Type>
           </Surface>
         )}
@@ -2386,7 +2406,7 @@ export default function ScoreViewer() {
         {isRerendering && (
           <div className={styles.rerenderOverlay} role="status" aria-live="polite">
             <Type variant="label-md" as="span">
-              Re-rendering…
+              {t('score:viewer.rerendering')}
             </Type>
           </div>
         )}
@@ -2398,16 +2418,16 @@ export default function ScoreViewer() {
         {submitSuccess && (
           <div className={styles.submitSuccessBanner} role="status" aria-live="assertive">
             <Type variant="label-md" as="span" className={styles.submitSuccessText}>
-              Fragment submitted for review.
+              {t('score:viewer.submitSuccess')}
             </Type>
             <button
               type="button"
               className={styles.submitSuccessDismiss}
               onClick={() => setSubmitSuccess(false)}
-              aria-label="Dismiss confirmation"
+              aria-label={t('score:viewer.dismissConfirmationAria')}
             >
               <Type variant="label-sm" as="span">
-                Dismiss
+                {t('score:viewer.dismiss')}
               </Type>
             </button>
           </div>
@@ -2418,13 +2438,15 @@ export default function ScoreViewer() {
       <Surface layer="container-highest" className={styles.playbackBar}>
         {isLoadingInstrument ? (
           <Type variant="label-md" as="span" className={styles.loadingInstrumentLabel}>
-            Loading instrument…
+            {t('common:loadingInstrument')}
           </Type>
         ) : isInstrumentError ? (
           <Type variant="label-md" as="span" className={styles.instrumentErrorLabel}>
-            Audio unavailable — set <code>VITE_SOUNDFONT_BASE_URL</code> and upload piano samples.
+            {t('score:viewer.audioUnavailablePre')}
+            <code>{SOUNDFONT_ENV_VAR}</code>
+            {t('score:viewer.audioUnavailablePost')}
             <button type="button" className={styles.retryButton} onClick={play}>
-              Retry
+              {t('common:retry')}
             </button>
           </Type>
         ) : (
@@ -2437,8 +2459,8 @@ export default function ScoreViewer() {
               className={styles.transportButton}
               onClick={handleRewind}
               disabled={!isPlaybackAvailable || isPlaying || playbackOriginMs === 0}
-              aria-label="Rewind to start"
-              title="Rewind to start"
+              aria-label={t('score:viewer.rewindAria')}
+              title={t('score:viewer.rewindAria')}
             >
               ⏮
             </button>
@@ -2449,7 +2471,7 @@ export default function ScoreViewer() {
               className={styles.transportButton}
               onClick={isPlaying ? pause : play}
               disabled={!isPlaybackAvailable || isLoadingInstrument}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
+              aria-label={isPlaying ? t('common:pause') : t('common:play')}
             >
               {isPlaying ? '⏸' : '▶'}
             </button>
@@ -2462,7 +2484,7 @@ export default function ScoreViewer() {
               disabled={
                 !isPlaybackAvailable || playbackStatus === 'ready' || playbackStatus === 'idle'
               }
-              aria-label="Stop"
+              aria-label={t('common:stop')}
             >
               ⏹
             </button>
@@ -2476,7 +2498,10 @@ export default function ScoreViewer() {
               as="span"
               className={styles.positionDisplay}
               aria-live="polite"
-              aria-label={`Bar ${displayPosition.bar}, beat ${displayPosition.beat}`}
+              aria-label={t('score:viewer.positionAria', {
+                bar: displayPosition.bar,
+                beat: displayPosition.beat,
+              })}
             >
               {isPlaybackAvailable ? `${displayPosition.bar}:${displayPosition.beat}` : '—'}
             </Type>

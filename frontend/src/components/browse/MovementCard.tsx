@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { MovementResponse } from '../../types/browse';
 import Type from '../ui/Type';
 import BrowseItem from './BrowseItem';
@@ -16,6 +17,7 @@ interface MovementCardProps {
  * and the incipit image below the text labels.
  */
 export default function MovementCard({ movement, isSelected, onClick }: MovementCardProps) {
+  const { t } = useTranslation('common');
   const subtitle = [movement.key_signature, movement.meter].filter(Boolean).join(' · ');
   const [hovered, setHovered] = useState(false);
 
@@ -33,7 +35,7 @@ export default function MovementCard({ movement, isSelected, onClick }: Movement
           <Type variant="body-lg" as="span">
             {movement.title
               ? `${movement.movement_number}. ${movement.title}`
-              : `Movement ${movement.movement_number}`}
+              : t('movementNumber', { number: movement.movement_number })}
           </Type>
           {subtitle && (
             <Type

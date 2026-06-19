@@ -1,4 +1,5 @@
 import { Link, NavLink } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { getSession } from '../../services/auth';
 import styles from './NavBar.module.css';
 
@@ -14,11 +15,12 @@ import styles from './NavBar.module.css';
  * Public Sans labels, Newsreader wordmark. No 1px borders.
  */
 export default function NavBar() {
+  const { t } = useTranslation('nav');
   const isAuthenticated = getSession() !== null;
 
   return (
-    <nav className={styles.bar} aria-label="Main navigation">
-      <Link to="/" className={styles.wordmark} aria-label="Doppia home">
+    <nav className={styles.bar} aria-label={t('ariaMain')}>
+      <Link to="/" className={styles.wordmark} aria-label={t('ariaHome')}>
         Doppia
       </Link>
 
@@ -31,7 +33,7 @@ export default function NavBar() {
             `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`
           }
         >
-          Browse
+          {t('browse')}
         </NavLink>
         <NavLink
           to="/concepts"
@@ -40,7 +42,7 @@ export default function NavBar() {
             `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`
           }
         >
-          Fragments
+          {t('fragments')}
         </NavLink>
         <NavLink
           to="/review-queue"
@@ -49,19 +51,19 @@ export default function NavBar() {
             `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`
           }
         >
-          Review
+          {t('review')}
         </NavLink>
       </div>
 
       {/* Right slot: user badge when logged in, login entry point otherwise */}
       <div className={styles.actions}>
         {isAuthenticated ? (
-          <div className={styles.userBadge} aria-label="User menu">
-            Account ▾
+          <div className={styles.userBadge} aria-label={t('ariaUserMenu')}>
+            {t('account')}
           </div>
         ) : (
           <Link to="/login" className={styles.loginButton}>
-            Login
+            {t('login')}
           </Link>
         )}
       </div>

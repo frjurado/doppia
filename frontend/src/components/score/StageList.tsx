@@ -24,6 +24,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { StageAssignment, SubPartTag } from './stages';
 import { stageColor } from './stages';
 import SubPartForm from './SubPartForm';
@@ -75,6 +76,7 @@ export default function StageList({
   onSubPartTagUpdate,
   subPartResetKey = 0,
 }: StageListProps) {
+  const { t } = useTranslation('score');
   // Ref map for auto-scroll when activeStageId changes.
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
 
@@ -117,7 +119,7 @@ export default function StageList({
             role="button"
             tabIndex={0}
             aria-pressed={isActive}
-            aria-label={`Stage: ${assignment.stageName}`}
+            aria-label={t('stageList.stageAria', { name: assignment.stageName })}
             onClick={() => onStageActivate(isActive ? null : assignment.stageId)}
             onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -144,7 +146,11 @@ export default function StageList({
                   }}
                   disabled={isLastActive}
                   aria-disabled={isLastActive}
-                  aria-label={`${assignment.stageName}: ${assignment.absent ? 'absent' : 'present'}${isLastActive ? ' (cannot remove last active stage)' : ''}`}
+                  aria-label={t('stageList.toggleAria', {
+                    name: assignment.stageName,
+                    state: assignment.absent ? t('stageList.absent') : t('stageList.present'),
+                    suffix: isLastActive ? t('stageList.cannotRemoveLast') : '',
+                  })}
                   data-testid={`absent-toggle-${assignment.stageId}`}
                 />
               ) : (
@@ -158,7 +164,11 @@ export default function StageList({
                 {assignment.stageName}
               </Type>
               {assignment.required && (
-                <span className={styles.badgeRequired} aria-label="required" title="Required stage">
+                <span
+                  className={styles.badgeRequired}
+                  aria-label={t('requiredAria')}
+                  title={t('stageList.requiredTitle')}
+                >
                   *
                 </span>
               )}
@@ -167,18 +177,18 @@ export default function StageList({
             {/* ── Bounds display ───────────────────────────────────────── */}
             <div className={styles.boundsRow}>
               <Type variant="label-sm" as="span" className={styles.boundsText}>
-                {assignment.absent ? 'absent' : boundsLabel(assignment)}
+                {assignment.absent ? t('stageList.absent') : boundsLabel(assignment)}
               </Type>
               {/* Orphaned warning */}
               {assignment.orphaned && (
                 <Type variant="label-sm" as="span" className={styles.warnText}>
-                  ⚠ stage not in current concept
+                  {t('stageList.orphanWarn')}
                 </Type>
               )}
               {/* Error warning */}
               {assignment.error && !assignment.orphaned && (
                 <Type variant="label-sm" as="span" className={styles.errorText}>
-                  ! outside main bracket
+                  {t('stageList.boundsError')}
                 </Type>
               )}
             </div>

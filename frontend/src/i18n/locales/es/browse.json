@@ -1,0 +1,25 @@
+{
+  "pageTitle": "Browse — Doppia",
+  "columns": {
+    "composer": "Composer",
+    "corpus": "Corpus",
+    "work": "Work",
+    "movement": "Movement"
+  },
+  "workCount_one": "{{count}} work",
+  "workCount_other": "{{count}} works",
+  "empty": {
+    "noCorpora": "No corpora found",
+    "selectComposer": "Select a composer",
+    "noWorks": "No works found",
+    "selectCorpus": "Select a corpus",
+    "noMovements": "No movements found",
+    "selectWork": "Select a work",
+    "selectMovement": "Select a movement"
+  },
+  "openForTagging": "Open for tagging",
+  "incipit": {
+    "rendering": "Rendering…",
+    "reloadToRefresh": "Reload to refresh"
+  }
+}

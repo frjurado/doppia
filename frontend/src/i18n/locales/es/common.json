@@ -1,0 +1,31 @@
+{
+  "retry": "Retry",
+  "loadMore": "Load more",
+  "loading": "Loading…",
+  "searching": "Searching…",
+  "collapse": "Collapse",
+  "expand": "Expand",
+  "movementNumber": "Movement {{number}}",
+  "barRangeMm": "mm. {{start}}–{{end}}",
+  "nothingHere": "Nothing here",
+  "play": "Play",
+  "pause": "Pause",
+  "stop": "Stop",
+  "save": "Save",
+  "cancel": "Cancel",
+  "close": "Close",
+  "edit": "Edit",
+  "delete": "Delete",
+  "back": "Back",
+  "yes": "Yes",
+  "no": "No",
+  "staffSize": "Staff size",
+  "loadingInstrument": "Loading instrument…",
+  "instrumentUnavailable": "Instrument unavailable",
+  "status": {
+    "draft": "draft",
+    "submitted": "submitted",
+    "approved": "approved",
+    "rejected": "rejected"
+  }
+}

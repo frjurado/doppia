@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import Type from '../ui/Type';
 import Surface from '../ui/Surface';
 import styles from './IncipitImage.module.css';
@@ -19,6 +20,7 @@ const RETURN_DURATION_S = 0.5;
  * slowly pans right to reveal the full score; on false it snaps back.
  */
 export default function IncipitImage({ url, ready, scrollActive = false }: IncipitImageProps) {
+  const { t } = useTranslation('browse');
   const [errored, setErrored] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -59,7 +61,7 @@ export default function IncipitImage({ url, ready, scrollActive = false }: Incip
   return (
     <Surface layer="container" className={styles.placeholder}>
       <Type variant="label-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
-        {errored ? 'Reload to refresh' : 'Rendering…'}
+        {errored ? t('incipit.reloadToRefresh') : t('incipit.rendering')}
       </Type>
     </Surface>
   );

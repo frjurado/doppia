@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import BrowseAccordion from '../components/browse/BrowseAccordion';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
@@ -32,9 +33,10 @@ function useMediaQuery(query: string): boolean {
  * Mobile (< 768px): stacked accordion.
  */
 export default function CorpusBrowser() {
+  const { t } = useTranslation(['browse', 'common']);
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 767px)');
-  usePageTitle('Browse — Doppia');
+  usePageTitle(t('browse:pageTitle'));
 
   const selection = useBrowseSelection();
   const {
@@ -72,7 +74,7 @@ export default function CorpusBrowser() {
           <Surface layer="container-lowest" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-                Composer
+                {t('browse:columns.composer')}
               </Type>
             </div>
             <BrowseColumn
@@ -104,7 +106,7 @@ export default function CorpusBrowser() {
           <Surface layer="container-low" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-                Corpus
+                {t('browse:columns.corpus')}
               </Type>
             </div>
             <BrowseColumn
@@ -123,11 +125,11 @@ export default function CorpusBrowser() {
                     as="span"
                     style={{ color: 'var(--color-on-surface-variant)', display: 'block' }}
                   >
-                    {c.work_count} {c.work_count === 1 ? 'work' : 'works'}
+                    {t('browse:workCount', { count: c.work_count })}
                   </Type>
                 </BrowseItem>
               )}
-              emptyLabel={composerSlug ? 'No corpora found' : 'Select a composer'}
+              emptyLabel={composerSlug ? t('browse:empty.noCorpora') : t('browse:empty.selectComposer')}
               error={corporaError}
               onRetry={retryCorpora}
             />
@@ -137,7 +139,7 @@ export default function CorpusBrowser() {
           <Surface layer="container-lowest" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-                Work
+                {t('browse:columns.work')}
               </Type>
             </div>
             <BrowseColumn
@@ -162,7 +164,7 @@ export default function CorpusBrowser() {
                   )}
                 </BrowseItem>
               )}
-              emptyLabel={corpusSlug ? 'No works found' : 'Select a corpus'}
+              emptyLabel={corpusSlug ? t('browse:empty.noWorks') : t('browse:empty.selectCorpus')}
               error={worksError}
               onRetry={retryWorks}
             />
@@ -172,7 +174,7 @@ export default function CorpusBrowser() {
           <Surface layer="container-low" className={styles.columnPanel}>
             <div className={styles.columnHeader}>
               <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-                Movement
+                {t('browse:columns.movement')}
               </Type>
             </div>
             <BrowseColumn
@@ -184,7 +186,7 @@ export default function CorpusBrowser() {
               renderItem={(m, isSelected, onSelect) => (
                 <MovementCard movement={m} isSelected={isSelected} onClick={onSelect} />
               )}
-              emptyLabel={workId ? 'No movements found' : 'Select a work'}
+              emptyLabel={workId ? t('browse:empty.noMovements') : t('browse:empty.selectWork')}
               error={movementsError}
               onRetry={retryMovements}
             />
@@ -198,7 +200,8 @@ export default function CorpusBrowser() {
           <div className={styles.footerContent}>
             <div className={styles.footerMeta}>
               <Type variant="label-md" as="span">
-                {selectedMovement.title ?? `Movement ${selectedMovement.movement_number}`}
+                {selectedMovement.title ??
+                  t('common:movementNumber', { number: selectedMovement.movement_number })}
               </Type>
               {(selectedMovement.key_signature || selectedMovement.meter) && (
                 <Type
@@ -222,7 +225,7 @@ export default function CorpusBrowser() {
                 navigate(`/scores/${selectedMovement.id}${qs}`);
               }}
             >
-              <Type variant="label-md" as="span">Open for tagging</Type>
+              <Type variant="label-md" as="span">{t('browse:openForTagging')}</Type>
             </button>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
 import Surface from '../components/ui/Surface';
@@ -20,7 +21,8 @@ import styles from './ReviewQueue.module.css';
  * Supports cursor-based "Load more" pagination.
  */
 export default function ReviewQueue() {
-  usePageTitle('Review Queue — Doppia');
+  const { t, i18n } = useTranslation(['review', 'common']);
+  usePageTitle(t('review:pageTitle'));
   const navigate = useNavigate();
 
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
@@ -64,13 +66,13 @@ export default function ReviewQueue() {
   }
 
   function formatBarRange(item: ReviewQueueItem): string {
-    return `bars ${item.bar_start}–${item.bar_end}`;
+    return t('review:barRange', { start: item.bar_start, end: item.bar_end });
   }
 
   function formatMovementLabel(item: ReviewQueueItem): string {
     const mvt = item.movement_title
       ? `${item.movement_number}. ${item.movement_title}`
-      : `Movement ${item.movement_number}`;
+      : t('common:movementNumber', { number: item.movement_number });
     const catalogue = item.work_catalogue_number ? ` (${item.work_catalogue_number})` : '';
     return `${item.work_title}${catalogue} — ${mvt}`;
   }
@@ -80,10 +82,14 @@ export default function ReviewQueue() {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / 86_400_000);
-    if (diffDays === 0) return 'today';
-    if (diffDays === 1) return 'yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    if (diffDays === 0) return t('review:submittedToday');
+    if (diffDays === 1) return t('review:submittedYesterday');
+    if (diffDays < 7) return t('review:submittedDaysAgo', { count: diffDays });
+    return date.toLocaleDateString(i18n.language, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
   }
 
   return (
@@ -93,12 +99,14 @@ export default function ReviewQueue() {
         <Surface layer="container-low" className={styles.listPanel}>
           <div className={styles.listHeader}>
             <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Submitted fragments
+              {t('review:submittedFragments')}
             </Type>
             {!isLoading && !error && (
               <Type variant="label-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
-                {items.length}
-                {nextCursor ? '+' : ''} item{items.length !== 1 ? 's' : ''}
+                {t('review:itemCount', {
+                  count: items.length,
+                  plus: nextCursor ? '+' : '',
+                })}
               </Type>
             )}
           </div>
@@ -109,7 +117,7 @@ export default function ReviewQueue() {
             onSelect={handleSelect}
             isLoading={isLoading}
             getKey={(item) => item.id}
-            emptyLabel="No fragments awaiting your review"
+            emptyLabel={t('review:empty')}
             error={error}
             onRetry={() => {
               setError(null);
@@ -152,7 +160,7 @@ export default function ReviewQueue() {
                       opacity: 0.7,
                     }}
                   >
-                    Submitted {formatSubmittedAt(item.submitted_at)}
+                    {t('review:submittedPrefix', { when: formatSubmittedAt(item.submitted_at) })}
                   </Type>
                 </div>
               </BrowseItem>
@@ -169,7 +177,7 @@ export default function ReviewQueue() {
                 disabled={isLoadingMore}
               >
                 <Type variant="label-sm" as="span">
-                  {isLoadingMore ? 'Loading…' : 'Load more'}
+                  {isLoadingMore ? t('common:loading') : t('common:loadMore')}
                 </Type>
               </button>
             </div>

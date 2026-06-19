@@ -27,6 +27,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { PropertySchema } from '../../services/conceptApi';
 import Type from '../ui/Type';
 import styles from './PropertyForm.module.css';
@@ -56,6 +57,7 @@ export interface PropertyFormProps {
 
 /** Field name label and optional description shown above each control. */
 function FieldMeta({ schema }: { schema: PropertySchema }) {
+  const { t } = useTranslation('score');
   const [descOpen, setDescOpen] = useState(false);
 
   return (
@@ -63,13 +65,13 @@ function FieldMeta({ schema }: { schema: PropertySchema }) {
       <span className={styles.fieldLabel}>
         <Type variant="label-sm" as="span">{schema.name}</Type>
         {schema.required && (
-          <span className={styles.required} aria-label="required">*</span>
+          <span className={styles.required} aria-label={t('requiredAria')}>*</span>
         )}
         {schema.description && (
           <button
             type="button"
             className={styles.descButton}
-            aria-label={`About: ${schema.name}`}
+            aria-label={t('propertyForm.aboutAria', { name: schema.name })}
             aria-expanded={descOpen}
             onMouseEnter={() => setDescOpen(true)}
             onMouseLeave={() => setDescOpen(false)}
@@ -121,6 +123,7 @@ interface OptionDropdownProps {
 }
 
 function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownProps) {
+  const { t } = useTranslation('score');
   const [open, setOpen] = useState(false);
   const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -152,15 +155,17 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
   // Trigger label text.
   let triggerLabel: string;
   if (selectedIds.length === 0) {
-    triggerLabel = 'Select…';
+    triggerLabel = t('propertyForm.selectPlaceholder');
   } else if (!multiple) {
-    triggerLabel = schema.values.find(pv => pv.id === selectedIds[0])?.name ?? 'Select…';
+    triggerLabel =
+      schema.values.find(pv => pv.id === selectedIds[0])?.name ??
+      t('propertyForm.selectPlaceholder');
   } else if (selectedIds.length <= 2) {
     triggerLabel = selectedIds
       .map(id => schema.values.find(pv => pv.id === id)?.name ?? id)
       .join(', ');
   } else {
-    triggerLabel = `${selectedIds.length} selected`;
+    triggerLabel = t('propertyForm.countSelected', { count: selectedIds.length });
   }
 
   const handleOptionClick = (pvId: string) => {
@@ -227,7 +232,7 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
                       <button
                         type="button"
                         className={styles.infoButton}
-                        aria-label={`Info: ${pv.referenced_concept!.name}`}
+                        aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
                         aria-expanded={isInfoOpen}
                         onClick={e => {
                           e.stopPropagation();
@@ -266,6 +271,7 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
 
 /** ONE_OF: radio group (≤2 values) or compact single-select popover (>2 values). */
 function OneOfField({ schema, value, onChange }: FieldProps) {
+  const { t } = useTranslation('score');
   const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const selected = typeof value === 'string' ? value : null;
 
@@ -312,7 +318,7 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
                   <button
                     type="button"
                     className={styles.infoButton}
-                    aria-label={`Info: ${pv.referenced_concept!.name}`}
+                    aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
                     aria-expanded={isInfoOpen}
                     onClick={e => {
                       e.stopPropagation();
@@ -349,6 +355,7 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
 
 /** MANY_OF: checkbox group (≤2 values) or compact multi-select popover (>2 values). */
 function ManyOfField({ schema, value, onChange }: FieldProps) {
+  const { t } = useTranslation('score');
   const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const selected: string[] = Array.isArray(value) ? value : [];
 
@@ -398,7 +405,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
                   <button
                     type="button"
                     className={styles.infoButton}
-                    aria-label={`Info: ${pv.referenced_concept!.name}`}
+                    aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
                     aria-expanded={isInfoOpen}
                     onClick={e => {
                       e.stopPropagation();
@@ -446,6 +453,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
  *  false → "✗" (off appearance — explicitly no)
  */
 function BoolField({ schema, value, onChange }: FieldProps) {
+  const { t } = useTranslation('score');
   const current = typeof value === 'boolean' ? value : null;
   const nextValue: boolean | null =
     current === null ? true : current === true ? false : true;
@@ -457,7 +465,15 @@ function BoolField({ schema, value, onChange }: FieldProps) {
         type="button"
         className={`${styles.boolToggle} ${current === true ? styles.boolToggleOn : styles.boolToggleOff}`}
         onClick={() => onChange(schema.id, nextValue)}
-        aria-label={`${schema.name}: ${current === null ? 'unset' : current ? 'yes' : 'no'}`}
+        aria-label={t('propertyForm.boolAria', {
+          name: schema.name,
+          state:
+            current === null
+              ? t('propertyForm.unset')
+              : current
+                ? t('propertyForm.yes')
+                : t('propertyForm.no'),
+        })}
         data-testid={`bool-toggle-${schema.id}`}
       >
         {indicator}

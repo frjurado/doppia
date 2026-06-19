@@ -1,0 +1,29 @@
+{
+  "movementShort": "mvt. {{number}}",
+  "browser": {
+    "pageTitle": "Fragment Browser — Doppia",
+    "concepts": "Concepts",
+    "clearSelectionAria": "Clear selection: {{name}}",
+    "searchPlaceholder": "Search for a concept root…",
+    "searchAria": "Search concept roots",
+    "searchToBrowse": "Search for a concept to browse",
+    "includeSubtypes": "Include subtypes",
+    "loadingFragments": "Loading fragments…",
+    "noApprovedFound": "No approved fragments found",
+    "selectFromTree": "Select a concept from the tree",
+    "searchToStart": "Search for a concept to get started",
+    "previewGenerating": "Preview generating…",
+    "openFragmentAria": "Open fragment {{concept}} {{range}}"
+  },
+  "detail": {
+    "pageTitle": "Fragment — Doppia",
+    "backToBrowser": "← Fragment Browser",
+    "loadingNotation": "Loading notation…",
+    "couldNotRender": "Could not render notation.",
+    "meiUnavailable": "MEI URL unavailable for this fragment.",
+    "harmonyToggle": "Harmony",
+    "sources": "Sources: {{list}}",
+    "partLabel": "Part {{number}}",
+    "alsoTagged": "Also tagged"
+  }
+}

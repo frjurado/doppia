@@ -29,6 +29,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { GhostLayer, ResolutionMode } from './ghosts';
 import type { AnnotationSession, SelectionRange } from './annotator';
 import type { StageAssignment } from './stages';
@@ -167,6 +168,7 @@ export default function StageBrackets({
   onSplitHandleMove,
   session,
 }: StageBracketsProps) {
+  const { t } = useTranslation('score');
   // Drag state for split handles: tracked in a ref to avoid re-renders during
   // the drag — only onSplitHandleMove triggers a React state update. The
   // frame (slots + boundary vector) is frozen at drag start; each mousemove
@@ -349,10 +351,10 @@ export default function StageBrackets({
                 >
                   {assignment.stageName}
                   {assignment.orphaned && (
-                    <span className={styles.orphanBadge} title="Stage not in current concept">⚠</span>
+                    <span className={styles.orphanBadge} title={t('stageBrackets.orphanTitle')}>⚠</span>
                   )}
                   {assignment.error && (
-                    <span className={styles.errorBadge} title="Bounds outside main bracket">!</span>
+                    <span className={styles.errorBadge} title={t('stageBrackets.errorTitle')}>!</span>
                   )}
                 </span>
               )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -36,6 +37,7 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodeProps) {
+  const { t } = useTranslation('common');
   const children = childrenMap.get(node.id) ?? [];
   const hasChildren = children.length > 0;
   const isSelected = node.id === selectedId;
@@ -59,7 +61,7 @@ function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodePr
           <span
             className={styles.treeToggle}
             role="button"
-            aria-label={expanded ? 'Collapse' : 'Expand'}
+            aria-label={expanded ? t('collapse') : t('expand')}
             onClick={(e) => {
               e.stopPropagation();
               setExpanded((v) => !v);
@@ -122,10 +124,11 @@ interface FragmentCardProps {
 }
 
 function FragmentCard({ item, onOpen }: FragmentCardProps) {
+  const { t } = useTranslation(['fragments', 'common']);
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
-  const barRange = `mm. ${item.bar_start}–${item.bar_end}`;
+  const barRange = t('common:barRangeMm', { start: item.bar_start, end: item.bar_end });
   const workLabel = `${item.work_title}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
-  const movementLabel = `mvt. ${item.movement_number}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
+  const movementLabel = `${t('fragments:movementShort', { number: item.movement_number })}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
   const [hovered, setHovered] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -154,7 +157,7 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
       onClick={() => onOpen(item.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label={`Open fragment ${conceptLabel} ${barRange}`}
+      aria-label={t('fragments:browser.openFragmentAria', { concept: conceptLabel, range: barRange })}
     >
       <div ref={wrapperRef} className={styles.previewArea}>
         {item.preview_url ? (
@@ -168,7 +171,7 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
         ) : (
           <div className={styles.previewPlaceholder}>
             <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Preview generating…
+              {t('fragments:browser.previewGenerating')}
             </Type>
           </div>
         )}
@@ -186,7 +189,7 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
         <div className={styles.fragmentBadges}>
           <span className={styles.statusBadge} data-status={item.status}>
             <Type variant="label-sm" as="span">
-              {item.status}
+              {t(`common:status.${item.status}`)}
             </Type>
           </span>
           {item.data_licence && (
@@ -218,7 +221,8 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
  * Component 8 Step 7.
  */
 export default function FragmentBrowser() {
-  usePageTitle('Fragment Browser — Doppia');
+  const { t } = useTranslation(['fragments', 'common']);
+  usePageTitle(t('fragments:browser.pageTitle'));
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -400,14 +404,14 @@ export default function FragmentBrowser() {
         <Surface layer="container-lowest" className={styles.treePanel}>
           <div className={styles.treePanelHeader}>
             <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Concepts
+              {t('fragments:browser.concepts')}
             </Type>
             {conceptId && selectedNode && (
               <button
                 type="button"
                 className={styles.clearSelection}
                 onClick={clearSelection}
-                aria-label={`Clear selection: ${selectedNode.name}`}
+                aria-label={t('fragments:browser.clearSelectionAria', { name: selectedNode.name })}
               >
                 <Type variant="label-sm" as="span">
                   {selectedNode.name}
@@ -422,10 +426,10 @@ export default function FragmentBrowser() {
             <input
               type="search"
               className={styles.searchInput}
-              placeholder="Search for a concept root…"
+              placeholder={t('fragments:browser.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              aria-label="Search concept roots"
+              aria-label={t('fragments:browser.searchAria')}
             />
             {(searchResults.length > 0 || searchLoading) && (
               <Surface layer="container-highest" floating className={styles.searchDropdown}>
@@ -436,7 +440,7 @@ export default function FragmentBrowser() {
                       as="span"
                       style={{ color: 'var(--color-on-surface-variant)' }}
                     >
-                      Searching…
+                      {t('common:searching')}
                     </Type>
                   </div>
                 )}
@@ -472,7 +476,7 @@ export default function FragmentBrowser() {
                   as="span"
                   style={{ color: 'var(--color-on-surface-variant)' }}
                 >
-                  Loading…
+                  {t('common:loading')}
                 </Type>
               </div>
             )}
@@ -490,7 +494,7 @@ export default function FragmentBrowser() {
                   as="span"
                   style={{ color: 'var(--color-on-surface-variant)' }}
                 >
-                  Search for a concept to browse
+                  {t('fragments:browser.searchToBrowse')}
                 </Type>
               </div>
             )}
@@ -536,7 +540,7 @@ export default function FragmentBrowser() {
                     onChange={(e) => setIncludeSubtypes(e.target.checked)}
                   />
                   <Type variant="label-sm" as="span">
-                    Include subtypes
+                    {t('fragments:browser.includeSubtypes')}
                   </Type>
                 </label>
               </div>
@@ -549,7 +553,7 @@ export default function FragmentBrowser() {
                       as="span"
                       style={{ color: 'var(--color-on-surface-variant)' }}
                     >
-                      Loading fragments…
+                      {t('fragments:browser.loadingFragments')}
                     </Type>
                   </div>
                 )}
@@ -567,7 +571,7 @@ export default function FragmentBrowser() {
                       as="span"
                       style={{ color: 'var(--color-on-surface-variant)' }}
                     >
-                      No approved fragments found
+                      {t('fragments:browser.noApprovedFound')}
                     </Type>
                   </div>
                 )}
@@ -582,7 +586,7 @@ export default function FragmentBrowser() {
                       onClick={() => loadFragments(fragmentsNextCursor)}
                     >
                       <Type variant="label-sm" as="span">
-                        Load more
+                        {t('common:loadMore')}
                       </Type>
                     </button>
                   </div>
@@ -596,7 +600,9 @@ export default function FragmentBrowser() {
                 as="span"
                 style={{ color: 'var(--color-on-surface-variant)' }}
               >
-                {rootId ? 'Select a concept from the tree' : 'Search for a concept to get started'}
+                {rootId
+                  ? t('fragments:browser.selectFromTree')
+                  : t('fragments:browser.searchToStart')}
               </Type>
             </div>
           )}

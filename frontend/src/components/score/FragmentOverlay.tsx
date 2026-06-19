@@ -42,6 +42,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { GhostLayer, ResolutionMode } from './ghosts';
 import { resolveSegments } from './MainBracket';
 import type { BracketSegment } from './MainBracket';
@@ -220,6 +221,7 @@ export default function FragmentOverlay({
   onBracketClick,
   'data-testid': testId,
 }: FragmentOverlayProps) {
+  const { t } = useTranslation('score');
 
   // ── Per-fragment display state (filter-ready + collapse) ─────────────────
   //
@@ -391,9 +393,9 @@ export default function FragmentOverlay({
                   aria-label={
                     hasSubParts
                       ? collapsed
-                        ? 'Expand fragment'
-                        : 'Collapse fragment'
-                      : 'Open fragment details'
+                        ? t('overlay.expandFragment')
+                        : t('overlay.collapseFragment')
+                      : t('overlay.openDetails')
                   }
                 />
               )}

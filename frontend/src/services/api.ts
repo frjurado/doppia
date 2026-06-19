@@ -14,6 +14,7 @@
 
 import { z } from 'zod';
 import { getSession } from './auth';
+import { getCurrentLanguage } from '../i18n';
 
 export class ApiError extends Error {
   constructor(
@@ -63,6 +64,13 @@ export async function apiFetch<T>(
   const callerSetContentType = 'Content-Type' in headers;
   if (hasBody && !callerSetContentType && !(options?.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
+  }
+
+  // Drive the backend translation overlay (ADR-006 § 6) from the active UI
+  // language unless the caller set its own Accept-Language. The backend
+  // negotiates this header and falls back to English with translation_missing.
+  if (!('Accept-Language' in headers)) {
+    headers['Accept-Language'] = getCurrentLanguage();
   }
 
   if (session) {

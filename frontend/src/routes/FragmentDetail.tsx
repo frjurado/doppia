@@ -41,6 +41,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import PlaybackCaret from '../components/score/PlaybackCaret';
 import { buildGhosts } from '../components/score/ghosts';
@@ -338,7 +339,8 @@ function computeBracketSegments(
  * approach as ScoreViewer's container-width measurement.
  */
 export default function FragmentDetail() {
-  usePageTitle('Fragment — Doppia');
+  const { t } = useTranslation(['fragments', 'common']);
+  usePageTitle(t('fragments:detail.pageTitle'));
   const { fragmentId } = useParams<{ fragmentId: string }>();
   const navigate = useNavigate();
 
@@ -406,7 +408,7 @@ export default function FragmentDetail() {
     if (!fragment) return;
     if (!fragment.mei_url || fragment.mc_start == null || fragment.mc_end == null) {
       setRenderStatus('error');
-      setRenderError('MEI URL unavailable for this fragment.');
+      setRenderError(t('fragments:detail.meiUnavailable'));
       return;
     }
 
@@ -655,9 +657,9 @@ export default function FragmentDetail() {
   }, [playbackPosition]);
 
   // ── Derived ─────────────────────────────────────────────────────────────
-  const primaryTag    = fragment?.concept_tags.find((t) => t.is_primary) ?? null;
+  const primaryTag    = fragment?.concept_tags.find((tag) => tag.is_primary) ?? null;
   const conceptLabel  = primaryTag?.alias ?? primaryTag?.name ?? '—';
-  const secondaryTags = fragment?.concept_tags.filter((t) => !t.is_primary) ?? [];
+  const secondaryTags = fragment?.concept_tags.filter((tag) => !tag.is_primary) ?? [];
 
   // Header groups (Step 15): work/composer and movement as separate lines.
   const workLine = fragment
@@ -672,7 +674,9 @@ export default function FragmentDetail() {
 
   const movementLine = fragment
     ? [
-        fragment.movement_number != null ? `mvt. ${fragment.movement_number}` : null,
+        fragment.movement_number != null
+          ? t('fragments:movementShort', { number: fragment.movement_number })
+          : null,
         fragment.movement_title,
       ].filter(Boolean).join(' — ') || null
     : null;
@@ -699,12 +703,12 @@ export default function FragmentDetail() {
           onClick={() => navigate(-1)}
         >
           <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            ← Fragment Browser
+            {t('fragments:detail.backToBrowser')}
           </Type>
         </button>
         {fragment && (
           <span className={styles.statusBadge} data-status={fragment.status}>
-            <Type variant="label-sm" as="span">{fragment.status}</Type>
+            <Type variant="label-sm" as="span">{t(`common:status.${fragment.status}`)}</Type>
           </span>
         )}
       </Surface>
@@ -712,7 +716,7 @@ export default function FragmentDetail() {
       {isLoading && (
         <div className={styles.centered}>
           <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Loading…
+            {t('common:loading')}
           </Type>
         </div>
       )}
@@ -778,7 +782,7 @@ export default function FragmentDetail() {
                     )}
                     {fragment.harmony_sources.length > 0 && (
                       <Type variant="label-sm" as="p" className={styles.sourceLine}>
-                        Sources: {fragment.harmony_sources.join(', ')}
+                        {t('fragments:detail.sources', { list: fragment.harmony_sources.join(', ') })}
                       </Type>
                     )}
                   </div>
@@ -801,11 +805,11 @@ export default function FragmentDetail() {
                       aria-pressed={showHarmony}
                       onClick={() => setShowHarmony((v) => !v)}
                     >
-                      <Type variant="label-sm" as="span">Harmony</Type>
+                      <Type variant="label-sm" as="span">{t('fragments:detail.harmonyToggle')}</Type>
                     </button>
                   </div>
                 )}
-                <div className={styles.scaleGroup} role="group" aria-label="Staff size">
+                <div className={styles.scaleGroup} role="group" aria-label={t('common:staffSize')}>
                   {([35, 45, 55] as const).map((s) => (
                     <button
                       key={s}
@@ -834,14 +838,14 @@ export default function FragmentDetail() {
                 {renderStatus === 'loading' && (
                   <div className={styles.renderState}>
                     <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      Loading notation…
+                      {t('fragments:detail.loadingNotation')}
                     </Type>
                   </div>
                 )}
                 {renderStatus === 'error' && (
                   <div className={styles.renderState}>
                     <Type variant="label-sm" as="span" style={{ color: 'var(--color-error)' }}>
-                      {renderError ?? 'Could not render notation.'}
+                      {renderError ?? t('fragments:detail.couldNotRender')}
                     </Type>
                   </div>
                 )}
@@ -877,8 +881,11 @@ export default function FragmentDetail() {
                 {fragment.sub_parts.length > 0 && geometry.measures.size > 0 && (
                   <div className={styles.subPartOverlayLayer} aria-hidden="true">
                     {fragment.sub_parts.map((sp, idx) => {
-                      const spPrimary = sp.concept_tags.find((t) => t.is_primary);
-                      const label = spPrimary?.alias ?? spPrimary?.name ?? `Part ${idx + 1}`;
+                      const spPrimary = sp.concept_tags.find((tag) => tag.is_primary);
+                      const label =
+                        spPrimary?.alias ??
+                        spPrimary?.name ??
+                        t('fragments:detail.partLabel', { number: idx + 1 });
                       const segs = computeBracketSegments(
                         geometry,
                         sp.bar_start, sp.bar_end,
@@ -914,7 +921,7 @@ export default function FragmentDetail() {
                   type="button"
                   className={styles.transportButton}
                   disabled={playbackStatus === 'idle' || playbackStatus === 'loading-instrument'}
-                  aria-label={playbackStatus === 'playing' ? 'Pause' : 'Play'}
+                  aria-label={playbackStatus === 'playing' ? t('common:pause') : t('common:play')}
                   onClick={() => {
                     if (playbackStatus === 'playing') pause();
                     else void play();
@@ -926,7 +933,7 @@ export default function FragmentDetail() {
                   type="button"
                   className={styles.transportButton}
                   disabled={playbackStatus === 'idle'}
-                  aria-label="Stop"
+                  aria-label={t('common:stop')}
                   onClick={handleStop}
                 >
                   ⏹
@@ -938,12 +945,12 @@ export default function FragmentDetail() {
                 )}
                 {playbackStatus === 'loading-instrument' && (
                   <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                    Loading instrument…
+                    {t('common:loadingInstrument')}
                   </Type>
                 )}
                 {playbackStatus === 'instrument-error' && (
                   <Type variant="label-sm" as="span" style={{ color: 'var(--color-error)' }}>
-                    Instrument unavailable
+                    {t('common:instrumentUnavailable')}
                   </Type>
                 )}
               </div>
@@ -957,12 +964,12 @@ export default function FragmentDetail() {
                   as="h2"
                   style={{ color: 'var(--color-on-surface-variant)', margin: 0 }}
                 >
-                  Also tagged
+                  {t('fragments:detail.alsoTagged')}
                 </Type>
                 <div className={styles.tagList}>
-                  {secondaryTags.map((t) => (
-                    <span key={t.concept_id} className={styles.tagChip}>
-                      <Type variant="label-sm" as="span">{t.alias ?? t.name}</Type>
+                  {secondaryTags.map((tag) => (
+                    <span key={tag.concept_id} className={styles.tagChip}>
+                      <Type variant="label-sm" as="span">{tag.alias ?? tag.name}</Type>
                     </span>
                   ))}
                 </div>
