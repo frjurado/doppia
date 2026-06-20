@@ -2,6 +2,7 @@
   /* Brand colours */
   --color-primary: #3f5f77;
   --color-primary-container: #587891;
+
   /* primary-container is a mid-blue, so its on-colour must be light —
      dark M3-style on-colours fail contrast on #587891. */
   --color-on-primary-container: #ffffff;
