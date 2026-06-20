@@ -169,7 +169,7 @@ Then reload the page. The corpus browser and tagging tool will use this token un
 2. Under Manage R2 API Tokens, create a token with "Object Read & Write" permission scoped to the bucket.
 3. Note the Account ID from the R2 overview page.
 4. Set all four R2 variables in Fly.io secrets.
-5. Configure the bucket's CORS policy (R2 → bucket → Settings → CORS Policy). The frontend fetches MEI files directly from R2 via signed URLs, so the bucket must allow `GET` requests from the frontend origin:
+5. Configure the bucket's CORS policy (R2 → bucket → Settings → CORS Policy). The frontend fetches MEI files (and incipit/preview SVGs) directly from R2 — via the public `r2.dev` URL when `R2_PUBLIC_URL` is set, otherwise via signed URLs — so the bucket must allow `GET` requests from the frontend origin:
 
 ```json
 [
@@ -395,6 +395,8 @@ Revert `fly.toml` to the single `app` process (remove the `worker` line from `[p
 ```bash
 fly deploy --app doppia-staging
 ```
+
+**Verifying the re-ingested artifacts actually show.** MEI, incipit, and preview objects are served from the public `r2.dev` URL (`R2_PUBLIC_URL`), which Cloudflare edge-caches and which **cannot be purged on demand** (the managed subdomain is not a zone in the account). Overwriting an object therefore does *not* invalidate the cached copy. The application defeats this by appending a `?v=<last-write timestamp>` cache-buster to each artifact URL (`object_storage._cache_bust_token`, keyed on `movement.updated_at` / `incipit_generated_at` / `preview_generated_at`), so a re-ingested movement gets a fresh URL and the corrected clefs/ties/title-stripped incipit appear immediately on the next page load — no purge needed. If you ever see a *stale* artifact after re-ingestion, confirm the URL in the network tab carries a `?v=` token that matches the new write; a missing or unchanged token is the bug, not the cache. See `security-model.md` §4 "Public-URL branch (R2.dev)".
 
 ## Uploading a corpus
 

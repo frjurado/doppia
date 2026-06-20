@@ -757,6 +757,7 @@ class FragmentService:
                 Movement.movement_number,
                 Movement.title.label("movement_title"),
                 Movement.mei_object_key,
+                Movement.updated_at.label("movement_updated_at"),
                 Work.title.label("work_title"),
                 Work.catalogue_number.label("work_catalogue_number"),
                 Composer.name.label("composer_name"),
@@ -770,11 +771,15 @@ class FragmentService:
 
         mei_url: str | None = None
         if self._storage is not None and ctx.get("mei_object_key"):
-            mei_url = await self._storage.signed_url(ctx["mei_object_key"])
+            mei_url = await self._storage.signed_url(
+                ctx["mei_object_key"], version=ctx.get("movement_updated_at")
+            )
 
         preview_url: str | None = None
         if self._storage is not None and fragment.preview_object_key:
-            preview_url = await self._storage.signed_url(fragment.preview_object_key)
+            preview_url = await self._storage.signed_url(
+                fragment.preview_object_key, version=fragment.preview_generated_at
+            )
 
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
@@ -1374,15 +1379,18 @@ class FragmentService:
         # Resolve preview signed URLs concurrently for all fragments that have
         # a stored preview_object_key (ADR-008: null until Celery task completes).
         async def _resolve_preview(
-            frag_id: uuid.UUID, key: str | None
+            frag_id: uuid.UUID, key: str | None, version: datetime | None
         ) -> tuple[uuid.UUID, str | None]:
             if self._storage is None or key is None:
                 return frag_id, None
-            return frag_id, await self._storage.signed_url(key)
+            return frag_id, await self._storage.signed_url(key, version=version)
 
         preview_url_map: dict[uuid.UUID, str | None] = dict(
             await asyncio.gather(
-                *[_resolve_preview(f.id, f.preview_object_key) for f in page]
+                *[
+                    _resolve_preview(f.id, f.preview_object_key, f.preview_generated_at)
+                    for f in page
+                ]
             )
         )
 
