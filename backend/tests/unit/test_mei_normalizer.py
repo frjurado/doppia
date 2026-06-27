@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import lxml.etree
+from models.corrections import Correction
 from services.mei_normalizer import normalize_mei
 
 # ---------------------------------------------------------------------------
@@ -918,3 +919,151 @@ class TestClefSameas:
         _, first_out = _run(tmp_path, "clef_sameas.mei")
         second_out = _round_trip(tmp_path, first_out, "clef_sameas.mei")
         assert first_out == second_out
+
+
+# ---------------------------------------------------------------------------
+# Pass 0 — Source-corrections overlay (ADR-027)
+# ---------------------------------------------------------------------------
+
+
+def _correction(**kwargs: object) -> Correction:
+    """Build a :class:`Correction` from keyword overrides over a default entry.
+
+    Args:
+        **kwargs: Fields to override on the default correction template.
+
+    Returns:
+        A validated :class:`~models.corrections.Correction`.
+    """
+    base: dict[str, object] = {
+        "movement": "k1/m1",
+        "target": {"xml_id": "n1"},
+        "field": "accid",
+        "expected": "n",
+        "corrected": "f",
+        "rationale": "test rationale",
+        "class": "errata",
+        "source_sha": "abc",
+        "added": "2026-06-28 test",
+    }
+    base.update(kwargs)
+    return Correction.model_validate(base)
+
+
+def _run_corrections(
+    tmp_path: Path,
+    corrections: list[Correction],
+    fixture_name: str = "corrections_overlay.mei",
+) -> tuple[object, bytes]:
+    """Normalize the corrections fixture with *corrections* applied as Pass 0.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        corrections: The overlay entries to pass to ``normalize_mei``.
+        fixture_name: MEI fixture to normalize.
+
+    Returns:
+        ``(report, output_bytes)``.
+    """
+    src = _fixture(fixture_name)
+    dst = tmp_path / fixture_name
+    report = normalize_mei(str(src), str(dst), corrections=corrections)
+    return report, dst.read_bytes()
+
+
+def _accid_value(out_bytes: bytes, note_id: str, attr: str = "accid") -> str | None:
+    """Return the ``<accid>`` child's *attr* of the note with *note_id*."""
+    ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+    tree = lxml.etree.fromstring(out_bytes)
+    accid = tree.xpath(f"//mei:note[@xml:id='{note_id}']/mei:accid", namespaces=ns)
+    return accid[0].get(attr) if accid else None
+
+
+class TestCorrectionsOverlay:
+    """Pass 0 applies a per-movement corrections overlay (ADR-027)."""
+
+    def test_no_corrections_is_noop(self, tmp_path: Path) -> None:
+        """With no corrections, Pass 0 changes nothing and stays clean."""
+        report, out_bytes = _run_corrections(tmp_path, [])
+        assert not any(
+            c.startswith("[errata]") or c.startswith("[editorial]")
+            for c in report.changes_applied
+        )
+        # n1's accid is untouched.
+        assert _accid_value(out_bytes, "n1") == "n"
+
+    def test_accid_correction_applied(self, tmp_path: Path) -> None:
+        """A matching pre-state correction rewrites the note's @accid."""
+        report, out_bytes = _run_corrections(tmp_path, [_correction()])
+        assert _accid_value(out_bytes, "n1") == "f"
+        assert any(
+            "Corrected accid on 'n1'" in c and "test rationale" in c
+            for c in report.changes_applied
+        )
+
+    def test_repeat_start_added(self, tmp_path: Path) -> None:
+        """A repeat-start correction sets @left on the target measure."""
+        c = _correction(
+            target={"xml_id": "m2"},
+            field="repeat-start",
+            expected=None,
+            corrected="rptstart",
+        )
+        report, out_bytes = _run_corrections(tmp_path, [c])
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        tree = lxml.etree.fromstring(out_bytes)
+        m2 = tree.xpath("//mei:measure[@xml:id='m2']", namespaces=ns)[0]
+        assert m2.get("left") == "rptstart"
+        assert report.is_clean  # m2 rptstart pairs with m3 rptend
+
+    def test_prestate_mismatch_warns_and_skips(self, tmp_path: Path) -> None:
+        """When the element holds neither expected nor corrected, it is flagged."""
+        # n2 holds accid='s'; expected 'n' does not match → mismatch.
+        c = _correction(target={"xml_id": "n2"})
+        report, out_bytes = _run_corrections(tmp_path, [c])
+        assert _accid_value(out_bytes, "n2") == "s"  # untouched
+        codes = [w.code for w in report.warnings]
+        assert "CORRECTION_PRESTATE_MISMATCH" in codes
+        assert not report.is_clean
+
+    def test_superseded_is_info_noop(self, tmp_path: Path) -> None:
+        """When the element already holds 'corrected', the correction is a no-op."""
+        # n2 already holds 's'; a correction targeting 's' is already satisfied.
+        c = _correction(target={"xml_id": "n2"}, expected="x", corrected="s")
+        report, _ = _run_corrections(tmp_path, [c])
+        codes = {w.code: w.severity for w in report.warnings}
+        assert codes.get("CORRECTION_SUPERSEDED") == "info"
+        assert report.is_clean  # info does not break cleanliness
+        assert not any("Corrected" in ch for ch in report.changes_applied)
+
+    def test_missing_target_warns(self, tmp_path: Path) -> None:
+        """A target xml:id absent from the document is flagged for review."""
+        c = _correction(target={"xml_id": "does-not-exist"})
+        report, _ = _run_corrections(tmp_path, [c])
+        assert "CORRECTION_TARGET_MISSING" in [w.code for w in report.warnings]
+        assert not report.is_clean
+
+    def test_unknown_field_warns(self, tmp_path: Path) -> None:
+        """An unsupported field is flagged rather than silently ignored."""
+        c = _correction(field="tie", expected="x", corrected="y")
+        report, _ = _run_corrections(tmp_path, [c])
+        assert "CORRECTION_UNKNOWN_FIELD" in [w.code for w in report.warnings]
+
+    def test_correction_idempotent(self, tmp_path: Path) -> None:
+        """Re-running with the same correction over corrected output is a no-op.
+
+        The second pass sees the element already holding 'corrected' (the
+        superseded branch), applies nothing, and produces byte-identical output.
+        """
+        corrections = [_correction()]
+        _, first_out = _run_corrections(tmp_path, corrections)
+
+        src2 = tmp_path / "second_corrections_overlay.mei"
+        src2.write_bytes(first_out)
+        dst2 = tmp_path / "second_out_corrections_overlay.mei"
+        report2 = normalize_mei(str(src2), str(dst2), corrections=corrections)
+        second_out = dst2.read_bytes()
+
+        assert second_out == first_out
+        assert not any("Corrected" in ch for ch in report2.changes_applied)
+        assert "CORRECTION_SUPERSEDED" in [w.code for w in report2.warnings]

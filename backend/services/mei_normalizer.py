@@ -1,10 +1,20 @@
 """MEI normalization pipeline.
 
-Applies ten normalization passes to an MEI file, writing the result to
-``output_path`` and returning a :class:`~models.normalization.NormalizationReport`.
+Applies a corrections-overlay pass (Pass 0) and ten normalization passes to an
+MEI file, writing the result to ``output_path`` and returning a
+:class:`~models.normalization.NormalizationReport`.
 
 Normalization rules (applied in this order):
 
+0. **Source-corrections overlay** — applies a per-movement list of
+   :class:`~models.corrections.Correction` entries (known errors in the source
+   data) *before* the structural passes, so the correctness passes that follow
+   (repeat-barline pairing, accidental stripping, tie completion) see corrected
+   data.  Each correction is applied only when the target element still holds
+   its recorded pre-state (``expected``); if it already holds ``corrected`` the
+   correction is a logged no-op (superseded), and if it holds neither it is
+   skipped and flagged for review.  No corrections (the default) makes Pass 0 a
+   no-op (ADR-027).
 1. **Pickup bar** — assigns ``@n="0"`` and ``@metcon="false"`` to the
    anacrusis, renumbering subsequent measures if needed.
 2. **Meter change propagation** — inserts ``<meterSig>`` children into
@@ -64,8 +74,10 @@ Example usage::
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 import lxml.etree
+from models.corrections import Correction
 from models.normalization import NormalizationIssue, NormalizationReport
 
 # ---------------------------------------------------------------------------
@@ -167,6 +179,200 @@ def _build_repeat_sections(
                 open_stack.append(i)
 
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Pass 0 — Source-corrections overlay (ADR-027)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _FieldOp:
+    """Maps a correction ``field`` to the concrete MEI attribute it edits.
+
+    Args:
+        child: Tag name of a child element of the target that carries the
+            attribute (e.g. ``"accid"`` for a note's accidental), or ``None``
+            when the attribute is on the target element itself.
+        attr: The attribute name to read/write.
+        create_child: When the attribute lives on a ``child`` that is absent and
+            a non-``None`` value is being written, create the child element.
+    """
+
+    child: str | None
+    attr: str
+    create_child: bool
+
+
+# The supported correction ``field`` vocabulary (ADR-027 §3).  Adding a new
+# field type is the only change that touches normalizer code; the corrections
+# themselves are pure data.
+_FIELD_OPS: dict[str, _FieldOp] = {
+    "accid": _FieldOp(child="accid", attr="accid", create_child=True),
+    "accid.ges": _FieldOp(child="accid", attr="accid.ges", create_child=True),
+    "repeat-start": _FieldOp(child=None, attr="left", create_child=False),
+    "repeat-end": _FieldOp(child=None, attr="right", create_child=False),
+}
+
+
+def _read_field_value(target: lxml.etree._Element, op: _FieldOp) -> str | None:
+    """Return the current value of *op*'s attribute on *target*, or ``None``.
+
+    Args:
+        target: The element the correction is anchored to.
+        op: The resolved field operation.
+
+    Returns:
+        The attribute's current value, or ``None`` when the attribute (or its
+        carrying child element) is absent.
+    """
+    if op.child is None:
+        return target.get(op.attr)
+    child = target.find(f"{{{_MEI_NS}}}{op.child}")
+    if child is None:
+        return None
+    return child.get(op.attr)
+
+
+def _write_field_value(
+    target: lxml.etree._Element, op: _FieldOp, value: str | None
+) -> None:
+    """Set *op*'s attribute on *target* to *value* (or remove it when ``None``).
+
+    Args:
+        target: The element the correction is anchored to.
+        op: The resolved field operation.
+        value: The value to write; ``None`` removes the attribute.
+    """
+    if op.child is None:
+        element: lxml.etree._Element | None = target
+    else:
+        element = target.find(f"{{{_MEI_NS}}}{op.child}")
+        if element is None:
+            if value is None:
+                return  # nothing to remove
+            if op.create_child:
+                element = lxml.etree.SubElement(target, f"{{{_MEI_NS}}}{op.child}")
+            else:
+                return
+    if value is None:
+        element.attrib.pop(op.attr, None)
+    else:
+        element.set(op.attr, value)
+
+
+def _apply_corrections_overlay(
+    root: lxml.etree._Element,
+    corrections: list[Correction],
+    changes_applied: list[str],
+    warnings: list[NormalizationIssue],
+) -> None:
+    """Pass 0 — Apply the per-movement source-corrections overlay (ADR-027).
+
+    Runs *before* the structural passes so they see corrected data.  For each
+    correction the target element is located by ``xml:id`` and the current value
+    of the corrected attribute is compared three ways:
+
+    1. Already equals ``corrected`` → no-op, recorded as ``info``
+       (``CORRECTION_SUPERSEDED``).  This is what makes the pass idempotent and
+       makes an upstream-merged fix a safe no-op rather than a double-correction.
+    2. Equals ``expected`` → the correction is applied and audited.
+    3. Neither → skipped and flagged ``warning`` (``CORRECTION_PRESTATE_MISMATCH``)
+       so a human decides whether to retire or re-target the entry.
+
+    A missing target or an unrecognised ``field`` is likewise flagged rather than
+    silently ignored.
+
+    Args:
+        root: Document root element.
+        corrections: The corrections scoped to this movement (already filtered
+            by ``services.corrections_overlay.load_corrections``).
+        changes_applied: Mutable list; applied corrections are appended here.
+        warnings: Mutable list; superseded, mismatched, missing-target, and
+            unknown-field findings are appended here.
+    """
+    if not corrections:
+        return
+
+    by_id: dict[str, lxml.etree._Element] = {}
+    for elem in root.iter():
+        if not isinstance(elem.tag, str):
+            continue
+        eid = elem.get(_XML_ID_KEY)
+        if eid:
+            by_id[eid] = elem
+
+    for c in corrections:
+        op = _FIELD_OPS.get(c.field)
+        if op is None:
+            warnings.append(
+                NormalizationIssue(
+                    code="CORRECTION_UNKNOWN_FIELD",
+                    message=(
+                        f"Correction for {c.movement} target "
+                        f"{c.target.xml_id!r} uses unsupported field "
+                        f"{c.field!r}; left unapplied."
+                    ),
+                    severity="warning",
+                )
+            )
+            continue
+
+        target = by_id.get(c.target.xml_id)
+        if target is None:
+            warnings.append(
+                NormalizationIssue(
+                    code="CORRECTION_TARGET_MISSING",
+                    message=(
+                        f"Correction for {c.movement} field {c.field!r}: target "
+                        f"xml:id={c.target.xml_id!r} not found (fallback: "
+                        f"{c.target.fallback!r}); the location may have drifted "
+                        f"after an upstream re-encode. Needs review."
+                    ),
+                    severity="warning",
+                )
+            )
+            continue
+
+        current = _read_field_value(target, op)
+
+        if current == c.corrected:
+            # Upstream resolved it our way, or this is a second pass over already-
+            # corrected output: never double-correct.
+            warnings.append(
+                NormalizationIssue(
+                    code="CORRECTION_SUPERSEDED",
+                    message=(
+                        f"Correction for {c.movement} field {c.field!r} on "
+                        f"{c.target.xml_id!r} is already satisfied "
+                        f"(value={c.corrected!r}); no-op. If the source now holds "
+                        f"this value, set upstream: merged and retire the entry."
+                    ),
+                    severity="info",
+                )
+            )
+            continue
+
+        if current != c.expected:
+            warnings.append(
+                NormalizationIssue(
+                    code="CORRECTION_PRESTATE_MISMATCH",
+                    message=(
+                        f"Correction for {c.movement} field {c.field!r} on "
+                        f"{c.target.xml_id!r}: expected pre-state "
+                        f"{c.expected!r} but found {current!r}; left unapplied. "
+                        f"Upstream may have changed this differently. Needs review."
+                    ),
+                    severity="warning",
+                )
+            )
+            continue
+
+        _write_field_value(target, op, c.corrected)
+        changes_applied.append(
+            f"[{c.correction_class}] Corrected {c.field} on {c.target.xml_id!r} "
+            f"({c.movement}): {c.expected!r} -> {c.corrected!r}. {c.rationale}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1452,7 +1658,11 @@ def _compute_duration_bars(root: lxml.etree._Element) -> int:
 # ---------------------------------------------------------------------------
 
 
-def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
+def normalize_mei(
+    source_path: str,
+    output_path: str,
+    corrections: list[Correction] | None = None,
+) -> NormalizationReport:
     """Read *source_path*, apply all normalization rules, write *output_path*.
 
     Normalization is idempotent: running this function on an already-
@@ -1466,6 +1676,10 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
         source_path: Path to the MEI file to normalize.
         output_path: Destination path for the normalized MEI file.  May be
             the same as *source_path* (in-place normalization).
+        corrections: Optional per-movement source-corrections overlay (ADR-027),
+            applied as Pass 0 before the structural passes.  Defaults to no
+            corrections, in which case Pass 0 is a no-op.  Callers obtain the
+            filtered list via ``services.corrections_overlay.load_corrections``.
 
     Returns:
         A :class:`~models.normalization.NormalizationReport` describing
@@ -1481,6 +1695,7 @@ def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
     changes_applied: list[str] = []
     warnings: list[NormalizationIssue] = []
 
+    _apply_corrections_overlay(root, corrections or [], changes_applied, warnings)
     _normalize_pickup_bar(root, changes_applied)
     _propagate_meter_changes(root, changes_applied)
     _normalize_ending_ns(root, changes_applied, warnings)

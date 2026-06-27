@@ -61,7 +61,7 @@ Genuine, but not worth blocking C9. Each needs a scoping/feasibility pass before
 
 ## Gate checklist (what "ready for Step 10" means)
 
-- [ ] ADR-027 (corrections overlay) ratified; ADR-009 redistribution question answered.
+- [x] ADR-027 (corrections overlay) ratified; ADR-009 redistribution question answered. (Mechanism landed: `mei_normalizer` Pass 0 + `services/corrections_overlay.py` loader + `backend/seed/corrections/`. First errata entries are Band 1 Item 5 / the B3/C2 checklist line below.)
 - [ ] A1–A3 fixed; multi-voice + multi-section measures on the Step 6 spot-check list and passing.
 - [ ] B1–B2 traced; B1 pass implemented or explicitly dropped after the Verovio-behaviour check.
 - [ ] D1 normalised; incipits regenerated once (with Step 8b title strip).

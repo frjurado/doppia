@@ -106,8 +106,15 @@ def mock_storage() -> AsyncMock:
     return storage
 
 
-def _mock_normalize_side_effect(src: str, dst: str) -> NormalizationReport:
-    """Write src bytes to dst so that read_bytes() works; return clean report."""
+def _mock_normalize_side_effect(
+    src: str, dst: str, corrections: object | None = None
+) -> NormalizationReport:
+    """Write src bytes to dst so that read_bytes() works; return clean report.
+
+    Accepts the optional ``corrections`` keyword (ADR-027 Pass 0) so the mock
+    matches the real ``normalize_mei`` signature; the overlay itself is
+    exercised in ``test_mei_normalizer``/``test_corrections_overlay``.
+    """
     Path(dst).write_bytes(Path(src).read_bytes())
     return NormalizationReport(duration_bars=3, changes_applied=[], warnings=[])
 
@@ -601,7 +608,9 @@ class TestReport:
             severity="warning",
         )
 
-        def _normalize_with_warnings(src: str, dst: str) -> NormalizationReport:
+        def _normalize_with_warnings(
+            src: str, dst: str, corrections: object | None = None
+        ) -> NormalizationReport:
             Path(dst).write_bytes(Path(src).read_bytes())
             return NormalizationReport(duration_bars=3, warnings=[issue])
 

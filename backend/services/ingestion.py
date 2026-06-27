@@ -48,6 +48,7 @@ from models.ingestion import (
 from models.music import Composer, Corpus, Movement, Work
 from models.normalization import NormalizationReport
 from pydantic import ValidationError
+from services.corrections_overlay import load_corrections
 from services.mei_normalizer import normalize_mei
 from services.mei_validator import validate_mei
 from services.object_storage import StorageClient
@@ -201,11 +202,19 @@ async def ingest_corpus(
                 )
                 continue
 
-            # Normalise MEI (writes to tmp files; normalize_mei takes paths)
+            # Normalise MEI (writes to tmp files; normalize_mei takes paths).
+            # Pass 0 applies any per-movement source-corrections overlay (ADR-027)
+            # before the structural passes; an absent overlay yields no corrections.
+            corrections = load_corrections(
+                metadata.composer.slug,
+                metadata.corpus.slug,
+                work_meta.slug,
+                mov_meta.slug,
+            )
             src = tmp / f"src_{work_meta.slug}_{mov_meta.slug}.mei"
             dst = tmp / f"norm_{work_meta.slug}_{mov_meta.slug}.mei"
             src.write_bytes(mei_bytes)
-            norm_report = normalize_mei(str(src), str(dst))
+            norm_report = normalize_mei(str(src), str(dst), corrections=corrections)
             normalized_bytes = dst.read_bytes()
 
             # Read harmonies TSV if present

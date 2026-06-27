@@ -1,0 +1,37 @@
+composer: mozart
+corpus: mozart-piano-sonatas
+corrections:
+  - movement: k331/movement-2
+    target:
+      xml_id: m_trio_start
+      fallback: "mc=49 staff=2 layer=1 (trio start)"
+    field: repeat-start
+    expected: null
+    corrected: rptstart
+    rationale: "Test fixture: DCML omits the trio's start-repeat."
+    class: errata
+    upstream: none
+    source_sha: deadbeef
+    added: "2026-06-28 test"
+  - movement: k331/movement-2
+    target:
+      xml_id: n_acc_1
+    field: accid
+    expected: "n"
+    corrected: "f"
+    rationale: "Test fixture: edition prints a flat; source has a natural."
+    class: errata
+    upstream: none
+    source_sha: deadbeef
+    added: "2026-06-28 test"
+  - movement: k279/movement-1
+    target:
+      xml_id: n_other
+    field: accid.ges
+    expected: null
+    corrected: "f"
+    rationale: "Test fixture: a different movement's correction."
+    class: editorial
+    upstream: none
+    source_sha: deadbeef
+    added: "2026-06-28 test"

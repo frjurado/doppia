@@ -12,6 +12,22 @@ Normalization runs as a Python script in the ingest pipeline, after schema valid
 
 ## What the normalizer enforces
 
+### 0. Source-corrections overlay (Pass 0)
+
+**Problem:** some defects are not normalizer or rendering bugs — the *source data itself is wrong* (a missing start-repeat, an accidental that disagrees with the reference edition). Silently hand-editing the stored MEI would violate ADR-014 (no byte-identical original to re-process), be invisible to review, and conflict with the source when upstream is updated.
+
+**Mechanism (ADR-027):** a **corrections overlay** is a YAML data file — one entry per known source error, attributed and reference-cited — applied by **Pass 0** *before* the structural passes below, so the correctness passes that depend on the data being right (repeat-barline pairing §4, split-measure completion §7, tie completion §8, accidental stripping §9) see corrected data. The overlay is *data*: growing the list never touches normalizer logic.
+
+Overlay files live in `backend/seed/corrections/`, one per corpus (`{composer_slug}__{corpus_slug}.yaml`); see that directory's `README.md` for the format. `services/corrections_overlay.py` loads and filters the entries to a single movement; the ingest path passes the filtered `list[Correction]` to `normalize_mei(..., corrections=...)`. The normalizer never touches the filesystem itself, and a movement with no entries (the common case) makes Pass 0 a no-op — so the existing corpus and unit fixtures are unaffected.
+
+Each correction names a target element (by `xml:id`), the `field` to correct, the current wrong value (`expected`), and the value to write (`corrected`). Pass 0 compares the element's current value three ways:
+
+- **Already equals `corrected`** → no-op, recorded as `info` `CORRECTION_SUPERSEDED`. This makes the pass idempotent and makes an upstream-merged fix a safe no-op rather than a double-correction.
+- **Equals `expected`** → the correction is applied and audited in `changes_applied`.
+- **Neither** → skipped and flagged `warning` (`CORRECTION_PRESTATE_MISMATCH`); a missing target is `CORRECTION_TARGET_MISSING` and an unrecognised `field` is `CORRECTION_UNKNOWN_FIELD`.
+
+Supported `field` values at ratification: `accid`/`accid.ges` (the note's `<accid>` child) and `repeat-start`/`repeat-end` (the measure's `@left`/`@right`). Corrections target by `xml:id`, which is stable per movement and unaffected by pass 1's renumbering or ADR-015 `mc`, so Pass 0's position ahead of the other passes is safe. Licensing: corrected MEI is a CC BY-SA 4.0 derivative exactly as the uncorrected DCML-derived MEI already is (ADR-009 governs it via `data_licence`); the overlay file itself is the project's own authored data and carries no ShareAlike obligation (ADR-027 §5).
+
 ### 1. Pickup bar encoding
 
 **Problem:** Anacrusis measures are encoded inconsistently. Some encoders use `@n="0"`, some use `@n="1"` for the pickup and renumber all subsequent measures, some omit `@n` entirely on the anacrusis, and some use `@metcon` while others do not.
@@ -136,13 +152,20 @@ This is the MEI-side complement to the **measure-start clef recovery** performed
 The normalizer is a standalone Python module (`backend/services/mei_normalizer.py`) using `lxml` for XML manipulation. It exposes a single function:
 
 ```python
-def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
+def normalize_mei(
+    source_path: str,
+    output_path: str,
+    corrections: list[Correction] | None = None,
+) -> NormalizationReport:
     """
-    Read the MEI file at source_path, apply all normalization rules,
+    Read the MEI file at source_path, apply the optional per-movement
+    source-corrections overlay (Pass 0, §0) and all normalization rules,
     write the normalized file to output_path, and return a report
     describing what was changed and what was flagged.
     """
 ```
+
+The `corrections` list is obtained by the caller from `services.corrections_overlay.load_corrections(composer_slug, corpus_slug, work_slug, movement_slug)` and defaults to `None` (no corrections; Pass 0 is a no-op).
 
 `NormalizationReport` is a Pydantic model containing:
 - `changes_applied: list[str]` — human-readable descriptions of each auto-correction made
