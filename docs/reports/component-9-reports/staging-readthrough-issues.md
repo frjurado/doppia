@@ -279,9 +279,11 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 
 | ID | Symptom & score locations | Conf. | Fix target | Status |
 |---|---|---|---|---|
-| A1 | Double clef glyph — 279/i m.86 · 279/iii m.72 · 283/ii m.19, m.25 · 331/i m.98 · 332/iii m.210 | H | Step 6 — widen recovery idempotency guard; converge `sameas` (Pass 10) | ☐ open |
-| A2 | Clef affects voice 1 only; voice 2 in old (F) clef — 279/iii m.110 · 280/i m.46 · 280/ii m.24 · 331/ii m.24–25 | C | Step 6 — inject clef into every layer / hoist to staff scope | ☐ open |
-| A3 | Trio clef changes absent — 331/ii Trio (after m.48) | H | Step 6 + Step 8 — section-aware `.mscx`↔MEI index | ☐ open |
+| A1 | Double clef glyph — 279/i m.86 · 279/iii m.72 · 283/ii m.19, m.25 · 331/i m.98 · 332/iii m.210 | H | Step 6 — widen recovery idempotency guard; converge `sameas` (Pass 10) | ☑ fixed (unverified on staging) |
+| A2 | Clef affects voice 1 only; voice 2 in old (F) clef — 279/iii m.110 · 280/i m.46 · 280/ii m.24 · 331/ii m.24–25 | C | Step 6 — inject clef into every layer / hoist to staff scope | ☑ fixed (unverified on staging) |
+| A3 | Trio clef changes absent — 331/ii Trio (after m.48) | H | Step 6 + Step 8 — section-aware `.mscx`↔MEI index | ☑ fixed (unverified on staging) |
+
+> **A1–A3 fixed (2026-06-28)** in `recover_measure_start_clefs` (`scripts/prepare_dcml_corpus.py`): widened idempotency guard (equivalent clef anywhere in the layer, not just first-child), per-voice injection into every `<layer>`, and section-aware `.mscx`↔MEI index with a diagnostic-logged fallback. Unit-covered in `test_prepare_dcml_corpus.py` (`TestClefRecovery*`). On-staging re-verification against the real K331/ii source is Band 1 Item 6; the render spot-check list to use is in `docs/investigations/accidentals-k279-mvt1/clefs-findings.md`. (Note: the A1 `sameas`-convergence sub-point — making Pass 10 collapse per-voice restatements rather than render two glyphs — was not in scope here; the double-clef cases observed trace to the recovery guard, and Pass 10 `_resolve_clef_sameas` already only resolves references without duplicating. Revisit only if a `sameas`-sourced double survives re-verification.)
 
 ### B — Accidentals in playback (new Step 7b; gate before Step 10)
 

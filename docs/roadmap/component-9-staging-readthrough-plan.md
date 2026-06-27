@@ -62,7 +62,7 @@ Genuine, but not worth blocking C9. Each needs a scoping/feasibility pass before
 ## Gate checklist (what "ready for Step 10" means)
 
 - [x] ADR-027 (corrections overlay) ratified; ADR-009 redistribution question answered. (Mechanism landed: `mei_normalizer` Pass 0 + `services/corrections_overlay.py` loader + `backend/seed/corrections/`. First errata entries are Band 1 Item 5 / the B3/C2 checklist line below.)
-- [ ] A1–A3 fixed; multi-voice + multi-section measures on the Step 6 spot-check list and passing.
+- [x] A1–A3 fixed in `recover_measure_start_clefs` (widened idempotency guard, per-voice injection, section-aware index); multi-voice + multi-section spot-check list recorded in `clefs-findings.md`. (Code + unit tests landed; *passing on staging* is confirmed at Band 1 Item 6 re-verification against the real K331/ii source.)
 - [ ] B1–B2 traced; B1 pass implemented or explicitly dropped after the Verovio-behaviour check.
 - [ ] D1 normalised; incipits regenerated once (with Step 8b title strip).
 - [ ] B3/C2 errata entered in the overlay with reference citations.

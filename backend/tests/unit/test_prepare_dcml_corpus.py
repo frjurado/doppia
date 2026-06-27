@@ -701,7 +701,7 @@ class TestRecoverMeasureStartClefs:
         assert first.tag == f"{{{_MEI_NS}}}clef"
         assert first.get("shape") == "G"
         assert first.get("line") == "2"
-        assert first.get(f"{{{_XML_NS}}}id") == "clefrec2s2"
+        assert first.get(f"{{{_XML_NS}}}id") == "clefrec2s2l1"
 
     def test_other_staff_untouched(self, tmp_path: Path) -> None:
         out = pdc.recover_measure_start_clefs(_write_mscx(tmp_path), _build_mei(5))
@@ -725,3 +725,227 @@ class TestRecoverMeasureStartClefs:
         p.write_text("<museScore version='3.02'></museScore>", encoding="utf-8")
         mei = _build_mei(3)
         assert pdc.recover_measure_start_clefs(p, mei) is mei
+
+
+# ---------------------------------------------------------------------------
+# Clef-recovery read-through fixes (A1 widened guard, A2 per-voice, A3 sections)
+# ---------------------------------------------------------------------------
+
+
+def _clefs_in(layer: lxml.etree._Element) -> list[lxml.etree._Element]:
+    """All ``<clef>`` descendants of a layer (e.g. nested inside a beam)."""
+    return list(layer.iter(f"{{{_MEI_NS}}}clef"))
+
+
+class TestClefRecoveryIdempotencyGuard:
+    """A1 — an existing equivalent clef (even mid-layer) blocks injection."""
+
+    def _mei_with_existing_clef(self, position: str) -> bytes:
+        # Five measures; m2 staff 2 already carries a G/2 clef.  ``position``
+        # selects whether it leads the layer or sits after a beam (the K279 m86
+        # shape, where the clef is *not* the first child).
+        if position == "leading":
+            staff2_m2 = (
+                '<staff n="2"><layer n="1">'
+                '<clef shape="G" line="2"/>'
+                '<note dur="4" oct="3" pname="c"/>'
+                "</layer></staff>"
+            )
+        else:  # mid-layer, inside a beam
+            staff2_m2 = (
+                '<staff n="2"><layer n="1">'
+                '<beam><note dur="8" oct="3" pname="c"/>'
+                '<clef shape="G" line="2"/>'
+                '<note dur="8" oct="4" pname="g"/></beam>'
+                "</layer></staff>"
+            )
+        measures = []
+        for i in range(1, 6):
+            s2 = (
+                staff2_m2
+                if i == 2
+                else '<staff n="2"><layer n="1">'
+                '<note dur="4" oct="3" pname="c"/></layer></staff>'
+            )
+            measures.append(
+                f'<measure n="{i}">'
+                f'<staff n="1"><layer n="1">'
+                f'<note dur="4" oct="4" pname="c"/></layer></staff>'
+                f"{s2}</measure>"
+            )
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+            f'<section>{"".join(measures)}</section>'
+            f"</score></mdiv></body></music></mei>"
+        ).encode("utf-8")
+
+    def test_no_double_when_leading_clef_present(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._mei_with_existing_clef("leading")
+        )
+        root = lxml.etree.fromstring(out)
+        m2_s2 = root.findall(f".//{{{_MEI_NS}}}measure")[1].find(
+            f"{{{_MEI_NS}}}staff[@n='2']"
+        )
+        # m2 keeps its single clef; m5 (no pre-existing clef) still gets one.
+        assert len(_clefs_in(m2_s2.find(f"{{{_MEI_NS}}}layer"))) == 1
+        assert out.count(b"<clef") == 2
+
+    def test_no_double_when_clef_nested_in_beam(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._mei_with_existing_clef("mid")
+        )
+        root = lxml.etree.fromstring(out)
+        m2_s2 = root.findall(f".//{{{_MEI_NS}}}measure")[1].find(
+            f"{{{_MEI_NS}}}staff[@n='2']"
+        )
+        # The mid-beam G/2 clef already encodes the change — no clef is injected
+        # at position 0, so no rendered double-clef (A1 / K279 m86).
+        assert len(_clefs_in(m2_s2.find(f"{{{_MEI_NS}}}layer"))) == 1
+
+
+class TestClefRecoveryPerVoice:
+    """A2 — the recovered clef is injected into every layer of the staff."""
+
+    def _two_voice_mei(self) -> bytes:
+        measures = []
+        for i in range(1, 6):
+            if i == 2:
+                s2 = (
+                    '<staff n="2">'
+                    '<layer n="1"><note dur="4" oct="3" pname="c"/></layer>'
+                    '<layer n="2"><note dur="4" oct="2" pname="c"/></layer>'
+                    "</staff>"
+                )
+            else:
+                s2 = (
+                    '<staff n="2"><layer n="1">'
+                    '<note dur="4" oct="3" pname="c"/></layer></staff>'
+                )
+            measures.append(
+                f'<measure n="{i}">'
+                f'<staff n="1"><layer n="1">'
+                f'<note dur="4" oct="4" pname="c"/></layer></staff>'
+                f"{s2}</measure>"
+            )
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+            f'<section>{"".join(measures)}</section>'
+            f"</score></mdiv></body></music></mei>"
+        ).encode("utf-8")
+
+    def test_clef_injected_into_both_layers(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._two_voice_mei()
+        )
+        root = lxml.etree.fromstring(out)
+        m2_s2 = root.findall(f".//{{{_MEI_NS}}}measure")[1].find(
+            f"{{{_MEI_NS}}}staff[@n='2']"
+        )
+        for layer in m2_s2.findall(f"{{{_MEI_NS}}}layer"):
+            first = layer[0]
+            assert first.tag == f"{{{_MEI_NS}}}clef"
+            assert first.get("shape") == "G" and first.get("line") == "2"
+        # Distinct xml:ids per layer (clefrec2s2l1, clefrec2s2l2).
+        ids = {
+            c.get(f"{{{_XML_NS}}}id")
+            for layer in m2_s2.findall(f"{{{_MEI_NS}}}layer")
+            for c in _clefs_in(layer)
+        }
+        assert ids == {"clefrec2s2l1", "clefrec2s2l2"}
+
+    def test_idempotent_across_two_voices(self, tmp_path: Path) -> None:
+        mscx = _write_mscx(tmp_path)
+        first = pdc.recover_measure_start_clefs(mscx, self._two_voice_mei())
+        second = pdc.recover_measure_start_clefs(mscx, first)
+        assert second.count(b"<clef") == first.count(b"<clef")
+
+
+# A two-section .mscx: section 1 = m1,m2 (break after m2), section 2 (trio) =
+# m3,m4 with a genuine measure-start G clef at m3 (staff 2, default F).
+_MSCX_SECTIONS = """<?xml version="1.0" encoding="UTF-8"?>
+<museScore version="3.02">
+  <Score>
+    <Part>
+      <Staff id="1"><StaffType group="pitched"/></Staff>
+      <Staff id="2"><StaffType group="pitched"/><defaultClef>F</defaultClef></Staff>
+    </Part>
+    <Staff id="1">
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice><LayoutBreak><subtype>section</subtype></LayoutBreak></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>72</pitch></Note></Chord></voice></Measure>
+    </Staff>
+    <Staff id="2">
+      <Measure><voice><Chord><Note><pitch>48</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>48</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Clef><concertClefType>G</concertClefType></Clef><Chord><Note><pitch>60</pitch></Note></Chord></voice></Measure>
+      <Measure><voice><Chord><Note><pitch>60</pitch></Note></Chord></voice></Measure>
+    </Staff>
+  </Score>
+</museScore>
+"""
+
+
+def _two_section_mei(minuet_measures: int) -> bytes:
+    """MEI with a minuet section (``minuet_measures`` bars) then a 2-bar trio.
+
+    Inflating ``minuet_measures`` past the .mscx's 2 simulates the count
+    divergence that makes flat document-order indexing mis-place the trio clef.
+    """
+
+    def measure(n: int) -> str:
+        return (
+            f'<measure n="{n}">'
+            f'<staff n="1"><layer n="1"><note dur="4" oct="4" pname="c"/></layer></staff>'
+            f'<staff n="2"><layer n="1"><note dur="4" oct="3" pname="c"/></layer></staff>'
+            f"</measure>"
+        )
+
+    minuet = "".join(measure(i) for i in range(1, minuet_measures + 1))
+    trio = "".join(measure(i) for i in range(1, 3))
+    return (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+        f"<section>{minuet}</section>"
+        f'<section type="trio">{trio}</section>'
+        f"</score></mdiv></body></music></mei>"
+    ).encode("utf-8")
+
+
+class TestClefRecoverySectionAware:
+    """A3 — index resolution is section-aware when section counts agree."""
+
+    def test_section_boundary_extracted(self, tmp_path: Path) -> None:
+        p = tmp_path / "sections.mscx"
+        p.write_text(_MSCX_SECTIONS, encoding="utf-8")
+        assert pdc._extract_section_boundaries(p) == [2]
+
+    def test_trio_clef_lands_in_trio_despite_minuet_drift(self, tmp_path: Path) -> None:
+        p = tmp_path / "sections.mscx"
+        p.write_text(_MSCX_SECTIONS, encoding="utf-8")
+        # MEI minuet has 3 bars vs the .mscx's 2 — a one-bar drift.  Flat
+        # indexing would place the m3 trio clef on the minuet's 3rd bar; the
+        # section-aware path lands it on the trio's first bar.
+        out = pdc.recover_measure_start_clefs(p, _two_section_mei(minuet_measures=3))
+        root = lxml.etree.fromstring(out)
+        sections = root.findall(f".//{{{_MEI_NS}}}section")
+        minuet, trio = sections[0], sections[1]
+        assert _clefs_in(minuet) == []
+        trio_first = trio.findall(f".//{{{_MEI_NS}}}measure")[0]
+        clef = trio_first.find(
+            f"{{{_MEI_NS}}}staff[@n='2']/{{{_MEI_NS}}}layer/{{{_MEI_NS}}}clef"
+        )
+        assert clef is not None
+        assert clef.get("shape") == "G" and clef.get("line") == "2"
+
+    def test_section_mismatch_falls_back_and_notes(self, tmp_path: Path) -> None:
+        p = tmp_path / "sections.mscx"
+        p.write_text(_MSCX_SECTIONS, encoding="utf-8")
+        # MEI as a single section: section counts disagree (2 vs 1) → fallback.
+        single = _build_mei(4)
+        notes: list[str] = []
+        pdc.recover_measure_start_clefs(p, single, notes=notes)
+        assert any("falling back to global" in n for n in notes)

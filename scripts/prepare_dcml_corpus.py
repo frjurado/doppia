@@ -47,9 +47,12 @@ import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    import lxml.etree
 
 # Bootstrap sys.path so backend packages are importable when running the
 # script directly from the repo root (``python scripts/prepare_dcml_corpus.py``).
@@ -484,7 +487,150 @@ def _extract_measure_start_clefs(
     return changes
 
 
-def recover_measure_start_clefs(mscx_path: Path, mei_bytes: bytes) -> bytes:
+def _extract_section_boundaries(mscx_path: Path) -> list[int]:
+    """Return the 1-based measure indices that *end* a section in a ``.mscx``.
+
+    A MuseScore section break (``<LayoutBreak><subtype>section</subtype>``) marks
+    the last measure of a section; the minuet→trio break that restarts measure
+    numbering is the canonical case.  Breaks are stored per-staff, so the union
+    across all staves is taken — a boundary present on any staff is a boundary
+    for the movement.
+
+    Args:
+        mscx_path: Path to the ``.mscx`` source file.
+
+    Returns:
+        Sorted 1-based document-order measure indices on which a section break
+        occurs (empty when the movement is a single section).
+    """
+    import lxml.etree
+
+    score = lxml.etree.parse(str(mscx_path)).getroot().find("Score")
+    if score is None:
+        return []
+    boundaries: set[int] = set()
+    for staff in score.findall("Staff"):
+        for idx, measure in enumerate(staff.findall("Measure"), start=1):
+            for layout_break in measure.iter("LayoutBreak"):
+                if (layout_break.findtext("subtype") or "").strip() == "section":
+                    boundaries.add(idx)
+                    break
+    return sorted(boundaries)
+
+
+def _mei_top_sections(
+    root: lxml.etree._Element,
+) -> list[list[lxml.etree._Element]]:
+    """Group the MEI measures by their top-level ``<section>``, in document order.
+
+    Nested ``<section>`` elements (e.g. a trio encoded inside the minuet section)
+    are folded into their top-level ancestor via the descendant axis, so each
+    returned bucket is one *top-level* section's measures.  This is the MEI side
+    of the section-aware ``.mscx``↔MEI alignment.
+
+    Args:
+        root: The MEI document root element.
+
+    Returns:
+        One list of ``<measure>`` elements per top-level section that contains
+        measures, in document order.
+    """
+    result: list[list[lxml.etree._Element]] = []
+    for section in root.iter(f"{{{_MEI_NS}}}section"):
+        parent = section.getparent()
+        if parent is not None and parent.tag == f"{{{_MEI_NS}}}section":
+            continue  # nested — its measures are counted under the top section
+        measures = section.findall(f".//{{{_MEI_NS}}}measure")
+        if measures:
+            result.append(measures)
+    return result
+
+
+def _resolve_mei_measure(
+    measure_index: int,
+    flat_measures: list[lxml.etree._Element],
+    mei_sections: list[list[lxml.etree._Element]],
+    boundaries: list[int],
+    notes: list[str],
+) -> lxml.etree._Element | None:
+    """Map a 1-based ``.mscx`` measure index to its MEI ``<measure>`` element.
+
+    When the ``.mscx`` section count (``len(boundaries) + 1``) matches the MEI
+    top-level section count and there is more than one section, the index is
+    resolved *within* its section — so a count divergence confined to an earlier
+    section (the K331/ii trio failure, A3) does not shift every later clef out of
+    place.  Otherwise it falls back to flat document-order indexing.
+
+    Args:
+        measure_index: 1-based ``.mscx`` document-order measure index.
+        flat_measures: All MEI measures in document order (fallback path).
+        mei_sections: MEI measures grouped by top-level section.
+        boundaries: ``.mscx`` section-break indices from
+            :func:`_extract_section_boundaries`.
+        notes: Accumulator for human-readable diagnostics on skipped clefs.
+
+    Returns:
+        The matching MEI ``<measure>`` element, or ``None`` when it cannot be
+        placed confidently (a diagnostic is appended to *notes*).
+    """
+    if len(boundaries) + 1 == len(mei_sections) and len(mei_sections) > 1:
+        ordinal = sum(1 for b in boundaries if b < measure_index)
+        start = max((b for b in boundaries if b < measure_index), default=0) + 1
+        within = measure_index - start + 1
+        section = mei_sections[ordinal]
+        if 1 <= within <= len(section):
+            return section[within - 1]
+        notes.append(
+            f"clef recovery: measure {measure_index} (section {ordinal + 1}, "
+            f"position {within}) is outside the MEI section's "
+            f"{len(section)} measures; clef skipped"
+        )
+        return None
+
+    if measure_index <= len(flat_measures):
+        return flat_measures[measure_index - 1]
+    notes.append(
+        f"clef recovery: measure index {measure_index} exceeds the MEI "
+        f"measure count {len(flat_measures)}; clef skipped"
+    )
+    return None
+
+
+def _layer_leads_with_clef(layer: lxml.etree._Element) -> bool:
+    """Return whether the layer's first element child is a ``<clef>``."""
+    first = next((c for c in layer if isinstance(c.tag, str)), None)
+    return first is not None and first.tag == f"{{{_MEI_NS}}}clef"
+
+
+def _layer_has_equivalent_clef(
+    layer: lxml.etree._Element, attrs: dict[str, str]
+) -> bool:
+    """Return whether the layer already holds a clef equal to *attrs*.
+
+    The descendant axis is used so a clef nested inside a ``<beam>``/``<tuplet>``
+    counts: the converter sometimes emits a genuine measure-start change a little
+    way into the layer (K279/i m. 86), and injecting an identical clef at
+    position 0 is exactly what produces the rendered double-clef (A1).
+
+    Args:
+        layer: The MEI ``<layer>`` element.
+        attrs: The recovered clef attributes (``shape``/``line`` and optionally
+            ``dis``/``dis.place``).
+
+    Returns:
+        ``True`` when a clef matching every attribute in *attrs* already exists.
+    """
+    for clef in layer.iter(f"{{{_MEI_NS}}}clef"):
+        if all(clef.get(key) == value for key, value in attrs.items()):
+            return True
+    return False
+
+
+def recover_measure_start_clefs(
+    mscx_path: Path,
+    mei_bytes: bytes,
+    notes: list[str] | None = None,
+) -> bytes:
     """Re-insert measure-initial clef changes dropped by MuseScore's MusicXML export.
 
     MuseScore (3.6.2 and 4) omits clef changes positioned at the very start of a
@@ -493,9 +639,25 @@ def recover_measure_start_clefs(mscx_path: Path, mei_bytes: bytes) -> bytes:
     notes still render at the correct pitch but on the previous clef (heavily
     ledger-lined, no clef glyph), which reads as a missing clef change.  This pass
     reads the genuine measure-start clef changes back out of the ``.mscx`` source —
-    the only artefact that retains them — and injects a ``<clef>`` as the first
-    child of the corresponding MEI measure/staff/layer.  Mid-measure clef changes
-    are exported correctly and are left untouched.
+    the only artefact that retains them — and injects a ``<clef>`` at the start of
+    the corresponding MEI measure/staff layer(s).  Mid-measure clef changes are
+    exported correctly and are left untouched.
+
+    Three properties make this safe on multi-voice and multi-section writing
+    (Component 9 read-through A1–A3):
+
+    * **Idempotency guard (A1):** a layer is skipped when it already leads with a
+      clef *or* already holds an identical clef anywhere (including nested in a
+      beam), so re-runs and converter-emitted measure-start clefs do not stack
+      into a rendered double-clef.
+    * **Per-voice scope (A2):** the recovered clef is injected into *every*
+      ``<layer>`` of the staff, because an MEI layer clef is layer-scoped — a
+      single-layer injection would leave the second voice on the previous clef.
+    * **Section-aware index (A3):** when the ``.mscx`` and MEI agree on section
+      count, the measure index is resolved within its section, so a count
+      divergence confined to an earlier section does not displace the trio's
+      clefs.  Unresolvable placements are recorded in *notes* rather than
+      silently dropped.
 
     Injecting clefs changes neither measure count nor document order, so fragment
     machine coordinates (``mc_start``/``mc_end``) are unaffected (ADR-015).
@@ -503,6 +665,9 @@ def recover_measure_start_clefs(mscx_path: Path, mei_bytes: bytes) -> bytes:
     Args:
         mscx_path: The MuseScore ``.mscx`` source for this movement.
         mei_bytes: The MEI produced by :func:`convert_mxl_to_mei`.
+        notes: Optional accumulator for human-readable diagnostics about clefs
+            that could not be placed (section mismatch, missing staff). Appended
+            to in place when provided.
 
     Returns:
         MEI bytes with measure-start clefs re-inserted (the input bytes unchanged
@@ -514,29 +679,44 @@ def recover_measure_start_clefs(mscx_path: Path, mei_bytes: bytes) -> bytes:
     if not changes:
         return mei_bytes
 
+    boundaries = _extract_section_boundaries(mscx_path)
     root = lxml.etree.fromstring(mei_bytes)
-    measures = root.findall(f".//{{{_MEI_NS}}}measure")
+    flat_measures = root.findall(f".//{{{_MEI_NS}}}measure")
+    mei_sections = _mei_top_sections(root)
+    local_notes = notes if notes is not None else []
+
+    if boundaries and len(boundaries) + 1 != len(mei_sections):
+        local_notes.append(
+            f"clef recovery: .mscx has {len(boundaries) + 1} sections but MEI "
+            f"has {len(mei_sections)}; falling back to global measure indexing"
+        )
 
     for measure_index, staff_id, attrs in changes:
-        if measure_index > len(measures):
-            # Document-order mismatch between .mscx and MEI: skip rather than
-            # risk mis-placing a clef.  Not observed in practice.
+        measure = _resolve_mei_measure(
+            measure_index, flat_measures, mei_sections, boundaries, local_notes
+        )
+        if measure is None:
             continue
-        staff = measures[measure_index - 1].find(f"{{{_MEI_NS}}}staff[@n='{staff_id}']")
+        staff = measure.find(f"{{{_MEI_NS}}}staff[@n='{staff_id}']")
         if staff is None:
+            local_notes.append(
+                f"clef recovery: staff {staff_id} absent in the measure mapped "
+                f"from .mscx index {measure_index}; clef skipped"
+            )
             continue
-        layer = staff.find(f"{{{_MEI_NS}}}layer")
-        if layer is None:
-            continue
-        first = next((c for c in layer if isinstance(c.tag, str)), None)
-        if first is not None and first.tag == f"{{{_MEI_NS}}}clef":
-            continue  # a measure-start clef already exists — leave it (idempotent)
-        clef = lxml.etree.SubElement(layer, f"{{{_MEI_NS}}}clef")
-        clef.set(f"{{{_XML_NS}}}id", f"clefrec{measure_index}s{staff_id}")
-        for key, value in attrs.items():
-            clef.set(key, value)
-        layer.remove(clef)
-        layer.insert(0, clef)
+        layers = staff.findall(f"{{{_MEI_NS}}}layer")
+        for position, layer in enumerate(layers, start=1):
+            if _layer_leads_with_clef(layer) or _layer_has_equivalent_clef(
+                layer, attrs
+            ):
+                continue  # already clef-consistent — avoid a double-clef (A1)
+            layer_n = layer.get("n") or str(position)
+            clef = lxml.etree.SubElement(layer, f"{{{_MEI_NS}}}clef")
+            clef.set(f"{{{_XML_NS}}}id", f"clefrec{measure_index}s{staff_id}l{layer_n}")
+            for key, value in attrs.items():
+                clef.set(key, value)
+            layer.remove(clef)
+            layer.insert(0, clef)
 
     return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
@@ -743,7 +923,12 @@ def main() -> None:
 
             # Recover measure-start clef changes that MuseScore drops from its
             # MusicXML export (see recover_measure_start_clefs docstring).
-            mei_bytes = recover_measure_start_clefs(entry.mscx_path, mei_bytes)
+            clef_notes: list[str] = []
+            mei_bytes = recover_measure_start_clefs(
+                entry.mscx_path, mei_bytes, notes=clef_notes
+            )
+            for note in clef_notes:
+                _log(f"  {label}: {note}")
 
             report = validate_mei(mei_bytes)
             if not report.is_valid:

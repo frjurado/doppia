@@ -56,3 +56,45 @@ Running the real pipeline on K279-1: extraction yields exactly the staff-2 list
 above; recovery raises the MEI clef count 10 → 21; after recovery + normalize,
 **0 empty clef groups** remain and every clef change renders a glyph. Injecting
 clefs leaves measure count and document order unchanged → no `mc` drift.
+
+## Staging read-through follow-up (2026-06-28 · Component 9 Band 1 · A1–A3)
+
+The original investigation validated only the *missing-clef* direction on a
+single-voice reduction. The full staging read-through surfaced three regressions
+the fixture set did not cover (issues A1–A3 in
+`docs/reports/component-9-reports/staging-readthrough-issues.md`); all three are
+fixed in `recover_measure_start_clefs`:
+
+- **A1 — double-clef glyph.** The idempotency guard skipped injection only when a
+  clef was the layer's *first child*. A genuine measure-start change can sit
+  mid-layer (after a `<beam>`, as at K279/i m. 86), so the guard missed it and a
+  second identical `<clef>` was inserted at position 0 → two glyphs. The guard is
+  widened to skip when an *equivalent* clef already exists anywhere in the layer
+  (descendant axis), in addition to the leading-clef check.
+- **A2 — clef affects voice 1 only.** The recovered clef was injected into
+  `staff.find("layer")` (the first layer only); the second voice stayed on the
+  previous clef. It is now injected into every `<layer>` of the staff, each with a
+  distinct `xml:id`.
+- **A3 — trio clefs vanish.** Flat `.//measure` document-order indexing mis-placed
+  clefs when the `.mscx`↔MEI measure counts diverged across a section boundary
+  (K331/ii minuet→trio). Indexing is now section-aware: when `.mscx` section
+  breaks and MEI top-level `<section>` counts agree, the index is resolved within
+  its section; otherwise it falls back to flat indexing **and logs a diagnostic**
+  so a silent trio-clef drop becomes visible.
+
+### Render spot-check list (extend before re-verification — Band 1 Item 6)
+
+The earlier list covered single-voice K279/i. Add these multi-voice and
+multi-section measures (from the A-cluster table) to the render check when the 15
+are re-verified:
+
+- **Double-clef (A1):** 279/i m. 86 · 279/iii m. 72 · 283/ii m. 19, m. 25 ·
+  331/i m. 98 · 331/ii m. 6 · 332/iii m. 210 — confirm a *single* clef glyph.
+- **Per-voice scope (A2):** 279/iii m. 110 · 280/i m. 46 · 280/ii m. 24 ·
+  331/ii m. 24–25 — confirm *both* voices read on the new clef.
+- **Multi-section (A3):** 331/ii Trio (after m. 48) — confirm the second-staff
+  clef changes reappear in the trio.
+
+Final on-staging verification against the real K331/ii source is Band 1 Item 6
+(re-run the normalizer + `mc`-stability check); the unit fixtures here exercise
+the logic synthetically because the DCML source is not checked into the repo.
