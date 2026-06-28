@@ -123,7 +123,7 @@ Raw items: instrument names on piano (sometimes absent, "Piano", or "Piano, Pian
 
 ### Feasibility & disposition
 
-- **Labels + brace + bar.thru standardisation:** **new sub-step under Step 8b** (it already owns "strip movement title from incipit renders" and already requires a regeneration pass — bundle the staff-presentation normalisation into the same pass so incipits regenerate once). Low risk.
+- **Labels + brace + bar.thru standardisation:** **new sub-step under Step 8b** (it already owns "strip movement title from incipit renders" and already requires a regeneration pass — bundle the staff-presentation normalisation into the same pass so incipits regenerate once). Low risk. **Done (2026-06-28, ADR-029):** normalizer Pass 11 (`_normalize_staff_presentation`) braces the leaf grand-staff group, sets `bar.thru="true"`, and strips redundant labels for a single-instrument piano (conservative no-op on multi-instrument scores). A fresh prep showed the defect in exactly 5/54 movements (K332/i, K332/ii, K576/i–iii) and **no labels at all** on the current converter — the "Piano" / "Piano, Piano right" strings were from the older staging ingest. `scripts/staff_audit.py --all` reports 0 warnings across all 54 normalized movements. Incipits regenerate from the normalised MEI at the Band 1 Item 6 re-ingest (no renderer change).
 - **Triplets / slurs:** **investigate, likely Phase-2 cosmetic.** Add to the render spot-check list; fix only the cheap, clearly-wrong ones (the 6-measure slur if it's a mis-resolved endpoint). Do not block the campaign.
 - **Courtesy clefs:** **design with Cluster A**, defer the courtesy-placement nicety to Phase 2 unless it falls out of the clef-scope fix for free.
 
@@ -306,7 +306,7 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 
 | ID | Symptom & score locations | Conf. | Fix target | Status |
 |---|---|---|---|---|
-| D1 | Instrument labels vary ("", "Piano", "Piano, Piano right"); brace missing (332/i & ii); barlines don't cross system (332/ii) | C | Step 8b — staff-presentation normalisation in the regen pass | ☐ open |
+| D1 | Instrument labels vary ("", "Piano", "Piano, Piano right"); brace missing (332/i & ii); barlines don't cross system (332/ii) | C | Step 8b — staff-presentation normalisation in the regen pass | ☑ fixed (ADR-029; verified on prep, unverified on staging) |
 | D2 | Tuplet brackets shown though hidden in MuseScore (279/ii m.6, 7, 10); dashed slurs (279/ii); 6-measure slur (332/iii m.190–195) | H | Spot-check; fix only mis-resolved slur endpoint; rest → P2 | ☐ open |
 | D3 | Courtesy-clef placement (clef after vs before barline) — 279/i m.5 · 279/iii m.5–11 (cf. correct 279/ii m.10, 47–49) | H | Design with Step 6; nicety → P2 | ☐ open |
 

@@ -21,7 +21,8 @@
       <mdiv>
         <score>
           <scoreDef meter.count="4" meter.unit="4">
-            <staffGrp>
+            <staffGrp bar.thru="true">
+              <grpSym symbol="brace"/>
               <!-- Key sig expressed as <keySig sig="1s"/> child of <staffDef>,
                    matching Verovio MusicXML transcoder output. -->
               <staffDef n="1" clef.shape="G" clef.line="2" lines="5">

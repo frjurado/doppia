@@ -979,6 +979,80 @@ class TestClefSameas:
 
 
 # ---------------------------------------------------------------------------
+# Pass 11 — Staff-presentation normalization (ADR-029)
+# ---------------------------------------------------------------------------
+
+_NS = {"mei": _NS_MEI}
+
+
+def _leaf_group(out_bytes: bytes) -> lxml.etree._Element:
+    """Return the staffGrp whose direct children include a staffDef."""
+    tree = lxml.etree.fromstring(out_bytes)
+    for grp in tree.xpath("//mei:scoreDef//mei:staffGrp", namespaces=_NS):
+        if grp.xpath("mei:staffDef", namespaces=_NS):
+            return grp
+    raise AssertionError("no leaf staffGrp found")
+
+
+class TestStaffPresentation:
+    """Pass 11: brace + bar.thru on the grand staff; strip redundant labels."""
+
+    def test_nested_unbraced_gains_brace(self, tmp_path: Path) -> None:
+        """Shape B: a brace is added to the leaf group; bar.thru already present."""
+        report, out_bytes = _run(tmp_path, "staff_unbraced_nested.mei")
+        group = _leaf_group(out_bytes)
+        grp_syms = group.xpath("mei:grpSym[@symbol='brace']", namespaces=_NS)
+        assert len(grp_syms) == 1
+        assert group.get("bar.thru") == "true"
+        # The brace is the group's first child (before instrDef/staffDef).
+        assert group[0].tag == f"{{{_NS_MEI}}}grpSym"
+        assert any("brace" in c for c in report.changes_applied)
+        # bar.thru already 'true' → no bar.thru change emitted.
+        assert not any("bar.thru" in c for c in report.changes_applied)
+
+    def test_nested_unbraced_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on the braced output is a clean no-op."""
+        _, first_out = _run(tmp_path, "staff_unbraced_nested.mei")
+        second_out = _round_trip(tmp_path, first_out, "staff_unbraced_nested.mei")
+        assert first_out == second_out
+
+    def test_flat_gains_brace_barthru_and_strips_labels(self, tmp_path: Path) -> None:
+        """Shape C: brace + bar.thru added; all labels stripped; instrDef kept."""
+        report, out_bytes = _run(tmp_path, "staff_flat_with_labels.mei")
+        group = _leaf_group(out_bytes)
+        assert group.xpath("mei:grpSym[@symbol='brace']", namespaces=_NS)
+        assert group.get("bar.thru") == "true"
+        tree = lxml.etree.fromstring(out_bytes)
+        # No labels anywhere; no @label attribute survives.
+        assert tree.xpath("//mei:label", namespaces=_NS) == []
+        assert tree.xpath("//mei:staffDef[@label]", namespaces=_NS) == []
+        # instrDef and its midi attributes are preserved.
+        instrs = tree.xpath("//mei:instrDef", namespaces=_NS)
+        assert len(instrs) == 2
+        assert all(i.get("midi.instrnum") == "0" for i in instrs)
+        assert any("bar.thru" in c for c in report.changes_applied)
+        assert any("label" in c for c in report.changes_applied)
+
+    def test_flat_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on the normalized flat output is a clean no-op."""
+        _, first_out = _run(tmp_path, "staff_flat_with_labels.mei")
+        second_out = _round_trip(tmp_path, first_out, "staff_flat_with_labels.mei")
+        assert first_out == second_out
+
+    def test_multi_instrument_is_noop(self, tmp_path: Path) -> None:
+        """More than one leaf group: staff presentation is left entirely untouched."""
+        report, out_bytes = _run(tmp_path, "staff_multi_instrument.mei")
+        assert not any(
+            c.startswith("Staff presentation") for c in report.changes_applied
+        )
+        tree = lxml.etree.fromstring(out_bytes)
+        assert tree.xpath("//mei:grpSym", namespaces=_NS) == []
+        assert tree.xpath("//mei:staffGrp[@bar.thru]", namespaces=_NS) == []
+        # The violin's label is preserved (not a single-instrument piano).
+        assert tree.xpath("//mei:staffDef[@label='Violin']", namespaces=_NS)
+
+
+# ---------------------------------------------------------------------------
 # Pass 0 — Source-corrections overlay (ADR-027)
 # ---------------------------------------------------------------------------
 

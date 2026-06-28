@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: shape C — flat, ungrouped grand staff with redundant labels
+     (K332/ii, K576 shape).
+
+     A single staffGrp directly holds the two staffDef staves (no brace, no
+     bar.thru), each carrying a per-staff <instrDef> and a redundant instrument
+     label.  Pass 11 adds brace + bar.thru to the group and strips every label
+     (@label on staffDef, <label> on staffDef, <label> on instrDef).  instrDef
+     and its midi.* attributes are kept. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Flat grand staff with redundant labels</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" label="Piano" clef.shape="G" clef.line="2" lines="5">
+                <label>Piano right</label>
+                <instrDef midi.channel="0" midi.instrnum="0">
+                  <label>Piano</label>
+                </instrDef>
+              </staffDef>
+              <staffDef n="2" clef.shape="F" clef.line="4" lines="5">
+                <instrDef midi.channel="0" midi.instrnum="0"/>
+              </staffDef>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1"><layer n="1"><note dur="1" oct="4" pname="c"/></layer></staff>
+              <staff n="2"><layer n="1"><note dur="1" oct="3" pname="c"/></layer></staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

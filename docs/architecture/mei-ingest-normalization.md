@@ -149,6 +149,14 @@ If no continuation note can be located in the following measure, the tie is left
 
 This is the MEI-side complement to the **measure-start clef recovery** performed earlier in the corpus-prep pipeline (see `corpus-and-analysis-sources.md`): that step re-inserts clef changes MuseScore drops from its MusicXML export; this step fixes clef changes MuseScore *does* export but in a form Verovio mis-renders.
 
+### 11. Staff-presentation normalization
+
+**Background.** The MuseScore-to-MEI conversion emits the piano grand staff inconsistently. A fresh prep of all 54 Mozart movements shows three shapes: 49 wrap the two `<staffDef>` staves in a `<staffGrp>` carrying a `brace` `<grpSym>` and `bar.thru="true"` (the canonical shape); K332/i omits the brace (and over-nests the group); K332/ii and K576/i–iii omit the grouping entirely, so the brace is absent **and** barlines do not connect across the staff gap. The instrument-label inconsistency Francisco saw on staging (`""` / `"Piano"` / `"Piano, Piano right"`) is not reproducible on the current prep — it emits no `<label>`/`@label` at all — but is stripped defensively so the corpus stays uniform across converter drift.
+
+**Normalizer behavior.** For a single-instrument grand staff, the *leaf* `<staffGrp>` (the one whose direct children include `<staffDef>`) is ensured to carry `bar.thru="true"` and a brace — a `<grpSym symbol="brace"/>` child is inserted when neither brace form (`@symbol="brace"` or a `<grpSym>` child) is present, converging every movement on the converter's own majority form. Redundant instrument labels (`@label` and `<label>` on `<staffDef>`; `<label>` on `<instrDef>`) are removed; `<instrDef>` and its `midi.*` attributes are kept (MIDI playback). The `<staffGrp>` tree is never restructured (the redundant nesting in shape B is left in place). The pass is **idempotent** (a braced, through-barred, label-free grand staff is a no-op) and a **conservative no-op on multi-instrument scores** — it only runs when every `<staffDef>` belongs to one leaf group, so it never force-braces unrelated instruments. See ADR-029.
+
+Because incipits regenerate from the normalised MEI on re-ingest (Component 9 Step 8b), folding this pass in before the Band 1 re-verification means K332/i–ii and K576/i–iii pick up the brace and connected barlines, and incipits regenerate **once** already-correct — no incipit-renderer change is needed.
+
 ---
 
 ## What the normalizer does NOT change

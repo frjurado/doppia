@@ -51,6 +51,14 @@ Normalization rules (applied in this order):
    (per-voice clef restatements emitted by the converter) to explicit
    ``shape``/``line`` so Verovio 6.1.0 renders them instead of an empty clef
    group.
+11. **Staff-presentation normalization** — standardises a single-instrument piano
+   grand staff to its canonical shape: ensures the ``<staffGrp>`` that directly
+   holds the ``<staffDef>`` staves carries a ``brace`` ``<grpSym>`` and
+   ``bar.thru="true"`` (so the brace shows and barlines connect across the staff
+   gap), and strips redundant instrument labels (``@label`` / ``<label>`` on
+   ``<staffDef>``/``<instrDef>``).  ``<instrDef>`` and its ``midi.*`` attributes
+   are kept (MIDI playback); only labels are removed.  A conservative no-op on
+   multi-instrument scores (ADR-029).
 
 Normalization is **idempotent**: running the normalizer on an already-
 normalized file produces byte-identical output and an
@@ -1713,6 +1721,127 @@ def _resolve_clef_sameas(
 
 
 # ---------------------------------------------------------------------------
+# Staff-presentation normalization
+# ---------------------------------------------------------------------------
+
+
+def _is_braced(group: lxml.etree._Element) -> bool:
+    """Return whether *group* already declares a brace, in either MEI form.
+
+    A staff group may express a brace as a ``@symbol="brace"`` attribute or as a
+    ``<grpSym symbol="brace">`` child element; the converter uses the child form.
+    """
+    if group.get("symbol") == "brace":
+        return True
+    for child in group:
+        if child.tag == f"{{{_MEI_NS}}}grpSym" and child.get("symbol") == "brace":
+            return True
+    return False
+
+
+def _normalize_staff_presentation(
+    root: lxml.etree._Element,
+    changes_applied: list[str],
+) -> None:
+    """Pass 11 — Standardise a single-instrument piano grand staff's presentation.
+
+    The MuseScore-to-MEI conversion emits the grand staff inconsistently: most
+    movements wrap the two ``<staffDef>`` staves in a ``<staffGrp>`` carrying a
+    ``brace`` ``<grpSym>`` and ``bar.thru="true"``, but a handful omit the brace,
+    the through-barlines, or the grouping entirely (so the brace is absent and
+    barlines do not connect across the staff gap).  Instrument labels likewise
+    vary between absent and redundant.
+
+    For a single-instrument grand staff this pass converges every movement on the
+    canonical shape:
+
+    * each *leaf* ``<staffGrp>`` (one whose direct children include
+      ``<staffDef>``) is ensured to carry ``bar.thru="true"`` and a brace,
+      inserting a ``<grpSym symbol="brace"/>`` child when neither brace form is
+      present;
+    * redundant instrument labels (``@label`` and ``<label>`` children on
+      ``<staffDef>``, and ``<label>`` children on ``<instrDef>``) are removed.
+
+    ``<instrDef>`` elements and their ``midi.*`` attributes are kept — they drive
+    MIDI playback; only labels are stripped.  The ``<staffGrp>`` tree is never
+    restructured.  The pass is idempotent and is a conservative no-op on
+    multi-instrument scores: it only runs when **all** ``<staffDef>`` elements
+    belong to a single leaf group (ADR-029).
+
+    Args:
+        root: The MEI document root element.
+        changes_applied: Accumulator for human-readable change descriptions.
+    """
+    # Operate only on the *header* layout definition — the first <scoreDef> that
+    # declares a <staffGrp>.  Inline section-level <scoreDef>s (mid-piece meter /
+    # key changes) carry bare attribute-only <staffDef>s and must be left alone.
+    header_defs = _xpath(root, "//mei:scoreDef[mei:staffGrp]")
+    if not header_defs:
+        return
+    header = header_defs[0]
+    all_staffdefs = _xpath(header, ".//mei:staffDef")
+
+    # Leaf groups: <staffGrp> whose *direct* children include a <staffDef>.
+    leaf_groups = [
+        grp
+        for grp in _xpath(header, ".//mei:staffGrp")
+        if any(child.tag == f"{{{_MEI_NS}}}staffDef" for child in grp)
+    ]
+    # Single-instrument grand-staff guard: exactly one leaf group holding *every*
+    # staffDef, and a brace only makes sense across two or more staves.
+    if len(leaf_groups) != 1:
+        return
+    group = leaf_groups[0]
+    grouped = [c for c in group if c.tag == f"{{{_MEI_NS}}}staffDef"]
+    if len(grouped) != len(all_staffdefs) or len(grouped) < 2:
+        return
+
+    # Brace + through-barlines on the grand-staff group.
+    if not _is_braced(group):
+        grp_sym = lxml.etree.Element(f"{{{_MEI_NS}}}grpSym")
+        grp_sym.set("symbol", "brace")
+        group.insert(0, grp_sym)
+        changes_applied.append(
+            "Staff presentation: added brace (grpSym symbol='brace') to the "
+            "grand-staff group."
+        )
+    if group.get("bar.thru") != "true":
+        group.set("bar.thru", "true")
+        changes_applied.append(
+            "Staff presentation: set bar.thru='true' on the grand-staff group "
+            "so barlines connect across the staff gap."
+        )
+
+    # Strip redundant instrument labels (single-instrument piano needs none).
+    for staffdef in all_staffdefs:
+        if "label" in staffdef.attrib:
+            del staffdef.attrib["label"]
+            changes_applied.append(
+                f"Staff presentation: removed redundant @label from staffDef "
+                f"(xml:id={staffdef.get(f'{{{_XML_NS}}}id', '?')!r})."
+            )
+        for label in staffdef.findall(f"{{{_MEI_NS}}}label"):
+            staffdef.remove(label)
+            changes_applied.append(
+                "Staff presentation: removed redundant <label> from staffDef "
+                f"(xml:id={staffdef.get(f'{{{_XML_NS}}}id', '?')!r})."
+            )
+
+    # <instrDef> labels — the converter places instrDef at group or staff level.
+    for instr in _xpath(header, ".//mei:instrDef"):
+        if "label" in instr.attrib:
+            del instr.attrib["label"]
+            changes_applied.append(
+                "Staff presentation: removed redundant @label from instrDef."
+            )
+        for label in instr.findall(f"{{{_MEI_NS}}}label"):
+            instr.remove(label)
+            changes_applied.append(
+                "Staff presentation: removed redundant <label> from instrDef."
+            )
+
+
+# ---------------------------------------------------------------------------
 # Duration metadata
 # ---------------------------------------------------------------------------
 
@@ -1800,6 +1929,7 @@ def normalize_mei(
     _complete_cross_barline_ties(root, changes_applied, warnings)
     _resolve_gestural_accidentals(root, changes_applied)
     _resolve_clef_sameas(root, changes_applied)
+    _normalize_staff_presentation(root, changes_applied)
 
     duration_bars = _compute_duration_bars(root)
 
