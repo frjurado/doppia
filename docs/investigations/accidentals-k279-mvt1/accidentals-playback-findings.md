@@ -1,7 +1,7 @@
 # Accidentals-in-playback Investigation — multi-movement (Component 9 · Band 1 Item 3 · B1–B3)
 
 **Date:** 2026-06-28
-**Status:** Root-caused and classified; full-resolution fix decided (ADR-028), not yet implemented
+**Status:** Root-caused, classified, fixed (ADR-028 resolution pass) and verified on all seven movements
 **Scope:** the Cluster B bars from
 `docs/reports/component-9-reports/staging-readthrough-issues.md` — K279/ii,
 K280/ii, K283/i, K283/ii, K331/ii, K332/ii, K332/iii.
@@ -184,7 +184,19 @@ K331/ii false positives before they were caught).
 - Engine model: proven on Verovio 6.1.0 (synthetic + decoded MIDI).
 - Per-bar classification: traced on freshly prepped+normalized real DCML sources
   for all seven movements.
-- Fix: **designed, not implemented.** Implementation, an ADR note (Pass 9
-  extension), and the promoted tool + regression tests are the next sub-step,
-  pending approval of the design question above. Corpus-wide re-application is
-  Band 1 Item 6.
+- Fix: **implemented and verified.** Pass 9 rewritten as
+  `_resolve_gestural_accidentals` (ADR-028); 81 normalizer unit tests pass (14
+  ADR-022 cases unchanged + 3 new fixtures) and `scripts/accidental_trace.py`
+  reports **0 mismatches** on all seven normalized movements (27 on the raw
+  pre-resolver output), with a Verovio MIDI cross-check confirming the engine
+  model holds. Corpus-wide re-application across the full 54 movements is Band 1
+  Item 6.
+
+### Spot-check tool
+
+`scripts/accidental_trace.py` (sibling of `clef_audit.py`) preps + normalizes a
+movement and flags any note whose realised alteration (own `accid.ges`/`@accid`)
+differs from staff+octave-scoped, section-aware, onset-ordered convention —
+reusing the normalizer's key-sig index, tie map, and onset walk. `--no-normalize`
+audits the raw prep output (shows the defects); `--verify-midi` cross-checks the
+engine model against rendered MIDI.

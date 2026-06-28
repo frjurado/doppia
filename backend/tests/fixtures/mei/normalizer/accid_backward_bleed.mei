@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-028): backward accidental bleed across interleaved voices.
+     C major.  Voice 1 (listed FIRST in document order) rests on beat 1 then
+     notates G#4 on beat 2.  Voice 2 has a bare g4 on beat 1 (onset BEFORE the
+     G#) that the converter wrongly marked accid.ges="s".  An accidental never
+     binds an earlier note -> the voice-2 g4 must sound natural, so the
+     resolver STRIPS its accid.ges.  This only resolves correctly under onset
+     ordering: a document-order walk would see the G# "first" and keep it. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Backward bleed fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4" key.sig="0">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <rest xml:id="r_v1_b1" dur.ppq="24" dur="4"/>
+                  <note xml:id="n_gs4" dur.ppq="24" dur="4" oct="4" pname="g">
+                    <accid xml:id="a_gs4" accid="s" accid.ges="s"/>
+                  </note>
+                </layer>
+                <layer n="2">
+                  <!-- g4 beat 1: bare pitch, wrongly carries a backward sharp -->
+                  <note xml:id="n_g4_early" dur.ppq="24" dur="4" oct="4" pname="g">
+                    <accid xml:id="a_g4_early" accid.ges="s" glyph.auth="smufl"/>
+                  </note>
+                  <rest xml:id="r_v2_b2" dur.ppq="24" dur="4"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

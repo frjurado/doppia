@@ -23,6 +23,7 @@ from services.mei_normalizer import normalize_mei
 # ---------------------------------------------------------------------------
 
 _FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "mei" / "normalizer"
+_NS_MEI = "http://www.music-encoding.org/ns/mei"
 
 
 def _fixture(name: str) -> Path:
@@ -881,6 +882,62 @@ class TestSpuriousGesturalAccidentals:
             tmp_path, first_out, "keysig_section_boundary_change.mei"
         )
         assert first_out == second_out
+
+
+class TestGesturalAccidentalResolution:
+    """Pass 9 (ADR-028): the add/override/onset directions beyond ADR-022 strip."""
+
+    _XNS = {"xml": "http://www.w3.org/XML/1998/namespace"}
+
+    def _accid(self, out_bytes: bytes, xml_id: str) -> lxml.etree._Element:
+        tree = lxml.etree.fromstring(out_bytes)
+        els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=self._XNS)
+        assert len(els) == 1, f"Expected element {xml_id!r}"
+        return els[0]
+
+    def test_cross_octave_suppression_overridden(self, tmp_path: Path) -> None:
+        """A key-sig flat suppressed to accid.ges='n' is corrected back to 'f'."""
+        report, out = _run(tmp_path, "accid_cross_octave_suppression.mei")
+        assert self._accid(out, "a_bass_b4").get("accid.ges") == "f"
+        # The explicit treble natural is authoritative and untouched.
+        assert self._accid(out, "a_treble_bn5").get("accid.ges") == "n"
+        assert any("corrected accid.ges" in c for c in report.changes_applied)
+
+    def test_cross_octave_suppression_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_cross_octave_suppression.mei")
+        assert first == _round_trip(
+            tmp_path, first, "accid_cross_octave_suppression.mei"
+        )
+
+    def test_cross_voice_carry_added(self, tmp_path: Path) -> None:
+        """A second-voice note bound by voice 1's accidental gains accid.ges='s'."""
+        report, out = _run(tmp_path, "accid_cross_voice_carry.mei")
+        for xml_id in ("n_c5_b1", "n_c5_b2"):
+            note = self._accid(out, xml_id)
+            accid = note.find(f"{{{_NS_MEI}}}accid")
+            assert (
+                accid is not None and accid.get("accid.ges") == "s"
+            ), f"{xml_id}: cross-voice carry accid.ges='s' must be added"
+        assert any("added accid.ges" in c for c in report.changes_applied)
+
+    def test_cross_voice_carry_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_cross_voice_carry.mei")
+        assert first == _round_trip(tmp_path, first, "accid_cross_voice_carry.mei")
+
+    def test_backward_bleed_stripped_by_onset(self, tmp_path: Path) -> None:
+        """A sharp on an earlier-onset note in another voice is stripped."""
+        report, out = _run(tmp_path, "accid_backward_bleed.mei")
+        early = self._accid(out, "a_g4_early")
+        assert "accid.ges" not in early.attrib, "backward accid.ges must be stripped"
+        assert "glyph.auth" not in early.attrib
+        # The genuinely-notated G#4 (later onset) is preserved.
+        assert self._accid(out, "a_gs4").get("accid") == "s"
+        assert self._accid(out, "a_gs4").get("accid.ges") == "s"
+        assert any("spurious" in c for c in report.changes_applied)
+
+    def test_backward_bleed_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_backward_bleed.mei")
+        assert first == _round_trip(tmp_path, first, "accid_backward_bleed.mei")
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ Normalization runs as a Python script in the ingest pipeline, after schema valid
 
 **Problem:** some defects are not normalizer or rendering bugs — the *source data itself is wrong* (a missing start-repeat, an accidental that disagrees with the reference edition). Silently hand-editing the stored MEI would violate ADR-014 (no byte-identical original to re-process), be invisible to review, and conflict with the source when upstream is updated.
 
-**Mechanism (ADR-027):** a **corrections overlay** is a YAML data file — one entry per known source error, attributed and reference-cited — applied by **Pass 0** *before* the structural passes below, so the correctness passes that depend on the data being right (repeat-barline pairing §4, split-measure completion §7, tie completion §8, accidental stripping §9) see corrected data. The overlay is *data*: growing the list never touches normalizer logic.
+**Mechanism (ADR-027):** a **corrections overlay** is a YAML data file — one entry per known source error, attributed and reference-cited — applied by **Pass 0** *before* the structural passes below, so the correctness passes that depend on the data being right (repeat-barline pairing §4, split-measure completion §7, tie completion §8, accidental resolution §9) see corrected data. The overlay is *data*: growing the list never touches normalizer logic.
 
 Overlay files live in `backend/seed/corrections/`, one per corpus (`{composer_slug}__{corpus_slug}.yaml`); see that directory's `README.md` for the format. `services/corrections_overlay.py` loads and filters the entries to a single movement; the ingest path passes the filtered `list[Correction]` to `normalize_mei(..., corrections=...)`. The normalizer never touches the filesystem itself, and a movement with no entries (the common case) makes Pass 0 a no-op — so the existing corpus and unit fixtures are unaffected.
 
@@ -126,7 +126,20 @@ This means each half is an independently addressable bar in the tagging coordina
 - Sets `@endid` to that note's `xml:id`.
 - If the tie's start note carries an alteration (notated `@accid` or gestural `accid.ges`) and the continuation note carries neither, adds `accid.ges` to the continuation matching the start note's alteration — preserving sounding pitch and MIDI without printing a redundant accidental (matching the original engraving).
 
-If no continuation note can be located in the following measure, the tie is left untouched and a warning is recorded rather than fabricating an endpoint. Ties already carrying `@endid`/`@tstamp2` are left untouched, so the pass is idempotent. This pass runs **before** the accidental pass (§9 below) so that the completed ties inform its tie-continuation legitimacy rule (a tied continuation's `accid.ges` is never stripped). See ADR-026.
+If no continuation note can be located in the following measure, the tie is left untouched and a warning is recorded rather than fabricating an endpoint. Ties already carrying `@endid`/`@tstamp2` are left untouched, so the pass is idempotent. This pass runs **before** the accidental pass (§9 below) so that the completed ties inform its tie-continuation legitimacy rule (a tied continuation's `accid.ges` is never touched). See ADR-026.
+
+### 9. Gestural accidental resolution
+
+**Background.** Verovio realises each note's MIDI pitch from that note's **own** encoded `accid` / `accid.ges` only — it does not infer running accidentals at render time (not within a layer, not across voices or octaves) and does not re-derive the key signature for a note that carries no `accid.ges`. Correct playback therefore depends entirely on the MuseScore-to-MEI converter writing the right `accid.ges` on every note, and it does not: it **omits** one a note needs (a key-sig alteration suppressed across an octave or staff by an explicit natural elsewhere; a cross-voice carry that never reaches the second voice) and it **adds** one a note must not have (a notated accidental propagated *backward* in onset order onto an earlier note in an interleaved voice). SVG stays correct; MIDI plays the wrong pitch. Diagnosed across seven movements in `docs/investigations/accidentals-k279-mvt1/accidentals-playback-findings.md`.
+
+**Normalizer behavior (ADR-028, supersedes ADR-022).** For each `<staff>` of a measure, the normalizer recomputes every note's correct gestural accidental and sets `accid.ges` to match — *full resolution*: it adds a missing gestural accidental, overrides a wrong one, and removes a spurious one. The algorithm:
+
+- Orders the staff's notes by **onset** — per-layer cumulative `@dur.ppq` (tuplet-correct; `0` for grace notes), with notes carrying an explicit `@accid` sorting first at equal onset so an explicit accidental governs a simultaneous same-pitch note in another voice.
+- Maintains `running[(pname, oct)]` — the most-recent explicit `@accid` for that exact pitch+octave **across all voices** of the staff — seeded by the active key signature (the per-section, per-staff index from §-key-sig handling, reused from ADR-022's `_build_measure_key_sigs`, so a mid-movement key change such as K331/ii's 3♯ Menuetto → 2♯ Trio resolves correctly).
+- For a note with no `@accid`: the expected alteration is the running value (or key signature). It **sets** `accid.ges` when that is an alteration, and **removes** any `accid.ges` (and orphaned `glyph.auth`) when it is natural — unless an explicit natural is overriding the key signature, in which case `accid.ges="n"` is kept.
+- A tie continuation (an `@endid` target, §8) inherits its predecessor's pitch and is left untouched. An explicitly notated `@accid` is authoritative and left untouched. `@accid`, pitch, and printed content are never modified, so SVG is invariant and the pass is idempotent.
+
+**What it does not do.** It does not correct *source errata* — a wrong or missing **notated** accidental in the DCML/MuseScore data. The pass realises the notation faithfully; bad notation stays wrong until a corrections-overlay entry fixes it (Pass 0, ADR-027), which keeps source drift visible.
 
 ### 10. Clef `sameas` resolution
 

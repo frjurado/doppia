@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-028): cross-voice accidental carry.
+     C major (no key sig).  Voice 1 notates C#5 on beat 1; voice 2 has two
+     same-octave C5 notes (beats 1 and 2) the converter left without any
+     accid.ges, so they sounded natural.  Classical convention binds the
+     whole staff: both voice-2 C5 must inherit the C# -> resolver ADDS
+     accid.ges="s".  The notated C#5 (voice 1) is untouched. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Cross-voice carry fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4" key.sig="0">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="n_cs5" dur.ppq="48" dur="2" oct="5" pname="c">
+                    <accid xml:id="a_cs5" accid="s" accid.ges="s"/>
+                  </note>
+                </layer>
+                <layer n="2">
+                  <!-- C5 beat 1: bare, should inherit the voice-1 C# -->
+                  <note xml:id="n_c5_b1" dur.ppq="24" dur="4" oct="5" pname="c"/>
+                  <!-- C5 beat 2: still under the same-measure carry -->
+                  <note xml:id="n_c5_b2" dur.ppq="24" dur="4" oct="5" pname="c"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

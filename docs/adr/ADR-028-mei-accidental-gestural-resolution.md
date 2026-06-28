@@ -1,7 +1,7 @@
 # ADR-028: MEI Accidental Normalization — Full Gestural Resolution (Pass 9)
 
 **Date:** 2026-06-28
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Supersedes:** ADR-022 (and, transitively, ADR-021 — kept as incident history)
 
 ---
@@ -92,8 +92,7 @@ no Verovio dependency are needed in the normalizer.
    the key-signature alteration for `pname` (natural if none).
 4. Walk notes in that order:
    - **Explicit `@accid`** → set `running[(pname, oct)] = @accid`; the note is
-     authoritative, leave its glyph alone (correct any inconsistent `accid.ges`
-     to match `@accid`).
+     authoritative and left untouched (its own glyph and gestural value stand).
    - **Tie continuation** (an `@endid` target whose start carries an alteration)
      → leave untouched (ADR-026).
    - **Otherwise** the expected alteration is
@@ -126,13 +125,18 @@ carry, so a second run is a no-op.
 - **MIDI corrected for the whole Cluster-B family** in one pass, both
   directions, across all seven traced movements; the existing ADR-022 strip
   cases remain fixed (they are the "expected = natural" branch).
-- **`_strip_spurious_gestural_accidentals` is renamed/rewritten** to
-  `_resolve_gestural_accidentals`; the pass slot (currently "Pass 9") and the
-  module docstring are updated. ADR-022's regression fixtures are retained and
-  re-pointed at the resolver, with new fixtures for the add and override
-  directions and the onset-ordered backward-bleed case.
+- **`_strip_spurious_gestural_accidentals` was renamed/rewritten** to
+  `_resolve_gestural_accidentals` (Pass 9); module docstring updated. All 14
+  ADR-022 regression cases pass unchanged against the resolver (their strip
+  behaviour is the "expected = natural" branch), plus three new fixtures —
+  `accid_cross_octave_suppression`, `accid_cross_voice_carry`,
+  `accid_backward_bleed` — each with an idempotence test.
 - **Document-order → onset-order** is the one behavioural risk surface; covered
-  by a dedicated multi-voice backward-bleed regression and an idempotence test.
+  by the `accid_backward_bleed` multi-voice regression (whose document order is
+  deliberately the reverse of its onset order) and an idempotence test. Onsets
+  are accumulated from `@dur.ppq`; note that lxml hands out fresh proxy objects
+  per traversal, so the onset walk **captures and reuses** note references
+  rather than keying a side table by `id(note)`.
 - **Edge case — conflicting simultaneous explicit accidentals** (two voices, the
   same `(pname, oct)`, different `@accid`, identical onset): both notated notes
   keep their own `@accid` (each is authoritative for its own pitch); the

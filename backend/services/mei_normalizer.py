@@ -38,13 +38,15 @@ Normalization rules (applied in this order):
    alteration onto that continuation note as ``accid.ges`` so its pitch is
    preserved.  Corrects a lost tie (and the consequent wrong accidental) that
    Verovio cannot render from an endpoint-less tie (ADR-026).
-9. **Spurious gestural accidentals** — strips ``accid.ges`` (and orphaned
-   ``glyph.auth``) from ``<accid>`` elements where ``accid.ges`` is present
-   but ``@accid`` is absent and the gestural alteration is *not* explained
-   by either the active key signature, a within-staff/measure/octave carry
-   from a prior explicit ``@accid``, or a tie from a note that carries the
-   same alteration.  Corrects a MuseScore-to-MEI artefact that causes wrong
-   MIDI pitch without affecting SVG display (ADR-022).
+9. **Gestural accidental resolution** — recomputes every note's ``accid.ges``
+   from staff- and octave-scoped Classical convention (the active key signature,
+   overridden by the most-recent explicit ``@accid`` on the same ``(pname, oct)``
+   earlier in onset order across all voices of the staff, tie-aware) and *sets*,
+   *overrides*, or *removes* ``accid.ges`` to match.  This both adds a gestural
+   accidental the converter omitted (cross-octave/cross-staff suppression,
+   cross-voice carry) and strips a spurious one it added (backward bleed across
+   interleaved voices).  ``@accid`` and printed content are untouched, so SVG is
+   invariant; only MIDI realisation is corrected (ADR-028, supersedes ADR-022).
 10. **Clef ``sameas`` resolution** — rewrites ``<clef sameas="#id">`` references
    (per-voice clef restatements emitted by the converter) to explicit
    ``shape``/``line`` so Verovio 6.1.0 renders them instead of an empty clef
@@ -57,8 +59,9 @@ normalized file produces byte-identical output and an
 The normalizer never touches musical content (pitches, durations, dynamics),
 ``xml:id`` values, or encoding style, with two exceptions that repair MEI
 conversion-pipeline damage: pass 8 completes endpoint-less ties and restores
-the tied continuation's pitch (ADR-026), and pass 9 removes spurious
-``accid.ges`` values (ADR-022, which supersedes ADR-021).
+the tied continuation's pitch (ADR-026), and pass 9 resolves each note's
+gestural accidental to staff-scoped convention (ADR-028, which supersedes
+ADR-022/ADR-021).
 
 Example usage::
 
@@ -1022,7 +1025,7 @@ def _normalize_split_measures(
 
 
 # ---------------------------------------------------------------------------
-# Pass 8 — Spurious gestural accidentals
+# Pass 9 — Gestural accidental resolution
 # ---------------------------------------------------------------------------
 
 _XML_ID_KEY: str = "{http://www.w3.org/XML/1998/namespace}id"
@@ -1417,51 +1420,146 @@ def _complete_cross_barline_ties(
 # ---------------------------------------------------------------------------
 
 
-def _strip_spurious_gestural_accidentals(
+def _event_ppq(elem: lxml.etree._Element) -> int:
+    """Return an element's duration in PPQ ticks for onset accumulation.
+
+    Reads ``@dur.ppq`` (which the MusicXML→MEI converter emits on every timed
+    event, already tuplet-correct and ``0`` for grace notes).  When the
+    attribute is absent — hand-written fixtures — returns ``1`` so onset
+    accumulation degrades gracefully to plain document order within a layer.
+
+    Args:
+        elem: A ``<note>``, ``<chord>``, ``<rest>``, or ``<space>`` element.
+
+    Returns:
+        The tick duration to advance the layer clock by.
+    """
+    raw = elem.get("dur.ppq")
+    if raw is None:
+        return 1
+    try:
+        return int(raw)
+    except ValueError:
+        return 1
+
+
+def _collect_layer_onsets(
+    container: lxml.etree._Element,
+    start: int,
+    out: list[tuple[int, lxml.etree._Element]],
+) -> int:
+    """Append ``(onset, note)`` for each note under *container*; return end time.
+
+    Walks the container's timed children in document order, advancing a tick
+    clock.  ``<chord>`` is one event shared by its note children; ``<beam>`` /
+    ``<tuplet>`` and similar wrappers are transparent and recursed into; grace
+    notes (``dur.ppq="0"``) do not advance the clock.
+
+    The note elements are captured *during* the walk and returned by reference —
+    lxml hands out transient proxy objects for the same underlying element on
+    each traversal, so an ``id(note)``-keyed side table built here would not
+    match a later ``findall`` lookup.  Callers must reuse these captured proxies.
+
+    Args:
+        container: A ``<layer>`` or a timing-transparent wrapper.
+        start: The clock value at the container's first child.
+        out: Mutable list; ``(onset, note)`` pairs are appended in walk order.
+
+    Returns:
+        The clock value after the container's last child.
+    """
+    t = start
+    for child in container:
+        tag = child.tag
+        if not isinstance(tag, str):
+            continue
+        local = tag.rsplit("}", 1)[-1]
+        if local == "note":
+            out.append((t, child))
+            t += _event_ppq(child)
+        elif local == "chord":
+            chord_ppq = child.get("dur.ppq")
+            chord_notes = child.findall(f"{{{_MEI_NS}}}note")
+            for note in chord_notes:
+                out.append((t, note))
+            if chord_ppq is not None:
+                t += _event_ppq(child)
+            else:
+                t += max((_event_ppq(n) for n in chord_notes), default=1)
+        elif local in ("rest", "space", "mRest", "mSpace"):
+            t += _event_ppq(child)
+        elif local in ("beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"):
+            t = _collect_layer_onsets(child, t, out)
+    return t
+
+
+def _staff_ordered_notes(
+    staff: lxml.etree._Element,
+) -> list[tuple[int, lxml.etree._Element]]:
+    """Return ``(onset, note)`` for every note in *staff*, captured during walk.
+
+    Each ``<layer>`` runs its own clock from zero, so onsets are directly
+    comparable across the voices of the staff — the basis for staff-scoped,
+    onset-ordered accidental resolution.
+
+    Args:
+        staff: A ``<staff>`` element.
+
+    Returns:
+        List of ``(onset_tick, note)`` pairs in document-walk order.
+    """
+    pairs: list[tuple[int, lxml.etree._Element]] = []
+    for layer in staff.findall(f"{{{_MEI_NS}}}layer"):
+        _collect_layer_onsets(layer, 0, pairs)
+    return pairs
+
+
+# Tokens that mean "no alteration" when comparing expected vs encoded gestural.
+_NATURAL_TOKENS = (None, "n")
+
+
+def _resolve_gestural_accidentals(
     root: lxml.etree._Element,
     changes_applied: list[str],
 ) -> None:
-    """Pass 9 — Strip spurious gestural accidentals from MEI conversion artefacts.
+    """Pass 9 — Resolve each note's gestural accidental to staff-scoped convention.
 
-    The MuseScore-to-MEI converter incorrectly propagates accidentals across
-    staves: a treble-staff explicit accidental (``@accid``) sometimes causes
-    the converter to mark same-pitch-class notes in other staves or later in
-    the same staff with ``accid.ges`` (and often ``glyph.auth="smufl"``) but
-    no ``@accid``, making MIDI play the wrong chromatic pitch while SVG display
-    remains correct.
+    The MuseScore-to-MEI converter writes the *wrong set* of ``accid.ges`` in
+    two directions: it **omits** a gestural accidental a note needs (so MIDI
+    plays natural where the key signature or another voice's accidental requires
+    an alteration — cross-octave/cross-staff suppression and cross-voice carry),
+    and it **adds** one a note must not have (so MIDI plays altered where the
+    score shows natural — a notated accidental propagated backward in onset order
+    to an earlier note in an interleaved voice).  Verovio realises each note's
+    MIDI pitch from its own encoded ``accid``/``accid.ges`` only, so both are
+    wrong-data, not engine, bugs.
 
-    **Algorithm** (ADR-022, supersedes ADR-021): a ``<accid>`` element with
-    ``accid.ges`` set and ``@accid`` absent is *legitimate* when the gestural
-    alteration is explained by *any* of three sources:
+    **Algorithm** (ADR-028, supersedes ADR-022 — *full resolution*): for each
+    ``<staff>`` of a measure, order the notes by **onset** (per-layer cumulative
+    ``@dur.ppq``; at equal onset a note carrying an explicit ``@accid`` sorts
+    first so it governs a simultaneous same-pitch note in another voice).  Walk
+    them maintaining ``running[(pname, oct)]`` — the most-recent explicit
+    ``@accid`` for that exact pitch+octave across all voices, seeded by the
+    active key signature.  The expected alteration of a note with no ``@accid``
+    is the running value (or the key signature), unless it is a tie continuation
+    (ADR-026), which is left untouched.  The note's ``accid.ges`` is then set to
+    match:
 
-    1. **Active key signature** — the staff's key signature at this position
-       alters this pitch class (e.g. F# in G major).  The key sig is read from
-       ``key.sig`` attributes and ``<keySig>/<keyAccid>`` children on
-       ``<scoreDef>`` and ``<staffDef>`` elements, with per-staff values
-       overriding the global default.
-    2. **Within-staff/measure/octave carry** — the same ``(pname, oct)`` in this
-       staff already carries an explicit ``@accid`` earlier in the same measure.
-    3. **Tie continuation** — the note is the ``@endid`` target of a ``<tie>``
-       whose start note carries the same alteration (ADR-026).  A tied
-       continuation inherits its predecessor's pitch and is written without a
-       fresh ``@accid``; its ``accid.ges`` must not be stripped or the pitch
-       would change.  This includes the gestural accidental added by pass 8.
+    * expected is an alteration → **set** ``accid.ges`` (adds when absent,
+      overrides when wrong);
+    * expected is natural → **remove** any ``accid.ges`` (and orphaned
+      ``glyph.auth``) unless an explicit natural is overriding the key
+      signature, in which case ``accid.ges="n"`` is kept/written.
 
-    Within-staff carry takes precedence over the key signature (a natural sign
-    written in the measure overrides the key-sig alteration for its octave).
-
-    If ``accid.ges`` is present but its value does *not* match the expected
-    alteration from either source, the element is flagged as a mismatch and
-    stripped.  Any other ``accid.ges`` without an explaining source is stripped
-    as spurious.
-
-    ``glyph.auth="smufl"`` is recorded in ``changes_applied`` as diagnostic
-    evidence when present, but is *not* used to trigger the pass — the decision
-    is driven entirely by key-signature and carry logic.
+    ``@accid`` (the printed glyph), pitch, and ties are never modified, so SVG is
+    invariant and the pass is idempotent.  Notes whose ``@accid`` is explicit are
+    authoritative and left untouched.  Source-data errata (a wrong/missing
+    *notated* accidental) are intentionally **not** corrected here — they belong
+    to the corrections overlay (ADR-027).
 
     Args:
         root: Document root element.
-        changes_applied: Mutable list; stripped elements are recorded here.
+        changes_applied: Mutable list; every add/override/strip is recorded here.
     """
     key_sig_index = _build_measure_key_sigs(root)
     tie_targets = _build_tie_targets(root)
@@ -1476,9 +1574,7 @@ def _strip_spurious_gestural_accidentals(
             k: dict(v) for k, v in raw_snap.items()
         }
 
-        # Apply inline <staffDef> key-sig changes inside this measure.  The
-        # pre-pass snapshots state *before* these elements are visited, so they
-        # would otherwise only take effect for the next measure.
+        # Apply inline <staffDef>/<scoreDef> key-sig changes inside this measure.
         for staffdef in measure.findall(f"{{{_MEI_NS}}}staffDef"):
             n = staffdef.get("n")
             if n is not None:
@@ -1492,79 +1588,77 @@ def _strip_spurious_gestural_accidentals(
 
         for staff in measure.findall(f"{{{_MEI_NS}}}staff"):
             staff_n = staff.get("n", "?")
-            # Resolve active key sig: per-staff entry overrides global default.
-            if staff_n in ks_by_staff:
-                active_ks = ks_by_staff[staff_n]
-            else:
-                active_ks = ks_by_staff.get(None, {})
+            active_ks = ks_by_staff.get(staff_n, ks_by_staff.get(None, {}))
 
-            # Track (pname, oct) → alteration for within-staff/measure carry.
-            explicit: dict[tuple[str, str], str] = {}
+            # Order notes by (onset, explicit-@accid-first, document order).  The
+            # note proxies captured by the onset walk are reused directly (see
+            # _collect_layer_onsets on lxml proxy identity).
+            events: list[tuple[int, int, int, lxml.etree._Element]] = []
+            for seq, (onset, note) in enumerate(_staff_ordered_notes(staff)):
+                accid_el = note.find(f"{{{_MEI_NS}}}accid")
+                has_accid = accid_el is not None and "accid" in accid_el.attrib
+                events.append((onset, 0 if has_accid else 1, seq, note))
+            events.sort(key=lambda e: (e[0], e[1], e[2]))
 
-            for note in staff.findall(f".//{{{_MEI_NS}}}note"):
+            # running[(pname, oct)] = most-recent explicit @accid token.
+            running: dict[tuple[str, str], str] = {}
+            for _onset, _explicit_first, _seq, note in events:
                 pname = note.get("pname", "")
                 oct_ = note.get("oct", "")
+                key = (pname, oct_)
+                note_id = note.get(_XML_ID_KEY, "?")
                 accid_el = note.find(f"{{{_MEI_NS}}}accid")
-                if accid_el is None:
+
+                if accid_el is not None and "accid" in accid_el.attrib:
+                    # Explicitly notated — authoritative; record for carry, leave alone.
+                    running[key] = accid_el.get("accid", "")
+                    continue
+                if note_id in tie_targets:
+                    # Tie continuation inherits its predecessor's pitch (ADR-026).
                     continue
 
-                has_accid = "accid" in accid_el.attrib
-                has_ges = "accid.ges" in accid_el.attrib
+                from_carry = key in running
+                expected = running[key] if from_carry else active_ks.get(pname)
+                ks_alt = active_ks.get(pname)
+                cur_ges = accid_el.get("accid.ges") if accid_el is not None else None
+                reason = "within-staff/measure carry" if from_carry else "key signature"
 
-                if has_accid:
-                    # Correctly notated accidental — record for carry; do not touch.
-                    explicit[(pname, oct_)] = accid_el.get("accid", "")
-                elif has_ges:
-                    ges_val = accid_el.get("accid.ges", "")
-                    carry_expected = explicit.get((pname, oct_))
-                    key_expected = active_ks.get(pname)
-                    note_id = note.get(_XML_ID_KEY, "?")
-                    glyph = accid_el.get("glyph.auth", "")
-                    glyph_note = f" (glyph.auth={glyph!r})" if glyph else ""
+                # Determine the gestural token the note must carry (None = remove).
+                if expected in _NATURAL_TOKENS:
+                    # Keep an explicit natural only when it overrides the key sig.
+                    target = "n" if (expected == "n" and ks_alt is not None) else None
+                else:
+                    target = expected
 
-                    if tie_targets.get(note_id) == ges_val:
-                        # Tie continuation inherits its predecessor's pitch
-                        # (ADR-026) — legitimate; do not touch.
-                        continue
-                    if carry_expected is not None:
-                        # Within-staff carry takes precedence over key sig.
-                        if carry_expected == ges_val:
-                            pass  # Legitimate carry — do not touch.
-                        else:
-                            # Carry value mismatches accid.ges — converter noise.
-                            changes_applied.append(
-                                f"Measure {m_n}, staff {staff_n}: stripped "
-                                f"mismatched accid.ges='{ges_val}' from "
-                                f"{pname}{oct_} — within-staff carry expects "
-                                f"'{carry_expected}'{glyph_note} "
-                                f"(note xml:id={note_id!r}); auditing recommended."
-                            )
-                            accid_el.attrib.pop("accid.ges")
-                            accid_el.attrib.pop("glyph.auth", None)
-                    elif key_expected is not None:
-                        if key_expected == ges_val:
-                            pass  # Legitimate key-signature carry — do not touch.
-                        else:
-                            # Key sig implies a different alteration — converter noise.
-                            changes_applied.append(
-                                f"Measure {m_n}, staff {staff_n}: stripped "
-                                f"mismatched accid.ges='{ges_val}' from "
-                                f"{pname}{oct_} — key signature expects "
-                                f"'{key_expected}'{glyph_note} "
-                                f"(note xml:id={note_id!r}); auditing recommended."
-                            )
-                            accid_el.attrib.pop("accid.ges")
-                            accid_el.attrib.pop("glyph.auth", None)
-                    else:
-                        # No key-sig or carry explanation — spurious; strip.
+                if target is None:
+                    if cur_ges is not None:
+                        glyph = accid_el.get("glyph.auth", "")
+                        glyph_note = f" (glyph.auth={glyph!r})" if glyph else ""
+                        accid_el.attrib.pop("accid.ges")
+                        accid_el.attrib.pop("glyph.auth", None)
                         changes_applied.append(
                             f"Measure {m_n}, staff {staff_n}: stripped spurious "
-                            f"accid.ges='{ges_val}' from {pname}{oct_} "
+                            f"accid.ges='{cur_ges}' from {pname}{oct_} "
                             f"(note xml:id={note_id!r}){glyph_note}; no "
                             f"key-signature or within-staff/measure cause found."
                         )
-                        accid_el.attrib.pop("accid.ges")
-                        accid_el.attrib.pop("glyph.auth", None)
+                elif cur_ges != target:
+                    if accid_el is None:
+                        accid_el = lxml.etree.SubElement(note, f"{{{_MEI_NS}}}accid")
+                    accid_el.set("accid.ges", target)
+                    accid_el.attrib.pop("glyph.auth", None)
+                    if cur_ges is None:
+                        changes_applied.append(
+                            f"Measure {m_n}, staff {staff_n}: added accid.ges="
+                            f"'{target}' to {pname}{oct_} (note xml:id={note_id!r}) "
+                            f"— {reason} (converter omitted it; MIDI was natural)."
+                        )
+                    else:
+                        changes_applied.append(
+                            f"Measure {m_n}, staff {staff_n}: corrected accid.ges "
+                            f"'{cur_ges}'→'{target}' on {pname}{oct_} "
+                            f"(note xml:id={note_id!r}) — {reason}."
+                        )
 
 
 # ---------------------------------------------------------------------------
@@ -1704,7 +1798,7 @@ def normalize_mei(
     _normalize_ending_measure_ns(root, changes_applied, warnings)
     _normalize_split_measures(root, changes_applied, warnings)
     _complete_cross_barline_ties(root, changes_applied, warnings)
-    _strip_spurious_gestural_accidentals(root, changes_applied)
+    _resolve_gestural_accidentals(root, changes_applied)
     _resolve_clef_sameas(root, changes_applied)
 
     duration_bars = _compute_duration_bars(root)
