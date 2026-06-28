@@ -289,9 +289,11 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 
 | ID | Symptom & score locations | Conf. | Fix target | Status |
 |---|---|---|---|---|
-| B1 | Cross-voice accidental not realised in MIDI — 279/ii m.51–52 · 283/ii m.17 · 331/ii m.25 ff., m.29 · 332/ii m.9–10, 13–14 | H | Step 7b — accidental-completion pass (after MIDI trace) | ☐ open |
-| B2 | Cross-octave / backward accidental — 279/ii m.67, m.70 · 280/ii m.30, m.58 · 283/ii m.22 · 283/i m.49 (unidentified) | ? | Step 7b — MIDI trace, then classify | ☐ open |
-| B3 | Source accidental errata — 332/ii m.24 · 279/ii m.51–52 (edition has flat) · 332/iii m.22, 27, 232, 237 | C (errata) | Corrections overlay (ADR-027) | ☐ open |
+| B1 | Cross-voice accidental not realised in MIDI — 279/ii m.51–52 · 283/ii m.17 · 331/ii m.25 ff., m.29 · 332/ii m.9–10, 13–14 | H | Step 7b — gestural-accidental resolution pass | ☑ traced & classified; pass designed, unimplemented |
+| B2 | Cross-octave / backward accidental — 279/ii m.67, m.70 · 280/ii m.30, m.58 · 283/ii m.22 · 283/i m.49 | ? → resolved | Step 7b — same pass (add) + onset-aware strip | ☑ traced & classified; pass designed, unimplemented |
+| B3 | Source accidental errata — 332/ii m.24 · 279/ii m.51–52 (cautionary flat) · ~~332/iii m.22, 27, 232, 237~~ (reclassified B2) | C (errata) | Corrections overlay (ADR-027) | ☐ open (errata not yet entered) |
+
+> **B1–B2 traced & classified (2026-06-28)** — see `docs/investigations/accidentals-k279-mvt1/accidentals-playback-findings.md`. The engine question is settled: **Verovio realises each note's MIDI pitch from its own encoded `accid`/`accid.ges` only** — it does not staff-scope, run within a layer, or re-derive the key signature at render time. So every Cluster B symptom is a converter `accid.ges` error, in two directions: (1) a **missing** gestural accidental — cross-octave/cross-staff suppression of a key-sig alteration by an explicit natural elsewhere, and cross-voice carries that never reach the second voice (279/ii 51/52/67, 280/ii 30·58, 283/i 49, 283/ii 22, 331/ii 25ff, 332/ii 9–14, **332/iii 22/27/232/237** — these last were B3, but the B♭ is diatonic and merely suppressed, so they are B2); (2) a **spurious** gestural accidental propagated **backward** in onset order across voices (279/ii m70, 280/ii m30 treble). Recommended fix: extend Pass 9 (ADR-022) into a **staff+octave-scoped, section-aware, onset-ordered** gestural-accidental *resolution* (sets/corrects `accid.ges`, prints nothing); it subsumes the current strip-only behaviour. **Open design question** (in the findings doc): override present-but-wrong `accid.ges`, or only add where absent. True B3 errata remaining: 332/ii m24 and the 279/ii m51–52 cautionary flat → overlay. K331/ii confirmed the pass must be per-section key-sig aware (3♯ Menuetto → 2♯ Trio).
 
 ### C — Multi-section & coordinate NaNs
 
