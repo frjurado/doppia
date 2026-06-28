@@ -187,6 +187,22 @@ class TestConvertMxlToMei:
             with pytest.raises(RuntimeError, match="verovio failed to load"):
                 pdc.convert_mxl_to_mei(mxl, tmp_path)
 
+    def test_enables_deterministic_xml_id_checksum(
+        self, tmp_path: Path, valid_mei_bytes: bytes
+    ) -> None:
+        """xmlIdChecksum must be enabled so ids survive a re-prep (ADR-030).
+
+        The corrections overlay (ADR-027) locates targets by xml:id; that is only
+        a viable locator if the prep generates the ids deterministically from the
+        movement's input rather than Verovio's default random seed.
+        """
+        mxl = tmp_path / "K331-1.mxl"
+        mxl.touch()
+        mock_verovio, mock_tk = self._verovio_mock(valid_mei_bytes)
+        with patch.dict("sys.modules", {"verovio": mock_verovio}):
+            pdc.convert_mxl_to_mei(mxl, tmp_path)
+        mock_tk.setOptions.assert_called_once_with({"xmlIdChecksum": True})
+
 
 # ---------------------------------------------------------------------------
 # TestFindHarmoniesTsv

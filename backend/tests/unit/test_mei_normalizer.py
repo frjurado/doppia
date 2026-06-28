@@ -939,6 +939,30 @@ class TestGesturalAccidentalResolution:
         _, first = _run(tmp_path, "accid_backward_bleed.mei")
         assert first == _round_trip(tmp_path, first, "accid_backward_bleed.mei")
 
+    def test_contradictory_ges_dropped(self, tmp_path: Path) -> None:
+        """A printed @accid wins: a contradicting accid.ges is dropped (ADR-027).
+
+        Mirrors the post-Pass-0 state where an errata correction changed the
+        printed accidental but the converter's stale gestural remained.
+        """
+        report, out = _run(tmp_path, "accid_contradictory_ges.mei")
+        corrected = self._accid(out, "n_corrected").find(f"{{{_NS_MEI}}}accid")
+        assert corrected.get("accid") == "n", "printed natural is preserved"
+        assert "accid.ges" not in corrected.attrib, "stale sharp gestural dropped"
+        # A clean explicit note (accid matches ges) is left untouched.
+        clean = self._accid(out, "n_clean").find(f"{{{_NS_MEI}}}accid")
+        assert clean.get("accid") == "f" and clean.get("accid.ges") == "f"
+        # The later bare C inherits the printed natural — stays natural (no ges).
+        carry = self._accid(out, "n_carry")
+        assert carry.find(f"{{{_NS_MEI}}}accid") is None
+        assert any(
+            "dropped contradictory accid.ges" in c for c in report.changes_applied
+        )
+
+    def test_contradictory_ges_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_contradictory_ges.mei")
+        assert first == _round_trip(tmp_path, first, "accid_contradictory_ges.mei")
+
 
 # ---------------------------------------------------------------------------
 # Pass 10 — Clef sameas resolution

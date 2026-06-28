@@ -56,6 +56,19 @@ corrections:
 | `source_sha` | DCML source git SHA the entry was authored against. |
 | `added` | Date + author. |
 
+## Notes for authors
+
+- **Correcting an accidental:** author a single `field: accid` entry (the printed
+  glyph — the actual difference from the reference edition). You do **not** need a
+  paired `accid.ges` entry: Pass 9 drops any gestural that contradicts the
+  corrected printed accidental, so the MIDI follows the print automatically
+  (ADR-028). Keeping it one entry also keeps the `errata` set a clean upstream-PR
+  backlog.
+- **`xml:id` stability:** the locator works because corpus-prep generates ids
+  deterministically from each movement's input (`xmlIdChecksum`, ADR-030). Read
+  the `xml_id` from the prepped MEI for the exact `source_sha` you pin; it is
+  reproducible across re-preps as long as that source `.mscx` is unchanged.
+
 ## Merge-back / idempotence
 
 The `expected` pre-state makes Pass 0 self-retiring (ADR-027 §3):

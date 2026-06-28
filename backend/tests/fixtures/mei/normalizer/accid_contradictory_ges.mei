@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-028 + ADR-027 interaction): a printed accidental whose
+     accid.ges contradicts it.  This is the state left after a Pass 0 errata
+     correction changed the printed @accid but the converter's stale gestural
+     remained: Verovio reads accid.ges over @accid for MIDI, so the note would
+     print one accidental and sound another.  Pass 9 must DROP the contradictory
+     accid.ges so the printed @accid governs the pitch.
+     C major (no key sig).
+       - n_corrected: c5 prints natural but carries a stale sharp gestural
+         -> drop the ges (plays natural).
+       - n_clean: e5 prints flat with a matching flat gestural
+         -> untouched (clean explicit note; no contradiction).
+       - n_carry: a later bare c5 inherits the printed natural -> stays natural. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Contradictory gestural fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4" key.sig="0">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="n_corrected" dur.ppq="24" dur="4" oct="5" pname="c">
+                    <accid xml:id="a_corrected" accid="n" accid.ges="s"/>
+                  </note>
+                  <note xml:id="n_clean" dur.ppq="24" dur="4" oct="5" pname="e">
+                    <accid xml:id="a_clean" accid="f" accid.ges="f"/>
+                  </note>
+                  <note xml:id="n_carry" dur.ppq="24" dur="4" oct="5" pname="c"/>
+                  <note xml:id="n_pad" dur.ppq="24" dur="4" oct="5" pname="g"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

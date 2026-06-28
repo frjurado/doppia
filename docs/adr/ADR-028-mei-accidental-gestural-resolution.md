@@ -92,7 +92,14 @@ no Verovio dependency are needed in the normalizer.
    the key-signature alteration for `pname` (natural if none).
 4. Walk notes in that order:
    - **Explicit `@accid`** → set `running[(pname, oct)] = @accid`; the note is
-     authoritative and left untouched (its own glyph and gestural value stand).
+     authoritative. Its glyph and gestural value stand, *except* when its
+     `accid.ges` **contradicts** the printed `@accid` (`accid.ges` ≠ `@accid`),
+     in which case the stale gestural is **dropped** so `@accid` governs the
+     MIDI pitch. Clean converter output never contradicts (it writes a matching
+     gestural); this fires only on a gestural left stale after a Pass 0 errata
+     correction changed the printed accidental (see "does not do", below, and
+     ADR-027). Verovio reads `@accid` for MIDI when `accid.ges` is absent, so the
+     dropped note plays exactly the printed accidental.
    - **Tie continuation** (an `@endid` target whose start carries an alteration)
      → leave untouched (ADR-026).
    - **Otherwise** the expected alteration is
@@ -118,7 +125,13 @@ carry, so a second run is a no-op.
   accidental in the DCML/MuseScore data — K332/ii m24; the K279/ii m51–52
   cautionary flat). The pass realises the notation faithfully; wrong notation
   stays wrong until a corrections-overlay errata entry fixes it (ADR-027), which
-  keeps source drift visible rather than silently "improving" the data.
+  keeps source drift visible rather than silently "improving" the data. When
+  such an entry *does* correct a printed `@accid` (Pass 0, before this pass), the
+  contradiction-drop above re-syncs the note's gestural automatically, so an
+  accidental erratum stays a **single, PR-worthy printed-accidental entry**
+  rather than needing a paired `accid.ges` correction. (Both K332/ii m24 and the
+  K279/ii m51–52 cautionary flat are now authored exactly this way — see
+  `backend/seed/corrections/mozart__mozart-piano-sonatas.yaml`.)
 
 ## Consequences
 

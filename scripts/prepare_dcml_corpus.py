@@ -355,6 +355,16 @@ def convert_mxl_to_mei(mxl_path: Path, tmpdir: Path) -> bytes:
     import verovio
 
     tk = verovio.toolkit()
+    # Derive each element's xml:id from a checksum of the input data instead of
+    # Verovio's default random seed.  This makes the ids *deterministic per
+    # movement* — depending only on that movement's source bytes — so they are
+    # reproducible across re-preps and stable as long as the source .mscx is
+    # unchanged (pinned by each correction's ``source_sha``).  The corrections
+    # overlay (ADR-027) locates targets by xml:id, which is only a viable locator
+    # if the ids survive a re-prep; without this, every prep run renumbers every
+    # element and the overlay would resolve to nothing on the next ingest.  See
+    # ADR-030.
+    tk.setOptions({"xmlIdChecksum": True})
     if not tk.loadFile(str(mxl_path)):
         raise RuntimeError(f"verovio failed to load {mxl_path}")
     mei_bytes = tk.getMEI().encode("utf-8")

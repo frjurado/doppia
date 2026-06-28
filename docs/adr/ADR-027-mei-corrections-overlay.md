@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-28
 **Status:** Accepted
-**Related:** ADR-009 (DCML licensing constraint), ADR-014 (original MEI retention), ADR-015 (dual measure coordinate system), ADR-022 (accidental normalization, pass 9), ADR-025 (repeat barlines & volta selection), ADR-026 (tie completion, pass 8)
+**Related:** ADR-009 (DCML licensing constraint), ADR-014 (original MEI retention), ADR-015 (dual measure coordinate system), ADR-022 (accidental normalization, pass 9), ADR-025 (repeat barlines & volta selection), ADR-026 (tie completion, pass 8), ADR-030 (deterministic MEI `xml:id`s — the prerequisite that makes the `xml:id` locator below actually stable)
 
 ---
 
@@ -91,7 +91,7 @@ The NonCommercial ABC corpus (ADR-009 §2) remains excluded from the public API;
 **Neutral**
 
 - Pass 0 is numbered 0 deliberately: it is conceptually *pre*-normalization (it fixes the source before the structural passes run), so it sits ahead of pass 1 without renumbering passes 1–10.
-- Corrections target by `xml:id`, which is stable per movement and unaffected by pass 1's measure renumbering or by ADR-015 `mc` coordinates, so Pass 0's ordering relative to the other passes is safe for every supported `field`.
+- Corrections target by `xml:id`, which is stable per movement and unaffected by pass 1's measure renumbering or by ADR-015 `mc` coordinates, so Pass 0's ordering relative to the other passes is safe for every supported `field`. **This stability is not free:** Verovio seeds `xml:id`s randomly by default, so the prep had to be made deterministic before any `xml:id`-keyed correction could survive a re-prep. That fix — seeding the ids from a checksum of each movement's input — is **ADR-030**, ratified alongside the first errata entries (Band 1 Item 5). Without ADR-030 the locator silently disarms on the next re-prep.
 
 ---
 

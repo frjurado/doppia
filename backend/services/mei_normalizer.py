@@ -1560,10 +1560,15 @@ def _resolve_gestural_accidentals(
       signature, in which case ``accid.ges="n"`` is kept/written.
 
     ``@accid`` (the printed glyph), pitch, and ties are never modified, so SVG is
-    invariant and the pass is idempotent.  Notes whose ``@accid`` is explicit are
-    authoritative and left untouched.  Source-data errata (a wrong/missing
-    *notated* accidental) are intentionally **not** corrected here — they belong
-    to the corrections overlay (ADR-027).
+    invariant and the pass is idempotent.  A note whose ``@accid`` is explicit is
+    authoritative: its ``accid.ges`` is left as-is *unless it contradicts the
+    printed ``@accid``* (``accid.ges`` ≠ ``@accid``), in which case the stale
+    gestural is dropped so ``@accid`` governs the MIDI pitch.  Clean converter
+    output never contradicts; this fires only on a gestural left stale after a
+    Pass 0 correction changed the printed accidental, letting an accidental
+    erratum stay a single printed-accidental entry (ADR-027).  Source-data
+    errata (a wrong/missing *notated* accidental) are intentionally **not**
+    discovered here — they belong to the corrections overlay (ADR-027).
 
     Args:
         root: Document root element.
@@ -1618,8 +1623,28 @@ def _resolve_gestural_accidentals(
                 accid_el = note.find(f"{{{_MEI_NS}}}accid")
 
                 if accid_el is not None and "accid" in accid_el.attrib:
-                    # Explicitly notated — authoritative; record for carry, leave alone.
-                    running[key] = accid_el.get("accid", "")
+                    # Explicitly notated — authoritative for the carry.  Its
+                    # printed @accid alone fixes the MIDI pitch (Verovio reads
+                    # @accid when @accid.ges is absent), so a *contradictory*
+                    # @accid.ges must be dropped or it overrides @accid in MIDI.
+                    # Clean converter output never contradicts (it writes a
+                    # matching ges); this only fires on a stale gestural left
+                    # behind after Pass 0 corrected the printed accidental
+                    # (ADR-027 errata), keeping that correction a single,
+                    # PR-worthy printed-accidental entry.
+                    printed = accid_el.get("accid", "")
+                    running[key] = printed
+                    stale_ges = accid_el.get("accid.ges")
+                    if stale_ges is not None and stale_ges != printed:
+                        accid_el.attrib.pop("accid.ges")
+                        accid_el.attrib.pop("glyph.auth", None)
+                        changes_applied.append(
+                            f"Measure {m_n}, staff {staff_n}: dropped "
+                            f"contradictory accid.ges='{stale_ges}' from "
+                            f"explicitly-notated {pname}{oct_} (note "
+                            f"xml:id={note_id!r}); printed accid='{printed}' "
+                            f"governs the MIDI pitch."
+                        )
                     continue
                 if note_id in tie_targets:
                     # Tie continuation inherits its predecessor's pitch (ADR-026).

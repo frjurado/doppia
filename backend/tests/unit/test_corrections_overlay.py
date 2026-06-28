@@ -149,3 +149,37 @@ def test_overlay_path_naming() -> None:
     """The overlay filename follows ``{composer}__{corpus}.yaml``."""
     p = overlay_path("mozart", "mozart-piano-sonatas", overlay_dir=_FIXTURE_DIR)
     assert p.name == "mozart__mozart-piano-sonatas.yaml"
+
+
+# ---------------------------------------------------------------------------
+# The real shipped overlay (backend/seed/corrections/) — must stay well-formed
+# ---------------------------------------------------------------------------
+
+_SEED_DIR = Path(__file__).parent.parent.parent / "seed" / "corrections"
+
+
+def test_seed_overlay_entries_validate() -> None:
+    """Every entry in the shipped Mozart overlay parses into a valid Correction.
+
+    Guards the production overlay so a malformed real entry (bad ``class``,
+    no-op correction, typo'd key, missing ``source_sha``) is caught here rather
+    than failing the ingest. Loading each authored movement exercises the
+    Pydantic validation in :func:`load_corrections`.
+    """
+    movements = [
+        ("k331", "movement-2"),
+        ("k332", "movement-2"),
+        ("k279", "movement-2"),
+    ]
+    total = 0
+    for work, mov in movements:
+        entries = load_corrections(
+            "mozart", "mozart-piano-sonatas", work, mov, overlay_dir=_SEED_DIR
+        )
+        total += len(entries)
+        for c in entries:
+            assert c.target.xml_id  # non-empty locator
+            assert c.expected != c.corrected  # not a no-op
+            assert c.correction_class in ("errata", "editorial")
+            assert c.source_sha  # pinned to a DCML commit
+    assert total >= 3, "expected the first C2 + B3 errata to be present"
