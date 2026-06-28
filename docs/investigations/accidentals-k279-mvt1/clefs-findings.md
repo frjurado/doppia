@@ -98,3 +98,30 @@ are re-verified:
 Final on-staging verification against the real K331/ii source is Band 1 Item 6
 (re-run the normalizer + `mc`-stability check); the unit fixtures here exercise
 the logic synthetically because the DCML source is not checked into the repo.
+
+### Spot-check tool and first real-data run (2026-06-28)
+
+`scripts/clef_audit.py` runs the real prep clef path (`.mscx → .mxl → .mei →
+recover_measure_start_clefs`, then the ingest normalizer) on a single movement
+and reports the A1/A2/A3 symptoms directly — no DB ingest, no SVG render:
+
+```
+backend/.venv/Scripts/python.exe scripts/clef_audit.py \
+  --mscx ~/src/mozart_piano_sonatas/MS3/K331-2.mscx
+```
+
+First run on the cloned DCML **K331/ii** (the minuet+trio): **PASS** — 14 clefs
+(12 measure + 2 initial `staffDef`), **0 recovered**, no double-clef, both voices
+clef-consistent at the one multi-voice bar (m. 18). Two things this established:
+
+- The current DCML Verovio output for K331/ii is a **single** MEI `<section>`
+  with continuous numbering and **no** MuseScore section breaks, and recovery
+  injected nothing (the export already carried every real measure-start change).
+  So the **A3 section-aware branch was not exercised by this file** — its
+  trio-vanish path is covered only by the synthetic unit test. A source that
+  produces multiple MEI sections + matching `.mscx` section breaks is needed to
+  exercise it on real data; flag this for the Item 6 re-verification.
+- The pre-normalization prep output shows the m. 18 second voice as a `<clef
+  sameas>` with no shape/line (it reads `?/?` under `--no-normalize`); Pass 10
+  resolves it to `F/4`, which is why the audit defaults to running the
+  normalizer.
