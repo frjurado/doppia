@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-029, 2026-06-30 D1 re-open): instrument labels attached at the
+     <staffGrp> level, the real K331/ii shape.  The leaf grand-staff group is
+     already braced + bar.thru, but carries <label> ("Piano, Piano right") and
+     <labelAbbr> ("Pno.", shown on later systems) children that Verovio renders.
+     Pass 11 must strip both from the <staffGrp> (it previously only stripped
+     staffDef/instrDef labels).  instrDef + midi.* are kept. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Group-level label fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="3" meter.unit="4" key.sig="3s">
+            <staffGrp>
+              <staffGrp bar.thru="true">
+                <grpSym symbol="brace"/>
+                <label>Piano, Piano right</label>
+                <labelAbbr>Pno.</labelAbbr>
+                <instrDef midi.channel="0" midi.instrnum="0"/>
+                <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+                <staffDef n="2" clef.shape="F" clef.line="4" lines="5"/>
+              </staffGrp>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1"><layer n="1"><note pname="a" oct="4" dur="4"/></layer></staff>
+              <staff n="2"><layer n="1"><note pname="a" oct="2" dur="4"/></layer></staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

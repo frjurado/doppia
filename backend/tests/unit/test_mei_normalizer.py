@@ -1063,6 +1063,31 @@ class TestStaffPresentation:
         second_out = _round_trip(tmp_path, first_out, "staff_flat_with_labels.mei")
         assert first_out == second_out
 
+    def test_group_level_labels_stripped(self, tmp_path: Path) -> None:
+        """Labels on the <staffGrp> itself (K331/ii shape) are stripped (D1).
+
+        Pass 11 previously stripped only staffDef/instrDef labels, so a
+        group-level <label>/<labelAbbr> survived and rendered as "Piano" / "Pno."
+        Brace + bar.thru are already present here, so only the labels change.
+        """
+        report, out_bytes = _run(tmp_path, "staff_group_labels.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert tree.xpath("//mei:label", namespaces=_NS) == []
+        assert tree.xpath("//mei:labelAbbr", namespaces=_NS) == []
+        # The instrDef and its midi.* survive; the brace is untouched.
+        instrs = tree.xpath("//mei:instrDef", namespaces=_NS)
+        assert len(instrs) == 1 and instrs[0].get("midi.instrnum") == "0"
+        assert _leaf_group(out_bytes).xpath(
+            "mei:grpSym[@symbol='brace']", namespaces=_NS
+        )
+        assert any("<label> from staffGrp" in c for c in report.changes_applied)
+        assert any("<labelAbbr> from staffGrp" in c for c in report.changes_applied)
+
+    def test_group_level_labels_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on the stripped output is a clean no-op."""
+        _, first_out = _run(tmp_path, "staff_group_labels.mei")
+        assert first_out == _round_trip(tmp_path, first_out, "staff_group_labels.mei")
+
     def test_multi_instrument_is_noop(self, tmp_path: Path) -> None:
         """More than one leaf group: staff presentation is left entirely untouched."""
         report, out_bytes = _run(tmp_path, "staff_multi_instrument.mei")

@@ -55,10 +55,11 @@ Normalization rules (applied in this order):
    grand staff to its canonical shape: ensures the ``<staffGrp>`` that directly
    holds the ``<staffDef>`` staves carries a ``brace`` ``<grpSym>`` and
    ``bar.thru="true"`` (so the brace shows and barlines connect across the staff
-   gap), and strips redundant instrument labels (``@label`` / ``<label>`` on
-   ``<staffDef>``/``<instrDef>``).  ``<instrDef>`` and its ``midi.*`` attributes
-   are kept (MIDI playback); only labels are removed.  A conservative no-op on
-   multi-instrument scores (ADR-029).
+   gap), and strips redundant instrument labels (``@label`` / ``<label>`` /
+   ``<labelAbbr>`` on the ``<staffGrp>``, ``<staffDef>``, and ``<instrDef>``).
+   ``<instrDef>`` and its ``midi.*`` attributes are kept (MIDI playback); only
+   labels are removed.  A conservative no-op on multi-instrument scores
+   (ADR-029).
 
 Normalization is **idempotent**: running the normalizer on an already-
 normalized file produces byte-identical output and an
@@ -1784,8 +1785,9 @@ def _normalize_staff_presentation(
       ``<staffDef>``) is ensured to carry ``bar.thru="true"`` and a brace,
       inserting a ``<grpSym symbol="brace"/>`` child when neither brace form is
       present;
-    * redundant instrument labels (``@label`` and ``<label>`` children on
-      ``<staffDef>``, and ``<label>`` children on ``<instrDef>``) are removed.
+    * redundant instrument labels — ``@label``, ``<label>``, and ``<labelAbbr>``
+      (the "Pno." shown on later systems) — on the ``<staffGrp>`` itself, on each
+      ``<staffDef>``, and on any ``<instrDef>`` are removed.
 
     ``<instrDef>`` elements and their ``midi.*`` attributes are kept — they drive
     MIDI playback; only labels are stripped.  The ``<staffGrp>`` tree is never
@@ -1838,32 +1840,30 @@ def _normalize_staff_presentation(
         )
 
     # Strip redundant instrument labels (single-instrument piano needs none).
-    for staffdef in all_staffdefs:
-        if "label" in staffdef.attrib:
-            del staffdef.attrib["label"]
+    # The converter attaches the part name as @label, <label>, or <labelAbbr>
+    # ("Pno." on later systems) at any of three levels: the grand-staff
+    # <staffGrp> itself (the common case — e.g. K331/ii's "Piano, Piano right"),
+    # each <staffDef>, or an <instrDef>.  Strip all three; @midi.* on <instrDef>
+    # is left untouched (playback).
+    def _strip_labels(el: lxml.etree._Element, where: str) -> None:
+        if "label" in el.attrib:
+            del el.attrib["label"]
             changes_applied.append(
-                f"Staff presentation: removed redundant @label from staffDef "
-                f"(xml:id={staffdef.get(f'{{{_XML_NS}}}id', '?')!r})."
+                f"Staff presentation: removed redundant @label from {where}."
             )
-        for label in staffdef.findall(f"{{{_MEI_NS}}}label"):
-            staffdef.remove(label)
-            changes_applied.append(
-                "Staff presentation: removed redundant <label> from staffDef "
-                f"(xml:id={staffdef.get(f'{{{_XML_NS}}}id', '?')!r})."
-            )
+        for tag in ("label", "labelAbbr"):
+            for lab in el.findall(f"{{{_MEI_NS}}}{tag}"):
+                el.remove(lab)
+                changes_applied.append(
+                    f"Staff presentation: removed redundant <{tag}> from {where}."
+                )
 
-    # <instrDef> labels — the converter places instrDef at group or staff level.
+    for grp in _xpath(header, ".//mei:staffGrp"):
+        _strip_labels(grp, "staffGrp")
+    for staffdef in all_staffdefs:
+        _strip_labels(staffdef, "staffDef")
     for instr in _xpath(header, ".//mei:instrDef"):
-        if "label" in instr.attrib:
-            del instr.attrib["label"]
-            changes_applied.append(
-                "Staff presentation: removed redundant @label from instrDef."
-            )
-        for label in instr.findall(f"{{{_MEI_NS}}}label"):
-            instr.remove(label)
-            changes_applied.append(
-                "Staff presentation: removed redundant <label> from instrDef."
-            )
+        _strip_labels(instr, "instrDef")
 
 
 # ---------------------------------------------------------------------------

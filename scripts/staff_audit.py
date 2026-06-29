@@ -100,14 +100,22 @@ def audit_staff_presentation(mei_bytes: bytes, *, verbose: bool = True) -> list[
             "bar.thru!='true' — barlines do not connect across the staff gap"
         )
 
-    for sd in header.iter(_q("staffDef")):
-        if "label" in sd.attrib:
-            warnings.append(f"residual @label={sd.get('label')!r} on a staffDef")
-        if sd.find(_q("label")) is not None:
-            warnings.append("residual <label> on a staffDef")
-    for instr in header.iter(_q("instrDef")):
-        if "label" in instr.attrib or instr.find(_q("label")) is not None:
-            warnings.append("residual label on an instrDef")
+    # Residual instrument labels can sit on the <staffGrp> itself (the common
+    # case — e.g. K331/ii's group-level "Piano, Piano right"), on a <staffDef>,
+    # or on an <instrDef>, as @label, <label>, or <labelAbbr> ("Pno.").  Pass 11
+    # strips all three; flag any that survive.
+    for tag, host in (
+        ("staffGrp", "a staffGrp"),
+        ("staffDef", "a staffDef"),
+        ("instrDef", "an instrDef"),
+    ):
+        for el in header.iter(_q(tag)):
+            if "label" in el.attrib:
+                warnings.append(f"residual @label={el.get('label')!r} on {host}")
+            if el.find(_q("label")) is not None:
+                warnings.append(f"residual <label> on {host}")
+            if el.find(_q("labelAbbr")) is not None:
+                warnings.append(f"residual <labelAbbr> on {host}")
 
     if verbose:
         for w in warnings:
