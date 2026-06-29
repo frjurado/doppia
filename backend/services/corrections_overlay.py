@@ -14,7 +14,7 @@ an empty list, so Pass 0 is a no-op.
 Overlay file shape::
 
     composer: mozart
-    corpus: mozart-piano-sonatas
+    corpus: piano-sonatas
     corrections:
       - movement: k331/movement-2     # {work_slug}/{movement_slug}
         target:
@@ -52,7 +52,7 @@ def overlay_path(
 
     Args:
         composer_slug: The composer slug (e.g. ``"mozart"``).
-        corpus_slug: The corpus slug (e.g. ``"mozart-piano-sonatas"``).
+        corpus_slug: The corpus slug (e.g. ``"piano-sonatas"``).
         overlay_dir: Directory holding overlay files; defaults to
             ``backend/seed/corrections/``.
 

@@ -131,7 +131,7 @@ carry, so a second run is a no-op.
   accidental erratum stays a **single, PR-worthy printed-accidental entry**
   rather than needing a paired `accid.ges` correction. (Both K332/ii m24 and the
   K279/ii m51–52 cautionary flat are now authored exactly this way — see
-  `backend/seed/corrections/mozart__mozart-piano-sonatas.yaml`.)
+  `backend/seed/corrections/mozart__piano-sonatas.yaml`.)
 
 ## Consequences
 

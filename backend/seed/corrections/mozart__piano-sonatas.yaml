@@ -13,7 +13,7 @@
 # source bump, Pass 0's pre-state check (ADR-027 §3) re-validates every entry.
 
 composer: mozart
-corpus: mozart-piano-sonatas
+corpus: piano-sonatas
 corrections:
   # --- C2: K331/ii Menuetto — Trio, missing second-strain start-repeat -------
   # The Trio is a rounded binary with both strains repeated. Its second strain

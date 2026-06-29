@@ -17,14 +17,19 @@ One YAML file per corpus:
 {composer_slug}__{corpus_slug}.yaml
 ```
 
-e.g. `mozart__mozart-piano-sonatas.yaml`. A corpus with no overlay file (the
-common case) simply gets no corrections — Pass 0 is a no-op.
+e.g. `mozart__piano-sonatas.yaml` — `composer_slug` and `corpus_slug` are the
+slugs the ingestion service passes (`metadata.composer.slug` /
+`metadata.corpus.slug`), i.e. the same slugs in the `mozart/piano-sonatas/`
+object keys and the `/composers/mozart/corpora/piano-sonatas/` API path. The
+filename must match those exactly or Pass 0 silently finds no overlay. A corpus
+with no overlay file (the common case) simply gets no corrections — Pass 0 is a
+no-op.
 
 ## File format
 
 ```yaml
 composer: mozart                       # informational; the filename is authoritative
-corpus: mozart-piano-sonatas
+corpus: piano-sonatas                  # the corpus slug (matches the filename + object keys)
 corrections:
   - movement: k331/movement-2          # {work_slug}/{movement_slug} — the scope key
     target:

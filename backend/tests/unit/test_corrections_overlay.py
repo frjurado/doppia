@@ -166,6 +166,9 @@ def test_seed_overlay_entries_validate() -> None:
     than failing the ingest. Loading each authored movement exercises the
     Pydantic validation in :func:`load_corrections`.
     """
+    # Use the real corpus slug ("piano-sonatas"), the one the ingestion service
+    # passes (``metadata.corpus.slug``) — so this test exercises the same file
+    # the live ingest resolves, guarding the overlay filename against drift.
     movements = [
         ("k331", "movement-2"),
         ("k332", "movement-2"),
@@ -174,7 +177,7 @@ def test_seed_overlay_entries_validate() -> None:
     total = 0
     for work, mov in movements:
         entries = load_corrections(
-            "mozart", "mozart-piano-sonatas", work, mov, overlay_dir=_SEED_DIR
+            "mozart", "piano-sonatas", work, mov, overlay_dir=_SEED_DIR
         )
         total += len(entries)
         for c in entries:
