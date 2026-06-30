@@ -1002,6 +1002,124 @@ class TestClefSameas:
         assert first_out == second_out
 
 
+class TestClefRedundantDangling:
+    """Pass 10a (ADR-031): drop a dangling clef that duplicates a sibling voice."""
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_redundant_dangling_clef_dropped(self, tmp_path: Path) -> None:
+        """The layer-6 restatement that positions no note is removed (no double)."""
+        report, out_bytes = _run(tmp_path, "clef_redundant_dangling.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+
+        assert tree.xpath("//mei:clef[@xml:id='c-dup']", namespaces=self._ns) == []
+        # m.1 keeps exactly the positioning F clef (one glyph, not two).
+        m1 = tree.xpath("//mei:measure[@n='1']", namespaces=self._ns)[0]
+        clefs = m1.xpath(".//mei:clef", namespaces=self._ns)
+        assert len(clefs) == 1
+        assert clefs[0].xpath("@xml:id", namespaces=self._ns) == ["c-real"]
+        assert any("dropped a redundant clef" in c for c in report.changes_applied)
+
+    def test_positioning_clef_kept(self, tmp_path: Path) -> None:
+        """The real layer-5 clef (notes follow it) is untouched."""
+        _, out_bytes = _run(tmp_path, "clef_redundant_dangling.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        real = tree.xpath("//mei:clef[@xml:id='c-real']", namespaces=self._ns)
+        assert len(real) == 1
+        assert real[0].get("shape") == "F" and real[0].get("line") == "4"
+
+    def test_solo_dangling_clef_preserved(self, tmp_path: Path) -> None:
+        """A dangling clef with no positioning sibling (a courtesy) is kept."""
+        _, out_bytes = _run(tmp_path, "clef_redundant_dangling.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert len(tree.xpath("//mei:clef[@xml:id='c-solo']", namespaces=self._ns)) == 1
+
+    def test_reconciliation_idempotent(self, tmp_path: Path) -> None:
+        """A second pass drops nothing further and is byte-identical."""
+        _, first_out = _run(tmp_path, "clef_redundant_dangling.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_redundant_dangling.mei")
+        assert first_out == second_out
+
+
+class TestClefCoincidentVoices:
+    """Pass 10c (ADR-031): align a two-voice clef change to one onset (overlap)."""
+
+    _ns = {"mei": _NS_MEI}
+
+    @staticmethod
+    def _onset(layer: object, clef_id: str) -> int | None:
+        """Tick onset of the clef with *clef_id* among *layer*'s top-level children."""
+        t = 0
+        for child in layer:  # type: ignore[attr-defined]
+            local = child.tag.rsplit("}", 1)[-1]
+            if local == "clef" and child.xpath(
+                "@xml:id", namespaces={"xml": "http://www.w3.org/XML/1998/namespace"}
+            ) == [clef_id]:
+                return t
+            ppq = child.get("dur.ppq")
+            t += int(ppq) if ppq else 0
+        return None
+
+    def _layers(self, tree: object, measure_n: str) -> dict[str, object]:
+        m = tree.xpath(  # type: ignore[attr-defined]
+            f"//mei:measure[@n='{measure_n}']", namespaces=self._ns
+        )[0]
+        return {ly.get("n"): ly for ly in m.xpath(".//mei:layer", namespaces=self._ns)}
+
+    def test_boundary_align_overlaps_onsets(self, tmp_path: Path) -> None:
+        """m.1: the later voice's clef moves to the earlier onset (shared boundary)."""
+        report, out_bytes = _run(tmp_path, "clef_coincident_voices.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        layers = self._layers(tree, "1")
+        early = self._onset(layers["1"], "m1-early")
+        late = self._onset(layers["2"], "m1-late")
+        assert early == late == 4
+        assert any("aligned a clef" in c for c in report.changes_applied)
+
+    def test_space_split_align_overlaps_onsets(self, tmp_path: Path) -> None:
+        """m.2: an invisible <space> is split so the later clef reaches the onset."""
+        _, out_bytes = _run(tmp_path, "clef_coincident_voices.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        layers = self._layers(tree, "2")
+        assert self._onset(layers["1"], "m2-early") == 2
+        assert self._onset(layers["2"], "m2-late") == 2
+        # The quarter <space> became two eighth <space>s with the clef between.
+        l2_children = [c.tag.rsplit("}", 1)[-1] for c in layers["2"]]
+        assert l2_children[:3] == ["space", "clef", "space"]
+        spaces = layers["2"].xpath("mei:space", namespaces=self._ns)
+        assert spaces[0].get("dur") == "8" and spaces[1].get("dur") == "8"
+
+    def test_align_idempotent(self, tmp_path: Path) -> None:
+        """Re-running aligns nothing further and is byte-identical."""
+        _, first_out = _run(tmp_path, "clef_coincident_voices.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_coincident_voices.mei")
+        assert first_out == second_out
+
+    def test_late_voice_pulled_to_change_point(self, tmp_path: Path) -> None:
+        """K279/i m.86: surviving glyph lands on the change point; f4 re-clefed."""
+        _, out_bytes = _run(tmp_path, "clef_late_positioning_voice.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # Layer 5's noteless copy is dropped; layer 6's clef survives.
+        assert tree.xpath("//mei:clef[@xml:id='c-correct']", namespaces=self._ns) == []
+        assert len(tree.xpath("//mei:clef[@xml:id='c-late']", namespaces=self._ns)) == 1
+        # It is hoisted out of the beam to the layer and sits at onset 8 (beat 3).
+        l6 = self._layers(tree, "1")["6"]
+        assert self._onset(l6, "c-late") == 8
+        # The clef now precedes f4 in document order, so f4 is re-clefed under G.
+        order = [
+            "CLEF" if el.tag.rsplit("}", 1)[-1] == "clef" else el.get("pname")
+            for el in l6.iter()
+            if el.tag.rsplit("}", 1)[-1] in ("note", "clef")
+        ]
+        assert order.index("CLEF") < order.index("f")
+
+    def test_late_voice_idempotent(self, tmp_path: Path) -> None:
+        """Re-running the pull-back is a no-op and byte-identical."""
+        _, first_out = _run(tmp_path, "clef_late_positioning_voice.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_late_positioning_voice.mei")
+        assert first_out == second_out
+
+
 # ---------------------------------------------------------------------------
 # Pass 11 — Staff-presentation normalization (ADR-029)
 # ---------------------------------------------------------------------------

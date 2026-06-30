@@ -47,10 +47,14 @@ Normalization rules (applied in this order):
    cross-voice carry) and strips a spurious one it added (backward bleed across
    interleaved voices).  ``@accid`` and printed content are untouched, so SVG is
    invariant; only MIDI realisation is corrected (ADR-028, supersedes ADR-022).
-10. **Clef ``sameas`` resolution** — rewrites ``<clef sameas="#id">`` references
-   (per-voice clef restatements emitted by the converter) to explicit
-   ``shape``/``line`` so Verovio 6.1.0 renders them instead of an empty clef
-   group.
+10. **Clef reconciliation** — resolves the converter's scattering of one
+   staff-wide clef change across voices into a single rendered glyph: (a)
+   rewrites ``<clef sameas="#id">`` references to explicit ``shape``/``line`` so
+   each clef is self-describing; (b) drops a restated clef that positions no
+   following note in its layer and merely duplicates a sibling voice's clef; and
+   (c) aligns a same-key change carried by two voices at slightly different
+   onsets to one onset (when safe) so the identical glyphs overlap into one
+   (ADR-031).
 11. **Staff-presentation normalization** — standardises a single-instrument piano
    grand staff to its canonical shape: ensures the ``<staffGrp>`` that directly
    holds the ``<staffDef>`` staves carries a ``brace`` ``<grpSym>`` and
@@ -1696,8 +1700,368 @@ def _resolve_gestural_accidentals(
 
 
 # ---------------------------------------------------------------------------
-# Clef sameas resolution
+# Clef reconciliation (Pass 10 — ADR-031)
 # ---------------------------------------------------------------------------
+
+
+def _flatten_timed(
+    container: lxml.etree._Element,
+    out: list[lxml.etree._Element],
+) -> None:
+    """Append a layer's clef and timed elements in document order (beams flattened).
+
+    ``<beam>``/``<tuplet>`` and similar timing-transparent wrappers are recursed
+    into, so a ``<clef>`` nested in a beam appears in sequence with the notes
+    around it.  Used to decide whether a note follows a clef within its layer.
+
+    Args:
+        container: A ``<layer>`` or a timing-transparent wrapper.
+        out: Mutable list; matching descendants are appended in walk order.
+    """
+    for child in container:
+        tag = child.tag
+        if not isinstance(tag, str):
+            continue
+        local = tag.rsplit("}", 1)[-1]
+        if local in ("beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"):
+            _flatten_timed(child, out)
+        else:
+            out.append(child)
+
+
+def _resolved_clef_key(
+    clef: lxml.etree._Element,
+    by_id: dict[str, lxml.etree._Element],
+) -> tuple[str, str, str, str] | None:
+    """Return a comparable ``(shape, line, dis, dis.place)`` key for a clef.
+
+    A ``<clef sameas="#x">`` carrying no ``shape``/``line`` of its own takes the
+    referenced clef's attributes, so two voices' restatements of one change
+    compare equal regardless of which one is the ``sameas`` reference.
+
+    Args:
+        clef: The ``<clef>`` element.
+        by_id: Map of ``xml:id`` → clef element, for resolving ``@sameas``.
+
+    Returns:
+        The comparable key, or ``None`` when neither the clef nor its ``@sameas``
+        target defines a ``shape``/``line`` (an unresolvable reference).
+    """
+    src = clef
+    if not (clef.get("shape") and clef.get("line")):
+        target = by_id.get((clef.get("sameas") or "").lstrip("#"))
+        if target is not None:
+            src = target
+    shape, line = src.get("shape"), src.get("line")
+    if not (shape and line):
+        return None
+    return (shape, line, src.get("dis") or "", src.get("dis.place") or "")
+
+
+def _drop_redundant_dangling_clefs(
+    root: lxml.etree._Element,
+    changes_applied: list[str],
+) -> None:
+    """Pass 10a — drop a clef that positions nothing and duplicates a sibling voice.
+
+    The MuseScore→MEI converter restates one staff-wide clef change across
+    several ``<layer>``s.  A restated ``<clef>`` whose layer has **no
+    note/chord after it** (only ``<space>``/nothing) positions no note — its sole
+    effect is a drawn glyph.  When a *different* layer of the same staff carries
+    the same clef change and **does** position a following note, that sibling
+    already draws the glyph, so the dangling copy is pure duplication and renders
+    as the second glyph of the Cluster-A1 "double clef".  Drop it.
+
+    A dangling clef with **no** positioning sibling of the same shape/line is
+    left untouched: it may be the only encoding of a real change (e.g. a courtesy
+    clef before a barline), so removing it would lose musical information.  See
+    ADR-031.
+
+    Args:
+        root: The MEI document root element.
+        changes_applied: Accumulator for human-readable change descriptions.
+    """
+    note_tags = {f"{{{_MEI_NS}}}note", f"{{{_MEI_NS}}}chord"}
+    clef_tag = f"{{{_MEI_NS}}}clef"
+    by_id = {
+        cid: c for c in _xpath(root, "//mei:clef") if (cid := c.get(f"{{{_XML_NS}}}id"))
+    }
+
+    for staff in _xpath(root, "//mei:staff"):
+        # (layer_index, layer, clef, key, positions_a_following_note)
+        info: list[
+            tuple[int, lxml.etree._Element, lxml.etree._Element, tuple, bool]
+        ] = []
+        for li, layer in enumerate(staff.findall(f"{{{_MEI_NS}}}layer")):
+            flat: list[lxml.etree._Element] = []
+            _flatten_timed(layer, flat)
+            for i, el in enumerate(flat):
+                if el.tag != clef_tag:
+                    continue
+                positions = any(f.tag in note_tags for f in flat[i + 1 :])
+                key = _resolved_clef_key(el, by_id)
+                info.append((li, layer, el, key, positions))
+
+        for li, layer, clef, key, positions in info:
+            if positions or key is None:
+                continue
+            if any(
+                oli != li and okey == key and opos
+                for oli, _ol, _oel, okey, opos in info
+            ):
+                clef.getparent().remove(clef)
+                changes_applied.append(
+                    f"Clef reconciliation: dropped a redundant clef "
+                    f"(shape={key[0]} line={key[1]}) from staff "
+                    f"{staff.get('n', '?')} layer {layer.get('n', '?')} — it "
+                    f"positioned no note and duplicated a sibling voice's clef."
+                )
+
+
+def _child_clock_advance(el: lxml.etree._Element) -> int:
+    """Return how many PPQ ticks a top-level layer child advances the clock.
+
+    Leaf timed events use ``@dur.ppq``; ``<beam>``/``<tuplet>`` wrappers sum
+    their children; ``<clef>`` and other untimed children advance nothing.
+
+    Args:
+        el: A direct child of a ``<layer>``.
+
+    Returns:
+        The tick duration to advance by.
+    """
+    local = el.tag.rsplit("}", 1)[-1]
+    if local in ("note", "chord", "rest", "space", "mRest", "mSpace"):
+        return _event_ppq(el)
+    if local in ("beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"):
+        return sum(_child_clock_advance(c) for c in el if isinstance(c.tag, str))
+    return 0
+
+
+def _layer_timeline(
+    layer: lxml.etree._Element,
+) -> list[tuple[int, lxml.etree._Element]]:
+    """Return ``(onset, child)`` for each top-level child of *layer* in order."""
+    out: list[tuple[int, lxml.etree._Element]] = []
+    t = 0
+    for child in layer:
+        if not isinstance(child.tag, str):
+            continue
+        out.append((t, child))
+        t += _child_clock_advance(child)
+    return out
+
+
+def _flattened_timeline(
+    container: lxml.etree._Element,
+    start: int,
+    out: list[tuple[int, lxml.etree._Element]],
+) -> int:
+    """Append ``(onset, element)`` for clefs and timed leaves, recursing beams.
+
+    Unlike :func:`_layer_timeline` this descends into ``<beam>``/``<tuplet>``
+    wrappers, so a clef or note nested in a beam is reported with its true onset
+    — needed to find a beam-nested clef's onset when aligning voices.
+
+    Args:
+        container: A ``<layer>`` or a timing-transparent wrapper.
+        start: Clock value at the container's first child.
+        out: Mutable accumulator of ``(onset, element)`` pairs.
+
+    Returns:
+        The clock value after the container's last child.
+    """
+    t = start
+    for child in container:
+        if not isinstance(child.tag, str):
+            continue
+        local = child.tag.rsplit("}", 1)[-1]
+        if local in ("beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"):
+            t = _flattened_timeline(child, t, out)
+        else:
+            out.append((t, child))
+            t += _child_clock_advance(child)
+    return t
+
+
+def _ppq_per_quarter(root: lxml.etree._Element) -> int | None:
+    """Infer ticks-per-quarter from any note carrying both ``@dur`` and ``@dur.ppq``.
+
+    ``ppq_per_quarter = dur.ppq * dur / 4`` for a power-of-two ``@dur``.  Returns
+    ``None`` when no usable note exists (hand-written fixtures without ``@dur.ppq``).
+    """
+    for note in root.iter(f"{{{_MEI_NS}}}note"):
+        dur, ppq = note.get("dur"), note.get("dur.ppq")
+        if dur and ppq and dur.isdigit() and ppq.isdigit() and int(dur) > 0:
+            val = int(ppq) * int(dur)
+            if val % 4 == 0:
+                return val // 4
+    return None
+
+
+def _ppq_to_dur(ppq: int, ppq_per_quarter: int) -> str | None:
+    """Express *ppq* ticks as an undotted MEI ``@dur`` value, or ``None``.
+
+    Returns the power-of-two note value (``"8"``, ``"16"``, …) whose tick length
+    equals *ppq*, or ``None`` when *ppq* is not a plain (undotted, non-tuplet)
+    note value — in which case the caller must not split.
+    """
+    whole = ppq_per_quarter * 4
+    if ppq <= 0 or whole % ppq != 0:
+        return None
+    value = whole // ppq
+    return str(value) if value & (value - 1) == 0 else None
+
+
+def _place_clef_at_onset(
+    layer: lxml.etree._Element,
+    clef: lxml.etree._Element,
+    target: int,
+    ppq_per_quarter: int | None,
+) -> bool:
+    """Move *clef* to *target* tick onset within *layer*; return whether it moved.
+
+    The clef is re-inserted before the child that already starts at *target*.
+    When no child starts there but *target* falls strictly inside an **invisible**
+    ``<space>`` (a layout filler that renders nothing), the space is split at
+    *target* into two spaces — provided both halves are plain note values — and
+    the clef is placed between them.  A printed ``<rest>`` or a sounding event is
+    never split, so the move is declined (returns ``False``) in that case.
+
+    Args:
+        layer: The ``<layer>`` containing *clef*.
+        clef: The ``<clef>`` to relocate (a direct child of *layer*).
+        target: Destination onset in PPQ ticks.
+        ppq_per_quarter: Ticks per quarter, for splitting a space (``None``
+            disables splitting).
+
+    Returns:
+        ``True`` when the clef was placed at *target*, ``False`` otherwise.
+    """
+    timeline = _layer_timeline(layer)
+    anchor = next((c for onset, c in timeline if onset == target), None)
+    if anchor is not None and anchor is not clef:
+        clef.getparent().remove(clef)
+        anchor.addprevious(clef)
+        return True
+    if ppq_per_quarter is None:
+        return False
+    space_tag = f"{{{_MEI_NS}}}space"
+    for onset, child in timeline:
+        if child.tag != space_tag:
+            continue
+        advance = _child_clock_advance(child)
+        if not onset < target < onset + advance:
+            continue
+        first, second = target - onset, onset + advance - target
+        d1, d2 = _ppq_to_dur(first, ppq_per_quarter), _ppq_to_dur(
+            second, ppq_per_quarter
+        )
+        if d1 is None or d2 is None:
+            return False
+        child.set("dur", d1)
+        child.set("dur.ppq", str(first))
+        tail = child.makeelement(space_tag, {"dur": d2, "dur.ppq": str(second)})
+        clef.getparent().remove(clef)
+        child.addnext(tail)
+        child.addnext(clef)  # order becomes: child(first half), clef, tail
+        return True
+    return False
+
+
+def _merge_coincident_clefs(
+    root: lxml.etree._Element,
+    changes_applied: list[str],
+) -> None:
+    """Pass 10c — align a staff-wide clef change shared by two voices to one onset.
+
+    The converter scatters one clef change across voices at slightly **different**
+    onsets, so Verovio draws the identical glyphs spaced apart (the visible
+    "double clef"), and the glyph that survives the drop step may sit at the
+    *later*, mis-placed onset (e.g. K279/i m.86, where the correct beat-3 clef is
+    on the silent voice and the playing voice's copy is a 16th late).  Identical
+    clefs at the *same* onset instead overlap into one glyph.
+
+    For each group of same-shape clefs, the **earliest** onset any voice marks is
+    the change point (the musically-correct position).  Each *positioning* clef
+    sitting later is pulled back to it — hoisted out of a beam if needed — so the
+    surviving glyph lands on the change point and the voice's first note there is
+    correctly re-clefed.  A move is declined when:
+
+    * a sounding note falls **strictly between** the change point and the clef
+      (it would be wrongly re-clefed — the note *at* the target is fine, it is the
+      first note of the new region); or
+    * the target onset is neither an existing child boundary nor inside an
+      invisible ``<space>`` that can be split (a printed ``<rest>`` is never
+      split — that would change its value).  Such a change is left as-is.
+
+    Noteless clefs are not moved; the drop step removes them.  See ADR-031.
+
+    Args:
+        root: The MEI document root element.
+        changes_applied: Accumulator for human-readable change descriptions.
+    """
+    clef_tag = f"{{{_MEI_NS}}}clef"
+    note_tags = {f"{{{_MEI_NS}}}note", f"{{{_MEI_NS}}}chord"}
+    by_id = {
+        cid: c for c in _xpath(root, "//mei:clef") if (cid := c.get(f"{{{_XML_NS}}}id"))
+    }
+    ppq_per_quarter = _ppq_per_quarter(root)
+
+    for staff in _xpath(root, "//mei:staff"):
+        layers = staff.findall(f"{{{_MEI_NS}}}layer")
+        flat_by_layer: dict[int, list[tuple[int, lxml.etree._Element]]] = {}
+        for layer in layers:
+            flat: list[tuple[int, lxml.etree._Element]] = []
+            _flattened_timeline(layer, 0, flat)
+            flat_by_layer[id(layer)] = flat
+        # Every clef across the staff (incl. beam-nested), grouped by resolved
+        # key, each tagged with whether it positions a following note.
+        groups: dict[
+            tuple, list[tuple[int, lxml.etree._Element, lxml.etree._Element, bool]]
+        ] = {}
+        for layer in layers:
+            flat = flat_by_layer[id(layer)]
+            for idx, (onset, child) in enumerate(flat):
+                if child.tag != clef_tag:
+                    continue
+                key = _resolved_clef_key(child, by_id)
+                if key is None:
+                    continue
+                positions = any(c.tag in note_tags for _o, c in flat[idx + 1 :])
+                groups.setdefault(key, []).append((onset, layer, child, positions))
+
+        for key, members in groups.items():
+            onsets = {onset for onset, _l, _c, _p in members}
+            if len(onsets) < 2:
+                continue
+            # The change happens once, at the earliest onset any voice marks it
+            # (the musically-correct position; a voice marking it later is the
+            # converter placing the clef after a note that belongs under it).
+            target = min(onsets)
+            for onset, layer, clef, positions in members:
+                # Skip a clef already at the change point, and a noteless clef
+                # (it positions nothing and the drop step removes it) — only a
+                # *positioning* clef's glyph needs pulling back to the earliest
+                # onset.  A beam-nested positioning clef is hoisted to the layer.
+                if onset == target or not positions:
+                    continue
+                # No sounding note *strictly* between the change point and this
+                # clef (a note exactly at the target is the first note of the new
+                # clef's region and is meant to be re-clefed under it).
+                if any(
+                    target < o < onset and c.tag in note_tags
+                    for o, c in flat_by_layer[id(layer)]
+                ):
+                    continue
+                if _place_clef_at_onset(layer, clef, target, ppq_per_quarter):
+                    changes_applied.append(
+                        f"Clef reconciliation: aligned a clef (shape={key[0]} "
+                        f"line={key[1]}) in staff {staff.get('n', '?')} layer "
+                        f"{layer.get('n', '?')} from onset {onset} to {target} so "
+                        f"it coincides with the same change in another voice (one "
+                        f"glyph)."
+                    )
 
 
 def _resolve_clef_sameas(
@@ -1954,6 +2318,8 @@ def normalize_mei(
     _complete_cross_barline_ties(root, changes_applied, warnings)
     _resolve_gestural_accidentals(root, changes_applied)
     _resolve_clef_sameas(root, changes_applied)
+    _merge_coincident_clefs(root, changes_applied)
+    _drop_redundant_dangling_clefs(root, changes_applied)
     _normalize_staff_presentation(root, changes_applied)
 
     duration_bars = _compute_duration_bars(root)
