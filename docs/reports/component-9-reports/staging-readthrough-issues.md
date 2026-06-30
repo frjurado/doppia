@@ -31,28 +31,47 @@ The original A1 explanation (recovery's first-child idempotency guard stacking a
 
 - **`recover_measure_start_clefs` is a complete no-op here.** `_extract_measure_start_clefs` returns **0** changes even though the `.mscx` bass staff has **22** `<Clef>` elements. Cause: MuseScore encodes a measure-start clef change at the **end of the previous measure** (after the notes — exactly Francisco's "shown before the barline" placement), but the extractor only accepts a clef that appears **before** any `<Chord>`/`<Rest>` (`not seen_note`), so it classifies all 22 as mid-measure and recovers none. The "section-aware index (A3)" can't help either: Verovio collapses the movement into a **single** MEI `<section>` (`_mei_top_sections` returns 1, not the minuet+trio 2), so it always falls to flat indexing.
 - **So the misplaced/missing clefs are converter artefacts, not ours.** With the recovery inert, the clefs in the MEI are whatever MuseScore's MusicXML export + Verovio import produced. Francisco's census shows the tell: the spurious **minuet** clefs (m7, m25, m37, m43) are exactly the **trio's** measure-start clefs (his trio `*` rows m7/m25/m37/m43), and the trio itself is left with essentially none (the ingested MEI has one trio clef, at the very end). The minuet/trio **restarting measure numbers** make the trio's clef changes collide onto the minuet measures of the same number on import. A3 ("trio clefs vanish") and A1 ("spurious/double minuet clefs") are two faces of this one collision.
-- **Direction for a fix (not yet done):** the recovery must (a) read MuseScore's **trailing** measure-start clefs (a clef after the notes that differs from the running clef and applies to the *next* measure's start), and (b) place them by a section/number-collision-robust map, ideally **overriding** the converter's mis-placed clefs rather than only adding missing ones. Until then, the *331-collision* A1/A3 are unfixed for any movement with restarting numbers.
+- **Direction for a fix — VALIDATED (2026-06-30):** the collision is in **Verovio's MusicXML importer keying clef placement on the measure number**. Proof: rewriting the `.mxl` so every measure carries a *unique* `number` before import restores **all 22** `.mscx` clefs at their correct document-order measures (the trio clefs at idx 52–98 return; the stray menuet n=24/n=42 clefs vanish) — 14 → 23 clefs in the MEI. The fix is therefore **B2**: renumber the MusicXML measures uniquely for the import, then restore the true restarting `@n` on the MEI afterward (safe — `@n` is display-only and `mc` is document-order; see Phase B and the mc/mn note below). This **supersedes** the earlier "trailing-clef recovery must override the converter" direction.
 
-### The other A1 doubles are a *different* mechanism (per-voice clef scope)
+### The other "double clef" cases are mid-measure changes in two-voice regions (2026-06-30, corrected)
 
-Inspecting every original A1 location in the ingested MEI shows A1 is **three** distinct mechanisms, not one — "A1+A3 are one bug" holds only for the K331 multi-section case:
+The earlier framing — that these are measure-start doubles with a "resolved in MEI" bucket — was **wrong** (Francisco, on render). Every A1 "double" is **one musical clef change inside a region where the staff carries two voices**: none are measure-start, and none are resolved.
 
-| Location | MEI at the bar | Mechanism |
+| Location | What the render shows | Onset |
 |---|---|---|
-| 283/ii m.19, m.25 · 332/iii m.210 | **two `<clef>`** — one in layer 5 + one in layer 6, identical shape, **converter-emitted** (recovery inactive, 0 injected) | **Per-voice double-glyph** |
-| 331/ii m.22 · 331/i m.98 | **no `<clef>`** at the bar | **Multi-section collision** (above) |
-| 279/i m.86 · 279/iii m.72 | **single `<clef>`**; recovery active (11 / 16 injected) | Looks **resolved** in MEI — confirm on render |
+| 283/ii m.19, m.25 · 332/iii m.210 | two glyphs | mid-bar (m19 beat 3, m25 beat 2, m210 beat 2 of compound) |
+| 279/i m.86 | two glyphs; the affected note still prints as if in F | real clef at beat 3 + a spurious one a 16th later |
+| 279/iii m.72 | two glyphs | real clef on the 2nd eighth + a spurious one on beat 2 |
 
-The per-voice double is confirmed at render: a synthetic staff with two layers each carrying an identical F clef renders **two** adjacent F-clef glyphs (3 total incl. the system-start G). This is the **same shape as our A2 "inject into every layer" fix** — A2 would itself create a double wherever it injects into two voices. So the per-voice doubles (283/ii, 332/iii) and A2 want the *same* resolution: **one staff-level clef** (or dedup identical adjacent layer-clefs), not per-layer clefs.
+Inspecting the raw converter MEI, the converter scatters that single clef change across the staff's layers as inconsistent fragments:
 
-### Disposition: one consolidated clef workstream (A1 ×3 + A2-revisit + A3 + D3)
+| Fragment the converter emits | Effect | Seen at |
+|---|---|---|
+| a real `<clef>` in a layer with **no notes after it** (only `<space>`) | a spurious glyph that positions nothing | 283/ii m19 L6, 279/i m86 L5 |
+| `<clef sameas="#…">` restating another layer's clef | Pass 10 resolves it to shape/line → a **2nd drawn** glyph | 283/ii m19/m25 L6 |
+| the two layers' clefs at **different onsets** | glyphs spaced apart → a visible double | 279/i m86, 279/iii m72 |
+| a `<clef>` **nested inside a `<beam>`** | a note *before* it stays in the old clef | 279/i m86 L6 |
 
-The clef issues reduce to **two design decisions, made together** — piecemeal fixes risk re-breaking each other (A2's per-voice fix *caused* the doubles; a naive A1 dedup could re-break A2):
+Verovio probes (synthetic 2-voice renders) settle which levers exist:
 
-1. **Clef scope** — one staff-level clef vs per-layer. Resolves the per-voice doubles (283/ii, 332/iii) and re-settles A2.
-2. **Trailing-clef recovery & placement** — read MuseScore's end-of-previous-measure clefs and place them as courtesies before the next barline, collision-robust across restarting numbers. Resolves A3 (missing trio clefs), the 331 collision (A1 multi-section), **and D3** at once.
+- `visible="false"` on a clef is **ignored** — Verovio draws it anyway. Glyph suppression is not available.
+- Two **identical** clefs at the **same onset overlap** at one x (render as one glyph); the *visible* doubles are exactly the cases where the converter placed them at **different** onsets.
+- A `<clef>` as a direct **`<staff>` child** draws **one** glyph and repositions **all** voices — but only at a measure boundary (it carries no mid-bar onset), so it does not help these mid-measure cases.
+- A clef **in one layer only** repositions that layer only (this *is* A2); a clef **in every layer** repositions all voices but draws N glyphs. There is **no** in-layer encoding that is simultaneously single-glyph and all-voices mid-measure.
 
-**D3 packs in here** (answering Francisco): MuseScore's trailing measure-start clef *is* the courtesy-before-barline position, so the trailing-clef model that fixes A3/331 also determines D3 placement — same mechanism, same fix. (K331/ii happens to render D3-correctly, but elsewhere — 279/i m.5, 279/iii m.5–11 — it does not; the trailing-clef handling is where that's decided.)
+So the fix is **dedup + onset-alignment, in-layer** — not a measure-start clef-scope change. (A2's "inject into every layer" recovery is therefore a latent double-generator on any multi-voice measure-start, and is folded into Phase A below.)
+
+### Disposition: a two-phase clef workstream (decisions recorded 2026-06-30)
+
+**Phase A — per-voice / mid-measure doubles (low risk; ADR-031).** A normalizer reconciliation (extend Pass 10) that, per staff: (1) **drops a `<clef>` from any layer with no note/chord after it** (kills the spurious glyphs); (2) **collapses a `sameas` restatement** that duplicates another layer's clef at the same onset (Pass 10 is the pass turning a silent `sameas` into a drawn double); (3) **onset-aligns** the clefs of a genuine co-active two-voice change to the same offset so the glyphs overlap into one, and **hoists a beam-nested clef** to its voice's correct position. Re-settles A2. Also switch the **measure-start recovery** — currently injects into *every* layer, a latent double-generator — to a single whole-staff encoding (a `<staff>`-child clef or running `<scoreDef>`, both proven single-glyph + all-voices at a barline).
+
+**D3 — courtesy clef placement: BEFORE the barline, always (decided with Francisco, 2026-06-30; ADR-031).** The natural convention and Francisco's preference. Place a recovered/normalised measure-start clef as the **trailing clef of the previous measure** (the courtesy-before-barline position MuseScore itself uses), not at the head of the new measure. Solve it now, designed *with* Phase A's clef handling. (Note: a trailing clef is layer-scoped like any in-layer clef, so the same dedup/onset-alignment from Phase A applies to it.)
+
+**Phase B — K331/ii multi-section / restarting `@n` (B2, VALIDATED; higher risk, chosen with Francisco 2026-06-30; ADR-032).** Chosen over a local clef-only repair because the restarting number is the common root of the clef loss and (very likely) the C2 repeat-expansion and incipit-slur symptoms — fix it once at the source. **Mechanism proven** (see the A1+A3 section above): **renumber the MusicXML measures uniquely before the Verovio import, then restore the true restarting `@n` on the resulting MEI.** Safe by construction — `@n` is the display-only human coordinate (ADR-015) and `mc` is document-order, so the restored restart preserves both `mc` and the displayed numbering. **Gate before building:** confirm on a fresh prep + live re-ingest that (a) all 22 K331/ii clefs return at the right measures, (b) `mc` is unchanged (document order is untouched) and the 15-movement mc-stability check passes, (c) repeat / volta / ending handling is preserved or improved (the C2 playback symptom), and (d) the restored `@n` still satisfies the ADR-015 duplicate-`@n` (Step 8) disposition. Likely lands as a new corpus-prep step between `convert_mscx_to_mxl` and `convert_mxl_to_mei`, with `mc`/`@n` round-trip unit coverage.
+
+#### Why duplicate `@n` is a problem *here* but not for our data model (the mc/mn question)
+
+`mc` (measure count = Verovio position index) is **always unique** — a 1-based document-order rank over `<measure>` elements (ADR-015). Fragment coordinates live on `mc_start`/`mc_end`, so duplicate display numbers never threaten machine identity. `@n` / `mn` (the notated bar number) **legitimately restarts** at the Trio — correct, matches the NMA, and we keep it. **So duplicate `@n` is not a defect in our model**, and Francisco is right that it "shouldn't" be a problem. The problem is confined to **Verovio's MusicXML→MEI importer**, which keys clef placement on the measure *number*: when the Trio reuses the Menuetto's numbers, the importer routes the Trio's measure-start clefs onto the Menuetto bar of the same number and drops the mid-measure ones. **B2 removes the duplication only for the importer's benefit and restores the correct restarting `@n` immediately after** — displayed numbering and `mc` are both untouched.
 
 ### C2 — visual fixed, playback still wrong
 
@@ -328,11 +347,13 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 
 | ID | Symptom & score locations | Conf. | Fix target | Status |
 |---|---|---|---|---|
-| A1 | Double/extra clefs — **3 mechanisms** (2026-06-30): (a) **per-voice double** = same clef in layers 5+6 → 2 glyphs: 283/ii m.19, m.25 · 332/iii m.210; (b) **multi-section collision** (trio clefs onto minuet): 331/ii m.7/22/25/37/43 · 331/i m.98; (c) **resolved in MEI**: 279/i m.86 · 279/iii m.72 | C | **Re-open as one clef workstream** — (a) staff-level clef/dedup (re-settles A2); (b) trailing-clef recovery + collision-robust map | ☐ **re-opened** (NOT fixed — 2026-06-30; orig. single-cause hypothesis refuted, see re-verification §) |
-| A2 | Clef affects voice 1 only; voice 2 in old (F) clef — 279/iii m.110 · 280/i m.46 · 280/ii m.24 · 331/ii m.24–25 | C | Step 6 — inject clef into every layer / hoist to staff scope | ✔ **verified on staging** (2026-06-30) |
-| A3 | Trio clef changes absent — 331/ii Trio (none in Doppia; ~16 expected) | C | Same bug as A1 — recovery no-op (0 extracted of 22) + converter collision | ☐ **re-opened** (NOT fixed on staging — 2026-06-30) |
+| A1 | Double/extra clefs — all are **mid-measure clef changes in a two-voice region** (2026-06-30, corrected): (a) **per-voice scatter** (spurious clef in a noteless layer · `sameas` restated · two layers' clefs at different onsets · clef nested in a beam): 283/ii m.19, m.25 · 332/iii m.210 · 279/i m.86 · 279/iii m.72; (b) **multi-section collision** (trio clefs lost/mis-placed by the importer): 331/ii · 331/i m.98 | C | (a) **Phase A** — Pass 10 dedup + onset-align in-layer (re-settles A2); (b) **Phase B (B2)** | ☐ **re-opened** (NOT fixed — 2026-06-30; measure-start framing refuted, see re-verification §) |
+| A2 | Clef affects voice 1 only; voice 2 in old (F) clef — 279/iii m.110 · 280/i m.46 · 280/ii m.24 · 331/ii m.24–25 | C | Step 6 — **revisit in Phase A**: "inject into every layer" is a latent double-generator; converge to single-glyph + all-voices | ✔ verified on staging (2026-06-30) — **revisit with A1 Phase A** |
+| A3 | Trio clef changes absent — 331/ii Trio (none in Doppia; ~16 expected) | C | **Phase B (B2)** — unique-number import restores all trio clefs (validated offline: 14 → 23) | ☐ **re-opened** — root cause **proven**, B2 validated offline (2026-06-30); not yet built/ingested |
 
-> **A1–A3 fixed (2026-06-28)** in `recover_measure_start_clefs` (`scripts/prepare_dcml_corpus.py`): widened idempotency guard (equivalent clef anywhere in the layer, not just first-child), per-voice injection into every `<layer>`, and section-aware `.mscx`↔MEI index with a diagnostic-logged fallback. Unit-covered in `test_prepare_dcml_corpus.py` (`TestClefRecovery*`). On-staging re-verification against the real K331/ii source is Band 1 Item 6; the render spot-check list to use is in `docs/investigations/accidentals-k279-mvt1/clefs-findings.md`. (Note: the A1 `sameas`-convergence sub-point — making Pass 10 collapse per-voice restatements rather than render two glyphs — was not in scope here; the double-clef cases observed trace to the recovery guard, and Pass 10 `_resolve_clef_sameas` already only resolves references without duplicating. Revisit only if a `sameas`-sourced double survives re-verification.)
+> **⚠ SUPERSEDED (2026-06-30):** the claim below that A1–A3 were fixed on 2026-06-28 is wrong — see the re-verification section above. A1 is mid-measure two-voice scatter (→ Phase A); A3 + the 331 collision are a Verovio-importer measure-number bug (→ Phase B / B2, validated offline). The 2026-06-28 note is retained only for history.
+>
+> **A1–A3 "fixed" (2026-06-28, superseded)** in `recover_measure_start_clefs` (`scripts/prepare_dcml_corpus.py`): widened idempotency guard (equivalent clef anywhere in the layer, not just first-child), per-voice injection into every `<layer>`, and section-aware `.mscx`↔MEI index with a diagnostic-logged fallback. Unit-covered in `test_prepare_dcml_corpus.py` (`TestClefRecovery*`). On-staging re-verification against the real K331/ii source is Band 1 Item 6; the render spot-check list to use is in `docs/investigations/accidentals-k279-mvt1/clefs-findings.md`. (Note: the A1 `sameas`-convergence sub-point — making Pass 10 collapse per-voice restatements rather than render two glyphs — was not in scope here; the double-clef cases observed trace to the recovery guard, and Pass 10 `_resolve_clef_sameas` already only resolves references without duplicating. Revisit only if a `sameas`-sourced double survives re-verification.)
 
 ### B — Accidentals in playback (new Step 7b; gate before Step 10)
 
@@ -351,7 +372,7 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 | ID | Symptom & score locations | Conf. | Fix target | Status |
 |---|---|---|---|---|
 | C1 | `NaN` bar number in transport — 279/ii m.28 · 283/ii m.14 (2nd ending) · 331/i m.98; "every similar case + 2nd endings" | C | Step 3 — same mc↔mn guard on the display path | ☐ open |
-| C2 | Trio repeat structure — first repeat jumps to minuet `|:` (m.19); missing start-repeat; da-capo `<i>`; blank space m.40 | C | Overlay (start-repeat, ✔ visual) + **Verovio repeat-expansion (playback, open)** + Step 15 (display) | ◐ **visual fixed, playback NOT** (2026-06-30) — `@left="rptstart"` is in the MEI and shows, but both trio repeats still jump to minuet m19 in playback. Da-capo `<i>` / blank space → Step 15 / multi-section cluster. |
+| C2 | Trio repeat structure — first repeat jumps to minuet `|:` (m.19); missing start-repeat; da-capo `<i>`; blank space m.40 | C | Overlay (start-repeat, ✔ visual) + **playback likely fixed by Phase B (B2)** — same restarting-`@n` root as the clef collision; verify at B2 + Step 15 (display) | ◐ **visual fixed, playback NOT** (2026-06-30) — `@left="rptstart"` is in the MEI and shows, but both trio repeats still jump to minuet m19 in playback. Da-capo `<i>` / blank space → Step 15 / multi-section cluster. |
 
 ### D — Other rendering
 
@@ -359,7 +380,7 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 |---|---|---|---|---|
 | D1 | Instrument labels vary ("", "Piano", "Piano, Piano right" + "Pno." on later systems); brace; barlines cross system | C | Pass 11 — **also strip `<label>`/`<labelAbbr>` from the leaf `<staffGrp>`** | ◐ **brace/bar.thru fixed; labels NOT** (2026-06-30) — group-level labels survive on K331 all + K332/i,iii; Pass 11 only stripped staffDef/instrDef labels. ADR-029 "no labels" was wrong (audit blind spot). |
 | D2 | Tuplet brackets shown though hidden in MuseScore (279/ii m.6, 7, 10); dashed slurs (279/ii); 6-measure slur (332/iii m.190–195); **NEW: 331/ii incipit shows enormous slurs on both staves** | H | Spot-check; mis-resolved/out-of-window slur endpoint; rest → P2 | ☐ open (incipit slurs new 2026-06-30 — likely `endid` outside the 4-bar incipit window; see multi-section cluster) |
-| D3 | Courtesy-clef placement (clef after vs before barline) — 279/i m.5 · 279/iii m.5–11 (cf. correct 279/ii m.10, 47–49) | C | **Pack into the A1/A3 clef workstream** — same trailing-clef mechanism determines courtesy placement (2026-06-30) | ☐ open (now grouped with clefs, not P2-deferred) |
+| D3 | Courtesy-clef placement (clef after vs before barline) — 279/i m.5 · 279/iii m.5–11 (cf. correct 279/ii m.10, 47–49) | C | **Phase A** — place measure-start clefs as the trailing courtesy clef of the *previous* measure | ☐ open — **decided: before-barline, always** (2026-06-30); build in Phase A |
 
 ### E — Playback caret (reopen Step 19)
 
