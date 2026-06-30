@@ -1,8 +1,11 @@
 # MEI source-corrections overlay — Mozart Piano Sonatas (DCML)
 #
-# See ADR-027 (mechanism), ADR-030 (why the xml:id locator is stable), and
+# See ADR-027 (mechanism + the coordinate locator) and
 # backend/seed/corrections/README.md (field reference). Applied by
-# mei_normalizer Pass 0 at ingest, before the structural passes.
+# mei_normalizer Pass 0 at ingest, before the structural passes. Targets are
+# located by COORDINATES (ADR-015 document-order `mc` + voice/pitch), which are
+# stable across a re-encode; xml:ids are not (the toolchain reassigns them, so a
+# pinned id silently stops resolving — the reason this overlay moved off them).
 #
 # Reference edition for every entry: the Neue Mozart-Ausgabe (NMA), which the
 # DCML corpus itself follows (see the corpus README). The NMA is freely
@@ -30,8 +33,8 @@ corrections:
   # separate rendering question, not a source error — it stays out of the overlay.)
   - movement: k331/movement-2
     target:
-      xml_id: e65xqli
-      fallback: "mc=65 — Trio second strain, first measure (its closing :| is at mc100)"
+      mc: 65
+      note: "Trio second strain, first measure (its closing :| is at mc100)"
     field: repeat-start
     expected: null
     corrected: rptstart
@@ -58,8 +61,14 @@ corrections:
   # gestural pitch of this note and the bar's last same-pitch C to natural.
   - movement: k332/movement-2
     target:
-      xml_id: c106gvd1
-      fallback: "mc=24 staff=1 — beat-4 C5 (4th of four C5s in the treble figure)"
+      mc: 24
+      staff: 1
+      layer: 1
+      pname: c
+      oct: 5
+      occurrence: 3
+      note: "beat-4 C5 (3rd of the four C5s in the treble figure; Pass 9 then
+        carries the natural to the bar's last C5)"
     field: accid
     expected: null
     corrected: "n"
@@ -84,8 +93,13 @@ corrections:
   # the RH B-natural. Restore that printed cautionary flat.
   - movement: k279/movement-2
     target:
-      xml_id: g1mnbfyc
-      fallback: "mc=53 mn=51 staff=2 layer=5 — first bass B4 of the measure"
+      mc: 53
+      staff: 2
+      layer: 5
+      pname: b
+      oct: 4
+      occurrence: 1
+      note: "first bass B4 of the measure (mn 51)"
     field: accid
     expected: null
     corrected: "f"

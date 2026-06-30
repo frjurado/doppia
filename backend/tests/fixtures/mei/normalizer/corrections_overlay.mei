@@ -18,6 +18,12 @@
           <note xml:id="n4" pname="e" oct="5"/>
         </layer></staff>
       </measure>
+      <measure n="4" xml:id="m4">
+        <staff n="1"><layer n="1">
+          <note xml:id="n5" pname="a" oct="5"/>
+          <note xml:id="n6" pname="a" oct="5"><accid accid="s"/></note>
+        </layer></staff>
+      </measure>
     </section>
   </score></mdiv></body></music>
 </mei>

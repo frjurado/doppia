@@ -26,7 +26,7 @@ def test_correction_accepts_class_alias() -> None:
     c = Correction.model_validate(
         {
             "movement": "k331/movement-2",
-            "target": {"xml_id": "n1"},
+            "target": {"mc": 1, "staff": 1, "layer": 1, "pname": "b", "oct": 4},
             "field": "accid",
             "expected": "n",
             "corrected": "f",
@@ -37,8 +37,45 @@ def test_correction_accepts_class_alias() -> None:
         }
     )
     assert c.correction_class == "errata"
-    assert c.target.xml_id == "n1"
+    assert c.target.mc == 1
+    assert c.target.occurrence == 1  # default
     assert c.upstream == "none"  # default
+
+
+def test_measure_target_needs_no_pitch() -> None:
+    """A measure-level target (just ``mc``) is valid and carries no pitch."""
+    t = Correction.model_validate(
+        {
+            "movement": "k331/movement-2",
+            "target": {"mc": 65, "note": "trio second strain"},
+            "field": "repeat-start",
+            "expected": None,
+            "corrected": "rptstart",
+            "rationale": "x",
+            "class": "errata",
+            "source_sha": "abc",
+            "added": "2026-06-28 test",
+        }
+    ).target
+    assert t.mc == 65 and t.pname is None
+
+
+def test_note_target_requires_full_triple() -> None:
+    """A partial pitch locator (pname without oct/staff) is rejected."""
+    with pytest.raises(ValueError, match="staff, pname, and oct"):
+        Correction.model_validate(
+            {
+                "movement": "k331/movement-2",
+                "target": {"mc": 1, "pname": "b"},
+                "field": "accid",
+                "expected": "n",
+                "corrected": "f",
+                "rationale": "x",
+                "class": "errata",
+                "source_sha": "abc",
+                "added": "2026-06-28 test",
+            }
+        )
 
 
 def test_correction_rejects_noop() -> None:
@@ -47,7 +84,7 @@ def test_correction_rejects_noop() -> None:
         Correction.model_validate(
             {
                 "movement": "k331/movement-2",
-                "target": {"xml_id": "n1"},
+                "target": {"mc": 1, "staff": 1, "pname": "b", "oct": 4},
                 "field": "accid",
                 "expected": "f",
                 "corrected": "f",
@@ -65,7 +102,7 @@ def test_correction_rejects_unknown_key() -> None:
         Correction.model_validate(
             {
                 "movement": "k331/movement-2",
-                "target": {"xml_id": "n1"},
+                "target": {"mc": 1, "staff": 1, "pname": "b", "oct": 4},
                 "field": "accid",
                 "corrected": "f",
                 "rationale": "x",
@@ -181,7 +218,7 @@ def test_seed_overlay_entries_validate() -> None:
         )
         total += len(entries)
         for c in entries:
-            assert c.target.xml_id  # non-empty locator
+            assert c.target.mc >= 1  # document-order measure locator (ADR-015)
             assert c.expected != c.corrected  # not a no-op
             assert c.correction_class in ("errata", "editorial")
             assert c.source_sha  # pinned to a DCML commit

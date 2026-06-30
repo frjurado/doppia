@@ -1235,7 +1235,7 @@ def _correction(**kwargs: object) -> Correction:
     """
     base: dict[str, object] = {
         "movement": "k1/m1",
-        "target": {"xml_id": "n1"},
+        "target": {"mc": 1, "staff": 1, "layer": 1, "pname": "b", "oct": 4},
         "field": "accid",
         "expected": "n",
         "corrected": "f",
@@ -1295,14 +1295,40 @@ class TestCorrectionsOverlay:
         report, out_bytes = _run_corrections(tmp_path, [_correction()])
         assert _accid_value(out_bytes, "n1") == "f"
         assert any(
-            "Corrected accid on 'n1'" in c and "test rationale" in c
+            "Corrected accid on mc=1 staff=1 layer=1 b4 #1" in c
+            and "test rationale" in c
             for c in report.changes_applied
         )
+
+    def test_occurrence_selects_nth_match(self, tmp_path: Path) -> None:
+        """``occurrence`` picks the Nth same-pitch note in document order."""
+        # m4 has two a5 notes; the second (n6) holds accid='s'.
+        c = _correction(
+            target={
+                "mc": 4,
+                "staff": 1,
+                "layer": 1,
+                "pname": "a",
+                "oct": 5,
+                "occurrence": 2,
+            },
+            expected="s",
+            corrected="n",
+        )
+        _, out_bytes = _run_corrections(tmp_path, [c])
+        assert _accid_value(out_bytes, "n6") == "n"  # second a5 corrected
+        assert _accid_value(out_bytes, "n5") is None  # first a5 untouched
+
+    def test_field_target_shape_mismatch_warns(self, tmp_path: Path) -> None:
+        """A note field with a measure-shaped target (no pitch) is flagged."""
+        c = _correction(target={"mc": 1}, expected=None, corrected="f")
+        report, _ = _run_corrections(tmp_path, [c])
+        assert "CORRECTION_TARGET_MISMATCH" in [w.code for w in report.warnings]
 
     def test_repeat_start_added(self, tmp_path: Path) -> None:
         """A repeat-start correction sets @left on the target measure."""
         c = _correction(
-            target={"xml_id": "m2"},
+            target={"mc": 2},
             field="repeat-start",
             expected=None,
             corrected="rptstart",
@@ -1316,8 +1342,10 @@ class TestCorrectionsOverlay:
 
     def test_prestate_mismatch_warns_and_skips(self, tmp_path: Path) -> None:
         """When the element holds neither expected nor corrected, it is flagged."""
-        # n2 holds accid='s'; expected 'n' does not match → mismatch.
-        c = _correction(target={"xml_id": "n2"})
+        # n2 (mc1, c5) holds accid='s'; default expected 'n' does not match.
+        c = _correction(
+            target={"mc": 1, "staff": 1, "layer": 1, "pname": "c", "oct": 5}
+        )
         report, out_bytes = _run_corrections(tmp_path, [c])
         assert _accid_value(out_bytes, "n2") == "s"  # untouched
         codes = [w.code for w in report.warnings]
@@ -1327,7 +1355,11 @@ class TestCorrectionsOverlay:
     def test_superseded_is_info_noop(self, tmp_path: Path) -> None:
         """When the element already holds 'corrected', the correction is a no-op."""
         # n2 already holds 's'; a correction targeting 's' is already satisfied.
-        c = _correction(target={"xml_id": "n2"}, expected="x", corrected="s")
+        c = _correction(
+            target={"mc": 1, "staff": 1, "layer": 1, "pname": "c", "oct": 5},
+            expected="x",
+            corrected="s",
+        )
         report, _ = _run_corrections(tmp_path, [c])
         codes = {w.code: w.severity for w in report.warnings}
         assert codes.get("CORRECTION_SUPERSEDED") == "info"
@@ -1335,8 +1367,8 @@ class TestCorrectionsOverlay:
         assert not any("Corrected" in ch for ch in report.changes_applied)
 
     def test_missing_target_warns(self, tmp_path: Path) -> None:
-        """A target xml:id absent from the document is flagged for review."""
-        c = _correction(target={"xml_id": "does-not-exist"})
+        """Coordinates that do not resolve (out-of-range mc) are flagged."""
+        c = _correction(target={"mc": 99, "staff": 1, "pname": "b", "oct": 4})
         report, _ = _run_corrections(tmp_path, [c])
         assert "CORRECTION_TARGET_MISSING" in [w.code for w in report.warnings]
         assert not report.is_clean

@@ -3,8 +3,8 @@ corpus: mozart-piano-sonatas
 corrections:
   - movement: k331/movement-2
     target:
-      xml_id: m_trio_start
-      fallback: "mc=49 staff=2 layer=1 (trio start)"
+      mc: 49
+      note: "trio start"
     field: repeat-start
     expected: null
     corrected: rptstart
@@ -15,7 +15,11 @@ corrections:
     added: "2026-06-28 test"
   - movement: k331/movement-2
     target:
-      xml_id: n_acc_1
+      mc: 12
+      staff: 1
+      layer: 1
+      pname: b
+      oct: 4
     field: accid
     expected: "n"
     corrected: "f"
@@ -26,7 +30,10 @@ corrections:
     added: "2026-06-28 test"
   - movement: k279/movement-1
     target:
-      xml_id: n_other
+      mc: 5
+      staff: 2
+      pname: f
+      oct: 5
     field: accid.ges
     expected: null
     corrected: "f"

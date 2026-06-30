@@ -21,22 +21,58 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CorrectionTarget(BaseModel):
-    """A stable locator for the MEI element a correction applies to.
+    """A coordinate locator for the MEI element a correction applies to.
+
+    The locator is the ADR-015 document-order measure index (``mc``) plus, for a
+    note-level field, the voice and pitch coordinates identifying the note within
+    that measure.  These are **stable across a re-encode of the same music** —
+    unlike an ``xml:id``, which the MuseScore→Verovio toolchain reassigns whenever
+    the toolchain or the prep changes (so a pinned id silently stops resolving;
+    see the ADR-030 amendment and ADR-027 §"Locator").
 
     Args:
-        xml_id: The ``xml:id`` of the affected element (a ``<note>`` or
-            ``<measure>``).  This is the authoritative locator the normalizer
-            resolves against; it is stable per movement and unaffected by
-            measure renumbering or ADR-015 ``mc`` coordinates.
-        fallback: A human-readable ``(mc, staff, layer, beat, pname, oct)``
-            description, advisory only — used by a reviewer when an ``xml_id``
-            drifts after an upstream re-encode.  Never resolved mechanically.
+        mc: 1-based document-order measure index (DCML ``mc`` / Verovio position
+            index, ADR-015).  The **sole** locator for a measure-level field
+            (``repeat-start`` / ``repeat-end``).
+        staff: ``<staff>`` ``@n`` — required for a note-level field.
+        layer: ``<layer>`` ``@n`` for a note-level field; ``None`` searches every
+            layer of the staff in document order.
+        pname: Pitch name (``a``–``g``) of the target note — its presence marks a
+            note-level target.
+        oct: Octave of the target note.
+        occurrence: 1-based ordinal among the notes matching ``(pname, oct)`` in
+            the located ``(mc, staff, layer)``, in document order (defaults to the
+            first).
+        note: Optional human-readable description of the spot (advisory only).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    xml_id: str = Field(min_length=1)
-    fallback: str | None = None
+    mc: int = Field(ge=1)
+    staff: int | None = Field(default=None, ge=1)
+    layer: int | None = Field(default=None, ge=1)
+    pname: str | None = Field(default=None, pattern="^[a-g]$")
+    oct: int | None = None
+    occurrence: int = Field(default=1, ge=1)
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _note_locator_complete(self) -> CorrectionTarget:
+        """Require a full ``(staff, pname, oct)`` triple for a note-level target.
+
+        Returns:
+            The validated model.
+
+        Raises:
+            ValueError: If any pitch coordinate is given without the others (an
+                incomplete note locator that could resolve ambiguously).
+        """
+        pitch_given = self.pname is not None or self.oct is not None
+        if pitch_given and not (
+            self.pname is not None and self.oct is not None and self.staff is not None
+        ):
+            raise ValueError("a note-level target needs staff, pname, and oct together")
+        return self
 
 
 class Correction(BaseModel):

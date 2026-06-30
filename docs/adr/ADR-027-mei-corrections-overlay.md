@@ -34,8 +34,7 @@ The overlay files live in `backend/seed/corrections/`, one file per corpus (`{co
 | Field | Purpose |
 |---|---|
 | `movement` | `{work_slug}/{movement_slug}` — the scope key the loader filters on. |
-| `target.xml_id` | Stable locator: the MEI `xml:id` of the affected element (note or measure). |
-| `target.fallback` | Human-readable `(mc, staff, layer, beat, pname, oct)` locator, advisory only — used by a reviewer when an `xml_id` drifts. |
+| `target` | A **coordinate** locator (see the 2026-07-01 amendment below): `mc` (document-order measure index, ADR-015) for a measure-level field, plus `staff`/`layer`/`pname`/`oct`/`occurrence` for a note-level field. *(Originally `target.xml_id` + a free-text `fallback`; superseded — see amendment.)* |
 | `field` | What is being corrected (`accid`, `accid.ges`, `repeat-start`, `repeat-end`, …). |
 | `expected` | The **current wrong value** in the source (the pre-state). Load-bearing — see merge-back below. `null` means the attribute is currently absent. |
 | `corrected` | The value to write. `null` means remove the attribute. |
@@ -49,7 +48,7 @@ The overlay files live in `backend/seed/corrections/`, one file per corpus (`{co
 
 ### 3. The pre-state check makes the pass idempotent and merge-back-safe
 
-For each correction, Pass 0 locates the target by `xml:id`, resolves `field` to a concrete `(child-element?, attribute)`, reads the current value, and acts on a **three-way** comparison — exactly the design Francisco's merge-back concern requires:
+For each correction, Pass 0 locates the target by its **coordinates** (see the 2026-07-01 amendment — originally by `xml:id`), resolves `field` to a concrete `(child-element?, attribute)`, reads the current value, and acts on a **three-way** comparison — exactly the design Francisco's merge-back concern requires:
 
 1. **Current value already equals `corrected`** (upstream fixed it our way, *or* this is a second normalizer pass over already-corrected output) → **no-op**, recorded as `info` `CORRECTION_SUPERSEDED`. No double-correction is possible because the pass never fires when the value is already right.
 2. **Current value equals `expected`** → **apply** the correction (`changes_applied`, audited with field, target, `expected → corrected`, class, and rationale).
@@ -104,3 +103,20 @@ The NonCommercial ABC corpus (ADR-009 §2) remains excluded from the public API;
 **Apply corrections in `scripts/prepare_dcml_corpus.py` (corpus-prep) rather than the normalizer.** Rejected. Corpus-prep needs the `.mscx` and the `mscore` toolchain; the normalizer operates on MEI alone and re-runs from the retained original (ADR-014) without any external tool. Putting Pass 0 in the normalizer means a correction can be added and re-applied by re-ingesting from `originals/`, with no MuseScore round-trip — the same property that makes passes 8–10 live there.
 
 **A free-text correction note per movement.** Rejected. Unstructured notes cannot be applied mechanically, cannot be pre-state-checked for merge-back safety, and cannot be filtered into a PR backlog. The structured record is what makes the mechanism idempotent and upstream-ready.
+
+---
+
+## Amendment (2026-07-01) — locator changed from `xml:id` to coordinates
+
+*Decision taken with Francisco after the 2026-07-01 re-ingest.*
+
+The original locator was `target.xml_id` (with a free-text `target.fallback` that was never resolved mechanically), made reproducible across re-preps by ADR-030's `xmlIdChecksum`. The first live re-ingest after that scheme shipped exposed its flaw: **every one of the three overlay entries logged `CORRECTION_TARGET_MISSING`** even though the music was unchanged. Investigation showed Verovio's checksum ids are deterministic *run-to-run* (two back-to-back preps produced byte-identical `.mxl` and identical ids), but they are **reassigned by any change to the toolchain or the prep code** — so a pinned id silently stops resolving with no source change and no warning until ingest. The `xml:id` is the wrong kind of locator: it is an artefact of the conversion, not of the music.
+
+**Decision.** Locate corrections by **coordinates** that are invariant under a re-encode of the same music:
+
+- **Measure-level** field (`repeat-start`/`repeat-end`): `target.mc` — the 1-based document-order measure index (DCML `mc` / Verovio position index, ADR-015). `mc` is unique and stable by construction; it is already the machine coordinate for fragments.
+- **Note-level** field (`accid`/`accid.ges`): `mc` + `staff` (`<staff @n>`) + optional `layer` (`<layer @n>`; omitted searches all layers) + `pname` + `oct`, disambiguated by `occurrence` (the 1-based Nth note matching `(pname, oct)` in that scope, document order). `target.note` is an optional human description (advisory).
+
+Pass 0 resolves these directly against the MEI (`_resolve_correction_target`): the `<measure>` at index `mc`, or the `occurrence`-th matching `<note>` within `(mc, staff, layer)`. A field whose note/measure shape disagrees with the target's coordinates (e.g. an `accid` field with no pitch) is flagged `CORRECTION_TARGET_MISMATCH`. Everything else in this ADR — the three-way pre-state check, idempotence, merge-back, the errata/PR backlog — is unchanged; only *how the element is found* changed.
+
+**Consequence for ADR-030.** `xmlIdChecksum` is no longer load-bearing for the overlay (it may stay for general id reproducibility). ADR-030 is amended to record that its premise — "deterministic ids make the `xml:id` locator stable" — held only within a fixed toolchain, which is why the locator moved to coordinates.

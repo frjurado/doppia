@@ -93,7 +93,7 @@ import re
 from dataclasses import dataclass
 
 import lxml.etree
-from models.corrections import Correction
+from models.corrections import Correction, CorrectionTarget
 from models.normalization import NormalizationIssue, NormalizationReport
 
 # ---------------------------------------------------------------------------
@@ -213,22 +213,82 @@ class _FieldOp:
         attr: The attribute name to read/write.
         create_child: When the attribute lives on a ``child`` that is absent and
             a non-``None`` value is being written, create the child element.
+        on_note: ``True`` when the field edits a ``<note>`` (so the target must
+            carry pitch coordinates); ``False`` when it edits a ``<measure>``.
     """
 
     child: str | None
     attr: str
     create_child: bool
+    on_note: bool
 
 
 # The supported correction ``field`` vocabulary (ADR-027 §3).  Adding a new
 # field type is the only change that touches normalizer code; the corrections
 # themselves are pure data.
 _FIELD_OPS: dict[str, _FieldOp] = {
-    "accid": _FieldOp(child="accid", attr="accid", create_child=True),
-    "accid.ges": _FieldOp(child="accid", attr="accid.ges", create_child=True),
-    "repeat-start": _FieldOp(child=None, attr="left", create_child=False),
-    "repeat-end": _FieldOp(child=None, attr="right", create_child=False),
+    "accid": _FieldOp(child="accid", attr="accid", create_child=True, on_note=True),
+    "accid.ges": _FieldOp(
+        child="accid", attr="accid.ges", create_child=True, on_note=True
+    ),
+    "repeat-start": _FieldOp(
+        child=None, attr="left", create_child=False, on_note=False
+    ),
+    "repeat-end": _FieldOp(child=None, attr="right", create_child=False, on_note=False),
 }
+
+
+def _target_desc(target: CorrectionTarget) -> str:
+    """Return a compact human description of a coordinate target for messages."""
+    if target.pname is None:
+        return f"mc={target.mc}"
+    return (
+        f"mc={target.mc} staff={target.staff} layer={target.layer} "
+        f"{target.pname}{target.oct} #{target.occurrence}"
+    )
+
+
+def _resolve_correction_target(
+    root: lxml.etree._Element, target: CorrectionTarget
+) -> lxml.etree._Element | None:
+    """Resolve a coordinate :class:`CorrectionTarget` to its MEI element.
+
+    A target with no ``pname`` is measure-level: the ``<measure>`` at
+    document-order index ``mc`` (ADR-015).  A target with pitch coordinates is
+    note-level: within that measure's ``<staff n=…>`` (and ``<layer n=…>`` when
+    given), the ``occurrence``-th ``<note>`` matching ``(pname, oct)`` in document
+    order.
+
+    Args:
+        root: The MEI document root element.
+        target: The coordinate locator.
+
+    Returns:
+        The located ``<measure>`` or ``<note>`` element, or ``None`` when the
+        coordinates do not resolve (out-of-range ``mc``, missing staff, or fewer
+        than ``occurrence`` matching notes).
+    """
+    measures = root.findall(f".//{{{_MEI_NS}}}measure")
+    if not 1 <= target.mc <= len(measures):
+        return None
+    measure = measures[target.mc - 1]
+    if target.pname is None:
+        return measure
+    staff = measure.find(f"{{{_MEI_NS}}}staff[@n='{target.staff}']")
+    if staff is None:
+        return None
+    layers = staff.findall(f"{{{_MEI_NS}}}layer")
+    if target.layer is not None:
+        layers = [ly for ly in layers if ly.get("n") == str(target.layer)]
+    matches = [
+        note
+        for layer in layers
+        for note in layer.iter(f"{{{_MEI_NS}}}note")
+        if note.get("pname") == target.pname and note.get("oct") == str(target.oct)
+    ]
+    if len(matches) >= target.occurrence:
+        return matches[target.occurrence - 1]
+    return None
 
 
 def _read_field_value(target: lxml.etree._Element, op: _FieldOp) -> str | None:
@@ -286,8 +346,10 @@ def _apply_corrections_overlay(
     """Pass 0 — Apply the per-movement source-corrections overlay (ADR-027).
 
     Runs *before* the structural passes so they see corrected data.  For each
-    correction the target element is located by ``xml:id`` and the current value
-    of the corrected attribute is compared three ways:
+    correction the target element is located by its **coordinates** (ADR-015
+    ``mc`` + voice/pitch, stable across a re-encode — not by ``xml:id``, which the
+    toolchain reassigns) and the current value of the corrected attribute is
+    compared three ways:
 
     1. Already equals ``corrected`` → no-op, recorded as ``info``
        (``CORRECTION_SUPERSEDED``).  This is what makes the pass idempotent and
@@ -296,8 +358,9 @@ def _apply_corrections_overlay(
     3. Neither → skipped and flagged ``warning`` (``CORRECTION_PRESTATE_MISMATCH``)
        so a human decides whether to retire or re-target the entry.
 
-    A missing target or an unrecognised ``field`` is likewise flagged rather than
-    silently ignored.
+    A target that does not resolve, an unrecognised ``field``, or a field whose
+    note/measure shape disagrees with the target's coordinates is likewise
+    flagged rather than silently ignored.
 
     Args:
         root: Document root element.
@@ -310,40 +373,47 @@ def _apply_corrections_overlay(
     if not corrections:
         return
 
-    by_id: dict[str, lxml.etree._Element] = {}
-    for elem in root.iter():
-        if not isinstance(elem.tag, str):
-            continue
-        eid = elem.get(_XML_ID_KEY)
-        if eid:
-            by_id[eid] = elem
-
     for c in corrections:
+        desc = _target_desc(c.target)
         op = _FIELD_OPS.get(c.field)
         if op is None:
             warnings.append(
                 NormalizationIssue(
                     code="CORRECTION_UNKNOWN_FIELD",
                     message=(
-                        f"Correction for {c.movement} target "
-                        f"{c.target.xml_id!r} uses unsupported field "
-                        f"{c.field!r}; left unapplied."
+                        f"Correction for {c.movement} target {desc} uses "
+                        f"unsupported field {c.field!r}; left unapplied."
                     ),
                     severity="warning",
                 )
             )
             continue
 
-        target = by_id.get(c.target.xml_id)
+        if op.on_note != (c.target.pname is not None):
+            warnings.append(
+                NormalizationIssue(
+                    code="CORRECTION_TARGET_MISMATCH",
+                    message=(
+                        f"Correction for {c.movement} field {c.field!r} ({desc}): "
+                        f"field is {'note' if op.on_note else 'measure'}-level but "
+                        f"the target {'lacks' if op.on_note else 'carries'} pitch "
+                        f"coordinates; left unapplied."
+                    ),
+                    severity="warning",
+                )
+            )
+            continue
+
+        target = _resolve_correction_target(root, c.target)
         if target is None:
             warnings.append(
                 NormalizationIssue(
                     code="CORRECTION_TARGET_MISSING",
                     message=(
                         f"Correction for {c.movement} field {c.field!r}: target "
-                        f"xml:id={c.target.xml_id!r} not found (fallback: "
-                        f"{c.target.fallback!r}); the location may have drifted "
-                        f"after an upstream re-encode. Needs review."
+                        f"{desc} did not resolve"
+                        f"{f' ({c.target.note})' if c.target.note else ''}; the "
+                        f"music may have changed. Needs review."
                     ),
                     severity="warning",
                 )
@@ -359,10 +429,10 @@ def _apply_corrections_overlay(
                 NormalizationIssue(
                     code="CORRECTION_SUPERSEDED",
                     message=(
-                        f"Correction for {c.movement} field {c.field!r} on "
-                        f"{c.target.xml_id!r} is already satisfied "
-                        f"(value={c.corrected!r}); no-op. If the source now holds "
-                        f"this value, set upstream: merged and retire the entry."
+                        f"Correction for {c.movement} field {c.field!r} on {desc} "
+                        f"is already satisfied (value={c.corrected!r}); no-op. If "
+                        f"the source now holds this value, set upstream: merged and "
+                        f"retire the entry."
                     ),
                     severity="info",
                 )
@@ -374,10 +444,10 @@ def _apply_corrections_overlay(
                 NormalizationIssue(
                     code="CORRECTION_PRESTATE_MISMATCH",
                     message=(
-                        f"Correction for {c.movement} field {c.field!r} on "
-                        f"{c.target.xml_id!r}: expected pre-state "
-                        f"{c.expected!r} but found {current!r}; left unapplied. "
-                        f"Upstream may have changed this differently. Needs review."
+                        f"Correction for {c.movement} field {c.field!r} on {desc}: "
+                        f"expected pre-state {c.expected!r} but found {current!r}; "
+                        f"left unapplied. Upstream may have changed this "
+                        f"differently. Needs review."
                     ),
                     severity="warning",
                 )
@@ -386,7 +456,7 @@ def _apply_corrections_overlay(
 
         _write_field_value(target, op, c.corrected)
         changes_applied.append(
-            f"[{c.correction_class}] Corrected {c.field} on {c.target.xml_id!r} "
+            f"[{c.correction_class}] Corrected {c.field} on {desc} "
             f"({c.movement}): {c.expected!r} -> {c.corrected!r}. {c.rationale}"
         )
 

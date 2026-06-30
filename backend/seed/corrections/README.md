@@ -32,9 +32,10 @@ composer: mozart                       # informational; the filename is authorit
 corpus: piano-sonatas                  # the corpus slug (matches the filename + object keys)
 corrections:
   - movement: k331/movement-2          # {work_slug}/{movement_slug} — the scope key
-    target:
-      xml_id: m1a2b3c4                  # xml:id of the affected <note> or <measure>
-      fallback: "mc=49 staff=2 layer=1 (trio start)"   # advisory only, never resolved
+    target:                            # COORDINATE locator (stable across re-encodes)
+      mc: 65                           # document-order measure index (ADR-015) — the only field a measure target needs
+      # for a NOTE target add: staff, (layer,) pname, oct, (occurrence)
+      note: "Trio second strain, first measure"   # advisory description
     field: repeat-start                # one of: accid, accid.ges, repeat-start, repeat-end
     expected: null                     # current (wrong) value; null = attribute absent
     corrected: rptstart                # value to write; null = remove the attribute
@@ -45,13 +46,30 @@ corrections:
     added: "2026-06-28 Francisco"
 ```
 
+A **note**-level correction (e.g. an accidental) adds the voice/pitch coordinates:
+
+```yaml
+    target:
+      mc: 24                           # measure (document order)
+      staff: 1                         # <staff @n>
+      layer: 1                         # <layer @n> (optional; omitted = search all layers)
+      pname: c                         # pitch name a–g
+      oct: 5                           # octave
+      occurrence: 3                    # 1-based Nth note matching (pname, oct) in that (mc, staff, layer); default 1
+      note: "beat-4 C5 (3rd of four C5s)"
+    field: accid
+```
+
 ### Fields
 
 | Field | Meaning |
 |---|---|
 | `movement` | `{work_slug}/{movement_slug}`; the loader filters on this. |
-| `target.xml_id` | Authoritative locator — the MEI `xml:id` of the element. Stable per movement. |
-| `target.fallback` | Human-readable `(mc, staff, layer, beat, pname, oct)`; used by a reviewer when an `xml_id` drifts. Never resolved mechanically. |
+| `target.mc` | **Locator** — the 1-based document-order measure index (DCML `mc` / Verovio position index, ADR-015). The *only* field a measure-level target (`repeat-start`/`repeat-end`) needs. Stable across a re-encode of the same music. |
+| `target.staff` / `layer` | For a note target: the `<staff>`/`<layer>` `@n`. `layer` is optional (omitted = search every layer of the staff in document order). |
+| `target.pname` / `oct` | For a note target: pitch name (`a`–`g`) + octave. Their presence marks the target as note-level. |
+| `target.occurrence` | For a note target: the 1-based Nth note matching `(pname, oct)` in the located `(mc, staff, layer)`, document order. Defaults to `1`. |
+| `target.note` | Optional human-readable description of the spot (advisory only). |
 | `field` | What is corrected. Supported: `accid`/`accid.ges` (on the note's `<accid>` child), `repeat-start`/`repeat-end` (the measure's `@left`/`@right`). |
 | `expected` | The current **wrong** value (pre-state). `null` = attribute currently absent. Load-bearing: the correction only fires when the element still holds this. |
 | `corrected` | The value to write. `null` = remove the attribute. Must differ from `expected`. |
@@ -69,10 +87,17 @@ corrections:
   corrected printed accidental, so the MIDI follows the print automatically
   (ADR-028). Keeping it one entry also keeps the `errata` set a clean upstream-PR
   backlog.
-- **`xml:id` stability:** the locator works because corpus-prep generates ids
-  deterministically from each movement's input (`xmlIdChecksum`, ADR-030). Read
-  the `xml_id` from the prepped MEI for the exact `source_sha` you pin; it is
-  reproducible across re-preps as long as that source `.mscx` is unchanged.
+- **Why coordinates, not `xml:id`:** an earlier version located targets by
+  `xml:id` (made reproducible per-prep by `xmlIdChecksum`, ADR-030). Verovio's
+  ids are deterministic *run-to-run*, but they are reassigned by any change to
+  the toolchain or the prep — so a pinned id silently stops resolving with no
+  data change (every entry logged `CORRECTION_TARGET_MISSING` at the 2026-07-01
+  re-ingest). `mc` + voice/pitch coordinates are invariant under a re-encode of
+  the same music, so the overlay survives. Read the coordinates from the prepped
+  MEI (or the DCML score) for the `source_sha` you pin.
+- **Counting `occurrence`:** for a note target, count the matching `(pname, oct)`
+  notes in the located `(mc, staff, layer)` in document (time) order; the entry
+  resolves to the Nth. Naming the `layer` makes the count unambiguous.
 
 ## Merge-back / idempotence
 

@@ -18,8 +18,8 @@ Overlay file shape::
     corrections:
       - movement: k331/movement-2     # {work_slug}/{movement_slug}
         target:
-          xml_id: m1a2b3c4
-          fallback: "mc=49 staff=2 layer=1 (trio start)"
+          mc: 65                      # document-order measure index (ADR-015)
+          note: "Trio second strain (a measure-level target needs only mc)"
         field: repeat-start
         expected: null                # attribute currently absent
         corrected: rptstart

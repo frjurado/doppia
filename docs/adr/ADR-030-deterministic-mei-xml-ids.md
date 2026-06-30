@@ -1,8 +1,8 @@
 # ADR-030 — Deterministic MEI `xml:id`s (corpus-prep checksum seeding)
 
 **Date:** 2026-06-29
-**Status:** Accepted — implemented
-**Related:** ADR-027 (corrections overlay, Pass 0 — depends on this), ADR-014 (original MEI retention), ADR-009 (DCML licensing), ADR-015 (dual measure coordinate system)
+**Status:** Accepted — implemented; **superseded as the overlay locator (2026-07-01, see amendment)**
+**Related:** ADR-027 (corrections overlay, Pass 0 — no longer depends on this for its locator), ADR-014 (original MEI retention), ADR-009 (DCML licensing), ADR-015 (dual measure coordinate system)
 
 ---
 
@@ -114,4 +114,36 @@ makes any future re-prep silently disarm the overlay. Rejected as fragile.
 **Post-process the MEI to assign content-stable ids ourselves** (e.g. hash of
 `(mc, staff, layer, beat, pname, oct)`). Reinvents what Verovio already offers,
 and would have to be kept consistent with every id Verovio emits. Rejected;
-`xmlIdChecksum` is the built-in, supported mechanism.
+`xmlIdChecksum` is the built-in, supported mechanism. *(2026-07-01: the
+**resolution-time** version of this idea — locate the target by
+`(mc, staff, layer, pname, oct, occurrence)` directly, never assigning our own
+ids — is what the overlay ultimately adopted; see the amendment.)*
+
+---
+
+## Amendment (2026-07-01) — superseded as the corrections-overlay locator
+
+The first live re-ingest after this ADR shipped (2026-07-01) found **all three**
+overlay entries logging `CORRECTION_TARGET_MISSING`, with the authored ids absent
+from the freshly-prepped MEI — despite the music being unchanged.
+
+Re-measuring confirmed this ADR's core finding still holds: two back-to-back
+preps **today** produce byte-identical `.mxl` and **identical** `xmlIdChecksum`
+ids (deterministic run-to-run). But the ids authored on 2026-06-29 no longer
+matched the 2026-07-01 prep — i.e. the ids are stable *within a fixed toolchain*
+but are reassigned by a change to the toolchain or prep between authoring and
+re-ingest, silently and with no source change. The flaw is structural: an
+`xml:id` is an artefact of the conversion, not of the music, so it is the wrong
+thing to pin a long-lived correction to.
+
+**The overlay locator moved to coordinates** — `mc` + `(staff, layer, pname,
+oct, occurrence)` — which are invariant under a re-encode of the same music (the
+resolution-time form of the "content-stable ids" alternative above). See the
+**ADR-027 amendment (2026-07-01)** for the locator design.
+
+`xmlIdChecksum` itself is **kept** in `convert_mxl_to_mei`: deterministic ids
+still make the prep output diffable and are harmless. It is simply no longer
+load-bearing — nothing now depends on a prep-to-prep id matching an
+externally-pinned value. This ADR's one-time corpus renumber and its
+"Consequences" stand as history; only the claim that the ids are a durable
+*locator* is retracted.
