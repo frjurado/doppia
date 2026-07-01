@@ -207,7 +207,7 @@ def test_seed_overlay_entries_validate() -> None:
     # passes (``metadata.corpus.slug``) — so this test exercises the same file
     # the live ingest resolves, guarding the overlay filename against drift.
     movements = [
-        ("k331", "movement-2"),
+        ("k331", "movement-2"),  # C2 repeat erratum retired (ADR-033); 0 entries now
         ("k332", "movement-2"),
         ("k279", "movement-2"),
     ]
@@ -222,4 +222,6 @@ def test_seed_overlay_entries_validate() -> None:
             assert c.expected != c.corrected  # not a no-op
             assert c.correction_class in ("errata", "editorial")
             assert c.source_sha  # pinned to a DCML commit
-    assert total >= 3, "expected the first C2 + B3 errata to be present"
+    # The K331/ii C2 repeat erratum moved pre-import (ADR-033); the two B3
+    # accidental errata (K332/ii, K279/ii) remain in the overlay.
+    assert total >= 2, "expected the two B3 accidental errata to be present"

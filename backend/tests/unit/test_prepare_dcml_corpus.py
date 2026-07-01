@@ -1109,3 +1109,108 @@ class TestRestoreMeasureNumbers:
         root = lxml.etree.fromstring(restored)
         numbers = [m.get("n") for m in root.findall(f".//{{{_MEI_NS}}}measure")]
         assert numbers == originals
+
+
+# ---------------------------------------------------------------------------
+# TestRepairSectionOpeningRepeats (ADR-033)
+# ---------------------------------------------------------------------------
+
+
+def _mxml_measure(num: int, *, forward: bool = False, backward: bool = False) -> str:
+    """One score-partwise <measure>, optionally with an opening/closing repeat."""
+    parts = [f'<measure number="{num}">']
+    if forward:
+        parts.append(
+            '<barline location="left"><bar-style>heavy-light</bar-style>'
+            '<repeat direction="forward"/></barline>'
+        )
+    parts.append("<note><rest/><duration>4</duration></note>")
+    if backward:
+        parts.append(
+            '<barline location="right"><bar-style>light-heavy</bar-style>'
+            '<repeat direction="backward"/></barline>'
+        )
+    parts.append("</measure>")
+    return "".join(parts)
+
+
+# Minuet+trio-shaped repeat structure: strain A (m1-2, first strain — implicit
+# opening repeat), strain B (m3-4, explicit |: at m3), strain C (m5-6, closes
+# with :| but has no |: — the omission a section restart produces).
+_MXML_STRAINS = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<score-partwise version="3.1"><part id="P1">'
+    + _mxml_measure(1)
+    + _mxml_measure(2, backward=True)
+    + _mxml_measure(3, forward=True)
+    + _mxml_measure(4, backward=True)
+    + _mxml_measure(5)
+    + _mxml_measure(6, backward=True)
+    + "</part></score-partwise>"
+).encode("utf-8")
+
+
+def _left_forward_indices(xml_bytes: bytes, part_id: str = "P1") -> list[int]:
+    root = lxml.etree.fromstring(xml_bytes)
+    part = root.find(f"part[@id='{part_id}']")
+    out = []
+    for i, m in enumerate(part.findall("measure"), 1):
+        if pdc._left_forward_repeat(m) is not None:
+            out.append(i)
+    return out
+
+
+class TestRepairSectionOpeningRepeats:
+    """repair_section_opening_repeats supplies strain-opening repeats the source omits."""
+
+    def test_needed_indices_flags_only_unpaired_non_first_strain(self) -> None:
+        root = lxml.etree.fromstring(_MXML_STRAINS)
+        measures = root.find("part[@id='P1']").findall("measure")
+        # strain A (m1-2) is exempt (first strain); B (m3-4) is paired; C (m5-6)
+        # closes with :| but has no |: -> its opening m5 is flagged.
+        assert pdc._strain_opening_repeats_needed(measures) == [5]
+
+    def test_first_strain_is_exempt(self) -> None:
+        # Only a first strain that closes with :| — opens at the movement start,
+        # implicit opening repeat, so nothing is flagged.
+        root = lxml.etree.fromstring(
+            b'<?xml version="1.0"?><score-partwise><part id="P1">'
+            + _mxml_measure(1).encode()
+            + _mxml_measure(2, backward=True).encode()
+            + b"</part></score-partwise>"
+        )
+        assert (
+            pdc._strain_opening_repeats_needed(root.find("part").findall("measure"))
+            == []
+        )
+
+    def test_injects_opening_repeat_and_renders(self, tmp_path: Path) -> None:
+        mxl = _build_mxl(tmp_path, _MXML_STRAINS)
+        out_path, injected = pdc.repair_section_opening_repeats(mxl, tmp_path)
+        assert injected == [5]
+        assert out_path != mxl
+        with zipfile.ZipFile(out_path) as z:
+            score = z.read("score.xml")
+        # m5 now carries an opening |:, cloned from the existing one at m3.
+        assert _left_forward_indices(score) == [3, 5]
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        mxl = _build_mxl(tmp_path, _MXML_STRAINS)
+        once, _ = pdc.repair_section_opening_repeats(mxl, tmp_path)
+        twice, injected = pdc.repair_section_opening_repeats(once, tmp_path)
+        assert injected == []
+        assert twice == once
+
+    def test_noop_when_all_strains_paired(self, tmp_path: Path) -> None:
+        paired = (
+            b'<?xml version="1.0"?><score-partwise><part id="P1">'
+            + _mxml_measure(1).encode()
+            + _mxml_measure(2, backward=True).encode()  # first strain, exempt
+            + _mxml_measure(3, forward=True).encode()
+            + _mxml_measure(4, backward=True).encode()  # paired
+            + b"</part></score-partwise>"
+        )
+        mxl = _build_mxl(tmp_path, paired)
+        out_path, injected = pdc.repair_section_opening_repeats(mxl, tmp_path)
+        assert injected == []
+        assert out_path == mxl

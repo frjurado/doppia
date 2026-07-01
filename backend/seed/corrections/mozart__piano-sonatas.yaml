@@ -18,36 +18,15 @@
 composer: mozart
 corpus: piano-sonatas
 corrections:
-  # --- C2: K331/ii Menuetto — Trio, missing second-strain start-repeat -------
-  # The Trio is a rounded binary with both strains repeated. Its second strain
-  # (mc65–100) ends with a repeat barline (mc100 carries :|, MEI right="rptend")
-  # but the DCML/MuseScore source encodes no start-repeat (|:) at its opening
-  # (mc65), so playback's repeat expansion jumps past the strain boundary back
-  # to the previous |: (the Menuetto's, mc19) instead of repeating the Trio's
-  # second strain. The NMA prints |: at the start of the Trio's second strain.
-  #
-  # The Trio's *first* strain (mc49) is deliberately NOT corrected: editions
-  # (NMA included) print no |: there — the Trio opens a new section, so its
-  # opening repeat is implicit. Only the second-strain omission is an erratum.
-  # (How Verovio expands the first strain's repeat without an explicit |: is a
-  # separate rendering question, not a source error — it stays out of the overlay.)
-  - movement: k331/movement-2
-    target:
-      mc: 65
-      note: "Trio second strain, first measure (its closing :| is at mc100)"
-    field: repeat-start
-    expected: null
-    corrected: rptstart
-    rationale: >-
-      DCML/MuseScore omits the start-repeat at the Trio's second strain (mc65),
-      though the strain is repeated (closing :| at mc100). The NMA prints |: at
-      the start of the Trio's second strain. Without it, repeat expansion jumps
-      back to the Menuetto's |: (mc19). The Trio's first-strain opening is left
-      uncorrected: editions print no |: there (implicit at the new section).
-    class: errata
-    upstream: none
-    source_sha: 5337257a5318711e6302cfe85c3f1a6ade3c6271
-    added: "2026-06-29 Francisco"
+  # --- C2 (RETIRED 2026-07-01, ADR-033): K331/ii Trio strain-opening repeats ---
+  # The K331/ii Trio's two strains close with :| (mc64, mc100) but the source
+  # omits their opening |: (mc49, mc65). A post-import overlay erratum used to
+  # add |: at mc65, but it could NOT fix playback: Verovio freezes the MIDI
+  # <expansion> at MusicXML-import time, so a later MEI edit leaves the wrong
+  # expansion in place. The fix moved PRE-import — prepare_dcml_corpus.py's
+  # repair_section_opening_repeats supplies both strain-opening |: before the
+  # import, so the expansion is generated correctly (ADR-033). Both mc49 and
+  # mc65 get the explicit |: (Francisco 2026-07-01), superseding this entry.
 
   # --- B3: K332/ii m24 — spurious C# (should be C natural) ------------------
   # m24 is a cadential bar (V65–I–V64–V/HC in B-flat). The treble 16th-note

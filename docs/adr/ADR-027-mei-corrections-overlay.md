@@ -11,7 +11,7 @@
 The Component 9 staging read-through (`docs/reports/component-9-reports/staging-readthrough-issues.md`) surfaced a class of defect that is **not** a normalizer or rendering bug: the *source data itself is wrong*. Two confirmed instances:
 
 - **B3 — source accidental errata.** Notes whose alteration is wrong in the DCML/MuseScore source relative to a reference edition (e.g. K. 279/ii mm. 51–52, where the edition DCML cites has an explicit flat that MuseScore omits; K. 332/ii m. 24; K. 332/iii mm. 22/27/232/237 a B♭ played natural).
-- **C2 — missing trio start-repeat.** K. 331/ii's trio has no `|:` start-repeat in the source (a DCML encoding error), so playback's repeat expansion jumps back to the minuet's `|:`.
+- **C2 — missing trio start-repeat.** K. 331/ii's trio has no `|:` start-repeat in the source (a DCML encoding error), so playback's repeat expansion jumps back to the minuet's `|:`. *(Superseded 2026-07-01 by ADR-033: a post-import overlay edit cannot fix this because Verovio freezes the MIDI `<expansion>` at import time; the repair moved pre-import into `prepare_dcml_corpus.py` and the C2 overlay entry was retired. The `repeat-start`/`repeat-end` field ops remain for any purely-visual repeat erratum.)*
 
 Francisco raised the meta-question twice: *how should the project deal with mistakes in the source data?* Silent hand-edits are unacceptable — they violate ADR-014 (the original must stay byte-identical and re-processable), they are invisible to reviewers, and they cannot be reconciled against upstream when the DCML repository is updated.
 

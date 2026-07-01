@@ -10,10 +10,13 @@ Pipeline (per movement):
 3. Renumber the ``.mxl`` measures uniquely for the import when the movement
    restarts its numbering at a section break, restoring the true ``@n`` after
    import so Verovio's number-keyed importer does not mis-route clefs (ADR-032).
-4. Convert ``.mxl`` → ``.mei`` via ``verovio`` CLI.
-5. Re-insert measure-start clef changes MuseScore drops from its export (ADR-031).
-6. Run ``validate_mei()`` on the emitted MEI; abort on any hard error.
-7. Locate the matching ``harmonies/*.tsv``.
+4. Supply strain-opening repeats the source omits so Verovio's playback
+   ``<expansion>`` pairs each ``:|`` with its own ``|:`` (ADR-033).  Scoped for
+   now to section-restart (renumbered) movements — reaches only K331/ii.
+5. Convert ``.mxl`` → ``.mei`` via ``verovio`` CLI.
+6. Re-insert measure-start clef changes MuseScore drops from its export (ADR-031).
+7. Run ``validate_mei()`` on the emitted MEI; abort on any hard error.
+8. Locate the matching ``harmonies/*.tsv``.
 
 Outputs a ZIP with the following structure::
 
@@ -489,6 +492,150 @@ def renumber_mxl_for_import(
                 zout.writestr(item, data)
 
     return out_path, original_numbers
+
+
+def _left_forward_repeat(measure: lxml.etree._Element) -> lxml.etree._Element | None:
+    """Return *measure*'s left forward-repeat ``<barline>`` (an opening ``|:``), or None."""
+    for barline in measure.findall("barline"):
+        if barline.get("location") == "left" and any(
+            rep.get("direction") == "forward" for rep in barline.findall("repeat")
+        ):
+            return barline
+    return None
+
+
+def _has_backward_repeat(measure: lxml.etree._Element) -> bool:
+    """Return whether *measure* carries a backward-repeat (a closing ``:|``)."""
+    return any(
+        rep.get("direction") == "backward"
+        for barline in measure.findall("barline")
+        for rep in barline.findall("repeat")
+    )
+
+
+def _strain_opening_repeats_needed(measures: list[lxml.etree._Element]) -> list[int]:
+    """Return the 1-based indices of strain openings missing their forward-repeat.
+
+    A *strain* is a run of measures that closes with a backward-repeat (``:|``).
+    A strain that closes with ``:|`` but carries no forward-repeat (``|:``)
+    anywhere within it is missing its opening repeat — the case a section-restart
+    minuet/trio produces, where the DCML/MuseScore source omits the trio strains'
+    opening ``|:`` (K331/ii mc49, mc65).  The very first strain is exempt: it
+    opens at the movement start, whose opening repeat is implicit (the ``:|``
+    repeats back to bar 1), so no glyph belongs there — exactly why the Menuetto's
+    first strain must *not* get one while the trio's strains must.
+
+    Args:
+        measures: A part's ``<measure>`` elements in document order.
+
+    Returns:
+        The 1-based document-order indices at which to inject an opening ``|:``.
+    """
+    needed: list[int] = []
+    strain_start = 1  # 1-based document-order index of the current strain's first bar
+    for index, measure in enumerate(measures, start=1):
+        if _has_backward_repeat(measure):
+            scope = measures[strain_start - 1 : index]
+            if strain_start != 1 and not any(
+                _left_forward_repeat(m) is not None for m in scope
+            ):
+                needed.append(strain_start)
+            strain_start = index + 1
+    return needed
+
+
+def repair_section_opening_repeats(
+    mxl_path: Path, tmpdir: Path
+) -> tuple[Path, list[int]]:
+    """Inject the strain-opening repeats a section-restart source omits (ADR-033).
+
+    Verovio builds the MIDI playback ``<expansion>`` at MusicXML-import time by
+    pairing each backward-repeat (``:|``) with the most recent forward-repeat
+    (``|:``).  When a trio strain closes with ``:|`` but its opening ``|:`` is
+    absent (the DCML/MuseScore convention for a section that restarts), Verovio
+    pairs the close with the *previous section's* ``|:`` — so the trio's repeat
+    replays the end of the minuet instead (K331/ii: both trio repeats jump back to
+    the Menuetto's bar 19).  This supplies the missing opening ``|:`` **before the
+    import**, so the generated expansion is correct.  It must run pre-import: a
+    post-import MEI edit (the earlier C2 overlay erratum) cannot help because the
+    expansion is already frozen (ADR-033 supersedes that erratum).
+
+    The injected barline is cloned from an existing forward-repeat in the score so
+    its bar-style matches.  The rendered ``|:`` is an accepted minor engraving
+    deviation (the NMA leaves the trio's first opening repeat implicit; Francisco
+    chose the explicit glyph on 2026-07-01 as the simplest, most replicable fix).
+    Injecting a barline changes neither measure count nor document order, so ``mc``
+    is unaffected (ADR-015).
+
+    Args:
+        mxl_path: The ``.mxl`` (typically already renumbered for import).
+        tmpdir: Temporary directory for the rewritten ``.mxl``.
+
+    Returns:
+        ``(mxl_to_import, injected_indices)``: a rewritten ``.mxl`` and the 1-based
+        document-order measure indices that received an opening ``|:``, or
+        ``(mxl_path, [])`` when nothing needed repair.
+    """
+    import copy
+    import io
+
+    import lxml.etree
+
+    with zipfile.ZipFile(mxl_path) as zin:
+        container = lxml.etree.fromstring(zin.read("META-INF/container.xml"))
+        rootfile = container.find(".//{*}rootfile")
+        score_name = rootfile.get("full-path") if rootfile is not None else None
+        if not score_name:
+            return mxl_path, []
+
+        parser = lxml.etree.XMLParser(resolve_entities=False, no_network=True)
+        tree = lxml.etree.parse(io.BytesIO(zin.read(score_name)), parser)
+        root = tree.getroot()
+        parts = root.findall("part")
+        if not parts:
+            return mxl_path, []
+
+        indices = _strain_opening_repeats_needed(parts[0].findall("measure"))
+        if not indices:
+            return mxl_path, []
+
+        # Clone an existing forward-repeat barline so bar-style/attributes match;
+        # fall back to a minimal heavy-light opening repeat if the score has none.
+        template = next(
+            (
+                bl
+                for m in parts[0].findall("measure")
+                if (bl := _left_forward_repeat(m)) is not None
+            ),
+            None,
+        )
+        for part in parts:
+            measures = part.findall("measure")
+            for index in indices:
+                measure = measures[index - 1]
+                if _left_forward_repeat(measure) is not None:
+                    continue  # idempotent: already carries an opening repeat
+                if template is not None:
+                    barline = copy.deepcopy(template)
+                else:
+                    barline = lxml.etree.SubElement(measure, "barline")
+                    barline.set("location", "left")
+                    lxml.etree.SubElement(barline, "bar-style").text = "heavy-light"
+                    lxml.etree.SubElement(barline, "repeat").set("direction", "forward")
+                    measure.remove(barline)
+                measure.insert(0, barline)
+
+        doctype = tree.docinfo.doctype or None
+        new_score = lxml.etree.tostring(
+            tree, xml_declaration=True, encoding="UTF-8", doctype=doctype
+        )
+        out_path = tmpdir / (mxl_path.stem + ".repeats.mxl")
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = new_score if item.filename == score_name else zin.read(item)
+                zout.writestr(item, data)
+
+    return out_path, indices
 
 
 def restore_measure_numbers(mei_bytes: bytes, original_numbers: list[str]) -> bytes:
@@ -1141,6 +1288,20 @@ def main() -> None:
                 _log(
                     f"  {label}: renumbered {len(original_numbers)} measures for import"
                 )
+
+                # Supply strain-opening repeats the source omits so Verovio's
+                # playback expansion pairs each trio :| with its own |: (ADR-033).
+                # Scoped for now to section-restart (renumbered) movements — this
+                # reaches only K331/ii; the same omission in single-section
+                # movements is deferred pending a render review (ADR-033).
+                mxl_path, repeat_fixes = repair_section_opening_repeats(
+                    mxl_path, tmpdir
+                )
+                if repeat_fixes:
+                    _log(
+                        f"  {label}: injected opening repeat(s) at measure(s) "
+                        f"{repeat_fixes} for correct playback expansion"
+                    )
 
             try:
                 mei_bytes = convert_mxl_to_mei(mxl_path, tmpdir)

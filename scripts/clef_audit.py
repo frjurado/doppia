@@ -256,6 +256,10 @@ def run_clef_pipeline(
         # (K331/ii minuet+trio) is audited in its ingested state, not with the
         # importer's mis-routed clefs (ADR-032).
         mxl, original_numbers = pdc.renumber_mxl_for_import(mxl, tmp)
+        if original_numbers is not None:
+            # Strain-opening repeat repair is scoped to section-restart movements
+            # (ADR-033), matching the prep pipeline's gating.
+            mxl, _ = pdc.repair_section_opening_repeats(mxl, tmp)
         mei = pdc.convert_mxl_to_mei(mxl, tmp)
         if original_numbers is not None:
             mei = pdc.restore_measure_numbers(mei, original_numbers)
