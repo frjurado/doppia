@@ -50,6 +50,7 @@ vi.mock('../../services/verovio', () => ({
     schedule: [],
   }),
   buildNoteInfoMap: vi.fn().mockReturnValue(new Map()),
+  collectGraceNoteIds: vi.fn().mockReturnValue(new Set()),
   getTimemapTempo: vi.fn().mockReturnValue(120),
   parseMeiMeterUnit: vi.fn().mockReturnValue(4),
 }));
@@ -363,9 +364,11 @@ describe('FragmentDetail — measure/beat display rule', () => {
 
   it('attaches each beat to its own measure for beat-precise fragments', async () => {
     setupFullLoad(
-      makeFragmentDetail({ bar_start: 3, bar_end: 4, mc_start: 3, mc_end: 4, beat_start: 2, beat_end: 1 }),
+      makeFragmentDetail({ bar_start: 3, bar_end: 4, mc_start: 3, mc_end: 4, beat_start: 2, beat_end: 2 }),
     );
     renderDetail();
+    // beat_end is an exclusive bound; displayed as the last covered beat
+    // (Component 9 G1) — 2 steps back to "beat 1" of m. 4.
     await screen.findByText('m. 3, beat 2 – m. 4, beat 1');
   });
 

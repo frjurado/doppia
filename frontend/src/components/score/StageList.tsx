@@ -80,7 +80,23 @@ export default function StageList({
   // Ref map for auto-scroll when activeStageId changes.
   const cardRefs = useRef<Map<string, HTMLElement>>(new Map());
 
-  const sorted = [...assignments].sort((a, b) => a.order - b.order);
+  // Order by physical position in the score (bar, then beat) so the sidebar
+  // reads top-to-bottom the way the stages actually lay out in the music, not
+  // by the abstract CONTAINS-edge schema order (Component 9 G2). Absent
+  // stages have no bounds to position by; group them after the positioned
+  // ones, each ordered among themselves by schema order.
+  const sorted = [...assignments].sort((a, b) => {
+    if (a.bounds && b.bounds) {
+      if (a.bounds.barStart !== b.bounds.barStart) return a.bounds.barStart - b.bounds.barStart;
+      const aBeat = a.bounds.beatStart ?? 0;
+      const bBeat = b.bounds.beatStart ?? 0;
+      if (aBeat !== bBeat) return aBeat - bBeat;
+      return a.order - b.order;
+    }
+    if (a.bounds && !b.bounds) return -1;
+    if (!a.bounds && b.bounds) return 1;
+    return a.order - b.order;
+  });
 
   // Auto-scroll active card into view when activeStageId is set from the score.
   useEffect(() => {
@@ -97,9 +113,12 @@ export default function StageList({
 
   return (
     <div className={styles.list} data-testid="stage-list">
-      {sorted.map((assignment, orderIdx) => {
+      {sorted.map((assignment) => {
         const isActive = assignment.stageId === activeStageId;
-        const color = assignment.orphaned ? '#aaaaaa' : stageColor(orderIdx);
+        // Keyed on the schema's CONTAINS-edge order, not the list's display
+        // position, so a stage's colour stays stable as bounds move it around
+        // the position-sorted list (Component 9 G2).
+        const color = assignment.orphaned ? '#aaaaaa' : stageColor(assignment.order);
         const isLastActive = !assignment.absent && !assignment.orphaned && activeCount === 1;
 
         return (

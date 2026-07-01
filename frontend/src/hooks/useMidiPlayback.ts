@@ -162,6 +162,22 @@ export interface UseMidiPlaybackResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * Lead time (seconds) given to a freshly-started transport before its first
+ * scheduled event fires (Component 9 F2). A note scheduled at transport-
+ * relative time 0 — the origin note of a play-from-position, or simply the
+ * first note of the piece — races `transport.start()`: the Web Audio clock's
+ * lookahead loop hasn't started ticking yet when `start()` returns
+ * synchronously, so an event due at time 0 can be silently dropped. Starting
+ * the transport `START_LOOKAHEAD_SEC` in the future (not touching any note's
+ * scheduled offset) gives the lookahead loop a chance to see it; every
+ * relative offset scheduled via `transport.schedule()`/`scheduleOnce()` stays
+ * correct regardless of when transport time 0 lands in real time, so this
+ * shifts the whole playback later by a barely-perceptible, uniform amount
+ * rather than desyncing individual notes.
+ */
+const START_LOOKAHEAD_SEC = 0.05;
+
+/**
  * Decode a base64 string (from Verovio renderToMIDI()) to a Uint8Array
  * suitable for the @tonejs/midi Midi constructor.
  */
@@ -303,6 +319,10 @@ export function useMidiPlayback(
     transport.stop();
     transport.cancel();
     transport.position = '0:0:0';
+    // Release any notes still sounding at the window boundary (F1): the
+    // sampler holds a note until explicitly released, and transport.cancel()
+    // only drops *future* scheduled events, not an already-triggered voice.
+    samplerRef.current?.releaseAll();
     stopTracking();
     setPosition({ bar: 1, beat: 1 });
     setStatus(midiBase64Ref.current !== null ? 'ready' : 'idle');
@@ -447,7 +467,10 @@ export function useMidiPlayback(
       }, endSec - startSec);
     }
 
-    transport.start();
+    // Lookahead-delayed start (F2) — see START_LOOKAHEAD_SEC. Only the fresh-
+    // schedule path needs it; resuming from pause (above) doesn't reschedule
+    // anything at time 0, so it isn't subject to the same race.
+    transport.start(`+${START_LOOKAHEAD_SEC}`);
     setStatus('playing');
     startTracking();
   }, [startTracking]);
@@ -455,6 +478,10 @@ export function useMidiPlayback(
   /** Pause at the current position. Call play() to resume. */
   const pause = useCallback(() => {
     Tone.getTransport().pause();
+    // Release any notes still sounding (F1): pausing the transport stops
+    // *future* scheduled attacks but does not release an already-triggered
+    // voice, so a note struck just before the pause point rings indefinitely.
+    samplerRef.current?.releaseAll();
     stopTracking();
     setStatus('paused');
   }, [stopTracking]);
@@ -469,6 +496,9 @@ export function useMidiPlayback(
     transport.stop();
     transport.cancel();
     transport.position = '0:0:0';
+    // Release any notes still sounding (F1) — see pause() for why this is
+    // needed in addition to transport.stop()/cancel().
+    samplerRef.current?.releaseAll();
     stopTracking();
     setPosition({ bar: 1, beat: 1 });
     // If MIDI is available, return to ready (not idle) after stop.

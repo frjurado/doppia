@@ -13,8 +13,8 @@
  */
 
 import { z } from 'zod';
-import { getSession } from './auth';
-import { getCurrentLanguage } from '../i18n';
+import { getSession, clearToken } from './auth';
+import i18next, { getCurrentLanguage } from '../i18n';
 
 export class ApiError extends Error {
   constructor(
@@ -101,6 +101,19 @@ export async function apiFetch<T>(
       }
     } catch {
       // response body was not valid JSON; keep the defaults above
+    }
+
+    // The auth middleware's INVALID_TOKEN message is raw English backend text
+    // (it covers several distinct causes — expired, malformed, missing claim —
+    // that all mean the same thing to the user: sign in again). Translate it
+    // here, once, rather than at each of the call sites that render
+    // ApiError.message directly. A stale token also means the caller is no
+    // longer authenticated even though one is still stored, so clear it: the
+    // next NavBar render (any navigation) then correctly shows the login link
+    // instead of the account badge (I1's root cause).
+    if (code === 'INVALID_TOKEN') {
+      clearToken();
+      message = i18next.t('auth:sessionExpired');
     }
 
     throw new ApiError(code, message, response.status, detail);

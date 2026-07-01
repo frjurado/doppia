@@ -34,7 +34,7 @@ import {
 } from '../../services/fragmentApi';
 import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
-import { formatFragmentRange } from '../../utils/fragmentRange';
+import { formatFragmentRange, formatBeat } from '../../utils/fragmentRange';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -155,8 +155,7 @@ function harmonyChordLabel(e: HarmonyRow): string {
 
 function harmonyPositionLabel(e: HarmonyRow): string {
   const v = e.volta != null ? `v${e.volta}` : '';
-  const b = e.beat % 1 === 0 ? String(e.beat) : e.beat.toFixed(2).replace(/\.?0+$/, '');
-  return `m.${e.mn}${v} b${b}`;
+  return `m.${e.mn}${v} b${formatBeat(e.beat)}`;
 }
 
 // ---------------------------------------------------------------------------

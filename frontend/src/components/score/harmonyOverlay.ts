@@ -190,7 +190,8 @@ export class HarmonyOverlay {
    * Rebuild all label positions from a fresh ghost layer and mcIndex.
    * Called by ScoreViewer on every reproject() signal (Verovio re-render).
    */
-  reproject(ghostLayer: GhostLayer, _mcIndex: Map<string, number>): void { // eslint-disable-line @typescript-eslint/no-unused-vars
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  reproject(ghostLayer: GhostLayer, _mcIndex: Map<string, number>): void {
     this._ghostLayer = ghostLayer;
     this._buildLabels();
   }

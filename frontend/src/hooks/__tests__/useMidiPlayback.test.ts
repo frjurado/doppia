@@ -46,6 +46,7 @@ vi.mock('tone', () => ({
     return {
       toDestination: vi.fn().mockReturnThis(),
       triggerAttackRelease: vi.fn(),
+      releaseAll: vi.fn(),
       dispose: vi.fn(),
     };
   }),
@@ -149,6 +150,19 @@ describe('useMidiPlayback — play()', () => {
     expect(mockTransport.start).toHaveBeenCalledTimes(1);
   });
 
+  it('starts with a lookahead offset so the first note is not missed (F2)', async () => {
+    const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
+
+    await act(async () => {
+      await result.current.play();
+    });
+
+    // A fresh schedule always includes a note at transport-relative time 0
+    // (the first note, or a play-from-position origin) — starting at literal
+    // "now" races the Web Audio lookahead clock and can drop it.
+    expect(mockTransport.start).toHaveBeenCalledWith(expect.stringMatching(/^\+0\.\d+$/));
+  });
+
   it('sets status to "playing" after play completes', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
@@ -237,6 +251,9 @@ describe('useMidiPlayback — play()', () => {
     expect(Tone.start).toHaveBeenCalledTimes(1); // not called again
     expect(Tone.Sampler).toHaveBeenCalledTimes(1); // not recreated
     expect(result.current.status).toBe('playing');
+    // Resuming doesn't reschedule anything at time 0, so it isn't subject to
+    // the F2 race — no lookahead offset needed on this second start() call.
+    expect(mockTransport.start).toHaveBeenNthCalledWith(2);
   });
 });
 
@@ -283,6 +300,20 @@ describe('useMidiPlayback — pause()', () => {
     expect(mockTransport.pause).toHaveBeenCalledTimes(1);
     expect(result.current.status).toBe('paused');
   });
+
+  it('releases any sounding notes (F1 — no hanging notes)', async () => {
+    const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
+
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.pause();
+    });
+
+    const sampler = vi.mocked(Tone.Sampler).mock.results[0]?.value;
+    expect(sampler.releaseAll).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('useMidiPlayback — stop()', () => {
@@ -298,6 +329,20 @@ describe('useMidiPlayback — stop()', () => {
 
     expect(mockTransport.stop).toHaveBeenCalled();
     expect(mockTransport.cancel).toHaveBeenCalled();
+  });
+
+  it('releases any sounding notes (F1 — no hanging notes)', async () => {
+    const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
+
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.stop();
+    });
+
+    const sampler = vi.mocked(Tone.Sampler).mock.results[0]?.value;
+    expect(sampler.releaseAll).toHaveBeenCalledTimes(1);
   });
 
   it('resets position display to bar 1, beat 1', async () => {
@@ -433,6 +478,10 @@ describe('useMidiPlayback — fragment window (Step 18)', () => {
     expect(result.current.status).toBe('ready');
     expect(onEnded).toHaveBeenCalledTimes(1);
     expect(mockTransport.stop).toHaveBeenCalled();
+    // F1: a note sounding right at the window boundary must be released, not
+    // left hanging.
+    const sampler = vi.mocked(Tone.Sampler).mock.results[0]?.value;
+    expect(sampler.releaseAll).toHaveBeenCalledTimes(1);
   });
 
   it('does not schedule an auto-stop when no window is given (whole movement)', async () => {

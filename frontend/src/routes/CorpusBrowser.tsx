@@ -9,6 +9,7 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { useBrowseSelection } from '../hooks/useBrowseSelection';
+import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './CorpusBrowser.module.css';
 
 function useMediaQuery(query: string): boolean {
@@ -85,15 +86,11 @@ export default function CorpusBrowser() {
               getKey={(c) => c.slug}
               renderItem={(c, isSelected, onSelect) => (
                 <BrowseItem id={c.slug} isSelected={isSelected} onClick={onSelect}>
+                  {/* sort_name is the lexicographic sort key ("Mozart, Wolfgang
+                      Amadeus"), not a distinct display fact — showing it under
+                      name duplicated the composer's name (Component 9 J1). */}
                   <Type variant="body-lg" as="span">
                     {c.name}
-                  </Type>
-                  <Type
-                    variant="label-sm"
-                    as="span"
-                    style={{ color: 'var(--color-on-surface-variant)', display: 'block' }}
-                  >
-                    {c.sort_name}
                   </Type>
                 </BrowseItem>
               )}
@@ -151,7 +148,7 @@ export default function CorpusBrowser() {
               renderItem={(w, isSelected, onSelect) => (
                 <BrowseItem id={w.id} isSelected={isSelected} onClick={onSelect}>
                   <Type variant="body-lg" as="span">
-                    {w.title}
+                    {stripEmbeddedCatalogue(w.title, w.catalogue_number)}
                   </Type>
                   {w.catalogue_number && (
                     <Type

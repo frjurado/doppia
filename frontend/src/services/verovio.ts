@@ -380,12 +380,20 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
     if (typeof DOMParser === 'undefined') return map;
     const doc = new DOMParser().parseFromString(meiText, 'text/xml');
     const measures = doc.getElementsByTagName('measure');
+    // Carries the last successfully-parsed @n forward across an unparseable
+    // one (e.g. the ADR-015 X-prefixed @n="X1" inside a volta ending) — the
+    // same guard walkMeasureKeys (ghosts.ts) applies for the selection layer.
+    // Without it, parseInt("X1", 10) is NaN and the transport bar readout
+    // shows "NaN" (Component 9 issue C1) for the rest of that ending.
+    let lastFiniteBarN = 0;
 
     for (let mi = 0; mi < measures.length; mi++) {
       const measure = measures[mi];
       const nAttr = measure.getAttribute('n');
       // @n = 0 is valid for pickup bars; missing @n → sequential 1-based index.
-      const barN = nAttr !== null ? parseInt(nAttr, 10) : mi + 1;
+      const parsedN = nAttr !== null ? parseInt(nAttr, 10) : mi + 1;
+      const barN = Number.isFinite(parsedN) ? parsedN : lastFiniteBarN;
+      if (Number.isFinite(parsedN)) lastFiniteBarN = parsedN;
       const isPickup = barN === 0;
 
       // Helper: read @xml:id from an element (namespace-safe).
@@ -441,6 +449,40 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
     // Ignore parse errors — caller falls back to Tone.js position.
   }
   return map;
+}
+
+/**
+ * Collect the xml:ids of grace notes in a MEI document — Component 9 E2.
+ *
+ * A grace note's timemap onset sits at (or just before) its main note's beat
+ * rather than on it, so treating it as a caret anchor makes the caret jump
+ * ahead and back around an ornamented note. Grace notes carry no real
+ * duration (`@dur.ppq="0"` or absent — the same convention `ghosts.ts` uses
+ * to skip them when building selection ghosts); this set lets
+ * {@link module:caret.buildCaretTrack} filter their ids out of each timemap
+ * entry so the caret anchors only on real note onsets.
+ *
+ * @param meiText - Normalized MEI content string.
+ */
+export function collectGraceNoteIds(meiText: string): Set<string> {
+  const ids = new Set<string>();
+  try {
+    if (typeof DOMParser === 'undefined') return ids;
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+    const notes = doc.getElementsByTagName('note');
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i]!;
+      const durPpq = parseInt(note.getAttribute('dur.ppq') ?? '0', 10);
+      if (durPpq > 0) continue; // real (non-grace) note
+      const id =
+        note.getAttribute('xml:id') ??
+        note.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
+      if (id) ids.add(id);
+    }
+  } catch {
+    // Ignore parse errors — caller treats an empty set as "no grace notes known".
+  }
+  return ids;
 }
 
 /**

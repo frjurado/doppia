@@ -286,7 +286,20 @@ export default function HarmonyPanel({
         selectionRange.barStart,
         selectionRange.barEnd,
       );
-      setEvents(evs);
+      // The events endpoint slices by measure (mn) range only, so a
+      // beat-precise fragment whose boundary falls mid-measure still pulls
+      // every event in the boundary measures. Apply the same beat clip the
+      // ghost/selection layer uses (annotator.ts _highlightSelection): drop
+      // events before beatStart in the first measure, and at/after the
+      // exclusive beatEnd in the last measure. Middle measures are
+      // unconstrained (Component 9 H1).
+      const { barStart, barEnd, beatStart, beatEnd } = selectionRange;
+      const clipped = evs.filter((e) => {
+        if (beatStart !== null && e.mn === barStart && e.beat < beatStart) return false;
+        if (beatEnd !== null && e.mn === barEnd && e.beat >= beatEnd) return false;
+        return true;
+      });
+      setEvents(clipped);
       setLoadState('idle');
     } catch (err) {
       setLoadState('error');

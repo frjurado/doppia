@@ -60,6 +60,7 @@ import type { HarmonyEventOut } from '../services/analysisApi';
 import {
   buildFragmentPlayback,
   buildNoteInfoMap,
+  collectGraceNoteIds,
   getTimemapTempo,
   getVerovioToolkit,
   parseMeiMeterUnit,
@@ -68,6 +69,7 @@ import {
 } from '../services/verovio';
 import type { FragmentTimeWindow, NoteInfo } from '../services/verovio';
 import { formatFragmentRange } from '../utils/fragmentRange';
+import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentDetail.module.css';
 
 // ---------------------------------------------------------------------------
@@ -389,6 +391,9 @@ export default function FragmentDetail() {
   const caretElRef             = useRef<HTMLDivElement | null>(null);
   const caretTrackRef          = useRef<CaretTrack | null>(null);
   const noteInfoMapRef         = useRef<Map<string, NoteInfo>>(new Map());
+  // Grace-note xml:ids (Component 9 E2) — excluded from the caret track so an
+  // ornament's onset doesn't make the caret jump ahead and back.
+  const graceIdsRef            = useRef<Set<string>>(new Set());
   // Ghost layer + harmony overlay (Step 23): the layer is built once per render
   // (shared with bracket geometry); the overlay is mounted/torn down by the
   // harmony-label effect below.
@@ -435,6 +440,7 @@ export default function FragmentDetail() {
         tkRef.current      = tk;
         lastFragIdRef.current = fragment!.id;
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
+        graceIdsRef.current = collectGraceNoteIds(meiText);
       }
 
       // breaks:'smart' at the measured container width — system breaks are
@@ -549,7 +555,11 @@ export default function FragmentDetail() {
       caretTrackRef.current = null;
       return;
     }
-    caretTrackRef.current = buildCaretTrack(container, highlightScheduleRef.current);
+    caretTrackRef.current = buildCaretTrack(
+      container,
+      highlightScheduleRef.current,
+      graceIdsRef.current
+    );
   }, [geometry, midiBase64]);
 
   // ── In-score harmony labels (Step 23) ────────────────────────────────────
@@ -666,7 +676,10 @@ export default function FragmentDetail() {
     ? [
         fragment.composer_name,
         [
-          fragment.work_title,
+          // work_title already embeds the catalogue number (DCML corpus-prep
+          // convention); strip it before re-appending in parens so it renders
+          // once, not twice (Component 9 J2).
+          stripEmbeddedCatalogue(fragment.work_title, fragment.work_catalogue_number),
           fragment.work_catalogue_number ? `(${fragment.work_catalogue_number})` : null,
         ].filter(Boolean).join(' '),
       ].filter(Boolean).join(' — ') || null

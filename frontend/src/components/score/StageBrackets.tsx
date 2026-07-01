@@ -293,7 +293,7 @@ export default function StageBrackets({
       data-testid="stage-brackets"
     >
       {/* ── Stage bracket segments ──────────────────────────────────────── */}
-      {allSorted.map((assignment, orderIdx) => {
+      {allSorted.map((assignment) => {
         if (assignment.absent) return null;
         if (!assignment.bounds) return null;
 
@@ -309,9 +309,12 @@ export default function StageBrackets({
         }
         if (segments.length === 0) return null;
 
+        // Keyed on schema order (not array position) for the same reason as
+        // StageList.tsx: colour must stay stable regardless of iteration/sort
+        // order (Component 9 G2).
         const color = assignment.orphaned
           ? '#aaaaaa'
-          : stageColor(orderIdx);
+          : stageColor(assignment.order);
 
         const isActive = assignment.stageId === activeStageId;
 

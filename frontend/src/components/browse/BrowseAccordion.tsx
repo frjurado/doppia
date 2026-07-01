@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { UseBrowseSelectionReturn } from '../../hooks/useBrowseSelection';
 import Surface from '../ui/Surface';
 import Type from '../ui/Type';
+import { stripEmbeddedCatalogue } from '../../utils/workTitle';
 import BrowseColumn from './BrowseColumn';
 import BrowseItem from './BrowseItem';
 import MovementCard from './MovementCard';
@@ -153,7 +154,9 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
           getKey={(w) => w.id}
           renderItem={(w, isSelected, onSelect) => (
             <BrowseItem id={w.id} isSelected={isSelected} onClick={onSelect}>
-              <Type variant="body-lg" as="span">{w.title}</Type>
+              <Type variant="body-lg" as="span">
+                {stripEmbeddedCatalogue(w.title, w.catalogue_number)}
+              </Type>
               {w.catalogue_number && (
                 <Type
                   variant="label-sm"

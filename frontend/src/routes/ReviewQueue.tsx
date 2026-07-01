@@ -8,6 +8,7 @@ import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import { ReviewQueueItem, ReviewQueueResponse, listReviewQueue } from '../services/fragmentApi';
+import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './ReviewQueue.module.css';
 
 /**
@@ -73,8 +74,12 @@ export default function ReviewQueue() {
     const mvt = item.movement_title
       ? `${item.movement_number}. ${item.movement_title}`
       : t('common:movementNumber', { number: item.movement_number });
+    // work_title already embeds the catalogue number (DCML corpus-prep
+    // convention); strip it before re-appending in parens so it renders once,
+    // not twice (Component 9 J2).
+    const title = stripEmbeddedCatalogue(item.work_title, item.work_catalogue_number);
     const catalogue = item.work_catalogue_number ? ` (${item.work_catalogue_number})` : '';
-    return `${item.work_title}${catalogue} — ${mvt}`;
+    return `${title}${catalogue} — ${mvt}`;
   }
 
   function formatSubmittedAt(iso: string): string {

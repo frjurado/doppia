@@ -93,11 +93,16 @@ function lerp(a: number, b: number, t: number): number {
  *  - At/after the last anchor → pinned at the last anchor.
  *  - Forward within one system → x linearly interpolated between the bracketing
  *    anchors.
- *  - System break (next anchor on a different system) → x sweeps toward the
+ *  - System break (next anchor on a *later* system) → x sweeps toward the
  *    current system's right edge over the interval, then jumps to the next
  *    anchor at its onset time. No interpolation across the break.
- *  - Backward x (repeat seam `:|`→`|:`, where the same notation replays) → hold
- *    at the current anchor until the next onset. Never sweep backwards.
+ *  - Repeat seam (next anchor on an *earlier* system, or backward x within the
+ *    same system — `:|`→`|:`, where the same notation replays) → hold at the
+ *    current anchor until the next onset. Never sweep backwards, and checked
+ *    *before* the system-break case (Component 9 E3): a seam that also
+ *    crosses a system boundary is still a hold, not a forward sweep to the
+ *    right edge — the system-break branch only fires for a genuine forward
+ *    break.
  *
  * @param track       Pre-built caret track.
  * @param t           Current playback time (ms, same clock as the schedule).
@@ -142,14 +147,21 @@ export function resolveCaret(
   const span = b.timeMs - a.timeMs;
   const frac = span > 0 ? Math.min(1, Math.max(0, (t - a.timeMs) / span)) : 0;
 
-  // System break: sweep toward the current system's right edge, then jump at b.
-  if (b.system !== a.system) {
-    return { x: lerp(a.x, aSys.rightEdge, frac), top: aSys.top, height: aSys.height };
+  // Repeat seam: hold at a until the next onset, never sweep. Checked before
+  // the system-break case so a backward jump that also crosses a system
+  // boundary doesn't first sweep toward the right edge as if it were a
+  // forward break (Component 9 E3). A same-system backward jump is detected
+  // by x; a cross-system backward jump is detected by system order (x alone
+  // is unreliable across systems — an earlier system's x range doesn't
+  // necessarily sit "before" a later one's in raw pixel terms).
+  if (b.system < a.system || (b.system === a.system && b.x < a.x)) {
+    return { x: a.x, top: aSys.top, height: aSys.height };
   }
 
-  // Repeat seam (backward x): hold at a until the next onset, never sweep back.
-  if (b.x < a.x) {
-    return { x: a.x, top: aSys.top, height: aSys.height };
+  // System break (forward): sweep toward the current system's right edge,
+  // then jump at b.
+  if (b.system !== a.system) {
+    return { x: lerp(a.x, aSys.rightEdge, frac), top: aSys.top, height: aSys.height };
   }
 
   // Forward within the same system: interpolate.
@@ -159,6 +171,44 @@ export function resolveCaret(
 // ---------------------------------------------------------------------------
 // DOM-dependent track builder
 // ---------------------------------------------------------------------------
+
+/**
+ * Derive a system's staff-line extents — top of the topmost staff's lines to
+ * bottom of the bottommost — from the direct `<path>` children of its
+ * `<g class="staff">` elements. Noteheads, stems, beams, slurs, dynamics, and
+ * ledger lines live in nested `<g>` children and are excluded by the
+ * direct-child query, so the result is a uniform "staff block" that doesn't
+ * balloon with whatever else a system happens to render that pass — a slur,
+ * a dynamic mark, or (K331/ii) the trio's section label (Component 9 E1).
+ *
+ * Mirrors `ghosts.ts`'s `staffLineBounds` (same Verovio SVG structure; the
+ * measure-ghost and stage-bracket layers already use it), applied directly to
+ * a whole system instead of per-measure-then-union, so the caret's vertical
+ * placement lines up with the ghost/bracket layer it moves alongside.
+ *
+ * Falls back to the system element's own bounding box when no staff-line
+ * paths are found (e.g. a synthetic SVG in a test fixture).
+ */
+function systemStaffLineBounds(
+  sysEl: Element,
+  containerRect: DOMRect
+): { top: number; bottom: number } {
+  let top = Infinity;
+  let bottom = -Infinity;
+  for (const staffEl of sysEl.querySelectorAll('g.staff')) {
+    const linePaths = staffEl.querySelectorAll(':scope > path');
+    if (linePaths.length === 0) continue;
+    const firstRect = linePaths[0]!.getBoundingClientRect();
+    const lastRect = linePaths[linePaths.length - 1]!.getBoundingClientRect();
+    top = Math.min(top, firstRect.top - containerRect.top);
+    bottom = Math.max(bottom, lastRect.bottom - containerRect.top);
+  }
+  if (!Number.isFinite(top) || !Number.isFinite(bottom)) {
+    const sr = sysEl.getBoundingClientRect();
+    return { top: sr.top - containerRect.top, bottom: sr.bottom - containerRect.top };
+  }
+  return { top, bottom };
+}
 
 /**
  * Build a {@link CaretTrack} by resolving a highlight schedule's note ids to
@@ -175,9 +225,19 @@ export function resolveCaret(
  * @param container - The score content element (position: relative).
  * @param schedule  - Timemap-derived `{ timeMs, ids }` entries (see
  *                    `buildHighlightSchedule` / `buildFragmentPlayback`).
+ * @param graceIds  - Grace-note ids to exclude from anchor selection
+ *                    (`collectGraceNoteIds`, Component 9 E2) — a grace note's
+ *                    onset sits at/just before its main note's beat, so
+ *                    anchoring on it makes the caret jump ahead and back
+ *                    around an ornamented note. An entry whose ids are all
+ *                    grace notes contributes no anchor at all.
  * @returns The caret track; partial/empty on DOM error or missing geometry.
  */
-export function buildCaretTrack(container: HTMLElement, schedule: ScheduleEntry[]): CaretTrack {
+export function buildCaretTrack(
+  container: HTMLElement,
+  schedule: ScheduleEntry[],
+  graceIds?: ReadonlySet<string>
+): CaretTrack {
   // Anchors keyed by system top (rounded) during collection, remapped to a
   // contiguous index afterwards.
   const raw: Array<{ timeMs: number; x: number; key: number }> = [];
@@ -189,6 +249,7 @@ export function buildCaretTrack(container: HTMLElement, schedule: ScheduleEntry[
       let x = Infinity;
       let sysEl: Element | null = null;
       for (const id of entry.ids) {
+        if (graceIds?.has(id)) continue;
         const el = container.querySelector(`[id="${CSS.escape(id)}"]`);
         if (!el) continue;
         const left = noteheadLeftEdge(el, cr.left);
@@ -200,10 +261,17 @@ export function buildCaretTrack(container: HTMLElement, schedule: ScheduleEntry[
       if (!Number.isFinite(x) || !sysEl) continue;
 
       const sr = sysEl.getBoundingClientRect();
-      const top = sr.top - cr.top;
-      const key = Math.round(top);
+      // Group/dedup by the system's own bbox top (stable per system); the
+      // displayed top/height use the staff-line-only bounds instead (E1) —
+      // the right edge (system-break sweep target) is unaffected.
+      const key = Math.round(sr.top - cr.top);
       if (!systemByKey.has(key)) {
-        systemByKey.set(key, { top, bottom: sr.bottom - cr.top, right: sr.right - cr.left });
+        const staffBounds = systemStaffLineBounds(sysEl, cr);
+        systemByKey.set(key, {
+          top: staffBounds.top,
+          bottom: staffBounds.bottom,
+          right: sr.right - cr.left,
+        });
       }
       raw.push({ timeMs: entry.timeMs, x, key });
     }

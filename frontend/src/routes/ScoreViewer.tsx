@@ -62,6 +62,7 @@ import {
   buildHighlightSchedule,
   buildMeasureOnsetIndex,
   buildNoteInfoMap,
+  collectGraceNoteIds,
   getTimemapTempo,
   getVerovioToolkit,
   parseMeiMeterUnit,
@@ -519,6 +520,10 @@ export default function ScoreViewer() {
   // and beats in the denominator unit (not quarter notes), fixing all three
   // transport-bar sub-defects: pickup phase drift, repeat bar count, 6/8 beats.
   const noteInfoMapRef = useRef<Map<string, NoteInfo>>(new Map());
+  // Grace-note xml:ids from collectGraceNoteIds(), built alongside
+  // noteInfoMapRef. Excludes ornament onsets from the caret track so the
+  // caret doesn't jump ahead and back around an ornamented note (E2).
+  const graceIdsRef = useRef<Set<string>>(new Set());
   // Beat duration in ms for the denominator unit (e.g. 250 ms for an eighth
   // note at quarter=120 in a 6/8 piece). Computed from the timemap tempo and
   // MEI @meter.unit after each render. Default 500 ms = quarter note at 120 BPM.
@@ -908,7 +913,11 @@ export default function ScoreViewer() {
       caretTrackRef.current = null;
       return;
     }
-    caretTrackRef.current = buildCaretTrack(container, highlightScheduleRef.current);
+    caretTrackRef.current = buildCaretTrack(
+      container,
+      highlightScheduleRef.current,
+      graceIdsRef.current
+    );
   }, [ghostLayer, midiBase64]);
 
   // ── displayPosition sync (Step 18) ──────────────────────────────────────
@@ -1983,6 +1992,7 @@ export default function ScoreViewer() {
       // Reset note info map so stale data from a previous score is not used
       // while the new MEI loads. Rebuilt synchronously after meiText is fetched.
       noteInfoMapRef.current = new Map();
+      graceIdsRef.current = new Set();
 
       // Measure container width before any await — DOM is synchronously
       // available at effect time. This value is used for the initial render;
@@ -2010,6 +2020,7 @@ export default function ScoreViewer() {
         // Build note info map synchronously from MEI (DOMParser, no toolkit needed).
         // Built once per score load; does not need rebuilding on options re-renders.
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
+        graceIdsRef.current = collectGraceNoteIds(meiText);
 
         // 2. Load Verovio WASM (singleton — loads at most once per session).
         setLoadingLabel(t('score:viewer.loadingRenderer'));

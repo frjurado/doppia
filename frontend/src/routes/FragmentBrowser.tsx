@@ -7,6 +7,7 @@ import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import { ConceptTreeNode, getConceptRoots, getConceptTree } from '../services/conceptApi';
 import { ConceptBrowseItem, listByConcept } from '../services/fragmentApi';
+import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentBrowser.module.css';
 
 // ---------------------------------------------------------------------------
@@ -127,7 +128,11 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const { t } = useTranslation(['fragments', 'common']);
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
   const barRange = t('common:barRangeMm', { start: item.bar_start, end: item.bar_end });
-  const workLabel = `${item.work_title}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
+  // work_title already embeds the catalogue number (DCML corpus-prep
+  // convention); strip it before re-appending so it renders once, not twice
+  // (Component 9 J2).
+  const workTitle = stripEmbeddedCatalogue(item.work_title, item.work_catalogue_number);
+  const workLabel = `${workTitle}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
   const movementLabel = `${t('fragments:movementShort', { number: item.movement_number })}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
   const [hovered, setHovered] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);

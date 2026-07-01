@@ -15,6 +15,7 @@ vi.mock('../../services/verovio', () => ({
   buildHighlightSchedule: vi.fn().mockReturnValue([]),
   buildMeasureOnsetIndex: vi.fn().mockReturnValue(new Map()),
   buildNoteInfoMap: vi.fn().mockReturnValue(new Map()),
+  collectGraceNoteIds: vi.fn().mockReturnValue(new Set()),
   getTimemapTempo: vi.fn().mockReturnValue(120),
   parseMeiMeterUnit: vi.fn().mockReturnValue(4),
 }));
@@ -52,6 +53,7 @@ function makeSamplerImpl(this: unknown, options?: { onload?: () => void }) {
   return {
     toDestination: vi.fn().mockReturnThis(),
     triggerAttackRelease: vi.fn(),
+    releaseAll: vi.fn(),
     dispose: vi.fn(),
   };
 }
@@ -383,6 +385,7 @@ describe('ScoreViewer', () => {
       return {
         toDestination: vi.fn().mockReturnThis(),
         triggerAttackRelease: vi.fn(),
+        releaseAll: vi.fn(),
         dispose: vi.fn(),
       };
     } as never);

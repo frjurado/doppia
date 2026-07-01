@@ -16,6 +16,7 @@ import {
   buildHighlightSchedule,
   buildMeasureOnsetIndex,
   buildNoteInfoMap,
+  collectGraceNoteIds,
   getTimemapTempo,
   parseMeiMeterUnit,
   renderFragment,
@@ -778,6 +779,30 @@ describe('buildNoteInfoMap', () => {
     expect(map.get('n1')?.barN).toBe(1);
   });
 
+  it('carries the last finite @n forward across an unparseable X-prefixed @n (Component 9 C1)', () => {
+    // @n="X1" is the ADR-015 disposition for a measure inside a volta ending
+    // whose true bar number is ambiguous. parseInt("X1", 10) is NaN; the
+    // transport display must not show "NaN" — it carries the previous
+    // measure's barN forward instead, mirroring walkMeasureKeys (ghosts.ts).
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure n="5">
+          <staff n="1"><layer n="1"><note xml:id="n1" tstamp="1" dur="4"/></layer></staff>
+        </measure>
+        <measure n="X1">
+          <staff n="1"><layer n="1"><note xml:id="n2" tstamp="1" dur="4"/></layer></staff>
+        </measure>
+        <measure n="6">
+          <staff n="1"><layer n="1"><note xml:id="n3" tstamp="1" dur="4"/></layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    const map = buildNoteInfoMap(mei);
+    expect(map.get('n1')?.barN).toBe(5);
+    expect(map.get('n2')?.barN).toBe(5); // carried forward, not NaN
+    expect(map.get('n3')?.barN).toBe(6);
+  });
+
   // ── Beat (sub-defect 3: non-quarter beat normalisation) ──────────────────
 
   it('reads beat directly from @tstamp for 4/4 notes (1–4)', () => {
@@ -929,6 +954,56 @@ describe('buildNoteInfoMap', () => {
     expect(map.get('s2n1')?.barN).toBe(5);
     expect(map.get('s1n1')?.beat).toBe(1);
     expect(map.get('s2n1')?.beat).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// collectGraceNoteIds — Component 9 E2 (caret dislocation on ornaments)
+// ---------------------------------------------------------------------------
+
+describe('collectGraceNoteIds', () => {
+  it('collects a note with dur.ppq="0" (grace) and excludes a real note', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure n="1">
+          <staff n="1"><layer n="1">
+            <note xml:id="grace1" dur.ppq="0" tstamp="1"/>
+            <note xml:id="real1" dur.ppq="480" tstamp="1"/>
+          </layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    const ids = collectGraceNoteIds(mei);
+    expect(ids.has('grace1')).toBe(true);
+    expect(ids.has('real1')).toBe(false);
+  });
+
+  it('collects a note with no dur.ppq attribute at all (grace)', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure n="1">
+          <staff n="1"><layer n="1">
+            <note xml:id="grace1" tstamp="1"/>
+          </layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    expect(collectGraceNoteIds(mei).has('grace1')).toBe(true);
+  });
+
+  it('returns an empty set when there are no grace notes', () => {
+    const mei = `<mei xmlns="http://www.music-encoding.org/ns/mei">
+      <music><body><mdiv><score><section>
+        <measure n="1">
+          <staff n="1"><layer n="1"><note xml:id="real1" dur.ppq="480" tstamp="1"/></layer></staff>
+        </measure>
+      </section></score></mdiv></body></music>
+    </mei>`;
+    expect(collectGraceNoteIds(mei).size).toBe(0);
+  });
+
+  it('returns an empty set for unparseable input', () => {
+    expect(collectGraceNoteIds('not xml at all').size).toBe(0);
   });
 });
 

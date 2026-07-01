@@ -125,6 +125,32 @@ describe('resolveCaret — repeat seam (backward x)', () => {
   });
 });
 
+describe('resolveCaret — repeat seam crossing a system boundary (Component 9 E3)', () => {
+  // A repeat jumps back several systems: the next onset is on an EARLIER
+  // system (system 0), current anchor is on system 1. Even though its raw x
+  // (300) is numerically less than the current anchor's x (50), a naive
+  // same-system x comparison alone wouldn't reliably classify this as
+  // backward across systems — system order must gate it. Before the E3 fix,
+  // the system-break branch ran first and swept toward system 1's right edge
+  // (500) as if this were a forward break.
+  const t = track([
+    { timeMs: 0, x: 50, system: 1 },
+    { timeMs: 100, x: 300, system: 0 },
+  ]);
+
+  it('holds at the current anchor instead of sweeping toward the right edge', () => {
+    const p = resolveCaret(t, 50)!;
+    expect(p.x).toBe(50);
+    expect(p.top).toBe(200); // system 1's top — still on the current system
+  });
+
+  it('jumps to the earlier system once its onset is reached', () => {
+    const p = resolveCaret(t, 100)!;
+    expect(p.x).toBe(300);
+    expect(p.top).toBe(100); // system 0's top
+  });
+});
+
 describe('resolveCaret — fallback (no interpolation)', () => {
   const t = track([
     { timeMs: 0, x: 100, system: 0 },
