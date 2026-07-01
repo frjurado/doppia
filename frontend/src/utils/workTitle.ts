@@ -9,10 +9,10 @@
  * returned unchanged.
  */
 export function stripEmbeddedCatalogue(
-  title: string,
+  title: string | null,
   catalogueNumber: string | null | undefined
-): string {
-  if (!catalogueNumber) return title;
+): string | null {
+  if (!title || !catalogueNumber) return title;
   for (const suffix of [`, ${catalogueNumber}`, ` ${catalogueNumber}`]) {
     if (title.endsWith(suffix)) return title.slice(0, -suffix.length);
   }
