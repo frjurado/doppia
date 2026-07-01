@@ -7,6 +7,9 @@ read-through symptoms directly — no database ingest, no SVG rendering required
 
 * **A1 — double clef:** a single ``<layer>`` holding two clefs of the same
   shape/line (the rendered double-glyph).
+* **A1b — cross-layer double:** the same clef change in two voices at *different*
+  onsets, which renders as two spaced-apart glyphs (normalizer Pass 10 should
+  have merged them to one onset — ADR-031).
 * **A2 — per-voice scope:** a multi-voice staff where a measure-start clef
   reaches some voices but not all.
 * **A3 — section/trio:** surfaced via the recovery diagnostics (section-count
@@ -69,6 +72,36 @@ def _voiced(layer: lxml.etree._Element) -> bool:
     return bool(
         list(layer.iter(f"{{{_MEI_NS}}}note")) or list(layer.iter(f"{{{_MEI_NS}}}rest"))
     )
+
+
+def _clef_onsets(
+    layer: lxml.etree._Element,
+) -> list[tuple[int, lxml.etree._Element]]:
+    """Return ``(onset_ppq, clef)`` for each clef in *layer* (beams flattened).
+
+    Onsets accumulate ``@dur.ppq`` so a clef's tick position is comparable across
+    the voices of a staff — the basis for the cross-layer double check (A1b).
+    """
+    out: list[tuple[int, lxml.etree._Element]] = []
+
+    def walk(container: lxml.etree._Element, t: int) -> int:
+        for child in container:
+            if not isinstance(child.tag, str):
+                continue
+            local = child.tag.rsplit("}", 1)[-1]
+            if local in ("beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"):
+                t = walk(child, t)
+            elif local == "clef":
+                out.append((t, child))
+            elif local in ("note", "chord", "rest", "space", "mRest", "mSpace"):
+                try:
+                    t += int(child.get("dur.ppq") or 0)
+                except ValueError:
+                    pass
+        return t
+
+    walk(layer, 0)
+    return out
 
 
 def audit_clefs(
@@ -135,6 +168,29 @@ def audit_clefs(
                     msg = (
                         f"A1: m{mn} staff{sn} layer{ln} has duplicate clef(s) "
                         f"{dupes} -> double-clef glyph"
+                    )
+                    warnings.append(msg)
+                    if verbose:
+                        print(f"      {msg}")
+
+            # A1b — the same clef change scattered across voices at DIFFERENT
+            # onsets renders as two spaced-apart glyphs (a cross-layer double); at
+            # the same onset they overlap into one.  Pass 10 reconciliation
+            # (ADR-031) should have merged them, so a survivor is a regression.
+            key_onsets: dict[str, set[int]] = {}
+            key_layers: dict[str, set[str]] = {}
+            for position, layer in enumerate(layers, 1):
+                ln = layer.get("n", str(position))
+                for onset, clef in _clef_onsets(layer):
+                    key = _clef_key(clef)
+                    key_onsets.setdefault(key, set()).add(onset)
+                    key_layers.setdefault(key, set()).add(ln)
+            for key, onsets in key_onsets.items():
+                if len(key_layers[key]) > 1 and len(onsets) > 1:
+                    msg = (
+                        f"A1b: m{mn} staff{sn} clef {key} in layers "
+                        f"{sorted(key_layers[key])} at different onsets "
+                        f"{sorted(onsets)} -> cross-layer double-clef glyph"
                     )
                     warnings.append(msg)
                     if verbose:

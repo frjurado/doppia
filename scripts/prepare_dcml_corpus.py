@@ -556,6 +556,31 @@ def _mei_top_sections(
     return result
 
 
+def _top_section(
+    measure: lxml.etree._Element,
+) -> lxml.etree._Element | None:
+    """Return the outermost ``<section>`` ancestor of *measure* (``None`` if none).
+
+    Two measures share a top-level section iff this returns the same element for
+    both — the test the D3 courtesy placement uses to avoid hosting a section's
+    opening clef in the previous section.
+
+    Args:
+        measure: An MEI ``<measure>`` element.
+
+    Returns:
+        The outermost ancestor ``<section>``, or ``None`` when the measure has no
+        section ancestor.
+    """
+    top: lxml.etree._Element | None = None
+    el = measure.getparent()
+    while el is not None:
+        if el.tag == f"{{{_MEI_NS}}}section":
+            top = el
+        el = el.getparent()
+    return top
+
+
 def _resolve_mei_measure(
     measure_index: int,
     flat_measures: list[lxml.etree._Element],
@@ -653,16 +678,23 @@ def recover_measure_start_clefs(
     the corresponding MEI measure/staff layer(s).  Mid-measure clef changes are
     exported correctly and are left untouched.
 
-    Three properties make this safe on multi-voice and multi-section writing
-    (Component 9 read-through A1–A3):
+    Four properties make this safe on multi-voice and multi-section writing
+    (Component 9 read-through A1–A3, D3):
 
+    * **Courtesy placement (D3):** the recovered clef is appended as the *last*
+      child of the **previous** measure's staff/layers, so Verovio draws it as a
+      courtesy *before* the barline (the position MuseScore uses) and the running
+      clef carries into this measure.  When there is no previous measure, or it
+      lacks the staff, the clef falls back to the start of this measure.
     * **Idempotency guard (A1):** a layer is skipped when it already leads with a
       clef *or* already holds an identical clef anywhere (including nested in a
       beam), so re-runs and converter-emitted measure-start clefs do not stack
       into a rendered double-clef.
     * **Per-voice scope (A2):** the recovered clef is injected into *every*
-      ``<layer>`` of the staff, because an MEI layer clef is layer-scoped — a
+      ``<layer>`` of the host staff, because an MEI layer clef is layer-scoped — a
       single-layer injection would leave the second voice on the previous clef.
+      Coincident copies are reconciled to a single glyph by normalizer Pass 10
+      (ADR-031).
     * **Section-aware index (A3):** when the ``.mscx`` and MEI agree on section
       count, the measure index is resolved within its section, so a count
       divergence confined to an earlier section does not displace the trio's
@@ -707,26 +739,56 @@ def recover_measure_start_clefs(
         )
         if measure is None:
             continue
-        staff = measure.find(f"{{{_MEI_NS}}}staff[@n='{staff_id}']")
+        staff_q = f"{{{_MEI_NS}}}staff[@n='{staff_id}']"
+
+        # If this measure already encodes the change — the converter emitted a
+        # leading or mid-measure clef — no courtesy is needed; adding one would
+        # double the glyph (A1).  (Checking the measure, not the host, also keeps
+        # a re-run from doubling the fallback placement.)
+        n_staff = measure.find(staff_q)
+        if n_staff is not None and any(
+            _layer_has_equivalent_clef(layer, attrs)
+            for layer in n_staff.findall(f"{{{_MEI_NS}}}layer")
+        ):
+            continue
+
+        # D3: host the courtesy clef in the PREVIOUS measure of the SAME section
+        # (rendered before the barline); fall back to the start of this measure
+        # at a section boundary, the first measure, or a missing previous staff.
+        host, trailing = measure, False
+        idx = flat_measures.index(measure)
+        if idx > 0:
+            prev = flat_measures[idx - 1]
+            if prev.find(staff_q) is not None and _top_section(prev) is _top_section(
+                measure
+            ):
+                host, trailing = prev, True
+
+        staff = host.find(staff_q)
         if staff is None:
             local_notes.append(
                 f"clef recovery: staff {staff_id} absent in the measure mapped "
                 f"from .mscx index {measure_index}; clef skipped"
             )
             continue
-        layers = staff.findall(f"{{{_MEI_NS}}}layer")
-        for position, layer in enumerate(layers, start=1):
-            if _layer_leads_with_clef(layer) or _layer_has_equivalent_clef(
-                layer, attrs
+        for position, layer in enumerate(staff.findall(f"{{{_MEI_NS}}}layer"), start=1):
+            # An equivalent clef anywhere in the layer means it is already
+            # clef-consistent (avoids the A1 double); for the start-of-measure
+            # fallback a leading clef also suffices.
+            if _layer_has_equivalent_clef(layer, attrs) or (
+                not trailing and _layer_leads_with_clef(layer)
             ):
-                continue  # already clef-consistent — avoid a double-clef (A1)
+                continue
             layer_n = layer.get("n") or str(position)
             clef = lxml.etree.SubElement(layer, f"{{{_MEI_NS}}}clef")
             clef.set(f"{{{_XML_NS}}}id", f"clefrec{measure_index}s{staff_id}l{layer_n}")
             for key, value in attrs.items():
                 clef.set(key, value)
-            layer.remove(clef)
-            layer.insert(0, clef)
+            if not trailing:
+                # Start-of-measure fallback: move to the head of the layer.
+                layer.remove(clef)
+                layer.insert(0, clef)
+            # Trailing case: SubElement already appended it as the last child.
 
     return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 

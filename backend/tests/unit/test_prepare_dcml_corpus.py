@@ -707,17 +707,23 @@ class TestRecoverMeasureStartClefs:
     def _measure(self, root: lxml.etree._Element, index: int) -> lxml.etree._Element:
         return root.findall(f".//{{{_MEI_NS}}}measure")[index]
 
-    def test_clef_injected_as_first_layer_child(self, tmp_path: Path) -> None:
+    def test_clef_hosted_as_trailing_courtesy_in_previous_measure(
+        self, tmp_path: Path
+    ) -> None:
+        # D3: the m2 measure-start change is hosted as the LAST child of m1's
+        # staff-2 layer (rendered before the barline), not at the head of m2.
         out = pdc.recover_measure_start_clefs(_write_mscx(tmp_path), _build_mei(5))
         root = lxml.etree.fromstring(out)
 
-        staff2 = self._measure(root, 1).find(f"{{{_MEI_NS}}}staff[@n='2']")
-        layer = staff2.find(f"{{{_MEI_NS}}}layer")
-        first = layer[0]
-        assert first.tag == f"{{{_MEI_NS}}}clef"
-        assert first.get("shape") == "G"
-        assert first.get("line") == "2"
-        assert first.get(f"{{{_XML_NS}}}id") == "clefrec2s2l1"
+        m1_staff2 = self._measure(root, 0).find(f"{{{_MEI_NS}}}staff[@n='2']")
+        layer = m1_staff2.find(f"{{{_MEI_NS}}}layer")
+        last = layer[-1]
+        assert last.tag == f"{{{_MEI_NS}}}clef"
+        assert last.get("shape") == "G" and last.get("line") == "2"
+        assert last.get(f"{{{_XML_NS}}}id") == "clefrec2s2l1"
+        # m2 itself carries no injected clef (the running clef carries in).
+        m2_staff2 = self._measure(root, 1).find(f"{{{_MEI_NS}}}staff[@n='2']")
+        assert m2_staff2.find(f"{{{_MEI_NS}}}layer/{{{_MEI_NS}}}clef") is None
 
     def test_other_staff_untouched(self, tmp_path: Path) -> None:
         out = pdc.recover_measure_start_clefs(_write_mscx(tmp_path), _build_mei(5))
@@ -822,7 +828,12 @@ class TestClefRecoveryIdempotencyGuard:
 
 
 class TestClefRecoveryPerVoice:
-    """A2 — the recovered clef is injected into every layer of the staff."""
+    """A2 — under D3 a single courtesy in the previous measure covers every voice.
+
+    The recovered change is hosted once (before the barline); Verovio carries the
+    staff running clef into the next measure's voices — including a voice that
+    only starts there (verified on the real K279/iii m110 render, where a courtesy
+    in m109's single layer correctly re-clefs both of m110's voices)."""
 
     def _two_voice_mei(self) -> bytes:
         measures = []
@@ -852,25 +863,21 @@ class TestClefRecoveryPerVoice:
             f"</score></mdiv></body></music></mei>"
         ).encode("utf-8")
 
-    def test_clef_injected_into_both_layers(self, tmp_path: Path) -> None:
+    def test_courtesy_hosted_once_in_previous_measure(self, tmp_path: Path) -> None:
         out = pdc.recover_measure_start_clefs(
             _write_mscx(tmp_path), self._two_voice_mei()
         )
         root = lxml.etree.fromstring(out)
-        m2_s2 = root.findall(f".//{{{_MEI_NS}}}measure")[1].find(
-            f"{{{_MEI_NS}}}staff[@n='2']"
-        )
-        for layer in m2_s2.findall(f"{{{_MEI_NS}}}layer"):
-            first = layer[0]
-            assert first.tag == f"{{{_MEI_NS}}}clef"
-            assert first.get("shape") == "G" and first.get("line") == "2"
-        # Distinct xml:ids per layer (clefrec2s2l1, clefrec2s2l2).
-        ids = {
-            c.get(f"{{{_XML_NS}}}id")
-            for layer in m2_s2.findall(f"{{{_MEI_NS}}}layer")
-            for c in _clefs_in(layer)
-        }
-        assert ids == {"clefrec2s2l1", "clefrec2s2l2"}
+        measures = root.findall(f".//{{{_MEI_NS}}}measure")
+        # The m2 change is hosted once, as the trailing clef of m1's staff-2
+        # layer; m2 (two voices) carries no injected clef of its own.
+        m1_s2 = measures[0].find(f"{{{_MEI_NS}}}staff[@n='2']")
+        m1_clefs = _clefs_in(m1_s2.find(f"{{{_MEI_NS}}}layer"))
+        assert len(m1_clefs) == 1
+        assert m1_clefs[0] is list(m1_s2.find(f"{{{_MEI_NS}}}layer"))[-1]
+        assert m1_clefs[0].get("shape") == "G" and m1_clefs[0].get("line") == "2"
+        m2_s2 = measures[1].find(f"{{{_MEI_NS}}}staff[@n='2']")
+        assert m2_s2.find(f"{{{_MEI_NS}}}layer/{{{_MEI_NS}}}clef") is None
 
     def test_idempotent_across_two_voices(self, tmp_path: Path) -> None:
         mscx = _write_mscx(tmp_path)
