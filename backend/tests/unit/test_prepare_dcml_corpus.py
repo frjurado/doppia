@@ -972,3 +972,140 @@ class TestClefRecoverySectionAware:
         notes: list[str] = []
         pdc.recover_measure_start_clefs(p, single, notes=notes)
         assert any("falling back to global" in n for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# TestMeasureRenumberForImport (ADR-032)
+# ---------------------------------------------------------------------------
+
+# A two-part score-partwise MusicXML whose measure numbers restart (1,2 then
+# 1,2 — a minuet+trio section restart), so the trio bars collide with the
+# minuet bars of the same number under Verovio's number-keyed importer.
+_MUSICXML_RESTART = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<score-partwise version="3.1">'
+    "<part-list>"
+    '<score-part id="P1"><part-name>RH</part-name></score-part>'
+    '<score-part id="P2"><part-name>LH</part-name></score-part>'
+    "</part-list>"
+    '<part id="P1">'
+    '<measure number="1"/><measure number="2"/>'
+    '<measure number="1"/><measure number="2"/>'
+    "</part>"
+    '<part id="P2">'
+    '<measure number="1"/><measure number="2"/>'
+    '<measure number="1"/><measure number="2"/>'
+    "</part>"
+    "</score-partwise>"
+).encode("utf-8")
+
+# The same score with already-unique numbers (a single-section movement).
+_MUSICXML_UNIQUE = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<score-partwise version="3.1">'
+    '<part id="P1">'
+    '<measure number="1"/><measure number="2"/><measure number="3"/>'
+    "</part>"
+    "</score-partwise>"
+).encode("utf-8")
+
+
+def _measure_numbers(xml_bytes: bytes, part_id: str = "P1") -> list[str]:
+    root = lxml.etree.fromstring(xml_bytes)
+    part = root.find(f"part[@id='{part_id}']")
+    return [m.get("number", "") for m in part.findall("measure")]
+
+
+def _build_mxl(
+    tmp_path: Path, score_bytes: bytes, score_name: str = "score.xml"
+) -> Path:
+    """Pack *score_bytes* into a minimal ``.mxl`` container (mimetype stored first)."""
+    container = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+        f'<rootfiles><rootfile full-path="{score_name}" '
+        'media-type="application/vnd.recordare.musicxml+xml"/></rootfiles>'
+        "</container>"
+    ).encode("utf-8")
+    p = tmp_path / "movement.mxl"
+    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            zipfile.ZipInfo("mimetype"),
+            "application/vnd.recordare.musicxml",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        z.writestr("META-INF/container.xml", container)
+        z.writestr(score_name, score_bytes)
+    return p
+
+
+class TestRenumberMusicxml:
+    """_renumber_musicxml makes measure numbers unique when a section restarts."""
+
+    def test_duplicate_numbers_are_renumbered(self) -> None:
+        result = pdc._renumber_musicxml(_MUSICXML_RESTART)
+        assert result is not None
+        new_bytes, originals = result
+        assert originals == ["1", "2", "1", "2"]
+        assert _measure_numbers(new_bytes) == ["1", "2", "3", "4"]
+
+    def test_all_parts_renumbered_consistently(self) -> None:
+        new_bytes, _ = pdc._renumber_musicxml(_MUSICXML_RESTART)
+        assert _measure_numbers(new_bytes, "P1") == ["1", "2", "3", "4"]
+        assert _measure_numbers(new_bytes, "P2") == ["1", "2", "3", "4"]
+
+    def test_unique_numbers_is_noop(self) -> None:
+        assert pdc._renumber_musicxml(_MUSICXML_UNIQUE) is None
+
+    def test_non_partwise_root_returns_none(self) -> None:
+        timewise = b'<?xml version="1.0"?><score-timewise/>'
+        assert pdc._renumber_musicxml(timewise) is None
+
+
+class TestRenumberMxlForImport:
+    """renumber_mxl_for_import repacks the .mxl and reports the original numbers."""
+
+    def test_repacks_and_returns_originals(self, tmp_path: Path) -> None:
+        mxl = _build_mxl(tmp_path, _MUSICXML_RESTART)
+        out_path, originals = pdc.renumber_mxl_for_import(mxl, tmp_path)
+        assert out_path != mxl
+        assert originals == ["1", "2", "1", "2"]
+        with zipfile.ZipFile(out_path) as z:
+            assert _measure_numbers(z.read("score.xml")) == ["1", "2", "3", "4"]
+            # The stored mimetype survives the repack unchanged.
+            info = z.getinfo("mimetype")
+            assert info.compress_type == zipfile.ZIP_STORED
+            assert z.read("mimetype") == b"application/vnd.recordare.musicxml"
+
+    def test_noop_when_numbers_unique(self, tmp_path: Path) -> None:
+        mxl = _build_mxl(tmp_path, _MUSICXML_UNIQUE)
+        out_path, originals = pdc.renumber_mxl_for_import(mxl, tmp_path)
+        assert out_path == mxl
+        assert originals is None
+
+
+class TestRestoreMeasureNumbers:
+    """restore_measure_numbers puts the true (restarting) @n back on the MEI."""
+
+    def test_restores_document_order_numbers(self) -> None:
+        # _build_mei(4) numbers the MEI 1..4 (as Verovio does post-renumber).
+        out = pdc.restore_measure_numbers(_build_mei(4), ["1", "2", "1", "2"])
+        root = lxml.etree.fromstring(out)
+        numbers = [m.get("n") for m in root.findall(f".//{{{_MEI_NS}}}measure")]
+        assert numbers == ["1", "2", "1", "2"]
+
+    def test_count_mismatch_raises(self) -> None:
+        with pytest.raises(ValueError, match="refusing to remap"):
+            pdc.restore_measure_numbers(_build_mei(4), ["1", "2", "3"])
+
+    def test_round_trip_through_renumber(self, tmp_path: Path) -> None:
+        # Simulate the full import cycle without Verovio: renumber the source,
+        # let a stand-in "import" produce MEI numbered 1..N (here _build_mei),
+        # then restore — the display @n must equal the original source numbers.
+        _, originals = pdc.renumber_mxl_for_import(
+            _build_mxl(tmp_path, _MUSICXML_RESTART), tmp_path
+        )
+        restored = pdc.restore_measure_numbers(_build_mei(len(originals)), originals)
+        root = lxml.etree.fromstring(restored)
+        numbers = [m.get("n") for m in root.findall(f".//{{{_MEI_NS}}}measure")]
+        assert numbers == originals

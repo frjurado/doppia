@@ -252,7 +252,13 @@ def run_clef_pipeline(
     with tempfile.TemporaryDirectory() as raw_tmp:
         tmp = Path(raw_tmp)
         mxl = pdc.convert_mscx_to_mxl(mscx_path, tmp, mscore_exe=mscore_exe)
+        # Renumber measures uniquely for the import so a section-restart movement
+        # (K331/ii minuet+trio) is audited in its ingested state, not with the
+        # importer's mis-routed clefs (ADR-032).
+        mxl, original_numbers = pdc.renumber_mxl_for_import(mxl, tmp)
         mei = pdc.convert_mxl_to_mei(mxl, tmp)
+        if original_numbers is not None:
+            mei = pdc.restore_measure_numbers(mei, original_numbers)
         notes: list[str] = []
         mei = pdc.recover_measure_start_clefs(mscx_path, mei, notes=notes)
 

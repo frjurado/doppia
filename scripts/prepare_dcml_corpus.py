@@ -7,9 +7,13 @@ Pipeline (per movement):
 
 1. Walk ``MS3/*.mscx`` files listed in the TOML config.
 2. Convert each ``.mscx`` → ``.mxl`` via ``mscore`` CLI (MuseScore 3.6.2).
-3. Convert ``.mxl`` → ``.mei`` via ``verovio`` CLI.
-4. Run ``validate_mei()`` on the emitted MEI; abort on any hard error.
-5. Locate the matching ``harmonies/*.tsv``.
+3. Renumber the ``.mxl`` measures uniquely for the import when the movement
+   restarts its numbering at a section break, restoring the true ``@n`` after
+   import so Verovio's number-keyed importer does not mis-route clefs (ADR-032).
+4. Convert ``.mxl`` → ``.mei`` via ``verovio`` CLI.
+5. Re-insert measure-start clef changes MuseScore drops from its export (ADR-031).
+6. Run ``validate_mei()`` on the emitted MEI; abort on any hard error.
+7. Locate the matching ``harmonies/*.tsv``.
 
 Outputs a ZIP with the following structure::
 
@@ -382,11 +386,152 @@ def convert_mxl_to_mei(mxl_path: Path, tmpdir: Path) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Measure-start clef recovery (works around a MuseScore MusicXML export defect)
+# Multi-section measure renumbering for the Verovio import (ADR-032)
 # ---------------------------------------------------------------------------
 
 _MEI_NS = "http://www.music-encoding.org/ns/mei"
 _XML_NS = "http://www.w3.org/XML/1998/namespace"
+
+
+def _renumber_musicxml(xml_bytes: bytes) -> tuple[bytes, list[str]] | None:
+    """Renumber ``score-partwise`` measures to unique document-order numbers.
+
+    Verovio's MusicXML importer keys clef (and repeat/ending) placement on the
+    ``<measure number>`` attribute.  When a movement restarts its measure
+    numbering at a section break (a minuet→trio, so the trio reuses the minuet's
+    numbers), the importer routes the trio's clef changes onto the minuet bars of
+    the same number and drops the mid-measure ones (ADR-032).  Rewriting every
+    ``<measure>`` to a unique 1..N document-order number removes the collision.
+
+    Args:
+        xml_bytes: The uncompressed MusicXML score bytes (the ``.mxl`` rootfile).
+
+    Returns:
+        ``(new_xml_bytes, original_numbers)`` when the score carries duplicate
+        measure numbers — ``original_numbers[i]`` is the original ``@number`` of
+        the *i*-th measure in document order (read from the first part; all parts
+        share the sequence), used to restore the true ``@n`` after import — or
+        ``None`` when the numbers are already unique (renumbering is a no-op).
+    """
+    import io
+
+    import lxml.etree
+
+    parser = lxml.etree.XMLParser(resolve_entities=False, no_network=True)
+    tree = lxml.etree.parse(io.BytesIO(xml_bytes), parser)
+    root = tree.getroot()
+    if root.tag != "score-partwise":
+        return None  # score-timewise / unexpected root — leave untouched
+    parts = root.findall("part")
+    if not parts:
+        return None
+
+    # All parts carry the same measure sequence; the first part is canonical.
+    original_numbers = [m.get("number", "") for m in parts[0].findall("measure")]
+    if len(set(original_numbers)) == len(original_numbers):
+        return None  # already unique — nothing to do
+
+    for part in parts:
+        for index, measure in enumerate(part.findall("measure"), start=1):
+            measure.set("number", str(index))
+
+    doctype = tree.docinfo.doctype or None
+    new_bytes = lxml.etree.tostring(
+        tree, xml_declaration=True, encoding="UTF-8", doctype=doctype
+    )
+    return new_bytes, original_numbers
+
+
+def renumber_mxl_for_import(
+    mxl_path: Path, tmpdir: Path
+) -> tuple[Path, list[str] | None]:
+    """Rewrite an ``.mxl`` so its measures are uniquely numbered for the import.
+
+    Unzips the ``.mxl`` container, renumbers the score's measures via
+    :func:`_renumber_musicxml`, and repacks — copying every other entry verbatim
+    (preserving each entry's compression, so a ``STORED`` ``mimetype`` stays
+    stored) and replacing only the score rootfile.  When the source already has
+    unique measure numbers (a single-section movement) it is a no-op: the input
+    path is returned with ``None`` and no restore is needed.
+
+    Pair with :func:`restore_measure_numbers`, which puts the true (restarting)
+    ``@n`` back on the MEI after :func:`convert_mxl_to_mei`.
+
+    Args:
+        mxl_path: The ``.mxl`` produced by :func:`convert_mscx_to_mxl`.
+        tmpdir: Temporary directory for the rewritten ``.mxl``.
+
+    Returns:
+        ``(mxl_to_import, original_numbers)``: a rewritten ``.mxl`` path and the
+        original document-order ``@number`` list when the source had duplicate
+        numbers, otherwise ``(mxl_path, None)``.
+    """
+    import lxml.etree
+
+    with zipfile.ZipFile(mxl_path) as zin:
+        container = lxml.etree.fromstring(zin.read("META-INF/container.xml"))
+        rootfile = container.find(".//{*}rootfile")
+        score_name = rootfile.get("full-path") if rootfile is not None else None
+        if not score_name:
+            return mxl_path, None
+
+        result = _renumber_musicxml(zin.read(score_name))
+        if result is None:
+            return mxl_path, None
+        new_score, original_numbers = result
+
+        out_path = tmpdir / (mxl_path.stem + ".renum.mxl")
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = new_score if item.filename == score_name else zin.read(item)
+                # Passing the original ZipInfo preserves per-entry compression
+                # (and order), so a STORED mimetype entry stays stored.
+                zout.writestr(item, data)
+
+    return out_path, original_numbers
+
+
+def restore_measure_numbers(mei_bytes: bytes, original_numbers: list[str]) -> bytes:
+    """Restore the true (restarting) ``@n`` on MEI measures after a renumbered import.
+
+    The renumbered import (:func:`renumber_mxl_for_import`) makes Verovio emit
+    MEI measures numbered 1..N; this maps each MEI ``<measure>`` — in document
+    order, which is the ``mc`` join key and is never changed by the renumber
+    (ADR-015) — back to its original source ``@number``.  The mapping is a clean
+    1:1 by position because the renumber neither adds, removes, nor reorders
+    measures.
+
+    Args:
+        mei_bytes: The MEI produced by :func:`convert_mxl_to_mei` on the
+            renumbered ``.mxl``.
+        original_numbers: The document-order ``@number`` list returned by
+            :func:`renumber_mxl_for_import`.
+
+    Returns:
+        MEI bytes with each measure's display ``@n`` restored.
+
+    Raises:
+        ValueError: When the MEI measure count differs from *original_numbers*,
+            so a corrupt ``@n`` remap fails loudly rather than silently
+            mislabelling the display numbering.
+    """
+    import lxml.etree
+
+    root = lxml.etree.fromstring(mei_bytes)
+    measures = root.findall(f".//{{{_MEI_NS}}}measure")
+    if len(measures) != len(original_numbers):
+        raise ValueError(
+            f"MEI has {len(measures)} measures but the renumbered .mxl had "
+            f"{len(original_numbers)}; refusing to remap @n"
+        )
+    for measure, number in zip(measures, original_numbers):
+        measure.set("n", number)
+    return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+
+
+# ---------------------------------------------------------------------------
+# Measure-start clef recovery (works around a MuseScore MusicXML export defect)
+# ---------------------------------------------------------------------------
 
 # MuseScore base clef letters → (MEI @shape, default @line).
 _CLEF_BASE_LINES: dict[str, str] = {"G": "2", "F": "4", "C": "3"}
@@ -987,11 +1132,28 @@ def main() -> None:
                 _err(f"mscore failed for {label}: {exc}")
                 sys.exit(1)
 
+            # Renumber measures uniquely before import so Verovio's number-keyed
+            # importer does not mis-route the clefs of a section that restarts its
+            # numbering (K331/ii minuet+trio); the true @n is restored below
+            # (ADR-032).  A single-section movement is a no-op.
+            mxl_path, original_numbers = renumber_mxl_for_import(mxl_path, tmpdir)
+            if original_numbers is not None:
+                _log(
+                    f"  {label}: renumbered {len(original_numbers)} measures for import"
+                )
+
             try:
                 mei_bytes = convert_mxl_to_mei(mxl_path, tmpdir)
             except RuntimeError as exc:
                 _err(f"verovio failed for {label}: {exc}")
                 sys.exit(1)
+
+            if original_numbers is not None:
+                try:
+                    mei_bytes = restore_measure_numbers(mei_bytes, original_numbers)
+                except ValueError as exc:
+                    _err(f"measure-number restore failed for {label}: {exc}")
+                    sys.exit(1)
 
             # Recover measure-start clef changes that MuseScore drops from its
             # MusicXML export (see recover_measure_start_clefs docstring).

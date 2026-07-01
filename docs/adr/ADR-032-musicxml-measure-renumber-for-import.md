@@ -1,7 +1,9 @@
 # ADR-032: MusicXML Measure Renumbering for the Verovio Import (Phase B / B2)
 
-**Date:** 2026-06-30
-**Status:** Accepted — validated offline; implementation deferred to Phase B
+**Date:** 2026-06-30 (implemented & verified live 2026-07-01)
+**Status:** Accepted — implemented in `scripts/prepare_dcml_corpus.py`
+(`renumber_mxl_for_import` + `restore_measure_numbers`); all five gates below
+pass on the 2026-07-01 fresh prep + live re-ingest.
 
 ---
 
@@ -106,6 +108,27 @@ unique, so the restore is identity).
 4. The restored `@n` still matches the duplicate-`@n` Step-8 disposition, and
    Pass 5/6 (`@n` uniqueness / ending `@n`) behave as before.
 5. The incipit slurs on K331/ii are re-checked.
+
+### Verification outcome (2026-07-01 — all gates pass)
+
+1. **PASS** — the stored K331/ii MEI carries all 22 `.mscx` clefs (6 Menuetto +
+   16 Trio); a render check finds 0 missing and 0 doubled glyphs, each at its
+   correct document-order measure (mc 52, 54, 56, …). The measure-start recovery
+   is a clean no-op here — the importer emits the clefs itself once numbering is
+   unique. (Only K331/ii triggers the renumber across all 54 sonata movements.)
+2. **PASS** — 8 prior-stored movements (incl. K331/ii at 101 measures)
+   fingerprint-identical before/after via `measure_content_fingerprints`; no mc
+   drift.
+3. **PASS (structural)** — repeat marks land correctly: Menuetto
+   `|: mc1-18 :| |: mc19-48 :|`, Trio `rptend@mc64 ↔ rptstart@mc65 ↔
+   rptend@mc100`, so the Trio repeat closes on the Trio's own start-repeat, not
+   the Menuetto's `rptstart@mc19` (the C2 symptom). Warning set unchanged from
+   the prior ingest. Rendered MIDI expansion still to be confirmed in-app.
+4. **PASS** — the restored `@n` raises `MEASURE_N_MULTI_SECTION_DUPLICATE` with
+   runs `[48, 51]`, exactly the Step-8 disposition; the ingest warning set is
+   otherwise unchanged.
+5. **PASS** — the regenerated K331/ii incipit has 7 slurs, none wider than the
+   viewport (max 1828 vs 13190 viewBox units); the runaway slurs are gone.
 
 ### Risks
 
