@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (2026-07-05): the K333/iii m.7 shape PLUS the bug that masked it.
+     The document's FIRST note is a dotted quarter (dur=4 dots=1 dur.ppq=6):
+     the pre-fix _ppq_per_quarter inferred 6 ticks/quarter from it (dots
+     ignored) instead of 4, which made every space-split decline and silently
+     disabled clef alignment for the whole movement.  With the fix (dotted /
+     tuplet / grace notes skipped), the second voice's restatement is aligned
+     into the invisible <space> at the change point.
+     4 ppq per quarter; 4/4 (16-tick bars). -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Dotted first note must not poison ppq inference</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="4" dots="1" dur.ppq="6" oct="3" pname="c"/>
+                  <note dur="8" dur.ppq="2" oct="3" pname="d"/>
+                  <clef xml:id="c-anchor" shape="G" line="2"/>
+                  <note dur="2" dur.ppq="8" oct="4" pname="c"/>
+                </layer>
+                <layer n="2">
+                  <space dur="1" dur.ppq="16"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="4" dur.ppq="4" oct="4" pname="d"/>
+                  <clef xml:id="c-anchor2" shape="F" line="4"/>
+                  <note dur="4" dur.ppq="4" oct="3" pname="d"/>
+                  <note dur="2" dur.ppq="8" oct="3" pname="c"/>
+                </layer>
+                <layer n="2">
+                  <space dur="2" dur.ppq="8"/>
+                  <clef xml:id="c-splittable" sameas="#c-anchor2"/>
+                  <note dur="2" dur.ppq="8" oct="2" pname="f"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

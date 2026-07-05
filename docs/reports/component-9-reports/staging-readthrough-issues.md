@@ -345,6 +345,23 @@ The **sequencing/interlock** for these around the Component 9 Steps — in parti
 
 ### A — Clefs (reopen Step 6; gate before Step 10)
 
+> **2026-07-05 — A-cluster closed corpus-wide (ADR-031 amendment).** Preparing
+> the remaining 39 movements surfaced 10 further A1b occurrences (K309/ii m77,
+> K310/ii m70, K333/iii m7/47/118, K570/ii m12, K570/iii m56, K283/iii
+> m56/m227, K331/i mX1). A root-cause investigation of all 15 known
+> occurrences (traces + Verovio probes; see
+> `docs/investigations/accidentals-k279-mvt1/clefs-findings.md` § 2026-07-05)
+> found the whole family reduces to one pattern — the converter scatters a
+> single staff-level clef change across voices, and our own `sameas`
+> resolution + per-voice trailing injections turned the copies into drawn
+> doubles. Pass 10 now keeps restatements **silent** (unresolved `sameas`
+> positions without drawing — probed), courtesy groups keep one bar-end copy,
+> the recovery injects a single trailing courtesy (leading after repeat
+> barlines, per NMA), and a `CLEF_SAMEAS_DANGLING` invariant guards the
+> original Step-6 missing-clef direction. `clef_audit` across **all 54
+> movements: 0 clef warnings**; render pass over all 19 spots (15 doubles +
+> K279/i m5/m9/m91 recovery + K533/iii m118) published for review.
+
 | ID | Symptom & score locations | Conf. | Fix target | Status |
 |---|---|---|---|---|
 | A1 | Double/extra clefs — all are **mid-measure clef changes in a two-voice region** (2026-06-30, corrected): (a) **per-voice scatter** (spurious clef in a noteless layer · `sameas` restated · two layers' clefs at different onsets · clef nested in a beam): 283/ii m.19, m.25 · 332/iii m.210 · 279/i m.86 · 279/iii m.72; (b) **multi-section collision** (trio clefs lost/mis-placed by the importer): 331/ii · 331/i m.98 | C | (a) **Phase A — Pass 10 reconciliation** (drop noteless-layer/`sameas` duplicates + onset-align, beam-aware, invisible-`<space>` split); (b) **Phase B (B2)** | ◐ **(a) FIXED in Pass 10** — render-verified one glyph on all 5 (283/ii m19/m25, 279/i m86, 279/iii m72, 332/iii m210; ADR-031). **Verified LIVE on the 2026-07-01 re-ingest** (13 clef drops + 4 onset-aligns; stored MEI shows one glyph per bar; all 15 mc-STABLE; 15 incipits + 15 analyses regenerated). **Refinement (2026-07-01):** the surviving glyph is now pulled to the **earliest** (musically-correct) onset, so 279/i m86 sits on beat 3 and its `f4` is re-clefed under G (Francisco caught the glyph a 16th late); beam-nested clefs are hoisted. Idempotent, 732 tests pass. **m86 refinement verified LIVE at the 2026-07-01 final re-ingest** (5 onset-aligns + 13 drops; m86 glyph now at beat 3; all 15 mc-STABLE). **Measure-start recovery→trailing/D3 DONE (2026-07-01; see D3 row). (b) multi-section collision DONE — Phase B / ADR-032 (2026-07-01, see A3 row): the importer now emits the Trio's clefs correctly, so the stray Menuetto clefs vanish and the Trio's ~16 return; render-verified one glyph per bar, all 15 mc-STABLE.** |

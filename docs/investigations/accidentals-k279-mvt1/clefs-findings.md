@@ -125,3 +125,35 @@ clef-consistent at the one multi-voice bar (m. 18). Two things this established:
   sameas>` with no shape/line (it reads `?/?` under `--no-normalize`); Pass 10
   resolves it to `F/4`, which is why the audit defaults to running the
   normalizer.
+
+## Double-clef root-cause investigation (2026-07-05 · full corpus)
+
+Preparing the remaining 39 movements surfaced 10 more A1b (cross-layer
+double-clef) occurrences; instead of per-case fixes, all 15 known occurrences
+(the 5 fixed above + the 10 new) were traced through every pipeline stage.
+Three synthetic Verovio 6.1.0 probes overturned two assumptions this
+investigation had baked into Pass 10 and the recovery:
+
+1. An **unresolved `<clef sameas>` positions its voice's notes** while drawing
+   no glyph. The "secondary issue" above called it an empty clef group and
+   "fixed it for robustness" by resolving to explicit shape/line — but the
+   positioning was never tested, and wholesale resolution is exactly what
+   turned silent restatements into drawn doubles (the entire A1b cluster).
+2. **Cross-measure clef state is staff-scoped** — one end-of-measure courtesy
+   in any layer re-clefs every voice of the next measure. The A2 "inject into
+   every layer" fix above is correct only for *leading* (within-measure)
+   placement; for the D3 trailing courtesy it over-encoded, and at unequal
+   layer-end ticks our own injections drew the K570/ii + K570/iii doubles.
+3. A `_ppq_per_quarter` inference bug (a dotted first note poisoned the
+   ticks-per-quarter estimate) had silently disabled space-split clef
+   alignment in K333/iii.
+
+Resolution (ADR-031 amendment, 2026-07-05; `mei-ingest-normalization.md` §10):
+Pass 10 keeps restatements silent with exactly one drawn bearer per change
+event, bar-end courtesy groups keep only their latest copy, the recovery
+injects a single trailing courtesy (leading, per-voice, after repeat
+barlines), and a safety invariant (`CLEF_SAMEAS_DANGLING`) guarantees the
+original missing-clef symptom can never return silently. `clef_audit.py`
+counts only *drawn* clefs for A1/A1b and adds A4 (dangling restatement).
+The K279/i m. 5/9/91 measure-start recoveries this file documents are
+single-voice trailing injections and are unaffected.

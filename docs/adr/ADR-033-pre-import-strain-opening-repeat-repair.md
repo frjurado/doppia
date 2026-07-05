@@ -1,8 +1,10 @@
 # ADR-033: Pre-import repair of omitted strain-opening repeats
 
-**Date:** 2026-07-01
+**Date:** 2026-07-01 (gate removed 2026-07-04)
 **Status:** Accepted — implemented in `scripts/prepare_dcml_corpus.py`
 (`repair_section_opening_repeats`); verified live on the 2026-07-01 re-ingest.
+The section-restart gate was dropped 2026-07-04 after a render review of the
+remaining 7 matched movements; the rule now applies unconditionally.
 Supersedes the C2 overlay erratum in `backend/seed/corrections/mozart__piano-sonatas.yaml`.
 
 ---
@@ -81,13 +83,27 @@ omitted opening `|:`: k282/ii (mc35), k330/i (mc59), k333/i (mc65), k545/ii
 a clean, standard-form expansion (consecutive strain repeats), so the rule is
 almost certainly correct there too.
 
-**Interim gating (Francisco 2026-07-01):** the repair is applied **only to
+**Gate removed (Francisco 2026-07-04):** the interim `if renumbered` restriction
+described below has been dropped. A 2026-07-04 before/after render review of all
+7 previously-deferred single-section movements (k282/ii, k284/iii's ten
+variation strains, k330/i, k333/i, k545/ii, k570/i, k570/iii) confirmed each
+"before" was an unambiguous bug (a strain replaying the previous one instead of
+itself) and each "after" the correct form. `repair_section_opening_repeats` now
+runs unconditionally in both the prep pipeline and `clef_audit`, for every
+movement whose structure matches, not just section-restart ones.
+
+<details>
+<summary>Original interim gating (2026-07-01 – 2026-07-04, superseded above)</summary>
+
+the repair was applied **only to
 section-restart movements** — those `renumber_mxl_for_import` renumbered — which
-reaches exactly **K331/ii** (the render-verified case). The 7 single-section
-movements are **deferred**: the rule adds a visible `|:` to each and they have not
-been render-reviewed against the edition, so they wait for a reviewed batch. The
-gate lives in the prep pipeline (and `clef_audit`), not in the function, which
-stays general; un-scoping later is deleting the `if renumbered` guard.
+reached exactly **K331/ii** (the render-verified case). The 7 single-section
+movements were **deferred**: the rule adds a visible `|:` to each and they had not
+been render-reviewed against the edition, so they waited for a reviewed batch. The
+gate lived in the prep pipeline (and `clef_audit`), not in the function, which
+stayed general; un-scoping later was deleting the `if renumbered` guard.
+
+</details>
 
 ### Relationship to ADR-032
 
@@ -112,11 +128,9 @@ omitted strain openings. Both are pre-import `.mxl` rewrites and both leave `mc`
   so fragment coordinates and the 15-movement mc-stability check are unaffected.
 - **A visible `|:` appears at K331/ii mc49** — the accepted engraving deviation
   above.
-- **7 single-section movements carry the same latent fix, currently gated off** —
-  a follow-up must render-review k282/ii, k330/i, k333/i, k545/ii, k570/i,
-  k570/iii, and k284/iii against the edition, then drop the section-restart gate
-  (or add them to an allowlist) so their trio/variation/second-half repeats play
-  correctly too.
+- **The 7 single-section movements now get the fix too** — render-reviewed
+  2026-07-04 (see below) and included once the section-restart gate was dropped;
+  their trio/variation/second-half repeats play correctly.
 
 ### Verification (2026-07-01 — live re-ingest)
 
@@ -128,12 +142,26 @@ omitted strain openings. Both are pre-import `.mxl` rewrites and both leave `mc`
 - Francisco confirmed in-app that the Trio repeats no longer jump to the
   Menuetto.
 
+### Verification (2026-07-04 — gate removal, 39-movement corpus prep)
+
+- Before/after repeat-mark and Verovio `<expansion>` evidence generated for all
+  7 previously-deferred movements (k282/ii, k284/iii, k330/i, k333/i, k545/ii,
+  k570/i, k570/iii); each "before" showed a strain replaying the wrong
+  neighbour, each "after" the corrected, self-consistent expansion.
+- Francisco reviewed the evidence and approved dropping the section-restart
+  gate.
+- The unconditional rule was then dry-run across the full 39-movement
+  not-yet-ingested corpus (`scripts/dcml_corpora/mozart-piano-sonatas-remaining.toml`)
+  with no unexpected injections beyond the 8 known movements.
+
 ### Risks
 
 - **Over-injection.** A movement whose structure genuinely wants a mid-movement
   `:|` to repeat to the movement start (not a strain start) would get an unwanted
-  `|:`. Mitigated by the first-strain exemption and by the corpus-wide check that
-  only K331/ii is touched; revisit if a future corpus surfaces a counter-example.
+  `|:`. Originally mitigated by scoping to K331/ii only; now that the rule is
+  unconditional, the mitigation is the corpus-wide dry-run + render review
+  before each new batch is ingested (done above for all 8 movements matched so
+  far) — revisit if a future corpus surfaces a counter-example.
 
 ### Alternatives considered
 

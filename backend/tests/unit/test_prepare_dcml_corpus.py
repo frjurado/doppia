@@ -886,6 +886,232 @@ class TestClefRecoveryPerVoice:
         assert second.count(b"<clef") == first.count(b"<clef")
 
 
+class TestClefRecoveryNativePartialCompletion:
+    """K533/iii m118 shape: the converter kept the measure-start change in ONE
+    voice of the target measure but not the other.  A cross-barline courtesy
+    would draw on the opposite side of the barline from the native glyph, so
+    the missing voice is completed IN PLACE — a leading clef at the same
+    onset, which normalizer Pass 10 then silences to a single drawn glyph."""
+
+    def _mei_one_layer_already_encoded(self) -> bytes:
+        # m2 staff 2 has two layers: layer 2 already carries the recovered
+        # clef (the converter got that voice right); layer 1 does not.
+        measures = []
+        for i in range(1, 6):
+            if i == 2:
+                s2 = (
+                    '<staff n="2">'
+                    '<layer n="1"><note dur="4" oct="3" pname="c"/></layer>'
+                    '<layer n="2">'
+                    '<clef shape="G" line="2"/>'
+                    '<note dur="4" oct="2" pname="c"/></layer>'
+                    "</staff>"
+                )
+            else:
+                s2 = (
+                    '<staff n="2"><layer n="1">'
+                    '<note dur="4" oct="3" pname="c"/></layer></staff>'
+                )
+            measures.append(
+                f'<measure n="{i}">'
+                f'<staff n="1"><layer n="1">'
+                f'<note dur="4" oct="4" pname="c"/></layer></staff>'
+                f"{s2}</measure>"
+            )
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+            f'<section>{"".join(measures)}</section>'
+            f"</score></mdiv></body></music></mei>"
+        ).encode("utf-8")
+
+    def test_missing_voice_completed_in_place(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._mei_one_layer_already_encoded()
+        )
+        root = lxml.etree.fromstring(out)
+        measures = root.findall(f".//{{{_MEI_NS}}}measure")
+        # No cross-barline courtesy: m1 stays clef-free.
+        m1_s2 = measures[0].find(f"{{{_MEI_NS}}}staff[@n='2']")
+        assert _clefs_in(m1_s2) == []
+        # m2 layer 1 (the voice the converter missed) leads with the clef.
+        m2_s2 = measures[1].find(f"{{{_MEI_NS}}}staff[@n='2']")
+        m2_layer1 = m2_s2.find(f"{{{_MEI_NS}}}layer[@n='1']")
+        l1_clefs = _clefs_in(m2_layer1)
+        assert len(l1_clefs) == 1
+        assert l1_clefs[0] is list(m2_layer1)[0]
+        assert l1_clefs[0].get("shape") == "G" and l1_clefs[0].get("line") == "2"
+        # The natively-encoded voice keeps its single clef (no double).
+        m2_layer2 = m2_s2.find(f"{{{_MEI_NS}}}layer[@n='2']")
+        assert len(_clefs_in(m2_layer2)) == 1
+
+    def test_idempotent_when_rerun(self, tmp_path: Path) -> None:
+        mscx = _write_mscx(tmp_path)
+        mei = self._mei_one_layer_already_encoded()
+        first = pdc.recover_measure_start_clefs(mscx, mei)
+        second = pdc.recover_measure_start_clefs(mscx, first)
+        assert first == second
+
+
+class TestClefRecoveryRepeatBoundary:
+    """K570/ii m.12→13: a repeat barline between the host and target measure
+    moves the courtesy AFTER the barline (leading in the target), per NMA —
+    the change only applies to the music after the repeat."""
+
+    def _mei_with_barline(self, attr: str, value: str) -> bytes:
+        # 5 single-voice measures; the m1|m2 boundary carries a repeat mark.
+        measures = []
+        for i in range(1, 6):
+            extra = ""
+            if attr == "right" and i == 1:
+                extra = f' right="{value}"'
+            if attr == "left" and i == 2:
+                extra = f' left="{value}"'
+            measures.append(
+                f'<measure n="{i}"{extra}>'
+                f'<staff n="1"><layer n="1">'
+                f'<note dur="4" oct="4" pname="c"/></layer></staff>'
+                f'<staff n="2"><layer n="1">'
+                f'<note dur="4" oct="3" pname="c"/></layer></staff>'
+                f"</measure>"
+            )
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+            f'<section>{"".join(measures)}</section>'
+            f"</score></mdiv></body></music></mei>"
+        ).encode("utf-8")
+
+    def _assert_leading_in_m2(self, out: bytes) -> None:
+        root = lxml.etree.fromstring(out)
+        measures = root.findall(f".//{{{_MEI_NS}}}measure")
+        m1_s2 = measures[0].find(f"{{{_MEI_NS}}}staff[@n='2']")
+        assert _clefs_in(m1_s2) == [], "no courtesy before a repeat barline"
+        m2_layer = measures[1].find(f"{{{_MEI_NS}}}staff[@n='2']/{{{_MEI_NS}}}layer")
+        clefs = _clefs_in(m2_layer)
+        assert len(clefs) == 1
+        assert clefs[0] is list(m2_layer)[0], "clef leads the target measure"
+
+    def test_rptend_on_host_moves_clef_after_barline(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._mei_with_barline("right", "rptend")
+        )
+        self._assert_leading_in_m2(out)
+
+    def test_rptstart_on_target_moves_clef_after_barline(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._mei_with_barline("left", "rptstart")
+        )
+        self._assert_leading_in_m2(out)
+
+    def test_repeat_boundary_idempotent(self, tmp_path: Path) -> None:
+        mscx = _write_mscx(tmp_path)
+        first = pdc.recover_measure_start_clefs(
+            mscx, self._mei_with_barline("right", "rptend")
+        )
+        second = pdc.recover_measure_start_clefs(mscx, first)
+        assert first == second
+
+
+class TestClefRecoveryTrailingSingleCopy:
+    """K570/ii/K570/iii shape: a multi-voice HOST measure gets exactly ONE
+    trailing courtesy, in the voice whose content reaches the bar end —
+    per-voice copies at unequal layer-end ticks drew two spaced glyphs.
+    Cross-measure clef state is staff-scoped, so one copy re-clefs every
+    voice of the next measure."""
+
+    def _mei_two_voice_host(self) -> bytes:
+        # m1 staff 2 has two layers: layer 1 is SHORT (one quarter, 48 ticks),
+        # layer 2 fills the bar (two quarters, 96 ticks).  The m2 change's
+        # courtesy must land in layer 2 only.
+        measures = []
+        for i in range(1, 6):
+            if i == 1:
+                s2 = (
+                    '<staff n="2">'
+                    '<layer n="1"><note dur="4" dur.ppq="48" oct="3" pname="c"/></layer>'
+                    '<layer n="2">'
+                    '<note dur="4" dur.ppq="48" oct="2" pname="c"/>'
+                    '<note dur="4" dur.ppq="48" oct="2" pname="d"/>'
+                    "</layer></staff>"
+                )
+            else:
+                s2 = (
+                    '<staff n="2"><layer n="1">'
+                    '<note dur="4" dur.ppq="48" oct="3" pname="c"/></layer></staff>'
+                )
+            measures.append(
+                f'<measure n="{i}">'
+                f'<staff n="1"><layer n="1">'
+                f'<note dur="4" dur.ppq="48" oct="4" pname="c"/></layer></staff>'
+                f"{s2}</measure>"
+            )
+        return (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<mei xmlns="{_MEI_NS}"><music><body><mdiv><score>'
+            f'<section>{"".join(measures)}</section>'
+            f"</score></mdiv></body></music></mei>"
+        ).encode("utf-8")
+
+    def test_single_copy_in_the_bar_end_voice(self, tmp_path: Path) -> None:
+        out = pdc.recover_measure_start_clefs(
+            _write_mscx(tmp_path), self._mei_two_voice_host()
+        )
+        root = lxml.etree.fromstring(out)
+        m1_s2 = root.findall(f".//{{{_MEI_NS}}}measure")[0].find(
+            f"{{{_MEI_NS}}}staff[@n='2']"
+        )
+        layer1 = m1_s2.find(f"{{{_MEI_NS}}}layer[@n='1']")
+        layer2 = m1_s2.find(f"{{{_MEI_NS}}}layer[@n='2']")
+        assert _clefs_in(layer1) == [], "short voice gets no copy"
+        clefs = _clefs_in(layer2)
+        assert len(clefs) == 1, "exactly one trailing courtesy"
+        assert clefs[0] is list(layer2)[-1]
+        assert clefs[0].get("shape") == "G" and clefs[0].get("line") == "2"
+
+    def test_trailing_single_copy_idempotent(self, tmp_path: Path) -> None:
+        mscx = _write_mscx(tmp_path)
+        first = pdc.recover_measure_start_clefs(mscx, self._mei_two_voice_host())
+        second = pdc.recover_measure_start_clefs(mscx, first)
+        assert first == second
+
+
+class TestLayerLeadsWithClefBeamed:
+    """A2 false positive (K533/iii m118, 2026-07-04): the converter sometimes
+    places a genuine measure-start clef as the first child of a ``<beam>``
+    rather than a direct child of the ``<layer>``. ``_layer_leads_with_clef``
+    must still recognize it as leading, or clef_audit's A2 check reports a
+    voice as missing its clef when it already has one at the same onset."""
+
+    def test_beamed_clef_as_first_event_leads(self) -> None:
+        layer = lxml.etree.fromstring(
+            f'<layer xmlns="{_MEI_NS}" n="1">'
+            '<beam><clef shape="G" line="2"/>'
+            '<note dur="16" oct="4" pname="f"/></beam>'
+            "</layer>"
+        )
+        assert pdc._layer_leads_with_clef(layer) is True
+
+    def test_beamed_clef_after_a_note_does_not_lead(self) -> None:
+        layer = lxml.etree.fromstring(
+            f'<layer xmlns="{_MEI_NS}" n="1">'
+            '<beam><note dur="16" oct="4" pname="f"/>'
+            '<clef shape="G" line="2"/></beam>'
+            "</layer>"
+        )
+        assert pdc._layer_leads_with_clef(layer) is False
+
+    def test_note_before_beam_does_not_lead(self) -> None:
+        layer = lxml.etree.fromstring(
+            f'<layer xmlns="{_MEI_NS}" n="1">'
+            '<note dur="16" oct="4" pname="f"/>'
+            '<beam><clef shape="G" line="2"/>'
+            '<note dur="16" oct="4" pname="g"/></beam>'
+            "</layer>"
+        )
+        assert pdc._layer_leads_with_clef(layer) is False
+
+
 # A two-section .mscx: section 1 = m1,m2 (break after m2), section 2 (trio) =
 # m3,m4 with a genuine measure-start G clef at m3 (staff 2, default F).
 _MSCX_SECTIONS = """<?xml version="1.0" encoding="UTF-8"?>

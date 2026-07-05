@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (2026-07-05): the safety invariant.  A <clef sameas> whose
+     target id does not exist anywhere in the document cannot resolve a
+     shape/line: Verovio would neither draw nor position — the original
+     "clef change missing from the render" symptom (Step 6).  The
+     reconciliation cannot materialize it (no known key), so it must flag
+     CLEF_SAMEAS_DANGLING. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Dangling clef sameas is flagged</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="2" dur.ppq="8" oct="3" pname="c"/>
+                  <clef xml:id="c-dangling" sameas="#no-such-clef"/>
+                  <note dur="2" dur.ppq="8" oct="4" pname="c"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

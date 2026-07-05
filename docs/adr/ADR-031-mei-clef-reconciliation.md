@@ -1,7 +1,9 @@
 # ADR-031: MEI Clef Reconciliation — per-voice doubles, onset alignment, and courtesy placement (Phase A)
 
 **Date:** 2026-06-30
-**Status:** Accepted — implementation starting
+**Status:** Accepted — implemented; **amended 2026-07-05** (see the amendment
+at the end: `sameas` restatements are kept silent instead of resolved, courtesy
+groups keep one copy, recovery injects a single trailing courtesy)
 
 ---
 
@@ -156,3 +158,94 @@ rather than a `<staff>`-child clef or running `<scoreDef>`: the latter two draw
 
 - Multi-instrument staves (out of scope; corpus is solo piano).
 - The K331/ii multi-section clef loss (ADR-032).
+
+---
+
+## Addendum (2026-07-04): audit false positive found while auditing the remaining 39 movements
+
+Running `clef_audit.py` against the not-yet-ingested corpus surfaced two
+further findings, neither of which changes the design above:
+
+- **A2 audit false positive (K533/iii m118).** `_layer_leads_with_clef`
+  checked only the layer's direct first child. When the converter's native
+  clef is the first child of a `<beam>` rather than a direct child of the
+  layer (the same beam-nesting artifact constraint 4/row 4 of the table above
+  already documents), the check missed it and both the A2 audit and the
+  measure-start recovery's already-encoded guard treated a voice that already
+  had its clef as if it did not. Fixed by making `_layer_leads_with_clef`
+  descend through beam/tuplet-style transparent containers to find the true
+  first musical event — no MEI output changed, only the audit/guard's read of
+  it. Covered by `TestLayerLeadsWithClefBeamed` in
+  `backend/tests/unit/test_prepare_dcml_corpus.py`.
+- **A1b — cross-layer clefs at different onsets, 10 occurrences across 7
+  movements** (K309/ii m77, K310/ii m70, K333/iii m7/47/118, K570/ii m12,
+  K570/iii m56, plus two pre-existing occurrences in the already-ingested
+  K283/iii m56/m227 and K331/i mX1). Francisco's read (2026-07-04) of the raw
+  `.mscx` for each: one real clef, with a second voice starting or ending
+  around it and MuseScore placing invisible rests such that the layers'
+  onsets disagree — but this is unconfirmed pending an actual Verovio render
+  review (published as an Artifact, `clef_spots_review.html`). Resolved by
+  the 2026-07-05 amendment below.
+
+---
+
+## Amendment (2026-07-05): silent restatements — one drawn glyph per change
+
+A systematic root-cause investigation of every known double-clef occurrence —
+the 5 this ADR originally fixed plus 10 then-open A1b survivors, traced
+through `.mscx` → MusicXML → converter MEI → recovery → normalizer — revised
+two of this ADR's premises. Full evidence: the four-stage traces and the
+three synthetic Verovio probes (2026-07-05).
+
+### Corrected facts (probed on Verovio 6.1.0, the pinned version in both
+`backend/requirements.txt` and `frontend/package.json`)
+
+1. **An unresolved `<clef sameas>` positions its voice.** Constraint 3 above
+   recorded only that it "renders no glyph"; the probe shows the layer's
+   following notes ARE repositioned. So a per-voice restatement kept as an
+   unresolved `sameas` is *silent but functional* — and resolving it to
+   explicit shape/line (the original Pass 10) is precisely what created the
+   visible A1b doubles. Constraint 4's dilemma ("no in-layer encoding is
+   single-glyph and all-voices") is thereby dissolved: one explicit anchor +
+   silent `sameas` copies is exactly that encoding.
+2. **Cross-measure clef state is staff-scoped.** An end-of-measure courtesy
+   clef in any single layer re-clefs every layer of the next measure;
+   per-layer copies only matter *within* a measure. So the measure-start
+   recovery's per-voice trailing injection (§2 above) was over-encoding — and
+   at unequal layer-end ticks it was itself a double-glyph generator (K570/ii
+   m12, K570/iii m56).
+
+### Amended decisions
+
+- **Pass 10 is reversed on `sameas`:** restatements are *kept silent* (never
+  resolved wholesale). Per staff-wide change event — same-key clefs adjacent
+  in onset order — exactly one member is the drawn **bearer** (explicit, at
+  the change point, the anchor voice's clef); every other positioning member
+  stays/becomes an unresolved `sameas` pointing at the bearer; a member that
+  positions nothing is dropped. Late copies are still pulled back to the
+  change point when reachable (the onset-alignment machinery is kept — a
+  `_ppq_per_quarter` inference bug that dotted first notes triggered, which
+  had silently disabled it for K333/iii, is fixed); an unreachable copy
+  (sounding note across the change point, K310/ii m70) harmlessly stays put,
+  silent.
+- **Bar-end courtesy groups keep one copy:** a group in which no member
+  positions a note is the next measure's courtesy; only the latest-onset
+  member survives, materialized to explicit (staff-scoped persistence, fact 2)
+  — its glyph sits just before the barline. Covers K309/ii m77, K283/iii
+  m56/m227, K331/i mX1.
+- **Recovery injects one trailing courtesy, not per-voice** (in the layer
+  whose content reaches the bar end), keeps per-voice injection only for
+  *leading* placement (within-measure state is per-layer), completes a
+  natively-half-encoded change in place (K533/iii m118), and switches to
+  leading placement across a repeat barline, where NMA prints no courtesy
+  before the barline (K570/ii m12→13).
+- **Safety invariant (regression guard for the original Step 6 bug):** every
+  surviving `sameas` must reference a live explicit clef; survivors are
+  re-pointed at their bearer, anything unresolvable is materialized from the
+  last known target or flagged `CLEF_SAMEAS_DANGLING`. A clef change can
+  never silently render nothing.
+
+`clef_audit.py` audits accordingly: A1/A1b count only *drawn* clefs, and a
+new A4 flags dangling restatements. The Verovio-version caveat stands: the
+silent-`sameas` behavior is an empirical property of the pinned 6.1.0 — any
+Verovio upgrade must re-run the probes before shipping.

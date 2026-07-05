@@ -5,21 +5,26 @@ Runs the real corpus-prep clef path (``.mscx`` -> ``.mxl`` -> ``.mei`` ->
 audits the resulting MEI's clef structure, flagging the three staging
 read-through symptoms directly — no database ingest, no SVG rendering required:
 
-* **A1 — double clef:** a single ``<layer>`` holding two clefs of the same
-  shape/line (the rendered double-glyph).
-* **A1b — cross-layer double:** the same clef change in two voices at *different*
-  onsets, which renders as two spaced-apart glyphs (normalizer Pass 10 should
-  have merged them to one onset — ADR-031).
+* **A1 — double clef:** a single ``<layer>`` holding two *drawn* clefs of the
+  same shape/line (the rendered double-glyph).
+* **A1b — cross-layer double:** the same *drawn* clef change in two voices at
+  *different* onsets, which renders as two spaced-apart glyphs.  Only explicit
+  (shape/line-bearing) clefs count: since the 2026-07-05 ADR-031 amendment a
+  per-voice restatement is deliberately kept as a **silent** unresolved
+  ``<clef sameas>`` — it positions its voice without drawing — so a surviving
+  explicit pair is a reconciliation regression.
 * **A2 — per-voice scope:** a multi-voice staff where a measure-start clef
-  reaches some voices but not all.
+  reaches some voices but not all (a silent restatement counts as reached).
 * **A3 — section/trio:** surfaced via the recovery diagnostics (section-count
   mismatch / skipped clefs) and the per-section clef tally.
+* **A4 — dangling restatement:** a ``<clef sameas>`` whose reference does not
+  resolve to an explicit clef would neither draw nor position its voice — the
+  original Step 6 "missing clef" symptom; the normalizer's safety invariant
+  should have materialized or flagged it.
 
 By default the audit also runs the ingest-time normalizer (Pass 0-10) after
-recovery, so the report reflects the clef state actually ingested — in
-particular ``<clef sameas>`` per-voice restatements are resolved by Pass 10
-(otherwise they appear with no shape/line).  Pass ``--no-normalize`` to inspect
-the raw prep output instead.
+recovery, so the report reflects the clef state actually ingested.  Pass
+``--no-normalize`` to inspect the raw prep output instead.
 
 Usage (from the repo root, with the backend venv)::
 
@@ -65,6 +70,16 @@ def _clef_key(clef: lxml.etree._Element) -> str:
     if clef.get("dis"):
         parts.append(f"{clef.get('dis')}{clef.get('dis.place', '')}")
     return "/".join(parts)
+
+
+def _drawn(clef: lxml.etree._Element) -> bool:
+    """Whether the clef draws a glyph (explicit shape/line).
+
+    A silent restatement — an unresolved ``<clef sameas>`` — positions its
+    voice without drawing (ADR-031 amendment, 2026-07-05) and is excluded from
+    the double-glyph checks.
+    """
+    return bool(clef.get("shape") and clef.get("line"))
 
 
 def _voiced(layer: lxml.etree._Element) -> bool:
@@ -155,14 +170,20 @@ def audit_clefs(
 
             if verbose:
                 cells = [
-                    f"layer{ln}=[{', '.join(_clef_key(c) for c in cl) or '-'}]"
+                    f"layer{ln}=["
+                    + (
+                        ", ".join(_clef_key(c) if _drawn(c) else "silent" for c in cl)
+                        or "-"
+                    )
+                    + "]"
                     for ln, cl in layer_clefs.items()
                 ]
                 print(f"  m{mn} staff{sn}: " + "  ".join(cells))
 
-            # A1 — a layer holding two clefs of the same key renders a double.
+            # A1 — a layer holding two DRAWN clefs of the same key renders a
+            # double (silent restatements draw nothing and are exempt).
             for ln, cl in layer_clefs.items():
-                keys = [_clef_key(c) for c in cl]
+                keys = [_clef_key(c) for c in cl if _drawn(c)]
                 dupes = sorted({k for k in keys if keys.count(k) > 1})
                 if dupes:
                     msg = (
@@ -173,15 +194,18 @@ def audit_clefs(
                     if verbose:
                         print(f"      {msg}")
 
-            # A1b — the same clef change scattered across voices at DIFFERENT
-            # onsets renders as two spaced-apart glyphs (a cross-layer double); at
-            # the same onset they overlap into one.  Pass 10 reconciliation
-            # (ADR-031) should have merged them, so a survivor is a regression.
+            # A1b — the same DRAWN clef change in two voices at DIFFERENT
+            # onsets renders as two spaced-apart glyphs (a cross-layer double);
+            # at the same onset they overlap into one.  Pass 10 keeps exactly
+            # one drawn clef per change (ADR-031 amendment), so a surviving
+            # explicit pair is a reconciliation regression.
             key_onsets: dict[str, set[int]] = {}
             key_layers: dict[str, set[str]] = {}
             for position, layer in enumerate(layers, 1):
                 ln = layer.get("n", str(position))
                 for onset, clef in _clef_onsets(layer):
+                    if not _drawn(clef):
+                        continue
                     key = _clef_key(clef)
                     key_onsets.setdefault(key, set()).add(onset)
                     key_layers.setdefault(key, set()).add(ln)
@@ -217,6 +241,27 @@ def audit_clefs(
                 if verbose:
                     print(f"      {msg}")
 
+    # A4 — every silent restatement must reference a live DRAWN clef, or the
+    # voice's clef change neither draws nor positions (the Step 6 symptom).
+    by_id = {
+        cid: c
+        for c in root.iter(f"{{{_MEI_NS}}}clef")
+        if (cid := c.get(f"{{{_XML_NS}}}id"))
+    }
+    for clef in root.iter(f"{{{_MEI_NS}}}clef"):
+        if _drawn(clef) or not clef.get("sameas"):
+            continue
+        target = by_id.get(clef.get("sameas", "").lstrip("#"))
+        if target is None or not _drawn(target):
+            msg = (
+                f"A4: <clef sameas='{clef.get('sameas')}'> (xml:id="
+                f"{clef.get(f'{{{_XML_NS}}}id', '?')!r}) does not resolve to a "
+                f"drawn clef -> the voice is neither drawn nor positioned"
+            )
+            warnings.append(msg)
+            if verbose:
+                print(f"      {msg}")
+
     if verbose:
         total = len(_clefs(root))
         injected = sum(
@@ -224,7 +269,11 @@ def audit_clefs(
             for c in _clefs(root)
             if c.get(f"{{{_XML_NS}}}id", "").startswith("clefrec")
         )
-        print(f"\nTotals: {total} clefs in MEI; {injected} recovered (clefrec*).")
+        silent = sum(1 for c in _clefs(root) if not _drawn(c) and c.get("sameas"))
+        print(
+            f"\nTotals: {total} clefs in MEI; {injected} recovered (clefrec*); "
+            f"{silent} silent restatement(s)."
+        )
         result = "PASS (no warnings)" if not warnings else f"{len(warnings)} WARNING(S)"
         print(f"Result: {result}")
 
@@ -256,10 +305,9 @@ def run_clef_pipeline(
         # (K331/ii minuet+trio) is audited in its ingested state, not with the
         # importer's mis-routed clefs (ADR-032).
         mxl, original_numbers = pdc.renumber_mxl_for_import(mxl, tmp)
-        if original_numbers is not None:
-            # Strain-opening repeat repair is scoped to section-restart movements
-            # (ADR-033), matching the prep pipeline's gating.
-            mxl, _ = pdc.repair_section_opening_repeats(mxl, tmp)
+        # Strain-opening repeat repair (ADR-033) applies to every movement,
+        # matching the prep pipeline.
+        mxl, _ = pdc.repair_section_opening_repeats(mxl, tmp)
         mei = pdc.convert_mxl_to_mei(mxl, tmp)
         if original_numbers is not None:
             mei = pdc.restore_measure_numbers(mei, original_numbers)

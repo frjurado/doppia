@@ -11,8 +11,8 @@ Pipeline (per movement):
    restarts its numbering at a section break, restoring the true ``@n`` after
    import so Verovio's number-keyed importer does not mis-route clefs (ADR-032).
 4. Supply strain-opening repeats the source omits so Verovio's playback
-   ``<expansion>`` pairs each ``:|`` with its own ``|:`` (ADR-033).  Scoped for
-   now to section-restart (renumbered) movements — reaches only K331/ii.
+   ``<expansion>`` pairs each ``:|`` with its own ``|:`` (ADR-033) — applies to
+   every movement whose structure matches, not just section-restart ones.
 5. Convert ``.mxl`` → ``.mei`` via ``verovio`` CLI.
 6. Re-insert measure-start clef changes MuseScore drops from its export (ADR-031).
 7. Run ``validate_mei()`` on the emitted MEI; abort on any hard error.
@@ -924,8 +924,33 @@ def _resolve_mei_measure(
 
 
 def _layer_leads_with_clef(layer: lxml.etree._Element) -> bool:
-    """Return whether the layer's first element child is a ``<clef>``."""
-    first = next((c for c in layer if isinstance(c.tag, str)), None)
+    """Return whether the layer's first musical event is a ``<clef>``.
+
+    Transparent grouping containers (``<beam>``, ``<tuplet>``, etc.) are
+    descended into: MuseScore's MusicXML export sometimes places a genuine
+    measure-start clef as the first child of a beam rather than a direct
+    child of the layer (K533/iii m118), and it still functions as a leading
+    clef there — checking direct children only produced a false "clef
+    missing on this voice" read.
+    """
+    transparent = {"beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"}
+
+    def first_event(
+        container: lxml.etree._Element,
+    ) -> lxml.etree._Element | None:
+        for child in container:
+            if not isinstance(child.tag, str):
+                continue
+            local = child.tag.rsplit("}", 1)[-1]
+            if local in transparent:
+                found = first_event(child)
+                if found is not None:
+                    return found
+                continue
+            return child
+        return None
+
+    first = first_event(layer)
     return first is not None and first.tag == f"{{{_MEI_NS}}}clef"
 
 
@@ -953,6 +978,33 @@ def _layer_has_equivalent_clef(
     return False
 
 
+def _layer_end_tick(layer: lxml.etree._Element) -> int:
+    """Total tick length of a layer's content (beams flattened, graces 0).
+
+    Used to pick the voice whose content reaches the notated bar end when a
+    single trailing courtesy clef is injected: a shorter voice's tail sits
+    mid-measure, and a clef appended there draws mid-measure too (the K570/ii
+    and K570/iii double-glyph generator).
+    """
+    total = 0
+
+    def walk(container: lxml.etree._Element) -> None:
+        nonlocal total
+        for child in container:
+            if not isinstance(child.tag, str):
+                continue
+            local = child.tag.rsplit("}", 1)[-1]
+            if local in ("beam", "tuplet", "ftrem", "btrem", "graceGrp", "beamSpan"):
+                walk(child)
+            elif local in ("note", "chord", "rest", "space", "mRest", "mSpace"):
+                dur = child.get("dur.ppq")
+                if dur and dur.lstrip("-").isdigit():
+                    total += int(dur)
+
+    walk(layer)
+    return total
+
+
 def recover_measure_start_clefs(
     mscx_path: Path,
     mei_bytes: bytes,
@@ -970,23 +1022,37 @@ def recover_measure_start_clefs(
     the corresponding MEI measure/staff layer(s).  Mid-measure clef changes are
     exported correctly and are left untouched.
 
-    Four properties make this safe on multi-voice and multi-section writing
-    (Component 9 read-through A1–A3, D3):
+    Five properties make this safe on multi-voice and multi-section writing
+    (Component 9 read-through A1–A3, D3; revised 2026-07-05 with the
+    double-clef investigation):
 
-    * **Courtesy placement (D3):** the recovered clef is appended as the *last*
-      child of the **previous** measure's staff/layers, so Verovio draws it as a
-      courtesy *before* the barline (the position MuseScore uses) and the running
-      clef carries into this measure.  When there is no previous measure, or it
-      lacks the staff, the clef falls back to the start of this measure.
-    * **Idempotency guard (A1):** a layer is skipped when it already leads with a
-      clef *or* already holds an identical clef anywhere (including nested in a
-      beam), so re-runs and converter-emitted measure-start clefs do not stack
-      into a rendered double-clef.
-    * **Per-voice scope (A2):** the recovered clef is injected into *every*
-      ``<layer>`` of the host staff, because an MEI layer clef is layer-scoped — a
-      single-layer injection would leave the second voice on the previous clef.
-      Coincident copies are reconciled to a single glyph by normalizer Pass 10
-      (ADR-031).
+    * **Courtesy placement (D3):** the recovered clef is appended as the last
+      child of **one** layer of the **previous** measure's staff — the voice
+      whose content reaches the notated bar end — so Verovio draws it as a
+      courtesy *before* the barline (the position MuseScore uses).
+      Cross-measure clef state is staff-scoped (probed on Verovio 6.1.0,
+      2026-07-05), so a single copy re-clefs every voice of this measure;
+      per-voice copies at unequal layer-end ticks were exactly the K570/ii
+      and K570/iii double-glyph generator.  When there is no previous measure,
+      or it lacks the staff, the clef falls back to the start of this measure.
+    * **Repeat boundary:** when the previous measure closes with a repeat
+      (``@right`` ``rptend``/``rptboth``) or this one opens with ``rptstart``,
+      the change belongs to the music *after* the repeat only — NMA prints no
+      courtesy before the barline there (K570/ii m.12→13) — so the clef is
+      placed leading in this measure instead.
+    * **Per-voice scope (A2) — leading placement only:** a leading clef is
+      injected into every ``<layer>`` of this measure, because *within* a
+      measure an MEI layer clef is layer-scoped — a single-layer leading
+      injection would leave the second voice on the previous clef.  The guard
+      is evaluated per layer (K533/iii m118: the converter can encode the
+      change in one voice only, and the missing voices are completed in place
+      at the same onset).  Normalizer Pass 10 silences the coincident copies
+      to a single drawn glyph (ADR-031).
+    * **Idempotency guard (A1):** injection is skipped when an equivalent clef
+      already exists — anywhere in the host staff for the trailing courtesy
+      (one copy suffices), per layer (leading clef or equivalent anywhere,
+      including nested in a beam) for the leading placement — so re-runs and
+      converter-emitted measure-start clefs do not stack into a double.
     * **Section-aware index (A3):** when the ``.mscx`` and MEI agree on section
       count, the measure index is resolved within its section, so a count
       divergence confined to an earlier section does not displace the trio's
@@ -1032,17 +1098,7 @@ def recover_measure_start_clefs(
         if measure is None:
             continue
         staff_q = f"{{{_MEI_NS}}}staff[@n='{staff_id}']"
-
-        # If this measure already encodes the change — the converter emitted a
-        # leading or mid-measure clef — no courtesy is needed; adding one would
-        # double the glyph (A1).  (Checking the measure, not the host, also keeps
-        # a re-run from doubling the fallback placement.)
         n_staff = measure.find(staff_q)
-        if n_staff is not None and any(
-            _layer_has_equivalent_clef(layer, attrs)
-            for layer in n_staff.findall(f"{{{_MEI_NS}}}layer")
-        ):
-            continue
 
         # D3: host the courtesy clef in the PREVIOUS measure of the SAME section
         # (rendered before the barline); fall back to the start of this measure
@@ -1056,6 +1112,30 @@ def recover_measure_start_clefs(
             ):
                 host, trailing = prev, True
 
+        # Repeat boundary: the change applies only to the music after the
+        # repeat, so NMA prints no courtesy before the barline (K570/ii
+        # m.12→13) — place the clef leading in this measure instead.
+        if trailing and (
+            host.get("right") in ("rptend", "rptboth")
+            or measure.get("left") == "rptstart"
+        ):
+            host, trailing = measure, False
+
+        # Native partial encoding: when the converter already kept the change
+        # in at least one of this measure's voices (K533/iii m118), complete
+        # the missing voices in place at the same onset — a cross-barline
+        # courtesy would draw a second glyph on the other side of the barline
+        # from the native one.
+        if (
+            trailing
+            and n_staff is not None
+            and any(
+                _layer_has_equivalent_clef(ly, attrs)
+                for ly in n_staff.findall(f"{{{_MEI_NS}}}layer")
+            )
+        ):
+            host, trailing = measure, False
+
         staff = host.find(staff_q)
         if staff is None:
             local_notes.append(
@@ -1063,24 +1143,40 @@ def recover_measure_start_clefs(
                 f"from .mscx index {measure_index}; clef skipped"
             )
             continue
-        for position, layer in enumerate(staff.findall(f"{{{_MEI_NS}}}layer"), start=1):
-            # An equivalent clef anywhere in the layer means it is already
-            # clef-consistent (avoids the A1 double); for the start-of-measure
-            # fallback a leading clef also suffices.
-            if _layer_has_equivalent_clef(layer, attrs) or (
-                not trailing and _layer_leads_with_clef(layer)
-            ):
+        layers = staff.findall(f"{{{_MEI_NS}}}layer")
+        if not layers:
+            continue
+
+        if trailing:
+            # One copy suffices: cross-measure clef state is staff-scoped.
+            # Host it in the voice whose content reaches the bar end so the
+            # glyph draws just before the barline, not mid-measure.
+            if any(_layer_has_equivalent_clef(ly, attrs) for ly in layers):
                 continue
-            layer_n = layer.get("n") or str(position)
+            layer = max(layers, key=_layer_end_tick)
+            layer_n = layer.get("n") or str(layers.index(layer) + 1)
             clef = lxml.etree.SubElement(layer, f"{{{_MEI_NS}}}clef")
             clef.set(f"{{{_XML_NS}}}id", f"clefrec{measure_index}s{staff_id}l{layer_n}")
             for key, value in attrs.items():
                 clef.set(key, value)
-            if not trailing:
-                # Start-of-measure fallback: move to the head of the layer.
-                layer.remove(clef)
-                layer.insert(0, clef)
-            # Trailing case: SubElement already appended it as the last child.
+            continue
+
+        # Leading placement: within a measure a layer clef is layer-scoped,
+        # so every voice needs its own copy at onset 0 (per-layer guards keep
+        # re-runs and natively-encoded voices from stacking a double; the
+        # normalizer silences the coincident copies to one drawn glyph).
+        for position, layer in enumerate(layers, start=1):
+            layer_n = layer.get("n") or str(position)
+            if _layer_has_equivalent_clef(layer, attrs) or _layer_leads_with_clef(
+                layer
+            ):
+                continue
+            clef = lxml.etree.SubElement(layer, f"{{{_MEI_NS}}}clef")
+            clef.set(f"{{{_XML_NS}}}id", f"clefrec{measure_index}s{staff_id}l{layer_n}")
+            for key, value in attrs.items():
+                clef.set(key, value)
+            layer.remove(clef)
+            layer.insert(0, clef)
 
     return lxml.etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
@@ -1289,19 +1385,21 @@ def main() -> None:
                     f"  {label}: renumbered {len(original_numbers)} measures for import"
                 )
 
-                # Supply strain-opening repeats the source omits so Verovio's
-                # playback expansion pairs each trio :| with its own |: (ADR-033).
-                # Scoped for now to section-restart (renumbered) movements — this
-                # reaches only K331/ii; the same omission in single-section
-                # movements is deferred pending a render review (ADR-033).
-                mxl_path, repeat_fixes = repair_section_opening_repeats(
-                    mxl_path, tmpdir
+            # Supply strain-opening repeats the source omits so Verovio's
+            # playback expansion pairs each :| with its own |: (ADR-033).
+            # Applies to every movement (not just section-restart ones) — a
+            # 2026-07-04 render review of all 7 single-section cases the rule
+            # also matched (K282/ii, K284/iii's 10 variation strains, K330/i,
+            # K333/i, K545/ii, K570/i, K570/iii) confirmed each "before" was an
+            # unambiguous bug (a strain replaying the previous one instead of
+            # itself) and each "after" the correct form; the gate was only ever
+            # a conservative holding pattern pending that review.
+            mxl_path, repeat_fixes = repair_section_opening_repeats(mxl_path, tmpdir)
+            if repeat_fixes:
+                _log(
+                    f"  {label}: injected opening repeat(s) at measure(s) "
+                    f"{repeat_fixes} for correct playback expansion"
                 )
-                if repeat_fixes:
-                    _log(
-                        f"  {label}: injected opening repeat(s) at measure(s) "
-                        f"{repeat_fixes} for correct playback expansion"
-                    )
 
             try:
                 mei_bytes = convert_mxl_to_mei(mxl_path, tmpdir)

@@ -965,38 +965,48 @@ class TestGesturalAccidentalResolution:
 
 
 # ---------------------------------------------------------------------------
-# Pass 10 — Clef sameas resolution
+# Pass 10 — Clef reconciliation (ADR-031, amended 2026-07-05)
 # ---------------------------------------------------------------------------
 
 
-class TestClefSameas:
-    """Pass 10: resolve <clef sameas="#id"> to explicit shape/line."""
+class TestClefSilentSameas:
+    """Pass 10: a positioning <clef sameas> restatement stays SILENT.
 
-    def test_sameas_resolved_to_explicit(self, tmp_path: Path) -> None:
-        """A clef referencing another via @sameas gains explicit shape/line."""
-        report, out_bytes = _run(tmp_path, "clef_sameas.mei")
+    Verovio 6.1.0 draws no glyph for an unresolved sameas but still
+    repositions the layer's notes (probed 2026-07-05), so resolving it to
+    explicit shape/line — the pre-amendment behaviour — is what produced the
+    A1b double-clef glyphs.  The anchor voice's explicit clef alone draws.
+    """
 
-        tree = lxml.etree.fromstring(out_bytes)
-        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
-        ref = tree.xpath("//mei:clef[@xml:id='clef-ref']", namespaces=ns)[0]
+    _ns = {"mei": _NS_MEI}
 
-        assert ref.get("shape") == "G"
-        assert ref.get("line") == "2"
-        assert "sameas" not in ref.attrib
-        assert any("sameas" in c.lower() for c in report.changes_applied)
-
-    def test_real_clef_untouched(self, tmp_path: Path) -> None:
-        """The referenced (already-explicit) clef is left unchanged."""
+    def test_positioning_sameas_kept_unresolved(self, tmp_path: Path) -> None:
+        """The layer-2 restatement keeps @sameas and gains no shape/line."""
         _, out_bytes = _run(tmp_path, "clef_sameas.mei")
         tree = lxml.etree.fromstring(out_bytes)
-        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
-        real = tree.xpath("//mei:clef[@xml:id='clef-real']", namespaces=ns)[0]
+        ref = tree.xpath("//mei:clef[@xml:id='clef-ref']", namespaces=self._ns)[0]
+        assert ref.get("shape") is None
+        assert ref.get("line") is None
+        assert ref.get("sameas") == "#clef-real"
+
+    def test_bearer_clef_untouched(self, tmp_path: Path) -> None:
+        """The anchor voice's explicit clef remains the single glyph bearer."""
+        _, out_bytes = _run(tmp_path, "clef_sameas.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        real = tree.xpath("//mei:clef[@xml:id='clef-real']", namespaces=self._ns)[0]
         assert real.get("shape") == "G"
         assert real.get("line") == "2"
         assert "sameas" not in real.attrib
+        # Exactly one drawn (explicit) clef survives in the measure.
+        explicit = [
+            c
+            for c in tree.xpath("//mei:measure//mei:clef", namespaces=self._ns)
+            if c.get("shape") and c.get("line")
+        ]
+        assert len(explicit) == 1
 
     def test_sameas_idempotent(self, tmp_path: Path) -> None:
-        """After resolution the clef carries no @sameas, so a second pass is clean."""
+        """A reconciled restatement mutates nothing on a second pass."""
         _, first_out = _run(tmp_path, "clef_sameas.mei")
         second_out = _round_trip(tmp_path, first_out, "clef_sameas.mei")
         assert first_out == second_out
@@ -1118,6 +1128,172 @@ class TestClefCoincidentVoices:
         _, first_out = _run(tmp_path, "clef_late_positioning_voice.mei")
         second_out = _round_trip(tmp_path, first_out, "clef_late_positioning_voice.mei")
         assert first_out == second_out
+
+    def test_aligned_duplicate_explicit_is_silenced(self, tmp_path: Path) -> None:
+        """m.1: after alignment the later explicit copy is demoted to sameas.
+
+        Two explicit same-key clefs at one onset overlap into one glyph, but
+        the reconciled form keeps exactly one drawn clef per change — the
+        second copy positions its voice silently.
+        """
+        report, out_bytes = _run(tmp_path, "clef_coincident_voices.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        late = tree.xpath("//mei:clef[@xml:id='m1-late']", namespaces=self._ns)[0]
+        assert late.get("shape") is None and late.get("line") is None
+        assert late.get("sameas") == "#m1-early"
+        early = tree.xpath("//mei:clef[@xml:id='m1-early']", namespaces=self._ns)[0]
+        assert early.get("shape") == "G" and early.get("line") == "2"
+        assert any("silenced a restatement" in c for c in report.changes_applied)
+
+
+class TestClefCourtesyGroup:
+    """Amended Pass 10: a bar-end courtesy group keeps only its latest copy.
+
+    Models K309/ii m.77 / K331/i mX1: the courtesy for the next measure's
+    clef change is scattered across voices at unequal layer-end ticks (no
+    member positions a note).  Cross-measure clef state is staff-scoped
+    (probed 2026-07-05), so the latest-onset copy alone re-clefs the next
+    measure and draws just before the barline; the early copy is dropped.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_latest_copy_kept_and_materialized(self, tmp_path: Path) -> None:
+        report, out_bytes = _run(tmp_path, "clef_courtesy_group.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # The bar-end sameas survives, materialized to the drawn glyph.
+        barend = tree.xpath("//mei:clef[@xml:id='c-barend']", namespaces=self._ns)
+        assert len(barend) == 1
+        assert barend[0].get("shape") == "G" and barend[0].get("line") == "2"
+        assert "sameas" not in barend[0].attrib
+        # The short voice's early explicit copy is dropped.
+        assert tree.xpath("//mei:clef[@xml:id='c-early']", namespaces=self._ns) == []
+        assert any(
+            "materialized the bar-end courtesy" in c for c in report.changes_applied
+        )
+        assert any("dropped a duplicated courtesy" in c for c in report.changes_applied)
+
+    def test_courtesy_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_courtesy_group.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_courtesy_group.mei")
+        assert first_out == second_out
+
+
+class TestClefUnreachableRestatement:
+    """Amended Pass 10: a restatement a sounding note blocks stays put, silent.
+
+    Models K310/ii m.70: the change point falls mid-note in the second voice,
+    so its copy cannot move there (a note is never split).  Kept unresolved it
+    draws no glyph but still repositions the voice's later notes — no glyph
+    double, no note-splitting, no positioning regression.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_stuck_restatement_stays_silent(self, tmp_path: Path) -> None:
+        _, out_bytes = _run(tmp_path, "clef_unreachable_restatement.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        stuck = tree.xpath("//mei:clef[@xml:id='c-stuck']", namespaces=self._ns)[0]
+        assert stuck.get("shape") is None and stuck.get("line") is None
+        assert stuck.get("sameas") == "#c-anchor"
+        # Still after the quarter note (onset 4): the layer's children open
+        # with the sounding note, then the clef.
+        layer2 = tree.xpath("//mei:layer[@n='2']", namespaces=self._ns)[0]
+        kinds = [c.tag.rsplit("}", 1)[-1] for c in layer2]
+        assert kinds[:2] == ["note", "clef"]
+        # The anchor stays the single drawn glyph.
+        anchor = tree.xpath("//mei:clef[@xml:id='c-anchor']", namespaces=self._ns)[0]
+        assert anchor.get("shape") == "G" and anchor.get("line") == "2"
+
+    def test_unreachable_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_unreachable_restatement.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "clef_unreachable_restatement.mei"
+        )
+        assert first_out == second_out
+
+
+class TestClefPpqInference:
+    """_ppq_per_quarter: dotted/tuplet/grace notes must not poison inference.
+
+    K333/iii: the movement's first qualifying note is a dotted quarter
+    (dur=4 dur.ppq=72 at 48 ppq/quarter); the pre-fix inference returned 72,
+    _ppq_to_dur could then never express a split, and every clef alignment in
+    the movement silently declined.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_dotted_first_note_skipped_and_alignment_fires(
+        self, tmp_path: Path
+    ) -> None:
+        report, out_bytes = _run(tmp_path, "clef_dotted_ppq_alignment.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # The m.2 restatement was aligned into the split <space> at onset 4.
+        layer2 = tree.xpath(
+            "//mei:measure[@n='2']//mei:layer[@n='2']", namespaces=self._ns
+        )[0]
+        kinds = [c.tag.rsplit("}", 1)[-1] for c in layer2]
+        assert kinds[:3] == ["space", "clef", "space"]
+        spaces = layer2.xpath("mei:space", namespaces=self._ns)
+        assert spaces[0].get("dur.ppq") == "4" and spaces[1].get("dur.ppq") == "4"
+        assert any("aligned a clef" in c for c in report.changes_applied)
+
+    def test_dotted_ppq_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_dotted_ppq_alignment.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_dotted_ppq_alignment.mei")
+        assert first_out == second_out
+
+
+class TestClefRestatementPastCourtesy:
+    """K330/i m.123: event membership follows the @sameas edge, not onset.
+
+    A mid-measure G change's voice-2 restatement sits at the bar end,
+    coinciding with an UNRELATED F courtesy for the next measure.  The
+    restatement belongs to the G event (noteless there → dropped); treating
+    it as a same-onset courtesy of its own would materialize a second drawn
+    G glyph at the bar end.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_restatement_joins_its_target_event(self, tmp_path: Path) -> None:
+        _, out_bytes = _run(tmp_path, "clef_restatement_past_courtesy.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # The noteless G restatement is dropped, not materialized.
+        assert (
+            tree.xpath("//mei:clef[@xml:id='c-g-restatement']", namespaces=self._ns)
+            == []
+        )
+        # Exactly two drawn clefs remain: the mid-measure G and the F courtesy.
+        drawn = [
+            (c.get("shape"), c.get("line"))
+            for c in tree.xpath("//mei:measure//mei:clef", namespaces=self._ns)
+            if c.get("shape") and c.get("line")
+        ]
+        assert sorted(drawn) == [("F", "4"), ("G", "2")]
+
+    def test_restatement_past_courtesy_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_restatement_past_courtesy.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "clef_restatement_past_courtesy.mei"
+        )
+        assert first_out == second_out
+
+
+class TestClefDanglingSameas:
+    """Safety invariant: an unresolvable <clef sameas> is flagged, never silent."""
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_dangling_reference_warns(self, tmp_path: Path) -> None:
+        report, out_bytes = _run(tmp_path, "clef_dangling_sameas.mei")
+        assert any(w.code == "CLEF_SAMEAS_DANGLING" for w in report.warnings)
+        # The clef is left in place (nothing to materialize from).
+        tree = lxml.etree.fromstring(out_bytes)
+        dangling = tree.xpath("//mei:clef[@xml:id='c-dangling']", namespaces=self._ns)
+        assert len(dangling) == 1
+        assert dangling[0].get("sameas") == "#no-such-clef"
 
 
 # ---------------------------------------------------------------------------
