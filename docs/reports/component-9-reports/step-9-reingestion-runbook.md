@@ -78,11 +78,17 @@ running, a Celery worker running, MuseScore 3.6.2, and a clone of
    Step 9 before continuing; document the incident in this directory.
 
 5. **Regenerate fragment previews** (the upload path does not — ADR-008's
-   MEI-correction trigger fires per-fragment, not on bulk ingest). Run after
+   MEI-correction trigger fires per-fragment, not on bulk ingest; see
+   `preview-regeneration-gap.md` for the pending automation). Run after
    `verify` is clean:
    ```bash
-   python scripts/regenerate_fragment_previews.py        # 6 approved fragments
+   python scripts/regenerate_fragment_previews.py   # all submitted/approved fragments
    ```
+   On staging, run it on the app machine (`fly ssh console -C ...`) while the
+   worker is on. **Note (2026-07-05):** the default snapshot path does not
+   exist inside the Docker image — run the `snapshot`/`verify` steps with an
+   explicit `--output`/`--snapshot` path (e.g. `/tmp/mc-after.json`), or diff
+   the machine's fingerprints against the committed snapshot locally.
 
 6. **Spot-check renders** for the Part 2 regression cases: K279/i clef changes
    (mm. 5, 9) and the tie at mm. 13–14, plus incipits now title-free (Step 8b).
