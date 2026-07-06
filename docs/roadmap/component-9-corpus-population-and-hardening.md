@@ -228,6 +228,8 @@ Execute the phase-1.md test-target table against the full corpus: 50–100 fragm
 
 Everything that surfaces is recorded as a per-issue report under `docs/reports/component-9-reports/` (the canonical backlog surface), triaged: fix-now (small, in-component), or carry to the Phase-2 backlog. The campaign is not "done" while a fix-now item is open.
 
+**First batch triaged (2026-07-07):** `docs/reports/component-9-reports/part-8-campaign-triage.md` — the mid-campaign issue batch from Francisco's full-corpus tagging pass, folding in `preview-regeneration-gap.md`. Eight fix-now items (headlined by the preview-pipeline/worker gap, which silently leaves campaign fragments without previews), two answered investigations (harmony confirmation workflow — `harmony_gate` seeding verified safe to defer; fragment edit lifecycle), and six Phase-2 deferrals with their mechanisms recorded.
+
 ---
 
 ## Part 9 — Full Project Review & Phase-1 Close-out
