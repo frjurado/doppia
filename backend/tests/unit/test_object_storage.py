@@ -17,6 +17,7 @@ Test structure:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -270,6 +271,62 @@ class TestSignedUrl:
 
         assert url == "https://pub-abc.r2.dev/some/key.mei"
         s3.generate_presigned_url.assert_not_awaited()
+
+    async def test_public_url_appends_version_cache_buster(self) -> None:
+        """A version timestamp adds a ?v=<token> cache-buster on the public branch."""
+        s3 = _make_mock_s3()
+        sc = _make_storage_client(s3, public_url="https://pub-abc.r2.dev")
+        version = datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc)
+
+        url = await sc.signed_url("mozart/k331/movement-1.mei", version=version)
+
+        expected_token = str(int(version.timestamp() * 1_000_000))
+        assert (
+            url
+            == f"https://pub-abc.r2.dev/mozart/k331/movement-1.mei?v={expected_token}"
+        )
+        s3.generate_presigned_url.assert_not_awaited()
+
+    async def test_public_url_without_version_has_no_query(self) -> None:
+        """Omitting version leaves the public URL unadorned (back-compat)."""
+        s3 = _make_mock_s3()
+        sc = _make_storage_client(s3, public_url="https://pub-abc.r2.dev")
+
+        url = await sc.signed_url("some/key.mei")
+
+        assert "?" not in url
+        assert url == "https://pub-abc.r2.dev/some/key.mei"
+
+    async def test_version_changes_produce_distinct_urls(self) -> None:
+        """A newer version yields a different URL — the core cache-defeating property."""
+        s3 = _make_mock_s3()
+        sc = _make_storage_client(s3, public_url="https://pub-abc.r2.dev")
+        older = datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc)
+        newer = datetime(2026, 6, 21, 12, 0, 1, tzinfo=timezone.utc)
+
+        url_old = await sc.signed_url("k.svg", version=older)
+        url_new = await sc.signed_url("k.svg", version=newer)
+
+        assert url_old != url_new
+
+    async def test_presigned_branch_ignores_version(self) -> None:
+        """On the presigned (MinIO) branch, version is ignored — no unsigned ?v=."""
+        s3 = _make_mock_s3(
+            generate_presigned_url=AsyncMock(
+                return_value="https://example.com/signed?X=1"
+            )
+        )
+        sc = _make_storage_client(s3)  # no public_url
+        version = datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc)
+
+        url = await sc.signed_url("some/key.mei", version=version)
+
+        assert url == "https://example.com/signed?X=1"  # untouched; no ?v= appended
+        s3.generate_presigned_url.assert_awaited_once_with(
+            "get_object",
+            Params={"Bucket": "test-bucket", "Key": "some/key.mei"},
+            ExpiresIn=CLIENT_FACING_URL_TTL,
+        )
 
     def test_client_facing_ttl_is_one_hour(self) -> None:
         """CLIENT_FACING_URL_TTL is 3600 seconds (1 hour)."""

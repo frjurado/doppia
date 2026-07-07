@@ -12,6 +12,22 @@ Normalization runs as a Python script in the ingest pipeline, after schema valid
 
 ## What the normalizer enforces
 
+### 0. Source-corrections overlay (Pass 0)
+
+**Problem:** some defects are not normalizer or rendering bugs — the *source data itself is wrong* (a missing start-repeat, an accidental that disagrees with the reference edition). Silently hand-editing the stored MEI would violate ADR-014 (no byte-identical original to re-process), be invisible to review, and conflict with the source when upstream is updated.
+
+**Mechanism (ADR-027):** a **corrections overlay** is a YAML data file — one entry per known source error, attributed and reference-cited — applied by **Pass 0** *before* the structural passes below, so the correctness passes that depend on the data being right (repeat-barline pairing §4, split-measure completion §7, tie completion §8, accidental resolution §9) see corrected data. The overlay is *data*: growing the list never touches normalizer logic.
+
+Overlay files live in `backend/seed/corrections/`, one per corpus (`{composer_slug}__{corpus_slug}.yaml`); see that directory's `README.md` for the format. `services/corrections_overlay.py` loads and filters the entries to a single movement; the ingest path passes the filtered `list[Correction]` to `normalize_mei(..., corrections=...)`. The normalizer never touches the filesystem itself, and a movement with no entries (the common case) makes Pass 0 a no-op — so the existing corpus and unit fixtures are unaffected.
+
+Each correction names a target element (by `xml:id`), the `field` to correct, the current wrong value (`expected`), and the value to write (`corrected`). Pass 0 compares the element's current value three ways:
+
+- **Already equals `corrected`** → no-op, recorded as `info` `CORRECTION_SUPERSEDED`. This makes the pass idempotent and makes an upstream-merged fix a safe no-op rather than a double-correction.
+- **Equals `expected`** → the correction is applied and audited in `changes_applied`.
+- **Neither** → skipped and flagged `warning` (`CORRECTION_PRESTATE_MISMATCH`); a missing target is `CORRECTION_TARGET_MISSING` and an unrecognised `field` is `CORRECTION_UNKNOWN_FIELD`.
+
+Supported `field` values at ratification: `accid`/`accid.ges` (the note's `<accid>` child) and `repeat-start`/`repeat-end` (the measure's `@left`/`@right`). Corrections target by `xml:id`, which is stable per movement and unaffected by pass 1's renumbering or ADR-015 `mc`, so Pass 0's position ahead of the other passes is safe. **That stability is provided by the corpus-prep, not by Verovio's defaults:** Verovio seeds `xml:id`s randomly per conversion, so `convert_mxl_to_mei` sets `xmlIdChecksum` to derive each id from a checksum of the movement's input — making the ids reproducible across re-preps as long as the source `.mscx` is unchanged (the same condition the per-entry `source_sha` pins). Without it, every re-prep would renumber every element and the overlay would resolve to nothing. See **ADR-030**. A correction on a printed `@accid` also re-syncs the note's gestural automatically (§9 contradiction-drop), so an accidental erratum is a single `accid` entry, not a paired `accid`/`accid.ges` pair. Licensing: corrected MEI is a CC BY-SA 4.0 derivative exactly as the uncorrected DCML-derived MEI already is (ADR-009 governs it via `data_licence`); the overlay file itself is the project's own authored data and carries no ShareAlike obligation (ADR-027 §5).
+
 ### 1. Pickup bar encoding
 
 **Problem:** Anacrusis measures are encoded inconsistently. Some encoders use `@n="0"`, some use `@n="1"` for the pickup and renumber all subsequent measures, some omit `@n` entirely on the anacrusis, and some use `@metcon` while others do not.
@@ -100,14 +116,57 @@ This means each half is an independently addressable bar in the tagging coordina
 
 **Why beat-counting is not attempted.** Determining a measure's actual duration from raw MEI requires handling chords (take the max duration per simultaneous group, not the sum), multiple layers (parallel voices — take the max across layers), tuplets (scale by `@numbase / @num`), and tied continuations. This is outside the normalizer's `lxml`-only scope, and attempting it would be both fragile and redundant. The tagging tool's ghost construction already resolves this correctly at render time: it queries Verovio for actual note onsets via `getTimesForElement()` and builds ghosts only for struck beats — so a metrically incomplete measure automatically produces the right number of ghosts regardless of whether `@metcon` is set. No ingestion-time beat count is needed to ensure correct tagging behaviour. Cases where a genuine split-measure half lacks `@metcon="false"` will be visible to annotators as a measure with fewer ghosts than the prevailing meter suggests, which is self-evident and does not corrupt any data.
 
+### 8. Cross-barline tie completion
+
+**Background.** The MuseScore-to-MEI conversion sometimes emits a tie across a barline as a `<tie>` control event carrying only `@startid` — no `@endid` (and no `@tstamp2`). Verovio cannot render an endpoint-less tie, so the tie silently disappears. Worse, the continuation note in the next measure was written *without* a fresh `@accid` precisely because it relied on the tie to carry the pitch; with the tie gone, Verovio falls back to the default accidental for that pitch class, so an altered note (e.g. a tied B♭) reappears as a natural in both the SVG and the MIDI. This was first diagnosed on K. 279 mvt 1, mm. 12–14 (see `docs/investigations/accidentals-k279-mvt1/tie-findings.md`).
+
+**Normalizer behavior.** For each `<tie>` carrying `@startid` but neither `@endid` nor `@tstamp2`, the normalizer:
+
+- Resolves the continuation note as the **first** note of the same `(pname, oct)` in the **following** measure's matching `<staff @n>` / `<layer @n>` (document order) — the legitimate cross-barline target.
+- Sets `@endid` to that note's `xml:id`.
+- If the tie's start note carries an alteration (notated `@accid` or gestural `accid.ges`) and the continuation note carries neither, adds `accid.ges` to the continuation matching the start note's alteration — preserving sounding pitch and MIDI without printing a redundant accidental (matching the original engraving).
+
+If no continuation note can be located in the following measure, the tie is left untouched and a warning is recorded rather than fabricating an endpoint. Ties already carrying `@endid`/`@tstamp2` are left untouched, so the pass is idempotent. This pass runs **before** the accidental pass (§9 below) so that the completed ties inform its tie-continuation legitimacy rule (a tied continuation's `accid.ges` is never touched). See ADR-026.
+
+### 9. Gestural accidental resolution
+
+**Background.** Verovio realises each note's MIDI pitch from that note's **own** encoded `accid` / `accid.ges` only — it does not infer running accidentals at render time (not within a layer, not across voices or octaves) and does not re-derive the key signature for a note that carries no `accid.ges`. Correct playback therefore depends entirely on the MuseScore-to-MEI converter writing the right `accid.ges` on every note, and it does not: it **omits** one a note needs (a key-sig alteration suppressed across an octave or staff by an explicit natural elsewhere; a cross-voice carry that never reaches the second voice) and it **adds** one a note must not have (a notated accidental propagated *backward* in onset order onto an earlier note in an interleaved voice). SVG stays correct; MIDI plays the wrong pitch. Diagnosed across seven movements in `docs/investigations/accidentals-k279-mvt1/accidentals-playback-findings.md`.
+
+**Normalizer behavior (ADR-028, supersedes ADR-022).** For each `<staff>` of a measure, the normalizer recomputes every note's correct gestural accidental and sets `accid.ges` to match — *full resolution*: it adds a missing gestural accidental, overrides a wrong one, and removes a spurious one. The algorithm:
+
+- Orders the staff's notes by **onset** — per-layer cumulative `@dur.ppq` (tuplet-correct; `0` for grace notes), with notes carrying an explicit `@accid` sorting first at equal onset so an explicit accidental governs a simultaneous same-pitch note in another voice.
+- Maintains `running[(pname, oct)]` — the most-recent explicit `@accid` for that exact pitch+octave **across all voices** of the staff — seeded by the active key signature (the per-section, per-staff index from §-key-sig handling, reused from ADR-022's `_build_measure_key_sigs`, so a mid-movement key change such as K331/ii's 3♯ Menuetto → 2♯ Trio resolves correctly).
+- For a note with no `@accid`: the expected alteration is the running value (or key signature). It **sets** `accid.ges` when that is an alteration, and **removes** any `accid.ges` (and orphaned `glyph.auth`) when it is natural — unless an explicit natural is overriding the key signature, in which case `accid.ges="n"` is kept.
+- A tie continuation (an `@endid` target, §8) inherits its predecessor's pitch and is left untouched. An explicitly notated `@accid` is authoritative and left untouched — *except* when its `accid.ges` contradicts the printed `@accid`, in which case the stale gestural is dropped so `@accid` governs the MIDI pitch (Verovio reads `@accid` when `accid.ges` is absent). Clean converter output never contradicts; this fires only on a gestural left stale after a Pass 0 errata correction changed the printed accidental, so an accidental erratum stays a single `accid` entry (§0). `@accid`, pitch, and printed content are never modified, so SVG is invariant and the pass is idempotent.
+
+**What it does not do.** It does not correct *source errata* — a wrong or missing **notated** accidental in the DCML/MuseScore data. The pass realises the notation faithfully; bad notation stays wrong until a corrections-overlay entry fixes it (Pass 0, ADR-027), which keeps source drift visible.
+
+### 10. Clef reconciliation (ADR-031, amended 2026-07-05)
+
+**Background.** In MuseScore a clef change is one staff-level event anchored in one voice; the MusicXML→MEI conversion copies it into **every** `<layer>` — one explicit `<clef shape="…" line="…">` in the anchor voice at the true onset plus `<clef sameas="#that-id"/>` restatements in the other layers, each at *that layer's* nearest reachable boundary (which drifts when the layer has invisible rests or ends early). Two rendering facts, probed on the pinned Verovio 6.1.0 (2026-07-05), drive the pass: an **unresolved `sameas` draws no glyph but still repositions its voice's notes**, and **cross-measure clef state is staff-scoped** (one end-of-measure courtesy in any layer re-clefs the whole next measure; per-layer scope only applies within a measure). The pre-amendment pass resolved every `sameas` to explicit shape/line — which is precisely what turned silent restatements into the visible "double clef" glyphs of the Component 9 A1b cluster.
+
+**Normalizer behavior.** Per `<staff>`, clefs are partitioned into **change events** (same resolved shape/line, adjacent in onset order). For an *active* event (some member has notes after it in its layer): late positioning copies are pulled back to the change point when reachable (an existing boundary or a splittable invisible `<space>`; a sounding note is never split — an unreachable copy stays put, silent and harmless); exactly one member at the change point becomes the drawn **bearer** (explicit); every other positioning member is kept as an unresolved `<clef sameas="#bearer">` (silent, positioning); a member that positions nothing is dropped. For a *courtesy* event (no member positions — the next measure's bar-end courtesy): only the latest-onset member survives, materialized to explicit, its glyph just before the barline. A **safety invariant** guarantees no `sameas` ever dangles: survivors are re-pointed at their bearer, and anything unresolvable is materialized from the last known target or flagged `CLEF_SAMEAS_DANGLING` — a clef change can never silently render nothing. The pass is idempotent.
+
+This is the MEI-side complement to the **measure-start clef recovery** performed earlier in the corpus-prep pipeline (see `corpus-and-analysis-sources.md`): that step re-inserts clef changes MuseScore drops from its MusicXML export (as a single trailing courtesy in the bar-end voice, or leading per-voice copies after a repeat barline / at a section start); this pass converges whatever the converter and the recovery emit onto one drawn glyph per change with every voice positioned.
+
+> **Verovio-version caveat:** the silent-`sameas` positioning behaviour is an empirical property of Verovio 6.1.0 (pinned in `backend/requirements.txt` and `frontend/package.json`). Re-run the clef probes before any Verovio upgrade.
+
+### 11. Staff-presentation normalization
+
+**Background.** The MuseScore-to-MEI conversion emits the piano grand staff inconsistently. A fresh prep of all 54 Mozart movements shows three shapes: 49 wrap the two `<staffDef>` staves in a `<staffGrp>` carrying a `brace` `<grpSym>` and `bar.thru="true"` (the canonical shape); K332/i omits the brace (and over-nests the group); K332/ii and K576/i–iii omit the grouping entirely, so the brace is absent **and** barlines do not connect across the staff gap. The instrument-label inconsistency Francisco saw on staging (`""` / `"Piano"` / `"Piano, Piano right"`) is not reproducible on the current prep — it emits no `<label>`/`@label` at all — but is stripped defensively so the corpus stays uniform across converter drift.
+
+**Normalizer behavior.** For a single-instrument grand staff, the *leaf* `<staffGrp>` (the one whose direct children include `<staffDef>`) is ensured to carry `bar.thru="true"` and a brace — a `<grpSym symbol="brace"/>` child is inserted when neither brace form (`@symbol="brace"` or a `<grpSym>` child) is present, converging every movement on the converter's own majority form. Redundant instrument labels (`@label` and `<label>` on `<staffDef>`; `<label>` on `<instrDef>`) are removed; `<instrDef>` and its `midi.*` attributes are kept (MIDI playback). The `<staffGrp>` tree is never restructured (the redundant nesting in shape B is left in place). The pass is **idempotent** (a braced, through-barred, label-free grand staff is a no-op) and a **conservative no-op on multi-instrument scores** — it only runs when every `<staffDef>` belongs to one leaf group, so it never force-braces unrelated instruments. See ADR-029.
+
+Because incipits regenerate from the normalised MEI on re-ingest (Component 9 Step 8b), folding this pass in before the Band 1 re-verification means K332/i–ii and K576/i–iii pick up the brace and connected barlines, and incipits regenerate **once** already-correct — no incipit-renderer change is needed.
+
 ---
 
 ## What the normalizer does NOT change
 
 - **Musical content**: pitches, durations, dynamics, articulations, text underlay, and all other content nodes are never touched.
-- **`xml:id` values**: these are globally unique identifiers relied on by Verovio. The normalizer never reassigns them.
+- **`xml:id` values**: these are globally unique identifiers relied on by Verovio and by the corrections overlay (§0). The normalizer never reassigns them; corpus-prep generates them *deterministically* per movement (`xmlIdChecksum`, ADR-030) so they survive a re-prep.
 - **`<ending>` measure content**: measures inside `<ending>` elements are not renumbered or restructured, except for the two auto-corrections described in §3 (assigning sequential `@n` to `<ending>` elements that lack it) and §6 (stripping alphabetic suffixes from measure `@n` values inside endings).
-- **Encoding style**: the normalizer does not convert between MEI encoding conventions (e.g. `@tie` vs. `<tie>` elements). Both styles are valid MEI and the tagging tool handles both.
+- **Encoding style**: the normalizer does not convert between MEI encoding conventions (e.g. `@tie` attributes vs. `<tie>` elements). Both styles are valid MEI and the tagging tool handles both. The one exception is §8 above, which *completes* an already-present `<tie>` element that the converter left endpoint-less (setting `@endid`) — it repairs malformed control-event data rather than converting between encoding styles.
 
 ---
 
@@ -116,21 +175,35 @@ This means each half is an independently addressable bar in the tagging coordina
 The normalizer is a standalone Python module (`backend/services/mei_normalizer.py`) using `lxml` for XML manipulation. It exposes a single function:
 
 ```python
-def normalize_mei(source_path: str, output_path: str) -> NormalizationReport:
+def normalize_mei(
+    source_path: str,
+    output_path: str,
+    corrections: list[Correction] | None = None,
+) -> NormalizationReport:
     """
-    Read the MEI file at source_path, apply all normalization rules,
+    Read the MEI file at source_path, apply the optional per-movement
+    source-corrections overlay (Pass 0, §0) and all normalization rules,
     write the normalized file to output_path, and return a report
     describing what was changed and what was flagged.
     """
 ```
 
+The `corrections` list is obtained by the caller from `services.corrections_overlay.load_corrections(composer_slug, corpus_slug, work_slug, movement_slug)` and defaults to `None` (no corrections; Pass 0 is a no-op).
+
 `NormalizationReport` is a Pydantic model containing:
 - `changes_applied: list[str]` — human-readable descriptions of each auto-correction made
-- `warnings: list[str]` — issues flagged but not auto-corrected
-- `is_clean: bool` — True if no warnings were raised (the file was already normalized or required only minor auto-corrections)
+- `warnings: list[NormalizationIssue]` — issues flagged but not auto-corrected, each carrying a `code`, `message`, `severity`, and optional `xpath`
+- `is_clean: bool` — True if no **`"warning"`-severity** issue was raised (`"info"`-severity advisories do not count against cleanliness)
 - `duration_bars: int` — maximum integer `@n` value found across all measures; stored as `movement.duration_bars`
 
-The ingest pipeline calls `normalize_mei()` after schema validation. If `report.warnings` is non-empty, the ingestion report surfaced to the admin includes those warnings. Files with warnings are stored with structured warnings written to `movement.normalization_warnings` (JSONB; null when clean). The tagging tool reads this column and surfaces a status indicator to annotators when it is non-null, so they can interpret unexpected ghost behaviour in context.
+**Issue severity (`NormalizationIssue.severity`).** Each finding carries a severity so the Component 9 Step 8 triage can downgrade accepted encoding patterns without discarding the record (mirrors `models.validation.ValidationIssue`, minus the `"error"` level — the normalizer never rejects):
+
+- **`"warning"`** — a genuine, actionable issue (missing `@n`, an unresolvable split-measure complement, a broken `@join`, an unclosed `rptstart`). Surfaced in the ingestion report, persisted to `movement.normalization_warnings`, and makes `is_clean` `False`.
+- **`"info"`** — a recognised, accepted encoding pattern that is harmless under the dual coordinate system (ADR-015): DCML `X`-prefixed `@n`, duplicate `@n` from a written-out repeat, repeated volta numbers, and unpaired-beyond-first `rptend`. Recorded for context but does not affect `is_clean` and does not, on its own, raise the per-movement attention indicator.
+
+The ingest pipeline calls `normalize_mei()` after schema validation. The full issue list (both severities) is returned in the admin-facing ingestion report (`IngestionReport.movements_accepted[].warnings`) — this is the artefact serialised to `docs/reports/component-9-reports/ingestion-warnings.json`. The `movement.normalization_warnings` column (JSONB) is written **only when the report is not clean** (i.e. at least one `"warning"`-severity issue is present); the full list is stored there for context, under the `warnings` key. The DCML harmony-alignment pass writes separately under the `harmony_alignment_warnings` key of the same column. The tagging tool surfaces a per-movement status indicator from `"warning"`-severity entries, so a movement whose only findings are accepted `"info"` patterns (e.g. K331/ii) leaves the column null and raises no indicator.
+
+> **Note — duplicated check (validator vs. normalizer).** The outside-`<ending>` measure-number integrity rules (missing / non-integer / duplicate / gap) are implemented in both `mei_validator.validate_mei` (Check 3) and the normalizer (Pass 5). The ingestion report and `normalization_warnings` are sourced **solely from the normalizer**; the validator's warning list is computed but not surfaced in the ingest path (only `validate_mei().is_valid` is consulted, to reject on hard errors). The duplication is therefore harmless today and is left as a Phase-2 cleanup (extract a shared helper) rather than refactored mid-corpus.
 
 **Duration metadata.** `normalize_mei()` also returns the **maximum integer `@n` value found across all measures in the document** (inside and outside `<ending>` elements) as `NormalizationReport.duration_bars`. The ingest pipeline stores this as `movement.duration_bars`. Using the maximum rather than the last `@n` outside endings is necessary because pieces frequently end inside a final or second ending; the "last outside endings" value would give the bar before the endings begin, not the actual last bar. Pickup bars (`@n="0"`) are excluded by being the minimum; split measure complements are counted because both halves carry distinct sequential integers.
 
@@ -306,6 +379,8 @@ The incipit approach (page 1 of a smart-break render) is not applicable to mid-s
 
 **Component 8 reuse.** The isolated fragment detail view (`FragmentDetail.tsx`, Component 8 Step 11) and the server-side `render_fragment_preview` Celery task (Component 8 Step 5) both render a fragment's `mc_start`/`mc_end` range using the same Strategy 1 call sequence. No additional spike is required for Component 8: the WASM client-side verification below (edge cases: mid-system start, repeat, first/second ending) applies equally to the Component 8 render path.
 
+**Component 9 Step 15 amendment (2026-06-11).** The fragment *detail view* now passes `breaks: "smart"` (with `scaleToPageSize: true`, a large `pageHeight`, and `pageWidth` set to the measured container width) instead of `breaks: "none"` with the wide fixed `pageWidth` — system breaks are preferable to horizontal scrolling on that surface, and the whole fragment still renders as a single SVG page (`adjustPageHeight` trims it to content). The `select()` + `redoLayout()` call sequence and the mc position-index semantics are unchanged. Single-system `breaks: "none"` remains the documented approach for incipits and server-side fragment previews.
+
 ---
 
 ## Relation to other documents
@@ -368,33 +443,55 @@ The spike script bug (missing `redoLayout()`) has been corrected. `tk.select()` 
 
 ---
 
-## § Known DCML encoding quirks: Mozart staging ingest (2026-04-24)
+## § Warning severity and dispositions (Component 9 Step 8 triage, 2026-06-16)
+
+The Mozart staging ingest surfaced five normalizer warning families. Each was triaged (against the live `ingestion-warnings.json`, the ADR-015 dual coordinate model, and ADR-025) as **normalize** (fix the check), **accept** (legitimate encoding — downgrade to `info`), or **defer** (upstream fix). The decisions on the two ambiguous families were taken with Francisco on 2026-06-16: accept + downgrade, no corpus surgery.
+
+| Issue code | Family (movements) | Disposition | Severity |
+|---|---|---|---|
+| `MEASURE_N_DCML_X` | `X`-prefixed `@n` outside `<ending>` — split-measure complements (K279/2,3, K280/3, K283/1) | **Accept** — `mc` keys it (ADR-015); not renumbered | `info` |
+| `ENDING_MEASURE_N_DCML_X` | `X`-prefixed `@n` inside `<ending>` (K283/2, K331/1) | **Accept** — integer base editorially ambiguous; `mc` keys it | `info` |
+| `ENDING_REPEATED_VOLTA` | Repeated volta numbers `[1,1,2,2]` / `[1,1,1,2,2,2]` (K283/2, K331/1) | **Normalize the check** — distinct ending numbers need only form a contiguous run from 1; repetition across passes is legitimate (ADR-025 volta index is the authority) | `info` |
+| `MEASURE_N_MULTI_SECTION_DUPLICATE` | Duplicate `@n` 1–48 twice (K331/ii) | **Accept + collapse** to one summary advisory; ADR-015 amended | `info` (1, not 48) |
+| `REPEAT_UNPAIRED_END` | Unpaired `rptend` beyond the first (K331/ii, ×2) | **Accept** — benign artefact of the same written-out structure; every `rptend` is a selection-neutral barline (ADR-025) | `info` |
+
+Genuinely actionable checks remain at `warning` severity (they did not fire on the staging corpus, but flag real defects): `MEASURE_N_MISSING`, `MEASURE_N_NON_INTEGER` (a non-integer `@n` that is *not* the `X`-pattern), `MEASURE_N_DUPLICATE` (a duplicate that is *not* a clean multi-section restart), `MEASURE_N_GAP`, `ENDING_EMPTY`, `ENDING_SINGLE`, `ENDING_NON_SEQUENTIAL` (a non-contiguous ending set, e.g. `[1,3]`), `ENDING_MEASURE_N_UNPARSEABLE`, `ENDING_MEASURE_N_DUPLICATE`, `SPLIT_MEASURE_NO_COMPLEMENT`, `JOIN_BROKEN_REFERENCE`, `REPEAT_UNCLOSED_START`, `TIE_UNRESOLVED`.
+
+**Acceptance signal (verified at Step 9 re-ingest):** after re-ingestion, the regenerated `ingestion-warnings.json` should contain **zero `"warning"`-severity entries** across the staging corpus; the five families above appear as `info`, with the K331/ii duplicate collapsed to a single summary line.
+
+---
+
+## § Known DCML encoding quirks: Mozart staging ingest (2026-04-24; triaged 2026-06-16)
 
 *Source: ingestion report from `scripts/dcml_corpora/mozart-browser-staging.toml` (K.279, 280, 283, 331, 332 — 15 movements). All movements were accepted; these are warnings, not rejections.*
 
-The following patterns appear across the Mozart corpus and are artefacts of how MuseScore 3.6 encodes repeats and how verovio converts them to MEI. They do not affect musical content or incipit rendering and are flagged by the normalizer as warnings only.
+The following patterns appear across the Mozart corpus and are artefacts of how MuseScore 3.6 encodes repeats and how verovio converts them to MEI. They do not affect musical content or incipit rendering, and — under ADR-015 — they do not affect machine coordinates (`mc`). They are now emitted by the normalizer as `info`-severity advisories (see the severity table above).
 
 ### `@n='X1'`, `'X2'`, … on measures outside `<ending>`
 
 Affects: K.279/2–3, K.280/3, K.283/1, K.331/1,3, K.332/3 (and others).
 
-MuseScore encodes certain repeated sections by writing out repeat-end measures with non-integer `@n` values (`X1`, `X2`, …) rather than using `<ending>` wrappers. These values are not valid as measure numbers outside `<ending>` elements. The normalizer flags them but cannot auto-correct them without knowing the intended bar numbering.
+MuseScore encodes certain repeat-boundary split measures with non-integer `@n` values (`X1`, `X2`, …). These are not valid as integer measure numbers, but `mc` (document-order position index) keys them correctly regardless (ADR-015), and the tagging tool's coordinate model never depends on `@n` being integer.
 
-**Future fix:** A dedicated normalizer pass that detects `X`-prefixed `@n` values, infers whether they belong inside an `<ending>` wrapper, and either rewrites the structure or strips the `X` prefix and renumbers accordingly. K.331/movement-1 is the representative case.
+**Resolved (Step 8):** Accepted and downgraded to `info` (`MEASURE_N_DCML_X`). They are **not** auto-renumbered — the decision (2026-06-16) was to rely on `mc` rather than guess integer bar numbers, keeping the corpus untouched.
 
 ### Duplicate `@n` on all measures outside `<ending>` (K.331/movement-2)
 
-K.331/movement-2 (Menuetto) has every measure `@n` duplicated (1–48 twice). This is the worst case in the staging set: the movement appears to have been written out twice by MuseScore rather than using repeat barlines, producing a full duplicate of the bar sequence. The normalizer warns on all 48 duplicates.
+K.331/movement-2 (Menuetto) has every measure `@n` duplicated — **48 bars, numbered 1–48 twice** (the issue backlog's "51" and "minuet+trio renumbering" descriptions were both inaccurate). The bar sequence is written out twice rather than expressed with a repeat structure; the duplication is a faithful written-out repeat / multi-section restart, not a corruption. Under ADR-015 the machine coordinate (`mc`) remains unique; only the human label (`@n`/`bar_*`) is ambiguous.
 
-**Future fix:** Investigate whether the MuseScore source (`K331-2.mscx`) contains a structural duplication and whether it can be collapsed into a repeat structure before MEI conversion.
+**Resolved (Step 8):** Accepted and downgraded to a single `info` summary (`MEASURE_N_MULTI_SECTION_DUPLICATE`) rather than 48 per-measure warnings. No upstream re-preparation of `K331-2.mscx`; the encoding is musically faithful and `mc` makes it safe. Display-time disambiguation of duplicate bar labels (a section qualifier) is deferred to the fragment-viewer / bracket work (Component 9 Step 15) per the ADR-015 amendment.
 
-### Non-sequential `<ending> @n` values (K.283/2, K.331/1)
+### Non-sequential / repeated `<ending> @n` values (K.283/2, K.331/1)
 
-Endings are numbered `[1, 1, 2, 2]` (K.283/2) and `[1, 1, 1, 2, 2, 2]` (K.331/1) rather than sequentially. These are paired endings across multiple repetitions; the MEI encoding repeats the same ending number for each volta occurrence rather than using unique identifiers.
+Endings are numbered `[1, 1, 2, 2]` (K.283/2) and `[1, 1, 1, 2, 2, 2]` (K.331/1). These are paired endings across multiple repetitions; the same volta number recurs for each occurrence. The original check expected a single global `1..N` sequence and flagged these as defects — a false positive.
+
+**Resolved (Step 8):** The check is now volta-group-aware: it requires only that the *distinct* ending numbers form a contiguous run from 1, and accepts repetition (`ENDING_REPEATED_VOLTA`, `info`). A genuine gap (e.g. `[1,3]`) still warns (`ENDING_NON_SEQUENTIAL`). The runtime authority for volta disambiguation is ADR-025's volta index; this check no longer competes with it.
 
 ### Unpaired `rptend` (K.331/movement-2)
 
-Two `rptend` barlines without matching `rptstart` in K.331/movement-2, consistent with the duplicate-bar issue above.
+Two `rptend` barlines without matching `rptstart`, part of the same written-out structure as the duplicate-`@n` case. Per the pairing convention above, the first unpaired close is already allowed; these are the extra closes.
+
+**Resolved (Step 8):** Downgraded to `info` (`REPEAT_UNPAIRED_END`). An unclosed `rptstart` — the riskier defect — stays a `warning`.
 
 ---
 
@@ -456,6 +553,12 @@ Verovio correctly isolates the individual `<ending>` elements by document order.
 `"3-end"` on the 6-measure k331 fixture renders positions 3–6 (4 measures, 492×124 px). `"start-end"` renders all 6 measures (identical to the full render). `"start-100"` on a 6-measure piece clamps to the last measure and renders all 6 measures correctly (720×124 px). Verovio emits a warning to stderr (`Measure range end for selection 'start-100' could not be found`) but `tk.getLog()` returns empty — the render succeeds. Use `"start-end"` rather than `"start-{large_N}"` when a full render fallback is needed; it is cleaner and silent.
 
 **Production recommendation:** Update `generate_incipit.py` to use `select({measureRange: "start-4"}) + redoLayout()` with `pageWidth=2200` and `breaks="none"`. This guarantees exactly 4 bars regardless of notation density or measure width, includes pickup bars automatically, and replaces the `breaks="smart"` / page-1 approach whose quality problems are documented above. For movements with fewer than 4 measures, use `"start-end"` as the fallback range (guard with `movement.duration_bars < 4`).
+
+### Finding 10 — `header="none"` suppresses the auto-generated movement-title page header (Component 9, Step 8b)
+
+By default Verovio renders an auto-generated page header (`<g class="pgHead autogenerated">`) above the first system, carrying the encoded movement title (e.g. `K331 movement 1 …`, `Andante grazioso`). Verovio emits this header on the first page **regardless of the selected `measureRange`**, so it appears above both incipit and fragment-preview thumbnails. In a fixed-height thumbnail it consumes vertical space without adding information the surrounding card UI does not already provide, effectively shrinking the visible score content.
+
+Confirmed in 6.1.0 on the k331 fixture: passing `"header": "none"` in `setOptions` removes the `pgHead` group entirely (SVG shrinks ~640 bytes, the title text disappears); the default (`"auto"`) and `"encoded"` both render it. Both server-side render tasks — `generate_incipit` and `render_fragment_preview` — set `"header": "none"`. The client-side score viewer (`frontend/src/services/verovio.ts`) is unaffected; this applies only to the thumbnail render path.
 
 ---
 

@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import yaml
 from models.ingestion import IngestionReport
-from models.normalization import NormalizationReport
+from models.normalization import NormalizationIssue, NormalizationReport
 from models.validation import ValidationIssue, ValidationReport
 from services.ingestion import ingest_corpus
 from tests.fixtures.builders import HARMONIES_TSV_PATH
@@ -106,20 +106,36 @@ def mock_storage() -> AsyncMock:
     return storage
 
 
-def _mock_normalize_side_effect(src: str, dst: str) -> NormalizationReport:
-    """Write src bytes to dst so that read_bytes() works; return clean report."""
+def _mock_normalize_side_effect(
+    src: str, dst: str, corrections: object | None = None
+) -> NormalizationReport:
+    """Write src bytes to dst so that read_bytes() works; return clean report.
+
+    Accepts the optional ``corrections`` keyword (ADR-027 Pass 0) so the mock
+    matches the real ``normalize_mei`` signature; the overlay itself is
+    exercised in ``test_mei_normalizer``/``test_corrections_overlay``.
+    """
     Path(dst).write_bytes(Path(src).read_bytes())
     return NormalizationReport(duration_bars=3, changes_applied=[], warnings=[])
 
 
 # ---------------------------------------------------------------------------
-# Module-level autouse fixture: suppress generate_incipit Celery dispatch
+# Module-level autouse fixtures: dispatch mode + suppressed side-dispatches
 # ---------------------------------------------------------------------------
 # All tests in this file call ingest_corpus() with mocked infrastructure.
-# The new generate_incipit.delay() call added in Step 3 would try to connect
-# to Redis (not available in unit tests) unless silenced here.
+# Dispatch goes through services.task_dispatch (ADR-034); these tests pin
+# TASK_EXECUTION_MODE=celery so the patched task objects' .delay() assertions
+# keep their original semantics (inline mode is covered by
+# test_task_dispatch.py). generate_incipit.delay() would try to connect to
+# Redis (not available in unit tests) unless silenced here.
 # TestTaskDispatch still verifies ingest_movement_analysis dispatch; a separate
 # integration test covers generate_incipit dispatch.
+
+
+@pytest.fixture(autouse=True)
+def _celery_dispatch_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin celery dispatch mode so .delay() patch assertions stay valid."""
+    monkeypatch.setenv("TASK_EXECUTION_MODE", "celery")
 
 
 @pytest.fixture(autouse=True)
@@ -127,6 +143,22 @@ def _mock_generate_incipit_delay():
     """Patch generate_incipit.delay for every unit test in this module."""
     with patch("services.ingestion.generate_incipit") as mock:
         mock.delay = MagicMock()
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def _mock_preview_regeneration():
+    """Patch the ADR-008 preview-regeneration call for every test here.
+
+    The real function would run a SELECT against the mocked session (whose
+    execute() yields upsert-shaped results, not fragment-id lists).
+    TestPreviewRegenerationDispatch asserts the wiring through this mock; the
+    function's own behaviour is unit-tested in test_fragment_service.py.
+    """
+    with patch(
+        "services.ingestion.enqueue_preview_regeneration_for_movement",
+        new_callable=AsyncMock,
+    ) as mock:
         yield mock
 
 
@@ -545,6 +577,60 @@ class TestTaskDispatch:
         mock_task.delay.assert_not_called()
 
 
+class TestPreviewRegenerationDispatch:
+    """ADR-008: the ingest path re-dispatches fragment previews per movement."""
+
+    async def test_regeneration_called_per_accepted_movement(
+        self,
+        valid_mei_bytes,
+        harmonies_bytes,
+        mock_db,
+        mock_storage,
+        _mock_preview_regeneration,
+    ):
+        meta = _minimal_metadata()
+        archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
+
+        with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
+            with patch(
+                "services.ingestion.normalize_mei",
+                side_effect=_mock_normalize_side_effect,
+            ):
+                with patch("services.ingestion.ingest_movement_analysis"):
+                    await ingest_corpus(
+                        "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                    )
+
+        _mock_preview_regeneration.assert_awaited_once()
+        args = _mock_preview_regeneration.await_args[0]
+        assert args[0] is mock_db
+        assert isinstance(args[1], uuid.UUID)  # the upserted movement's id
+
+    async def test_regeneration_not_called_for_rejected_movements(
+        self,
+        valid_mei_bytes,
+        harmonies_bytes,
+        mock_db,
+        mock_storage,
+        _mock_preview_regeneration,
+    ):
+        meta = _minimal_metadata()
+        archive = _build_zip(meta, b"invalid xml", harmonies_bytes)
+        bad_report = ValidationReport(
+            errors=[
+                ValidationIssue(code="INVALID_XML", message="bad", severity="error")
+            ]
+        )
+
+        with patch("services.ingestion.validate_mei", return_value=bad_report):
+            with pytest.raises(Exception):
+                await ingest_corpus(
+                    "mozart", "piano-sonatas", archive, mock_db, mock_storage
+                )
+
+        _mock_preview_regeneration.assert_not_awaited()
+
+
 class TestReport:
     async def test_report_contains_accepted_slug(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage
@@ -595,12 +681,17 @@ class TestReport:
         meta = _minimal_metadata()
         archive = _build_zip(meta, valid_mei_bytes, harmonies_bytes)
 
-        def _normalize_with_warnings(src: str, dst: str) -> NormalizationReport:
+        issue = NormalizationIssue(
+            code="REPEAT_UNCLOSED_START",
+            message="Unclosed rptstart at measure 5",
+            severity="warning",
+        )
+
+        def _normalize_with_warnings(
+            src: str, dst: str, corrections: object | None = None
+        ) -> NormalizationReport:
             Path(dst).write_bytes(Path(src).read_bytes())
-            return NormalizationReport(
-                duration_bars=3,
-                warnings=["Unpaired rptstart at measure 5"],
-            )
+            return NormalizationReport(duration_bars=3, warnings=[issue])
 
         with patch("services.ingestion.validate_mei", return_value=ValidationReport()):
             with patch(
@@ -611,9 +702,8 @@ class TestReport:
                         "mozart", "piano-sonatas", archive, mock_db, mock_storage
                     )
 
-        assert report.movements_accepted[0].warnings == [
-            "Unpaired rptstart at measure 5"
-        ]
+        assert report.movements_accepted[0].warnings == [issue]
+        assert report.movements_accepted[0].warnings[0].severity == "warning"
 
     async def test_partial_accept_shows_rejected_entry(
         self, valid_mei_bytes, harmonies_bytes, mock_db, mock_storage

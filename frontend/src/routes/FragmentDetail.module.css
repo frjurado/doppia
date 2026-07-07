@@ -36,8 +36,8 @@
 }
 
 .statusBadge[data-status='submitted'] {
-  background: var(--color-tertiary-container);
-  color: var(--color-on-tertiary-container);
+  background: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
 }
 
 .statusBadge[data-status='rejected'] {
@@ -52,14 +52,20 @@
   justify-content: center;
 }
 
+/* Scroll container: full width so the scrollbar sits at the viewport edge;
+   .bodyInner centers the content column (Step 15 — wider and centered). */
 .body {
   flex: 1;
   overflow-y: auto;
+  padding: var(--spacing-4) var(--spacing-5) var(--spacing-10);
+}
+
+.bodyInner {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-2);
-  padding: var(--spacing-4);
-  max-width: 960px;
+  gap: var(--spacing-3);
+  max-width: 1280px;
+  margin: 0 auto;
 }
 
 .section {
@@ -69,8 +75,80 @@
   padding: var(--spacing-4);
 }
 
+/* ─── Header (Step 15) ──────────────────────────────────────────────────────
+   Distinct groups: concept identity (kicker + serif title + work lines) on
+   the left; location and source/licence right-aligned as marginalia. */
+
+.headerSection {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-4) var(--spacing-8);
+  padding: var(--spacing-5) var(--spacing-5) var(--spacing-4);
+}
+
+.headerIdentity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+/* Concept hierarchy as an uppercase kicker above the title (DESIGN.md:
+   large serif title paired with an uppercase label subtitle). */
+.headerKicker {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
 .conceptTitle {
   margin: 0;
+}
+
+.workLine {
+  margin: var(--spacing-2) 0 0;
+}
+
+.movementLine {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.headerMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--spacing-2);
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.locationLine {
+  margin: 0;
+}
+
+/* Source + licence grouped, quieter than the location. */
+.sourceGroup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.sourceLine {
+  color: var(--color-on-surface-variant);
+  opacity: 0.7;
+  margin: 0;
+}
+
+.sourceLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sourceLink:hover {
+  text-decoration: underline;
 }
 
 /* ─── Notation section ──────────────────────────────────────────────────────── */
@@ -89,33 +167,54 @@
   justify-content: flex-end;
 }
 
+/* Harmony-label toggle floats to the left of the staff-size group (which stays
+   right via the strip's flex-end). */
+.harmonyToggleGroup {
+  display: flex;
+  margin-right: auto;
+}
+
 .scaleGroup {
   display: flex;
   gap: 1px;
 }
 
+/* Mirrors ScoreViewer's .sizeButton treatment (Step 17 / F7): transparent
+   base, primary text on hover, solid primary when active. */
 .scaleBtn {
-  background: var(--color-surface-container-high);
+  background: transparent;
   border: none;
   cursor: pointer;
   padding: 2px var(--spacing-3);
   min-width: 28px;
   text-align: center;
+  color: var(--color-on-surface-variant);
 }
 
 .scaleBtn:hover {
-  background: var(--color-surface-container-highest);
+  color: var(--color-primary);
 }
 
 .scaleBtnActive {
-  background: var(--color-primary-container);
-  color: var(--color-on-primary-container);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
 }
 
-/* Score + bracket overlay wrapper */
+/* Score + bracket overlay wrapper.
+   overflow: visible — brackets must never be clipped (Step 15); the SVG is
+   rendered at the measured container width, so nothing overflows horizontally.
+   padding-top reserves room for the main fragment bracket above the first
+   system. */
 .scoreContent {
   position: relative;
-  overflow: auto visible;
+  overflow: visible;
+  padding-top: 16px;
+}
+
+/* Extra bottom padding reserves room for sub-part brackets below the last
+   system, so no vertical scrolling is needed to discover them. */
+.scoreContentWithSubParts {
+  padding-bottom: 56px;
 }
 
 /* Verovio SVG container */
@@ -126,8 +225,11 @@
 .svgPage svg {
   display: block;
 
-  /* Natural width — Verovio sizes to content with breaks:"none" */
-  max-width: none;
+  /* Rendered at the measured container width (breaks:'smart'); cap at 100%
+     so a stale render never overflows the centered column while the resize
+     re-render is pending. */
+  max-width: 100%;
+  height: auto;
 }
 
 /* Loading / error state inside score area */
@@ -139,14 +241,21 @@
   padding: var(--spacing-6);
 }
 
-/* Sub-part bracket overlay layer */
+/* Bracket overlay layers — absolutely positioned HTML above the SVG
+   (CLAUDE.md overlay rule); never clip brackets drawn outside the SVG box. */
+.bracketOverlayLayer,
 .subPartOverlayLayer {
   position: absolute;
   inset: 0;
   pointer-events: none;
-
-  /* Must not clip brackets drawn below the SVG bottom edge */
   overflow: visible;
+}
+
+/* Main fragment bracket — above the score, one segment per system row.
+   Mirrors the tagging tool's MainBracket visual (primary, 0px radius). */
+.mainBracket {
+  position: absolute;
+  background-color: var(--color-primary);
 }
 
 /* Individual sub-part bracket bar */
@@ -162,7 +271,7 @@
 }
 
 .subPartBracket[data-status='submitted'] {
-  background: var(--color-tertiary);
+  background: var(--color-secondary);
 }
 
 .subPartBracket[data-status='rejected'] {

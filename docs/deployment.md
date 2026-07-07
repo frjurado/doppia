@@ -169,7 +169,7 @@ Then reload the page. The corpus browser and tagging tool will use this token un
 2. Under Manage R2 API Tokens, create a token with "Object Read & Write" permission scoped to the bucket.
 3. Note the Account ID from the R2 overview page.
 4. Set all four R2 variables in Fly.io secrets.
-5. Configure the bucket's CORS policy (R2 → bucket → Settings → CORS Policy). The frontend fetches MEI files directly from R2 via signed URLs, so the bucket must allow `GET` requests from the frontend origin:
+5. Configure the bucket's CORS policy (R2 → bucket → Settings → CORS Policy). The frontend fetches MEI files (and incipit/preview SVGs) directly from R2 — via the public `r2.dev` URL when `R2_PUBLIC_URL` is set, otherwise via signed URLs — so the bucket must allow `GET` requests from the frontend origin:
 
 ```json
 [
@@ -256,9 +256,14 @@ fly secrets set \
 
 `REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` is the Celery task broker. `CELERY_RESULT_BACKEND` must be `cache+memory://` and not a `rediss://` URL: all tasks are fire-and-forget (`task_ignore_result = True` in `celery_app.py`), and pointing the result backend at a `rediss://` URL causes the worker to crash on startup with a missing `ssl_cert_reqs` parameter error.
 
-Redis is wired in from day one but is not load-bearing in Phase 1. If the Upstash connection is unavailable, the Celery task dispatch (music21 analysis, incipit generation) logs a warning and the upload continues — the core ingestion (MEI validation, R2 storage, PostgreSQL records) is unaffected. Cache misses are acceptable in Phase 1; Redis is required for correctness only from Phase 2 onward.
+Redis is wired in from day one but is not load-bearing in Phase 1. If the Upstash connection is unavailable in `celery` dispatch mode, the task dispatch logs a warning and the upload continues — the core ingestion (MEI validation, R2 storage, PostgreSQL records) is unaffected. Cache misses are acceptable in Phase 1; Redis is required for correctness only from Phase 2 onward.
 
-**No Celery worker is deployed in Phase 1 staging.** The `worker` process group is intentionally absent from `fly.toml`; only the `app` process runs. Tasks dispatched via Celery are enqueued into Redis but never consumed. Background work (music21 analysis, incipit generation) must be triggered manually or deferred until a worker is added back in a later phase.
+**Background tasks run in-process by default (ADR-034).** `services/task_dispatch.py` routes every background task (analysis ingestion, incipit generation, fragment preview rendering) according to `TASK_EXECUTION_MODE`:
+
+- `inline` (the default, used by staging) — the task runs on a single-worker thread inside the `app` process, fire-and-forget. No worker, no broker traffic. This is why fragment previews and incipits materialise on staging even though no worker runs.
+- `celery` — classic broker dispatch; requires a running worker. Used for bulk ingest windows (below) and available for Phase-2 scale.
+
+**No Celery worker is deployed in Phase 1 staging.** The `worker` process group is intentionally absent from `fly.toml`; only the `app` process runs. A permanently-on worker polls the metered Upstash broker continuously and would saturate the free tier (see § "Free-tier operations"). With inline dispatch this costs nothing: background work executes in the app process. Set `TASK_EXECUTION_MODE=celery` (and add a worker) only for deliberate bulk windows.
 
 ### 5. Fly.io
 
@@ -326,7 +331,9 @@ fly ssh console --app doppia-staging -C "python scripts/validate_graph.py"
 
 Required when a bug fix changes how `movement_analysis.events` JSONB is computed (e.g. a `_compute_beat` correction). The admin `/dispatch-pending-analysis` endpoint **cannot** be used for DCML movements because the harmonies TSV is not stored in R2 — it is only available during the original upload. The only correct re-ingestion path is to re-upload the corpus ZIP, which passes the TSV through the pipeline again.
 
-A Celery worker must be running to process the analysis tasks. The worker is absent from `fly.toml` by default (Phase 1); add it temporarily.
+**With inline dispatch (ADR-034, the default) no worker is needed:** the analysis, incipit, and fragment-preview tasks run in the app process as each movement's upload commits, serialised on one thread. For a full-corpus re-ingest that is ~2 s of background work per movement trailing each upload — acceptable, and the zero-infrastructure path. The worker-window procedure below remains the documented alternative for `TASK_EXECUTION_MODE=celery` (e.g. if inline execution ever proves too slow or memory-tight on the 512 MB machine).
+
+In celery mode, a worker must be running to process the tasks. The worker is absent from `fly.toml` by default (Phase 1); add it temporarily.
 
 ### Step 1 — Add the worker to fly.toml
 
@@ -395,6 +402,8 @@ Revert `fly.toml` to the single `app` process (remove the `worker` line from `[p
 ```bash
 fly deploy --app doppia-staging
 ```
+
+**Verifying the re-ingested artifacts actually show.** MEI, incipit, and preview objects are served from the public `r2.dev` URL (`R2_PUBLIC_URL`), which Cloudflare edge-caches and which **cannot be purged on demand** (the managed subdomain is not a zone in the account). Overwriting an object therefore does *not* invalidate the cached copy. The application defeats this by appending a `?v=<last-write timestamp>` cache-buster to each artifact URL (`object_storage._cache_bust_token`, keyed on `movement.updated_at` / `incipit_generated_at` / `preview_generated_at`), so a re-ingested movement gets a fresh URL and the corrected clefs/ties/title-stripped incipit appear immediately on the next page load — no purge needed. If you ever see a *stale* artifact after re-ingestion, confirm the URL in the network tab carries a `?v=` token that matches the new write; a missing or unchanged token is the bug, not the cache. See `security-model.md` §4 "Public-URL branch (R2.dev)".
 
 ## Uploading a corpus
 
@@ -483,6 +492,24 @@ Logs are structured JSON (FastAPI + uvicorn configured for JSON output). Filter 
 **Supabase logs:** available in the Supabase dashboard under Logs → Postgres. Slow queries appear in the "Slow Queries" view.
 
 **Upstash:** connection counts and throughput visible in the Upstash dashboard. No action required in Phase 1.
+
+---
+
+## Free-tier operations
+
+Staging runs entirely on free tiers, and two of them **auto-pause on idleness** — a real-world availability problem once tagging happens on staging (Component 9 Part 8 triage, 2026-07-07). What to know:
+
+| Service | Free-tier behaviour | Effect when it triggers | Mitigation |
+|---|---|---|---|
+| Supabase | Project pauses after ~1 week without activity | **Login fails** (Supabase Auth is down, not just data); API returns 500s on Postgres reads | Daily keep-alive ping; manual restore from the Supabase dashboard if it pauses anyway |
+| Neo4j AuraDB Free | Instance pauses after ~3 days idle | Concept search, browse-by-concept, and tagging concept pickers fail | Daily keep-alive ping; manual resume from the Aura console |
+| Upstash Redis | Metered per command | A permanently-on Celery worker's broker polling exhausts the quota | Inline dispatch mode (ADR-034) — no worker, no polling; `celery` mode only for deliberate bulk windows |
+| Fly.io | `auto_stop_machines` + `min_machines_running = 0` | First request after idle hits a cold start (a few seconds) | Nothing needed; the keep-alive ping also wakes the machine daily |
+| Cloudflare R2 | 10 GB storage / generous ops allowance | Not a realistic constraint at Phase-1 scale | None |
+
+**Keep-alive ping.** `.github/workflows/keepalive.yml` hits `GET /api/v1/health/deep` daily (06:23 UTC, with retries for the Fly cold start). The endpoint runs a trivial query against **both** PostgreSQL and Neo4j so each provider registers activity; it is unauthenticated (like `/health`) and returns per-store status only, no data. A 503 from it names the paused store. Daily is comfortably inside the shortest (3-day) pause window, so a failed run or two is harmless.
+
+**If a store paused anyway** (e.g. the workflow was disabled): resume Neo4j from the Aura console (takes ~1 min) and/or restore the Supabase project from its dashboard, then re-run the workflow manually (`workflow_dispatch`) and confirm it returns 200.
 
 ---
 

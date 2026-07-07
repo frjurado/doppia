@@ -19,10 +19,13 @@ from graph.queries.concepts import (
     get_concept_contains_stages,
     get_concept_property_schemas,
     get_concept_subtree,
+    get_domain_roots,
     get_type_refinement_children,
     search_concepts,
 )
 from models.concepts import (
+    ConceptRootItem,
+    ConceptRootsResponse,
     ConceptSchemaTreeResponse,
     ConceptSearchItem,
     ConceptSearchResponse,
@@ -39,6 +42,8 @@ from models.fragment import Fragment, FragmentConceptTag
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.cache import get_tree_cache, set_tree_cache
+from services.i18n import DEFAULT_LANGUAGE
+from services.translation import TranslationOverlay, is_translation_missing
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,8 +56,10 @@ class ConceptService:
 
     Args:
         driver: The application-scoped async Neo4j driver.
-        db: Async SQLAlchemy session; required only for ``get_tree`` (fragment
-            counts).  Pass ``None`` when only search/schema operations are needed.
+        db: Async SQLAlchemy session; used for fragment counts (``get_tree``)
+            and the translation overlay on non-English reads (ADR-006). May be
+            ``None`` only when every read is English-only (the overlay
+            short-circuits ``'en'`` without touching the session).
         redis: Async Redis client; used by ``get_tree`` to cache the tree
             response.  Pass ``None`` to skip caching.
     """
@@ -67,12 +74,22 @@ class ConceptService:
         self._db = db
         self._redis = redis
 
+    def _overlay(self) -> TranslationOverlay:
+        """Return a translation overlay bound to this service's DB session.
+
+        The overlay short-circuits for English (``DEFAULT_LANGUAGE``) without
+        touching the session, so a ``None`` ``db`` is tolerated on the
+        English-only path; any non-English request requires a session.
+        """
+        return TranslationOverlay(self._db)  # type: ignore[arg-type]
+
     async def search(
         self,
         *,
         q: str,
         domain: str | None = None,
         cursor: str | None = None,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ConceptSearchResponse:
         """Full-text concept search with cursor-based pagination.
 
@@ -86,6 +103,8 @@ class ConceptService:
                 all domains.
             cursor: Opaque cursor from a previous response's ``next_cursor``
                 field; ``None`` for the first page.
+            language: Requested response language; English values are overlaid
+                with the requested locale where a translation exists (ADR-006).
 
         Returns:
             :class:`~models.concepts.ConceptSearchResponse` with ordered hits
@@ -106,23 +125,37 @@ class ConceptService:
         has_more = len(rows) == fetch
         page_rows = rows[:_PAGE_SIZE]
 
-        items = [
-            ConceptSearchItem(
-                id=row["id"],
-                name=row["name"],
-                aliases=row["aliases"] or [],
-                hierarchy_path=row["hierarchy_path"] or [],
-                definition=row.get("definition"),
+        translations = await self._overlay().concept_translations(
+            [row["id"] for row in page_rows], language
+        )
+
+        items: list[ConceptSearchItem] = []
+        for row in page_rows:
+            t = translations.get(row["id"])
+            items.append(
+                ConceptSearchItem(
+                    id=row["id"],
+                    name=t.name if t else row["name"],
+                    aliases=(
+                        t.aliases if t and t.aliases is not None else row["aliases"]
+                    )
+                    or [],
+                    hierarchy_path=row["hierarchy_path"] or [],
+                    definition=(t.definition if t else row.get("definition")),
+                    translation_missing=is_translation_missing(
+                        language, translations, row["id"]
+                    ),
+                )
             )
-            for row in page_rows
-        ]
 
         return ConceptSearchResponse(
             items=items,
             next_cursor=_encode_cursor(skip + _PAGE_SIZE) if has_more else None,
         )
 
-    async def get_schema_tree(self, concept_id: str) -> ConceptSchemaTreeResponse:
+    async def get_schema_tree(
+        self, concept_id: str, language: str = DEFAULT_LANGUAGE
+    ) -> ConceptSchemaTreeResponse:
         """Fetch the full schema tree for a concept.
 
         Runs four Neo4j queries sequentially within one session:
@@ -133,6 +166,9 @@ class ConceptService:
         Args:
             concept_id: Immutable concept identifier (e.g.
                 ``"PerfectAuthenticCadence"``).
+            language: Requested response language; schema/value/referenced-concept
+                labels are overlaid with the requested locale where a
+                translation exists (ADR-006).
 
         Returns:
             :class:`~models.concepts.ConceptSchemaTreeResponse` with schemas,
@@ -151,20 +187,48 @@ class ConceptService:
             stages_rows = await get_concept_contains_stages(session, concept_id)
             children_rows = await get_type_refinement_children(session, concept_id)
 
-        schemas = [_build_schema_item(row) for row in schemas_rows]
+        # Collect every translatable id across the three row sets, then resolve
+        # the overlay in one batch per table.
+        schema_ids = [row["schema_id"] for row in schemas_rows]
+        value_ids: list[str] = []
+        concept_ref_ids: set[str] = set()
+        for row in schemas_rows:
+            for v in row["values"]:
+                value_ids.append(v["id"])
+                if v.get("referenced_concept_id") is not None:
+                    concept_ref_ids.add(v["referenced_concept_id"])
+        concept_ref_ids.update(row["target_id"] for row in stages_rows)
+        concept_ref_ids.update(row["child_id"] for row in children_rows)
+
+        overlay = self._overlay()
+        schema_t = await overlay.schema_translations(schema_ids, language)
+        value_t = await overlay.value_translations(value_ids, language)
+        concept_t = await overlay.concept_translations(list(concept_ref_ids), language)
+
+        schemas = [
+            _build_schema_item(row, language, schema_t, value_t, concept_t)
+            for row in schemas_rows
+        ]
         stages = [
             ContainsStageItem(
                 target_id=row["target_id"],
-                target_name=row["target_name"],
+                target_name=(
+                    concept_t[row["target_id"]].name
+                    if row["target_id"] in concept_t
+                    else row["target_name"]
+                ),
                 order=row["order"],
                 required=row["required"],
                 display_mode=row["display_mode"],
                 containment_mode=row["containment_mode"],
                 default_weight=row["default_weight"],
+                translation_missing=is_translation_missing(
+                    language, concept_t, row["target_id"]
+                ),
             )
             for row in stages_rows
         ]
-        type_refinement = _compute_type_refinement(children_rows)
+        type_refinement = _compute_type_refinement(children_rows, language, concept_t)
 
         return ConceptSchemaTreeResponse(
             concept_id=concept_id,
@@ -173,13 +237,50 @@ class ConceptService:
             type_refinement=type_refinement,
         )
 
-    async def get_tree(self, root_id: str) -> ConceptTreeResponse:
+    async def get_roots(self, language: str = DEFAULT_LANGUAGE) -> ConceptRootsResponse:
+        """Return all domain root concepts (non-stub nodes with no IS_SUBTYPE_OF parent).
+
+        Domain roots are the natural entry points for the concept-tree navigator.
+        Results are ordered alphabetically by name.
+
+        Args:
+            language: Requested response language; root names/aliases are
+                overlaid with the requested locale where a translation exists.
+
+        Returns:
+            :class:`~models.concepts.ConceptRootsResponse` with a list of root items.
+        """
+        async with self._driver.session() as session:
+            rows = await get_domain_roots(session)
+
+        translations = await self._overlay().concept_translations(
+            [r["id"] for r in rows], language
+        )
+        roots: list[ConceptRootItem] = []
+        for r in rows:
+            t = translations.get(r["id"])
+            roots.append(
+                ConceptRootItem(
+                    id=r["id"],
+                    name=t.name if t else r["name"],
+                    aliases=(t.aliases if t and t.aliases is not None else r["aliases"])
+                    or [],
+                    translation_missing=is_translation_missing(
+                        language, translations, r["id"]
+                    ),
+                )
+            )
+        return ConceptRootsResponse(roots=roots)
+
+    async def get_tree(
+        self, root_id: str, language: str = DEFAULT_LANGUAGE
+    ) -> ConceptTreeResponse:
         """Return the concept subtree rooted at root_id for the tag browser.
 
         Performs three operations:
 
         1. Checks Redis for a cached ``ConceptTreeResponse`` (key
-           ``tree:{root_id}``); returns it immediately on a hit.
+           ``tree:{root_id}:{language}``); returns it immediately on a hit.
         2. Queries Neo4j for all non-stub concepts in the IS_SUBTYPE_OF
            subtree, building a flat node list with parent_id linkage and
            hierarchy paths.
@@ -195,6 +296,9 @@ class ConceptService:
 
         Args:
             root_id: Immutable concept identifier for the tree root.
+            language: Requested response language; node names/aliases are
+                overlaid with the requested locale where a translation exists.
+                The cache entry is keyed per language.
 
         Returns:
             :class:`~models.concepts.ConceptTreeResponse` with a flat node
@@ -204,7 +308,7 @@ class ConceptService:
             ConceptNotFoundError: If no non-stub Concept with ``root_id`` exists.
         """
         if self._redis is not None:
-            cached = await get_tree_cache(self._redis, root_id)
+            cached = await get_tree_cache(self._redis, root_id, language)
             if cached is not None:
                 return ConceptTreeResponse.model_validate(cached)
 
@@ -219,23 +323,30 @@ class ConceptService:
 
         node_ids = [r["id"] for r in rows]
         counts = await self._fetch_fragment_counts(node_ids)
+        translations = await self._overlay().concept_translations(node_ids, language)
 
-        nodes = [
-            ConceptTreeNode(
-                id=r["id"],
-                name=r["name"],
-                aliases=r["aliases"] or [],
-                hierarchy_path=r["hierarchy_path"] or [],
-                parent_id=r["parent_id"],
-                fragment_count=counts.get(r["id"], 0),
+        nodes = []
+        for r in rows:
+            t = translations.get(r["id"])
+            nodes.append(
+                ConceptTreeNode(
+                    id=r["id"],
+                    name=t.name if t else r["name"],
+                    aliases=(t.aliases if t and t.aliases is not None else r["aliases"])
+                    or [],
+                    hierarchy_path=r["hierarchy_path"] or [],
+                    parent_id=r["parent_id"],
+                    fragment_count=counts.get(r["id"], 0),
+                    translation_missing=is_translation_missing(
+                        language, translations, r["id"]
+                    ),
+                )
             )
-            for r in rows
-        ]
 
         response = ConceptTreeResponse(root_id=root_id, nodes=nodes)
 
         if self._redis is not None:
-            await set_tree_cache(self._redis, root_id, response.model_dump())
+            await set_tree_cache(self._redis, root_id, language, response.model_dump())
 
         return response
 
@@ -271,38 +382,64 @@ class ConceptService:
 # ---------------------------------------------------------------------------
 
 
-def _build_schema_item(row: dict) -> PropertySchemaItem:
-    """Assemble a :class:`~models.concepts.PropertySchemaItem` from a raw query row."""
+def _build_schema_item(
+    row: dict,
+    language: str,
+    schema_t: dict,
+    value_t: dict,
+    concept_t: dict,
+) -> PropertySchemaItem:
+    """Assemble a :class:`~models.concepts.PropertySchemaItem` from a raw query row.
+
+    Schema, value, and referenced-concept labels are overlaid from the supplied
+    translation maps (empty for English); ``translation_missing`` is set per
+    item when the requested non-English locale has no record.
+    """
     values: list[PropertyValueItem] = []
     for v in row["values"]:
         ref: ReferencedConcept | None = None
         if v.get("referenced_concept_id") is not None:
+            ref_id = v["referenced_concept_id"]
+            ct = concept_t.get(ref_id)
             ref = ReferencedConcept(
-                id=v["referenced_concept_id"],
-                name=v["referenced_concept_name"],
-                definition=v.get("referenced_concept_definition"),
+                id=ref_id,
+                name=ct.name if ct else v["referenced_concept_name"],
+                definition=(
+                    ct.definition if ct else v.get("referenced_concept_definition")
+                ),
+                translation_missing=is_translation_missing(language, concept_t, ref_id),
             )
+        vt = value_t.get(v["id"])
         values.append(
             PropertyValueItem(
                 id=v["id"],
-                name=v["name"],
+                name=vt.name if vt else v["name"],
                 order=v.get("order"),
                 referenced_concept=ref,
+                translation_missing=is_translation_missing(language, value_t, v["id"]),
             )
         )
+    st = schema_t.get(row["schema_id"])
     return PropertySchemaItem(
         id=row["schema_id"],
-        name=row["schema_name"],
-        description=row.get("schema_description"),
+        name=st.name if st else row["schema_name"],
+        description=st.description if st else row.get("schema_description"),
         cardinality=row["cardinality"],
         required=row["required"],
         order=row.get("order"),
         group=row.get("group"),
         values=values,
+        translation_missing=is_translation_missing(
+            language, schema_t, row["schema_id"]
+        ),
     )
 
 
-def _compute_type_refinement(children_rows: list[dict]) -> TypeRefinement:
+def _compute_type_refinement(
+    children_rows: list[dict],
+    language: str,
+    concept_t: dict,
+) -> TypeRefinement:
     """Determine whether Type Refinement should be shown.
 
     Compares the CONTAINS fingerprints of all direct non-stub children.  If
@@ -311,6 +448,9 @@ def _compute_type_refinement(children_rows: list[dict]) -> TypeRefinement:
 
     Args:
         children_rows: Raw rows from :func:`~graph.queries.concepts.get_type_refinement_children`.
+        language: Requested response language.
+        concept_t: Concept translation map keyed by child concept id (empty for
+            English).
 
     Returns:
         :class:`~models.concepts.TypeRefinement` with ``show=True`` and all
@@ -323,17 +463,20 @@ def _compute_type_refinement(children_rows: list[dict]) -> TypeRefinement:
     if len(set(fingerprints)) == 1:
         return TypeRefinement(show=False)
 
-    return TypeRefinement(
-        show=True,
-        children=[
+    children: list[TypeRefinementChild] = []
+    for row in children_rows:
+        ct = concept_t.get(row["child_id"])
+        children.append(
             TypeRefinementChild(
                 id=row["child_id"],
-                name=row["child_name"],
-                definition=row["child_definition"],
+                name=ct.name if ct else row["child_name"],
+                definition=ct.definition if ct else row["child_definition"],
+                translation_missing=is_translation_missing(
+                    language, concept_t, row["child_id"]
+                ),
             )
-            for row in children_rows
-        ],
-    )
+        )
+    return TypeRefinement(show=True, children=children)
 
 
 # ---------------------------------------------------------------------------

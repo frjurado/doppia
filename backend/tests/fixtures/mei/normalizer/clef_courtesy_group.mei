@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-031 amendment, 2026-07-05): a bar-end COURTESY clef change
+     scattered across two voices at unequal layer-end ticks (no member has a
+     note after it).  Models K309/ii m.77 (explicit in the SHORT voice, sameas
+     at the bar end) and K331/i mX1.  The reconciliation keeps only the
+     latest-onset copy, materialized to explicit shape/line: cross-measure
+     clef state is staff-scoped, so one survivor re-clefs the whole next
+     measure, and its glyph sits just before the barline.
+     4 ppq per quarter; 4/4 (16-tick bars). -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Bar-end courtesy clef, unequal layer ends</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="2" dur.ppq="8" oct="3" pname="c"/>
+                  <note dur="2" dur.ppq="8" oct="3" pname="d"/>
+                  <clef xml:id="c-barend" sameas="#c-early"/>
+                </layer>
+                <layer n="2">
+                  <note dur="4" dur.ppq="4" oct="2" pname="g"/>
+                  <clef xml:id="c-early" shape="G" line="2"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="1" dur.ppq="16" oct="4" pname="c"/>
+                </layer>
+                <layer n="2">
+                  <note dur="1" dur.ppq="16" oct="3" pname="g"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

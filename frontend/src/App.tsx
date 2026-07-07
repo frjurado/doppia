@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import RequireAuth from './components/auth/RequireAuth';
+import BrowsingLayout from './components/ui/BrowsingLayout';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import CorpusBrowser from './routes/CorpusBrowser';
@@ -22,46 +23,18 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <ErrorBoundary>
-                <CorpusBrowser />
-              </ErrorBoundary>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/review-queue"
-          element={
-            <RequireAuth>
-              <ErrorBoundary>
-                <ReviewQueue />
-              </ErrorBoundary>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/concepts"
-          element={
-            <RequireAuth>
-              <ErrorBoundary>
-                <FragmentBrowser />
-              </ErrorBoundary>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/fragments/:fragmentId"
-          element={
-            <RequireAuth>
-              <ErrorBoundary>
-                <FragmentDetail />
-              </ErrorBoundary>
-            </RequireAuth>
-          }
-        />
+
+        {/* Browsing views share the NavBar via BrowsingLayout (no auth gate here).
+            RequireAuth is on each child so unauthenticated users still see the
+            nav bar — and the Login button — before being redirected. */}
+        <Route element={<ErrorBoundary><BrowsingLayout /></ErrorBoundary>}>
+          <Route path="/" element={<RequireAuth><CorpusBrowser /></RequireAuth>} />
+          <Route path="/review-queue" element={<RequireAuth><ReviewQueue /></RequireAuth>} />
+          <Route path="/concepts" element={<RequireAuth><FragmentBrowser /></RequireAuth>} />
+          <Route path="/fragments/:fragmentId" element={<RequireAuth><FragmentDetail /></RequireAuth>} />
+        </Route>
+
+        {/* Score viewer is full-screen; no shared nav */}
         <Route
           path="/scores/:movementId"
           element={

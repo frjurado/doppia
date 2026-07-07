@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-031, Pass 10c): one staff-wide clef change carried by two
+     voices at slightly DIFFERENT onsets renders as two spaced glyphs (the
+     Cluster-A1 double).  Pass 10c moves the later voice's clef back to the
+     earlier onset so the identical glyphs overlap into one.
+       m.1 — the earlier onset is an existing boundary in the later voice
+             (a <space> starts there): a clean re-insert (the K283/ii m.25 shape).
+       m.2 — the earlier onset falls inside an invisible <space>: the space is
+             split (no printed rest changes) and the clef placed between the
+             halves (the K279/iii m.72 shape).
+     4 ppq per quarter (a quarter note carries dur.ppq="4"). -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Coincident clef change across two voices</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="3" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="4" dur.ppq="4" oct="3" pname="c"/>
+                  <clef xml:id="m1-early" shape="G" line="2"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="c"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="d"/>
+                </layer>
+                <layer n="2">
+                  <note dur="4" dur.ppq="4" oct="2" pname="g"/>
+                  <space dur="4" dur.ppq="4"/>
+                  <clef xml:id="m1-late" shape="G" line="2"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="a"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="8" dur.ppq="2" oct="3" pname="c"/>
+                  <clef xml:id="m2-early" shape="G" line="2"/>
+                  <note dur="8" dur.ppq="2" oct="4" pname="c"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="d"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="e"/>
+                </layer>
+                <layer n="2">
+                  <space dur="4" dur.ppq="4"/>
+                  <clef xml:id="m2-late" shape="G" line="2"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="a"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="b"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

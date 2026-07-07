@@ -15,9 +15,22 @@ Related documents:
 
 ## Mode gating
 
-The overlay renders **only when `ScoreViewer` mode is `'tag'`**. Read-only `view` mode stays clean (score and MIDI only).
+The overlay surfaces on **two surfaces, gated differently** (Step 23 decision, confirmed with Francisco 2026-06-19):
 
-This is an intentional scope restriction: harmony labels are an annotator aid, not a reading surface. The gate is checked in `ScoreViewer.tsx` before mounting `harmonyOverlay.ts`; the module itself has no knowledge of view mode. If a view-mode reading aid is wanted later, removing the mount condition is the only change required.
+| Surface | Gate | Rationale |
+|---|---|---|
+| **Score viewer** (`ScoreViewer.tsx`) | Tag mode only | The score viewer is a reading/annotation surface; in-score labels are an annotator aid. View mode stays clean (score + MIDI only). |
+| **Fragment viewer** (`FragmentDetail.tsx`) | On by default, user toggle | A fragment *is* a study object — the tagged harmony is part of what it teaches. Labels render on load; a "Harmony" toggle in the score controls lets the reader hide them. |
+
+This resolves the Step 23 asymmetry deliberately as **option (b)**: show labels in the fragment viewer (with a toggle defaulting to on), keep the score-viewer tag-mode gate. The roadmap's two other options — keep the asymmetry, or add a toggle to *both* surfaces — were not taken: the score viewer's view mode has no fragment-study purpose to justify the labels.
+
+**Score viewer.** The tag-mode gate is checked in `ScoreViewer.tsx` before mounting `harmonyOverlay.ts`; the module itself has no knowledge of view mode.
+
+**Fragment viewer.** `FragmentDetail.tsx` mounts the same `HarmonyOverlay` in a `showHarmony`-gated effect. Differences from the score-viewer mount:
+- **Data**: reuses the `harmony_events` already sliced into the fragment detail response over the rendered bar range (`toOverlayHarmonyEvents()` coerces the loosely-typed records into `HarmonyEventOut`), so there is no second analysis request.
+- **Ghost layer**: reuses the layer built once per render for bracket geometry (`readFragmentGeometry()` takes it as a parameter), so the bracket and label surfaces share one coordinate origin.
+- **Non-interactive**: no `onLabelClick` is passed — the viewer is read-only, so labels stay `pointer-events: none` (there is no `HarmonyPanel` to focus).
+- **Toggle**: rendered only when the fragment has harmony events; `useState(true)` default, no persistence (per-view state).
 
 ---
 
@@ -62,8 +75,26 @@ if (mc == null) return;
 const beatIdx = Math.floor(event.beat) - 1;                 // 0-indexed
 const beatEntry = ghostLayer.beatIndex.get(encodeBeat(mc, beatIdx));
 if (!beatEntry) return;                                      // beat not present in this measure
-const x = beatEntry.bounds.left;                             // pixel x relative to the container
+const x = beatEntry.noteheadCenter;                          // leftmost-notehead center (see below)
 ```
+
+**Centering on the notehead (Step 21).** `x` is the horizontal **center of the leftmost
+notehead** at that metric position — the same head that defines the beat-boundary left
+edge — *not* the beat-boundary left edge (`bounds.left`) itself. The label element is
+positioned `left: x` and centered on it in CSS via `transform: translateX(-50%)`.
+
+It is computed in `computeBeatBoundaries()` (`beatCenters[]` / `subBeatCenters[][]`) from
+each note's `noteheadCenter()` x and stored on `BeatGhostEntry.noteheadCenter` /
+`SubBeatGhostEntry.noteheadCenter` by `buildGhosts()`. Accidentals and ornaments are
+excluded (it uses the `<g class="noteHead">` geometry, the same accidental-aware
+resolution as `noteheadLeftEdge()`).
+
+The **leftmost** head is used deliberately rather than an average over the beat: notes
+bucket into a beat by onset, so averaging would pull the label rightward as later notes
+within the beat (e.g. an eighth on the "&") are added. When a beat has displaced
+simultaneous noteheads — a 2nd interval, where Verovio offsets one head off the stem —
+the label centers on the leftmost (stem-side) head. Empty measures (no onsets) fall back
+to the measure center.
 
 ### Step 3 — vertical position
 
@@ -123,7 +154,49 @@ Label content is the **primary label** format used by `HarmonyPanel`: `numeral +
 
 This keeps the panel and in-score labels lexically identical so annotators can cross-reference without translation.
 
-CSS rules live in `harmonyOverlay.module.css`. Font: Public Sans (label tier per `DESIGN.md`). Colour: Henle Blue `#3f5f77` at reduced opacity (≈70%) so labels read but do not compete with the notation. `0px border-radius`, no border. Unreviewed events may carry a faint amber tint to match the `HarmonyPanel` review badge — implementation detail, not a hard requirement.
+### Stacked figures (Step 22)
+
+The Roman numeral's inversion / figured-bass digits render as a **vertical stack**
+beside the numeral (engraved figured-bass convention), not as linear text. The numeral
+base is an inline text node; the figure is a child `<span data-figure="true">` of
+`flex-direction: column` digit rows (`.figure` / `.figureRow` in
+`harmonyOverlay.module.css`), at `0.72em` and tight line-height. The figure column uses
+`vertical-align: middle` so it straddles the numeral — the top digit reads as a
+superscript and the bottom as a subscript, rather than the first digit sitting on the RN
+baseline. The whole composite still centres on the notehead via the `.label`
+`translateX(-50%)` anchor from Step 21.
+
+**Font size scales with the staff size.** The label base size is 12px at the smallest
+staff preset (Verovio scale 35); `harmonyOverlay.ts` computes `12 × scale / 35` and sets
+it inline per label (≈15.4px at Medium/45, ≈18.9px at Large/55), so labels stay
+proportional to the engraving. The figure rows inherit it via their `em` sizing. The
+overlay is reconstructed on every Verovio re-render (the effect keys on `svgPages`), so a
+staff-size change picks up the new scale at construction.
+
+**Implemented grammar (everything else falls back to today's rendering):**
+
+1. **Figbass inversion figures** carried in the `numeral` string. A whole-corpus survey of
+   the Mozart piano sonatas confirms exactly seven figbass values — `""`, `6`, `7`, `65`,
+   `43`, `2`, `64` (all in `ingest_analysis._FIGBASS_MAP`); **two stacked digits is the
+   maximum.** `harmonyOverlay.ts` splits the numeral into base RN + trailing digits via
+   `splitNumeralFigure()`; recognised digits split to single-digit rows (`V65` → `6`/`5`,
+   `I64` → `6`/`4`, `V7` → `7`).
+2. **The cadential six-four.** DCML encodes it as `numeral="V"`, `figbass=""`,
+   `changes="64"` — i.e. it arrives as a figure-less numeral with `extensions=["64"]`
+   (835 of 889 `"64"` changes in the corpus), so the overlay previously rendered a bare
+   `"V"` and dropped the 6/4. When the numeral has no figbass figure **and**
+   `extensions === ["64"]`, the figure stacks as `6`/`4`. A figbass figure on the numeral
+   always wins; the extension is then ignored.
+
+Every other `extensions` value — accidentals/markers (`b3`, `#7`, `+4`, `6v5`),
+multi-token concatenations (`#4#2`, `9#74`), and two-digit intervals (`11`, `13`, `112`,
+`1311`) — is **out of scope by design**: the numeral renders linearly and the extension is
+not shown (the pre-Step-22 behaviour). The `changes` field's long tail is not a clean
+single/double-digit stack (e.g. `974` is three rows), so it is deliberately not parsed.
+This is a rendering refinement of the existing surface, not a new architectural decision —
+no ADR (consistent with Step 21); confirmed with Francisco 2026-06-18.
+
+CSS rules live in `harmonyOverlay.module.css`. Font: **Newsreader serif at 12px**, centered on the notehead-centroid anchor x via `transform: translateX(-50%)` (Step 21). This is a deliberate departure from the Public Sans label tier in `DESIGN.md`: in-score analysis text reads as engraved Roman-numeral / figured-bass, which is conventionally serif (confirmed with Francisco, 2026-06-18). Colour: Henle Blue `#3f5f77` at reduced opacity (≈70%) so labels read but do not compete with the notation. `0px border-radius`, no border. Unreviewed events may carry a faint amber tint to match the `HarmonyPanel` review badge — implementation detail, not a hard requirement.
 
 ---
 

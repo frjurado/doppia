@@ -27,11 +27,23 @@
  *   - string: base64 MIDI from Verovio renderToMIDI(). When this changes
  *     (e.g. after transposition), the hook stops playback and prepares to
  *     reschedule on the next `play()` call.
+ *
+ * Fragment window (Component 9 Step 18):
+ *   `options.window` constrains playback to a time span of the supplied MIDI.
+ *   Verovio's renderToMIDI() ignores the fragment `select()`, so the fragment
+ *   viewer passes the *whole-movement* MIDI plus the fragment's
+ *   `{ startMs, endMs }` window (from `buildFragmentPlayback`). The hook
+ *   schedules only the notes inside the window, shifted so the fragment starts
+ *   at transport time 0, and schedules an automatic stop at the window's end so
+ *   playback never spills past the fragment. With no window (the full score
+ *   viewer) playback is unchanged. `options.onEnded` fires when playback
+ *   reaches the window's end, letting the caller clear its own highlights.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
+import type { FragmentTimeWindow } from '../services/verovio';
 
 // ---------------------------------------------------------------------------
 // SoundFont configuration
@@ -54,13 +66,34 @@ const SOUNDFONT_BASE_URL: string = import.meta.env['VITE_SOUNDFONT_BASE_URL'] ??
  * Value = filename,         e.g. "Ds4.mp3" (sharp with `s`, URL-safe)
  */
 const PIANO_SAMPLE_URLS: Record<string, string> = {
-  'C1': 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', 'A1': 'A1.mp3',
-  'C2': 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', 'A2': 'A2.mp3',
-  'C3': 'C3.mp3', 'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', 'A3': 'A3.mp3',
-  'C4': 'C4.mp3', 'D#4': 'Ds4.mp3', 'F#4': 'Fs4.mp3', 'A4': 'A4.mp3',
-  'C5': 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3', 'A5': 'A5.mp3',
-  'C6': 'C6.mp3', 'D#6': 'Ds6.mp3', 'F#6': 'Fs6.mp3', 'A6': 'A6.mp3',
-  'C7': 'C7.mp3', 'D#7': 'Ds7.mp3', 'F#7': 'Fs7.mp3', 'A7': 'A7.mp3',
+  C1: 'C1.mp3',
+  'D#1': 'Ds1.mp3',
+  'F#1': 'Fs1.mp3',
+  A1: 'A1.mp3',
+  C2: 'C2.mp3',
+  'D#2': 'Ds2.mp3',
+  'F#2': 'Fs2.mp3',
+  A2: 'A2.mp3',
+  C3: 'C3.mp3',
+  'D#3': 'Ds3.mp3',
+  'F#3': 'Fs3.mp3',
+  A3: 'A3.mp3',
+  C4: 'C4.mp3',
+  'D#4': 'Ds4.mp3',
+  'F#4': 'Fs4.mp3',
+  A4: 'A4.mp3',
+  C5: 'C5.mp3',
+  'D#5': 'Ds5.mp3',
+  'F#5': 'Fs5.mp3',
+  A5: 'A5.mp3',
+  C6: 'C6.mp3',
+  'D#6': 'Ds6.mp3',
+  'F#6': 'Fs6.mp3',
+  A6: 'A6.mp3',
+  C7: 'C7.mp3',
+  'D#7': 'Ds7.mp3',
+  'F#7': 'Fs7.mp3',
+  A7: 'A7.mp3',
 };
 
 // ---------------------------------------------------------------------------
@@ -69,12 +102,12 @@ const PIANO_SAMPLE_URLS: Record<string, string> = {
 
 /** Playback lifecycle states exposed to the score viewer. */
 export type PlaybackStatus =
-  | 'idle'               // No MIDI available; play button disabled.
+  | 'idle' // No MIDI available; play button disabled.
   | 'loading-instrument' // SoundFont loading on first play click.
-  | 'instrument-error'   // SoundFont failed to load (404, timeout, etc.). Retryable.
-  | 'ready'              // MIDI available, not playing. Play enabled.
-  | 'playing'            // Transport running.
-  | 'paused';            // Transport paused at current position.
+  | 'instrument-error' // SoundFont failed to load (404, timeout, etc.). Retryable.
+  | 'ready' // MIDI available, not playing. Play enabled.
+  | 'playing' // Transport running.
+  | 'paused'; // Transport paused at current position.
 
 /** 1-indexed bar and beat position, updated during playback via RAF. */
 export interface PlaybackPosition {
@@ -82,6 +115,28 @@ export interface PlaybackPosition {
   bar: number;
   /** 1-indexed beat within the measure. */
   beat: number;
+}
+
+/** Optional behaviour modifiers for fragment-scoped playback (Step 18). */
+export interface MidiPlaybackOptions {
+  /**
+   * Constrain playback to a window of the supplied MIDI (whole-movement) so
+   * only the fragment sounds. `null`/omitted plays the entire MIDI.
+   */
+  window?: FragmentTimeWindow | null;
+  /** Called when playback reaches the window end (auto-stop). */
+  onEnded?: () => void;
+  /**
+   * Play-from-position origin (Component 9 Step 20): start playback at this
+   * offset (ms) into the supplied MIDI, shifted so the origin is transport time
+   * 0. `0`/omitted starts at the beginning. Composes with `window` by taking the
+   * later of the two starts; the window end (if any) still bounds playback.
+   *
+   * The caller's `onPositionUpdate` handler must add `originMs` back when
+   * querying an *absolute* (whole-movement) schedule/caret track, since the
+   * transport time it receives is origin-relative.
+   */
+  originMs?: number;
 }
 
 export interface UseMidiPlaybackResult {
@@ -105,6 +160,22 @@ export interface UseMidiPlaybackResult {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Lead time (seconds) given to a freshly-started transport before its first
+ * scheduled event fires (Component 9 F2). A note scheduled at transport-
+ * relative time 0 — the origin note of a play-from-position, or simply the
+ * first note of the piece — races `transport.start()`: the Web Audio clock's
+ * lookahead loop hasn't started ticking yet when `start()` returns
+ * synchronously, so an event due at time 0 can be silently dropped. Starting
+ * the transport `START_LOOKAHEAD_SEC` in the future (not touching any note's
+ * scheduled offset) gives the lookahead loop a chance to see it; every
+ * relative offset scheduled via `transport.schedule()`/`scheduleOnce()` stays
+ * correct regardless of when transport time 0 lands in real time, so this
+ * shifts the whole playback later by a barely-perceptible, uniform amount
+ * rather than desyncing individual notes.
+ */
+const START_LOOKAHEAD_SEC = 0.05;
 
 /**
  * Decode a base64 string (from Verovio renderToMIDI()) to a Uint8Array
@@ -141,14 +212,15 @@ function parseTransportPosition(posStr: string): PlaybackPosition {
  * @param midiBase64 - Base64-encoded MIDI from Verovio renderToMIDI(), or
  *   null when the score is not yet rendered or MIDI generation failed.
  * @param onPositionUpdate - Called on each animation frame during playback
- *   with the current MIDI time in milliseconds. The score viewer binary-searches
- *   the pre-built timemap schedule (from `buildHighlightSchedule`) to find the
- *   active notes and applies the `.is-playing` CSS class to the matching SVG
- *   elements. No Verovio calls happen at playback time.
+ *   with the current MIDI time in milliseconds. The score viewer uses it to
+ *   drive the playback caret (Step 19) from the pre-built timemap schedule /
+ *   caret track, and to update the transport bar. No Verovio calls happen at
+ *   playback time.
  */
 export function useMidiPlayback(
   midiBase64: string | null,
   onPositionUpdate: (timeMs: number) => void,
+  options: MidiPlaybackOptions = {}
 ): UseMidiPlaybackResult {
   const [status, setStatus] = useState<PlaybackStatus>('idle');
   const [position, setPosition] = useState<PlaybackPosition>({ bar: 1, beat: 1 });
@@ -161,6 +233,11 @@ export function useMidiPlayback(
   const onPositionUpdateRef = useRef(onPositionUpdate);
   // Keep midiBase64 current without making it a play() dep.
   const midiBase64Ref = useRef(midiBase64);
+  // Fragment window + end callback, read at play() time (no play() deps).
+  const windowRef = useRef<FragmentTimeWindow | null>(options.window ?? null);
+  const onEndedRef = useRef<MidiPlaybackOptions['onEnded']>(options.onEnded);
+  // Play-from-position origin (Step 20), read at play() time (no play() deps).
+  const originMsRef = useRef<number>(options.originMs ?? 0);
 
   useEffect(() => {
     onPositionUpdateRef.current = onPositionUpdate;
@@ -169,6 +246,18 @@ export function useMidiPlayback(
   useEffect(() => {
     midiBase64Ref.current = midiBase64;
   }, [midiBase64]);
+
+  useEffect(() => {
+    windowRef.current = options.window ?? null;
+  }, [options.window]);
+
+  useEffect(() => {
+    onEndedRef.current = options.onEnded;
+  }, [options.onEnded]);
+
+  useEffect(() => {
+    originMsRef.current = options.originMs ?? 0;
+  }, [options.originMs]);
 
   // ── RAF position tracking ──────────────────────────────────────────────────
 
@@ -219,6 +308,28 @@ export function useMidiPlayback(
   // ── Transport controls ─────────────────────────────────────────────────────
 
   /**
+   * Reset transport to the fragment start and return to 'ready' when playback
+   * reaches the window end. Held in a ref so the transport-scheduled callback
+   * always calls the latest closure. Mirrors stop() but also fires onEnded so
+   * the caller can clear its own highlight state.
+   */
+  const endPlaybackRef = useRef<() => void>(() => {});
+  endPlaybackRef.current = () => {
+    const transport = Tone.getTransport();
+    transport.stop();
+    transport.cancel();
+    transport.position = '0:0:0';
+    // Release any notes still sounding at the window boundary (F1): the
+    // sampler holds a note until explicitly released, and transport.cancel()
+    // only drops *future* scheduled events, not an already-triggered voice.
+    samplerRef.current?.releaseAll();
+    stopTracking();
+    setPosition({ bar: 1, beat: 1 });
+    setStatus(midiBase64Ref.current !== null ? 'ready' : 'idle');
+    onEndedRef.current?.();
+  };
+
+  /**
    * Start playback. On the first call, starts the AudioContext (requires user
    * gesture) and loads the SoundFont. On subsequent calls after pause, resumes.
    * Always reschedules MIDI from the beginning (except when resuming a pause).
@@ -251,17 +362,28 @@ export function useMidiPlayback(
         // requests go to the Vite dev server which never 404s synchronously).
         let settled = false;
         const timer = setTimeout(() => {
-          if (!settled) { settled = true; resolve('error'); }
+          if (!settled) {
+            settled = true;
+            resolve('error');
+          }
         }, 10_000);
 
         samplerRef.current = new Tone.Sampler({
           urls: PIANO_SAMPLE_URLS,
           baseUrl: `${SOUNDFONT_BASE_URL}/soundfonts/piano/`,
           onload: () => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve('ok'); }
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve('ok');
+            }
           },
           onerror: () => {
-            if (!settled) { settled = true; clearTimeout(timer); resolve('error'); }
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve('error');
+            }
           },
         }).toDestination();
       });
@@ -282,22 +404,42 @@ export function useMidiPlayback(
     const bytes = base64ToUint8Array(midi64);
     const midiData = new Midi(bytes.buffer as ArrayBuffer);
 
+    // Fragment window (Step 18) + play-from-position origin (Step 20): only the
+    // notes between startSec and endSec sound, shifted so the start is transport
+    // time 0. startSec is the later of the fragment window start and the
+    // play-from-position origin; with neither set, startSec=0 / endSec=∞
+    // reproduces whole-movement playback exactly.
+    const win = windowRef.current;
+    const startSec = Math.max(win?.startMs ?? 0, originMsRef.current) / 1000;
+    const endSec = win && Number.isFinite(win.endMs) ? win.endMs / 1000 : Number.POSITIVE_INFINITY;
+    const EPS_SEC = 1e-4;
+
     // Sync the Tone.js Transport tempo and time signature with the actual MIDI
     // header so the position display counts bars and beats at the correct
     // musical rate. Without this, the transport always assumes 120 BPM and 4/4,
     // making the position display wrong for any other tempo or meter.
     //
     // Multiple tempo changes are scheduled via bpm.setValueAtTime() so a ritard
-    // or accelerando mid-piece is reflected in the position display.
+    // or accelerando mid-piece is reflected in the position display. Within a
+    // window, the initial BPM is the tempo in force at the fragment start and
+    // later changes are shifted into fragment-relative time.
     // Tone.js supports only a single static time signature — mid-piece meter
     // changes are not tracked in the display (acceptable limitation).
     const tempos = midiData.header?.tempos ?? [];
     const timeSignatures = midiData.header?.timeSignatures ?? [];
     if (tempos.length > 0) {
       transport.bpm.cancelScheduledValues(0);
-      transport.bpm.value = tempos[0].bpm;
-      for (let i = 1; i < tempos.length; i++) {
-        transport.bpm.setValueAtTime(tempos[i].bpm, tempos[i].time ?? 0);
+      // Initial BPM = the last tempo at or before the window start.
+      let initialBpm = tempos[0].bpm;
+      for (const t of tempos) {
+        if ((t.time ?? 0) <= startSec + EPS_SEC) initialBpm = t.bpm;
+      }
+      transport.bpm.value = initialBpm;
+      for (const t of tempos) {
+        const tt = t.time ?? 0;
+        if (tt > startSec + EPS_SEC && tt < endSec) {
+          transport.bpm.setValueAtTime(t.bpm, tt - startSec);
+        }
       }
     }
     if (timeSignatures.length > 0) {
@@ -306,18 +448,34 @@ export function useMidiPlayback(
 
     midiData.tracks.forEach((track) => {
       track.notes.forEach((note) => {
+        if (note.time < startSec - EPS_SEC || note.time >= endSec - EPS_SEC) return;
+        // Clamp to 0: the window filter admits notes down to startSec − EPS,
+        // so an origin note whose time lands a hair below startSec would be
+        // scheduled at a *negative* transport offset — silently dropped, and
+        // no start lookahead can save it (F2 residual, Part 8 item 5).
+        const offsetSec = Math.max(0, note.time - startSec);
         transport.schedule((audioTime) => {
           samplerRef.current?.triggerAttackRelease(
             note.name,
             note.duration,
             audioTime,
-            note.velocity,
+            note.velocity
           );
-        }, note.time);
+        }, offsetSec);
       });
     });
 
-    transport.start();
+    // Auto-stop at the window end so playback never spills past the fragment.
+    if (Number.isFinite(endSec)) {
+      transport.scheduleOnce(() => {
+        endPlaybackRef.current();
+      }, endSec - startSec);
+    }
+
+    // Lookahead-delayed start (F2) — see START_LOOKAHEAD_SEC. Only the fresh-
+    // schedule path needs it; resuming from pause (above) doesn't reschedule
+    // anything at time 0, so it isn't subject to the same race.
+    transport.start(`+${START_LOOKAHEAD_SEC}`);
     setStatus('playing');
     startTracking();
   }, [startTracking]);
@@ -325,6 +483,10 @@ export function useMidiPlayback(
   /** Pause at the current position. Call play() to resume. */
   const pause = useCallback(() => {
     Tone.getTransport().pause();
+    // Release any notes still sounding (F1): pausing the transport stops
+    // *future* scheduled attacks but does not release an already-triggered
+    // voice, so a note struck just before the pause point rings indefinitely.
+    samplerRef.current?.releaseAll();
     stopTracking();
     setStatus('paused');
   }, [stopTracking]);
@@ -339,6 +501,9 @@ export function useMidiPlayback(
     transport.stop();
     transport.cancel();
     transport.position = '0:0:0';
+    // Release any notes still sounding (F1) — see pause() for why this is
+    // needed in addition to transport.stop()/cancel().
+    samplerRef.current?.releaseAll();
     stopTracking();
     setPosition({ bar: 1, beat: 1 });
     // If MIDI is available, return to ready (not idle) after stop.

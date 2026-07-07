@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (2026-07-05): the K330/i m.123 shape.  A mid-measure G change
+     (anchor in voice 1, t=8) whose voice-2 restatement sits at the BAR END
+     (t=16, after voice 2's notes, positioning nothing) — while an unrelated
+     F courtesy for the NEXT measure (a recovery injection) shares that same
+     bar-end onset in voice 1.  Event membership must follow the @sameas edge:
+     the G restatement belongs to the mid-measure G event (and is dropped as
+     noteless), NOT to a same-onset "courtesy event" of its own — materializing
+     it there would draw a second G glyph at the bar end.
+     4 ppq per quarter; 4/4 (16-tick bars). -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Restatement whose onset passes an unrelated courtesy</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <rest dur="2" dur.ppq="8"/>
+                  <clef xml:id="c-mid-g" shape="G" line="2"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="g"/>
+                  <rest dur="4" dur.ppq="4"/>
+                  <clef xml:id="c-next-f" shape="F" line="4"/>
+                </layer>
+                <layer n="2">
+                  <space dur="2" dur.ppq="8"/>
+                  <note dur="4" dur.ppq="4" oct="3" pname="b"/>
+                  <note dur="4" dur.ppq="4" oct="4" pname="c"/>
+                  <clef xml:id="c-g-restatement" sameas="#c-mid-g"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="1" dur.ppq="16" oct="3" pname="c"/>
+                </layer>
+                <layer n="2">
+                  <note dur="1" dur.ppq="16" oct="2" pname="c"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

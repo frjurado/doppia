@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei">
+  <music><body><mdiv><score>
+    <section>
+      <measure n="1" xml:id="m1">
+        <staff n="1"><layer n="1">
+          <note xml:id="n1" pname="b" oct="4"><accid accid="n"/></note>
+          <note xml:id="n2" pname="c" oct="5"><accid accid="s"/></note>
+        </layer></staff>
+      </measure>
+      <measure n="2" xml:id="m2">
+        <staff n="1"><layer n="1">
+          <note xml:id="n3" pname="d" oct="5"/>
+        </layer></staff>
+      </measure>
+      <measure n="3" xml:id="m3" right="rptend">
+        <staff n="1"><layer n="1">
+          <note xml:id="n4" pname="e" oct="5"/>
+        </layer></staff>
+      </measure>
+      <measure n="4" xml:id="m4">
+        <staff n="1"><layer n="1">
+          <note xml:id="n5" pname="a" oct="5"/>
+          <note xml:id="n6" pname="a" oct="5"><accid accid="s"/></note>
+        </layer></staff>
+      </measure>
+    </section>
+  </score></mdiv></body></music>
+</mei>

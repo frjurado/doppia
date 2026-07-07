@@ -358,6 +358,7 @@ class FragmentListItem(BaseModel):
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
+    primary_concept_name: str | None = None
     sub_parts: list["FragmentListItem"]
 
 
@@ -560,6 +561,10 @@ class Fragment(Base):
     )
     summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
     prose_annotation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # BCP 47 language tag for the original annotation (ADR-006, migration 0003).
+    # Phase 1 content is English; the column exists so a second language is a
+    # data migration, not a schema change.
+    language: Mapped[str] = mapped_column(String, nullable=False, server_default="en")
     data_licence: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, server_default="draft")
     created_by: Mapped[uuid.UUID | None] = mapped_column(

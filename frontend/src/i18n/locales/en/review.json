@@ -1,0 +1,13 @@
+{
+  "pageTitle": "Review Queue — Doppia",
+  "submittedFragments": "Submitted fragments",
+  "itemCount_one": "{{count}}{{plus}} item",
+  "itemCount_other": "{{count}}{{plus}} items",
+  "empty": "No fragments awaiting your review",
+  "barRange": "bars {{start}}–{{end}}",
+  "submittedPrefix": "Submitted {{when}}",
+  "submittedToday": "today",
+  "submittedYesterday": "yesterday",
+  "submittedDaysAgo_one": "{{count}} day ago",
+  "submittedDaysAgo_other": "{{count}} days ago"
+}

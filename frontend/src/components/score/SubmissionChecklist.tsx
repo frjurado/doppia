@@ -24,6 +24,7 @@
  *   docs/roadmap/component-5-tagging-tool.md § Step 18
  */
 
+import { useTranslation } from 'react-i18next';
 import Type from '../ui/Type';
 import type { AnnotationFlags } from './annotator';
 import styles from './SubmissionChecklist.module.css';
@@ -112,6 +113,7 @@ export default function SubmissionChecklist({
   onSaveDraft,
   onSubmit,
 }: SubmissionChecklistProps) {
+  const { t } = useTranslation('score');
   const refinementOk = !typeRefinementRequired || typeRefinementSet;
 
   const canSubmit =
@@ -129,25 +131,30 @@ export default function SubmissionChecklist({
     <div className={styles.checklist}>
       {/* ── Checklist items ─────────────────────────────────────────── */}
       <Type variant="label-sm" as="h2" className={styles.heading}>
-        Checklist
+        {t('checklist.heading')}
       </Type>
 
       <ul className={styles.items} role="list">
-        <CheckRow label="Fragment drawn" done={flags.fragmentSet} />
-        <CheckRow label="Concept selected" done={flags.conceptSet} />
+        <CheckRow label={t('checklist.fragmentDrawn')} done={flags.fragmentSet} />
+        <CheckRow label={t('checklist.conceptSelected')} done={flags.conceptSet} />
         {typeRefinementRequired && (
-          <CheckRow label="Type Refinement set" done={typeRefinementSet} />
+          <CheckRow label={t('checklist.typeRefinementSet')} done={typeRefinementSet} />
         )}
         {conceptHasStages && flags.fragmentSet && (
-          <CheckRow label="Stages complete" done={flags.stagesComplete} />
+          <CheckRow label={t('checklist.stagesComplete')} done={flags.stagesComplete} />
         )}
-        <CheckRow label="Properties filled" done={flags.propertiesComplete} />
+        <CheckRow label={t('checklist.propertiesFilled')} done={flags.propertiesComplete} />
       </ul>
 
       {/* ── Draft saved indicator ────────────────────────────────────── */}
-      {draftId && !submitError && (
+      {/* Quiet, persistent feedback for Save Draft (Step 5). Suppressed while a
+          Submit is in flight: Submit creates/updates the draft as an
+          intermediate step, and showing "Draft saved" mid-submit was the
+          confusing flash annotators reported — the Submit button's own
+          "Submitting…" state is the relevant feedback there. */}
+      {draftId && !submitError && !isSubmitting && (
         <Type variant="label-sm" as="p" className={styles.draftSavedNote}>
-          Draft saved
+          {t('checklist.draftSaved')}
         </Type>
       )}
 
@@ -168,7 +175,7 @@ export default function SubmissionChecklist({
           aria-busy={isSavingDraft}
         >
           <Type variant="label-sm" as="span">
-            {isSavingDraft ? 'Saving…' : 'Save Draft'}
+            {isSavingDraft ? t('checklist.saving') : t('checklist.saveDraft')}
           </Type>
         </button>
 
@@ -180,7 +187,7 @@ export default function SubmissionChecklist({
           aria-busy={isSubmitting}
         >
           <Type variant="label-sm" as="span">
-            {isSubmitting ? 'Submitting…' : 'Submit for Review'}
+            {isSubmitting ? t('checklist.submitting') : t('checklist.submitForReview')}
           </Type>
         </button>
       </div>

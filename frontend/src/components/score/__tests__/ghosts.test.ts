@@ -27,7 +27,65 @@ import {
   isCompoundMeter,
   measureGhostKey,
   subdivisionsPerBeat,
+  walkMeasureKeys,
 } from '../ghosts';
+
+// ---------------------------------------------------------------------------
+// walkMeasureKeys (§6A.1 shared key derivation)
+// ---------------------------------------------------------------------------
+
+function parseMei(inner: string): Document {
+  return new DOMParser().parseFromString(
+    `<mei><music><body><mdiv><score>${inner}</score></mdiv></body></music></mei>`,
+    'text/xml',
+  );
+}
+
+describe('walkMeasureKeys', () => {
+  it('derives barN, key, and 1-based mc in document order', () => {
+    const infos = walkMeasureKeys(parseMei(
+      '<measure n="0"/><measure n="1"/><measure n="2"/>',
+    ));
+    expect(infos.map(i => i.key)).toEqual(['m0', 'm1', 'm2']);
+    expect(infos.map(i => i.mc)).toEqual([1, 2, 3]);
+    expect(infos.every(i => !i.barNIsFallback)).toBe(true);
+  });
+
+  it('incorporates ending context into keys', () => {
+    const infos = walkMeasureKeys(parseMei(
+      '<measure n="1"/><ending n="1"><measure n="2"/></ending><ending n="2"><measure n="2"/></ending>',
+    ));
+    expect(infos.map(i => i.key)).toEqual(['m1', 'm2-e1', 'm2-e2']);
+    expect(infos[1]!.endingN).toBe(1);
+    expect(infos[2]!.endingN).toBe(2);
+  });
+
+  it('deduplicates section-reset @n collisions with #N suffixes', () => {
+    const infos = walkMeasureKeys(parseMei(
+      '<measure n="1"/><measure n="2"/><measure n="1"/>',
+    ));
+    expect(infos.map(i => i.key)).toEqual(['m1', 'm2', 'm1#1']);
+  });
+
+  it('falls back to the preceding finite @n for unparseable values (I2)', () => {
+    // MuseScore X-numbered excluded measures: barN must stay finite, keyed
+    // under the bar they complete, never NaN.
+    const infos = walkMeasureKeys(parseMei(
+      '<measure n="8"/><measure n="X1"/><measure n="X2"/><measure n="9"/>',
+    ));
+    expect(infos.map(i => i.barN)).toEqual([8, 8, 8, 9]);
+    expect(infos.map(i => i.key)).toEqual(['m8', 'm8#1', 'm8#2', 'm9']);
+    expect(infos.map(i => i.barNIsFallback)).toEqual([false, true, true, false]);
+    expect(infos.every(i => Number.isFinite(i.barN))).toBe(true);
+  });
+
+  it('falls back for a missing @n on the first measure without producing NaN', () => {
+    const infos = walkMeasureKeys(parseMei('<measure/><measure n="1"/>'));
+    expect(Number.isFinite(infos[0]!.barN)).toBe(true);
+    expect(infos[0]!.barNIsFallback).toBe(true);
+    expect(infos[1]!.barN).toBe(1);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Flat-index encoding (ADR-005 §"Flat index encoding")
@@ -247,13 +305,20 @@ describe('getMeterForMeasure', () => {
 // computeBeatBoundaries — the core beat inference algorithm
 // ---------------------------------------------------------------------------
 
-// Helpers to build note inputs.
-function note(xLeft: number, onset: number, duration = 1.0): {
+// Helpers to build note inputs. xCenter defaults to xLeft + 5 (≈ half a notehead
+// width); pass an explicit center to exercise the centroid logic.
+function note(
+  xLeft: number,
+  onset: number,
+  duration = 1.0,
+  xCenter = xLeft + 5,
+): {
   xLeft: number;
+  xCenter: number;
   scoreTimeOnset: number;
   scoreTimeDuration: number;
 } {
-  return { xLeft, scoreTimeOnset: onset, scoreTimeDuration: duration };
+  return { xLeft, xCenter, scoreTimeOnset: onset, scoreTimeDuration: duration };
 }
 
 const grace = (xLeft: number, onset: number) => note(xLeft, onset, 0);
@@ -331,6 +396,66 @@ describe('computeBeatBoundaries — 4/4 (simple meter)', () => {
       note(110, 0), note(210, 1), note(310, 2), note(410, 3),
     ]);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Leftmost-notehead center — harmony-label centering (Step 21)
+// ---------------------------------------------------------------------------
+
+describe('computeBeatBoundaries — leftmost-notehead center', () => {
+  const MLEFT = 100;
+  const MRIGHT = 500;
+  const MSTART = 0;
+
+  it('beatCenters[b] is the center of the notehead for a single struck note', () => {
+    // note(xLeft=210, onset=1, xCenter=218) → beat index 1.
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 1.0, 116), note(210, 1, 1.0, 218),
+    ]);
+    expect(bb.beatCenters[0]).toBe(116);
+    expect(bb.beatCenters[1]).toBe(218);
+  });
+
+  it('beatCenters[b] follows the LEFTMOST head, not an average, for a 2nd interval', () => {
+    // Two notes at the same onset (beat 2) whose heads are offset off the stem:
+    // leftmost head xLeft=210/center=218, displaced head xLeft=222/center=230.
+    // Centering must use the leftmost head (218), not the centroid (224).
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 1.0, 116),
+      note(210, 1, 1.0, 218),
+      note(222, 1, 1.0, 230),
+    ]);
+    expect(bb.beatCenters[1]).toBe(218);
+  });
+
+  it('a later note within the beat does not drag beatCenters right', () => {
+    // Downbeat note at beat 1 (xLeft=110/center=116) plus an eighth on the "&"
+    // (onset 0.5, xLeft=160/center=166) — both bucket into beat index 0. The beat
+    // label must stay on the downbeat head (116), not move toward the "&".
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 0.5, 116),
+      note(160, 0.5, 0.5, 166),
+    ]);
+    expect(bb.beatCenters[0]).toBe(116);
+  });
+
+  it('beatCenters is NaN for unstruck beats', () => {
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 1.0, 116),
+    ]);
+    expect(bb.beatCenters[0]).toBe(116);
+    expect(Number.isNaN(bb.beatCenters[1]!)).toBe(true);
+  });
+
+  it('subBeatCenters carries the leftmost head per sub-beat', () => {
+    // Beat 1 downbeat (sub-beat 0) and its "&" (onset 0.5, sub-beat 1) in 4/4.
+    const bb = computeBeatBoundaries(MLEFT, MRIGHT, MSTART, 4, 4, [
+      note(110, 0, 0.5, 116),
+      note(160, 0.5, 0.5, 166),
+    ]);
+    expect(bb.subBeatCenters[0]![0]).toBe(116);
+    expect(bb.subBeatCenters[0]![1]).toBe(166);
+  });
 });
 
 // ---------------------------------------------------------------------------

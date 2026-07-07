@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-028): cross-octave key-sig-flat suppression.
+     F major (key.sig="1f": Bb).  An explicit Bn5 in the treble made the
+     converter drop the key-sig flat on the bass B4, writing accid.ges="n"
+     instead.  B4 should sound Bb -> the resolver must OVERRIDE accid.ges
+     "n" -> "f".  The treble Bn5 (explicit) is left untouched. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Cross-octave suppression fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4" key.sig="1f">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+              <staffDef n="2" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="n_treble_bn5" dur.ppq="96" dur="1" oct="5" pname="b">
+                    <accid xml:id="a_treble_bn5" accid="n" accid.ges="n"/>
+                  </note>
+                </layer>
+              </staff>
+              <staff n="2">
+                <layer n="1">
+                  <!-- B4: key-sig Bb, but converter wrote a suppressed natural -->
+                  <note xml:id="n_bass_b4" dur.ppq="48" dur="2" oct="4" pname="b">
+                    <accid xml:id="a_bass_b4" accid.ges="n"/>
+                  </note>
+                  <note xml:id="n_bass_g4" dur.ppq="48" dur="2" oct="4" pname="g">
+                    <accid xml:id="a_bass_g4"/>
+                  </note>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
-import { ConceptTreeNode, getConceptTree } from '../services/conceptApi';
+import { ConceptTreeNode, getConceptRoots, getConceptTree } from '../services/conceptApi';
 import { ConceptBrowseItem, listByConcept } from '../services/fragmentApi';
+import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentBrowser.module.css';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +38,7 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodeProps) {
+  const { t } = useTranslation('common');
   const children = childrenMap.get(node.id) ?? [];
   const hasChildren = children.length > 0;
   const isSelected = node.id === selectedId;
@@ -59,7 +62,7 @@ function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodePr
           <span
             className={styles.treeToggle}
             role="button"
-            aria-label={expanded ? 'Collapse' : 'Expand'}
+            aria-label={expanded ? t('collapse') : t('expand')}
             onClick={(e) => {
               e.stopPropagation();
               setExpanded((v) => !v);
@@ -113,27 +116,58 @@ function TreeNode({ node, childrenMap, selectedId, onSelect, depth }: TreeNodePr
 // Fragment preview card
 // ---------------------------------------------------------------------------
 
+const SCROLL_SPEED_PX_PER_S = 60;
+const RETURN_DURATION_S = 0.5;
+
 interface FragmentCardProps {
   item: ConceptBrowseItem;
   onOpen: (id: string) => void;
 }
 
 function FragmentCard({ item, onOpen }: FragmentCardProps) {
+  const { t } = useTranslation(['fragments', 'common']);
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
-  const barRange = `mm. ${item.bar_start}–${item.bar_end}`;
-  const workLabel = `${item.work_title}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
-  const movementLabel = `mvt. ${item.movement_number}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
+  const barRange = t('common:barRangeMm', { start: item.bar_start, end: item.bar_end });
+  // work_title already embeds the catalogue number (DCML corpus-prep
+  // convention); strip it before re-appending so it renders once, not twice
+  // (Component 9 J2).
+  const workTitle = stripEmbeddedCatalogue(item.work_title, item.work_catalogue_number);
+  const workLabel = `${workTitle}${item.work_catalogue_number ? ` ${item.work_catalogue_number}` : ''}`;
+  const movementLabel = `${t('fragments:movementShort', { number: item.movement_number })}${item.movement_title ? ` · ${item.movement_title}` : ''}`;
+  const [hovered, setHovered] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    const wrapper = wrapperRef.current;
+    if (!img || !wrapper) return;
+    if (hovered) {
+      const scrollDist = img.offsetWidth - wrapper.offsetWidth;
+      if (scrollDist > 0) {
+        const duration = scrollDist / SCROLL_SPEED_PX_PER_S;
+        img.style.transition = `transform ${duration}s linear`;
+        img.style.transform = `translateX(-${scrollDist}px)`;
+      }
+    } else {
+      img.style.transition = `transform ${RETURN_DURATION_S}s ease-out`;
+      img.style.transform = 'translateX(0)';
+    }
+  }, [hovered]);
 
   return (
     <button
       type="button"
       className={styles.fragmentCard}
       onClick={() => onOpen(item.id)}
-      aria-label={`Open fragment ${conceptLabel} ${barRange}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label={t('fragments:browser.openFragmentAria', { concept: conceptLabel, range: barRange })}
     >
-      <div className={styles.previewArea}>
+      <div ref={wrapperRef} className={styles.previewArea}>
         {item.preview_url ? (
           <img
+            ref={imgRef}
             src={item.preview_url}
             alt=""
             className={styles.previewImage}
@@ -141,38 +175,26 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
           />
         ) : (
           <div className={styles.previewPlaceholder}>
-            <Type
-              variant="label-sm"
-              as="span"
-              style={{ color: 'var(--color-on-surface-variant)' }}
-            >
-              Preview generating…
+            <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+              {t('fragments:browser.previewGenerating')}
             </Type>
           </div>
         )}
       </div>
       <div className={styles.fragmentMeta}>
-        <Type variant="body-sm" as="span" className={styles.fragmentConcept}>
+        <Type variant="body-sm" as="span" bold>
           {conceptLabel}
         </Type>
-        <Type
-          variant="label-sm"
-          as="span"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
+        <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
           {item.composer_name} · {workLabel}
         </Type>
-        <Type
-          variant="label-sm"
-          as="span"
-          style={{ color: 'var(--color-on-surface-variant)' }}
-        >
+        <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
           {movementLabel} · {barRange}
         </Type>
         <div className={styles.fragmentBadges}>
           <span className={styles.statusBadge} data-status={item.status}>
             <Type variant="label-sm" as="span">
-              {item.status}
+              {t(`common:status.${item.status}`)}
             </Type>
           </span>
           {item.data_licence && (
@@ -204,7 +226,8 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
  * Component 8 Step 7.
  */
 export default function FragmentBrowser() {
-  usePageTitle('Fragment Browser — Doppia');
+  const { t } = useTranslation(['fragments', 'common']);
+  usePageTitle(t('fragments:browser.pageTitle'));
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -229,6 +252,34 @@ export default function FragmentBrowser() {
   const [fragmentsError, setFragmentsError] = useState<ApiError | null>(null);
   const [includeSubtypes, setIncludeSubtypes] = useState(true);
   const [statusFilter] = useState<'approved' | 'submitted' | 'draft' | 'rejected'>('approved');
+
+  // The root id set by the auto-load on mount — used by clearSelection to
+  // reset the tree back to the default domain view.
+  const defaultRootIdRef = useRef<string | null>(null);
+
+  // ---- auto-load domain roots on first visit (no root in URL) ----
+  useEffect(() => {
+    if (rootId) {
+      // Page opened with an explicit ?root — treat it as the default.
+      if (!defaultRootIdRef.current) defaultRootIdRef.current = rootId;
+      return;
+    }
+    getConceptRoots()
+      .then((roots) => {
+        if (roots.length > 0) {
+          defaultRootIdRef.current = roots[0].id;
+          setSearchParams((p) => {
+            const next = new URLSearchParams(p);
+            next.set('root', roots[0].id);
+            return next;
+          });
+        }
+      })
+      .catch(() => {
+        // Silently ignore — user can still type a root manually.
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- load tree when root changes ----
   useEffect(() => {
@@ -279,7 +330,7 @@ export default function FragmentBrowser() {
         return next;
       });
     },
-    [setSearchParams],
+    [setSearchParams]
   );
 
   // ---- load fragments when selected concept changes ----
@@ -303,7 +354,7 @@ export default function FragmentBrowser() {
         if (isFirstPage) setFragmentsLoading(false);
       }
     },
-    [conceptId, includeSubtypes, statusFilter],
+    [conceptId, includeSubtypes, statusFilter]
   );
 
   useEffect(() => {
@@ -319,12 +370,28 @@ export default function FragmentBrowser() {
     (id: string) => {
       setSearchParams((p) => {
         const next = new URLSearchParams(p);
-        next.set('concept', id);
+        if (id === conceptId) {
+          next.delete('concept');
+        } else {
+          next.set('concept', id);
+        }
         return next;
       });
     },
-    [setSearchParams],
+    [setSearchParams, conceptId]
   );
+
+  const clearSelection = useCallback(() => {
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.delete('concept');
+      const defaultRoot = defaultRootIdRef.current;
+      if (defaultRoot) {
+        next.set('root', defaultRoot);
+      }
+      return next;
+    });
+  }, [setSearchParams]);
 
   const selectedNode = treeNodes.find((n) => n.id === conceptId) ?? null;
 
@@ -332,35 +399,31 @@ export default function FragmentBrowser() {
     (id: string) => {
       navigate(`/fragments/${id}`);
     },
-    [navigate],
+    [navigate]
   );
 
   return (
     <Surface layer="base" className={styles.page}>
-      {/* Nav strip */}
-      <Surface layer="container-lowest" className={styles.pageNav}>
-        <Type variant="label-md" as="span" className={styles.pageNavTitle}>
-          Fragment Browser
-        </Type>
-        <Link to="/" className={styles.pageNavLink}>
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Browse →
-          </Type>
-        </Link>
-        <Link to="/review-queue" className={styles.pageNavLink}>
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Review Queue →
-          </Type>
-        </Link>
-      </Surface>
-
       <div className={styles.body}>
         {/* Left: concept tree panel */}
         <Surface layer="container-lowest" className={styles.treePanel}>
           <div className={styles.treePanelHeader}>
             <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Concepts
+              {t('fragments:browser.concepts')}
             </Type>
+            {conceptId && selectedNode && (
+              <button
+                type="button"
+                className={styles.clearSelection}
+                onClick={clearSelection}
+                aria-label={t('fragments:browser.clearSelectionAria', { name: selectedNode.name })}
+              >
+                <Type variant="label-sm" as="span">
+                  {selectedNode.name}
+                </Type>
+                <span aria-hidden="true">×</span>
+              </button>
+            )}
           </div>
 
           {/* Root search */}
@@ -368,17 +431,21 @@ export default function FragmentBrowser() {
             <input
               type="search"
               className={styles.searchInput}
-              placeholder="Search for a concept root…"
+              placeholder={t('fragments:browser.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              aria-label="Search concept roots"
+              aria-label={t('fragments:browser.searchAria')}
             />
             {(searchResults.length > 0 || searchLoading) && (
               <Surface layer="container-highest" floating className={styles.searchDropdown}>
                 {searchLoading && (
                   <div className={styles.searchItem}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      Searching…
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
+                      {t('common:searching')}
                     </Type>
                   </div>
                 )}
@@ -389,8 +456,14 @@ export default function FragmentBrowser() {
                     className={styles.searchItem}
                     onClick={() => pickRoot(r.id)}
                   >
-                    <Type variant="body-sm" as="span">{r.name}</Type>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    <Type variant="body-sm" as="span">
+                      {r.name}
+                    </Type>
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
                       {r.id}
                     </Type>
                   </button>
@@ -403,8 +476,12 @@ export default function FragmentBrowser() {
           <div className={styles.treeScroll}>
             {treeLoading && (
               <div className={styles.treeEmpty}>
-                <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                  Loading…
+                <Type
+                  variant="label-sm"
+                  as="span"
+                  style={{ color: 'var(--color-on-surface-variant)' }}
+                >
+                  {t('common:loading')}
                 </Type>
               </div>
             )}
@@ -417,21 +494,26 @@ export default function FragmentBrowser() {
             )}
             {!treeLoading && !treeError && !rootId && (
               <div className={styles.treeEmpty}>
-                <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                  Search for a concept to browse
+                <Type
+                  variant="label-sm"
+                  as="span"
+                  style={{ color: 'var(--color-on-surface-variant)' }}
+                >
+                  {t('fragments:browser.searchToBrowse')}
                 </Type>
               </div>
             )}
-            {!treeLoading && roots.map((root) => (
-              <TreeNode
-                key={root.id}
-                node={root}
-                childrenMap={childrenMap}
-                selectedId={conceptId}
-                onSelect={selectConcept}
-                depth={0}
-              />
-            ))}
+            {!treeLoading &&
+              roots.map((root) => (
+                <TreeNode
+                  key={root.id}
+                  node={root}
+                  childrenMap={childrenMap}
+                  selectedId={conceptId}
+                  onSelect={selectConcept}
+                  depth={0}
+                />
+              ))}
           </div>
         </Surface>
 
@@ -463,7 +545,7 @@ export default function FragmentBrowser() {
                     onChange={(e) => setIncludeSubtypes(e.target.checked)}
                   />
                   <Type variant="label-sm" as="span">
-                    Include subtypes
+                    {t('fragments:browser.includeSubtypes')}
                   </Type>
                 </label>
               </div>
@@ -471,8 +553,12 @@ export default function FragmentBrowser() {
               <div className={styles.listScroll}>
                 {fragmentsLoading && (
                   <div className={styles.listEmpty}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      Loading fragments…
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
+                      {t('fragments:browser.loadingFragments')}
                     </Type>
                   </div>
                 )}
@@ -485,8 +571,12 @@ export default function FragmentBrowser() {
                 )}
                 {!fragmentsLoading && !fragmentsError && fragments.length === 0 && (
                   <div className={styles.listEmpty}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                      No approved fragments found
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
+                      {t('fragments:browser.noApprovedFound')}
                     </Type>
                   </div>
                 )}
@@ -500,7 +590,9 @@ export default function FragmentBrowser() {
                       className={styles.loadMoreButton}
                       onClick={() => loadFragments(fragmentsNextCursor)}
                     >
-                      <Type variant="label-sm" as="span">Load more</Type>
+                      <Type variant="label-sm" as="span">
+                        {t('common:loadMore')}
+                      </Type>
                     </button>
                   </div>
                 )}
@@ -508,8 +600,14 @@ export default function FragmentBrowser() {
             </>
           ) : (
             <div className={styles.listEmpty}>
-              <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-                {rootId ? 'Select a concept from the tree' : 'Search for a concept to get started'}
+              <Type
+                variant="label-sm"
+                as="span"
+                style={{ color: 'var(--color-on-surface-variant)' }}
+              >
+                {rootId
+                  ? t('fragments:browser.selectFromTree')
+                  : t('fragments:browser.searchToStart')}
               </Type>
             </div>
           )}

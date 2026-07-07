@@ -203,6 +203,9 @@ class TestGenerateIncipitAsync:
         assert options["breaks"] == "none"
         assert options["pageWidth"] == 2200
         assert "pageHeight" not in options
+        # Step 8b: the movement-title page header is suppressed so it does not
+        # consume vertical space in the fixed-height incipit thumbnail.
+        assert options["header"] == "none"
 
     # ------------------------------------------------------------------
     # Call ordering

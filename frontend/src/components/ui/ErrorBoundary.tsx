@@ -1,4 +1,5 @@
 import React from 'react';
+import i18n from '../../i18n';
 import Surface from './Surface';
 import Type from './Type';
 
@@ -31,7 +32,7 @@ export default class ErrorBoundary extends React.Component<
       return (
         <Surface layer="base" style={{ padding: '2rem' }}>
           <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Something went wrong: {this.state.error.message}
+            {i18n.t('errors:somethingWentWrong', { message: this.state.error.message })}
           </Type>
         </Surface>
       );

@@ -39,6 +39,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getConceptSchemas } from '../../services/conceptApi';
 import type {
   ConceptSchemaTree,
@@ -57,6 +58,7 @@ import SubmissionChecklist from './SubmissionChecklist';
 import type { PropertyFormValues } from './PropertyForm';
 import { carryOverValues, computeIsComplete } from './propertyFormHelpers';
 import Type from '../ui/Type';
+import InfoHint from '../ui/InfoHint';
 import styles from './FormPanel.module.css';
 
 // ---------------------------------------------------------------------------
@@ -110,6 +112,12 @@ export interface FormPanelProps {
   onStageActivate?: (stageId: string | null) => void;
   /** Called when the annotator toggles a stage's absent checkbox. */
   onToggleAbsent?: (stageId: string, absent: boolean) => void;
+  /**
+   * True while a stage split-handle drag is in progress — freezes the stage
+   * list's display order so cards don't jump mid-gesture (Part 8 item 4);
+   * the list resorts by position once on release.
+   */
+  stageDragActive?: boolean;
 
   // ── Step 15: Sub-part tags passed down from ScoreViewer ────────────────────
 
@@ -247,6 +255,7 @@ export default function FormPanel({
   activeStageId = null,
   onStageActivate,
   onToggleAbsent,
+  stageDragActive = false,
   subPartTags,
   onSubPartTagUpdate,
   subPartResetKey,
@@ -265,6 +274,7 @@ export default function FormPanel({
   onHarmonyUpdated,
   harmonyFocusKey,
 }: FormPanelProps) {
+  const { t } = useTranslation(['score', 'common']);
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
   const [selectedConcept, setSelectedConcept] = useState<ConceptSearchHit | null>(null);
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(null);
@@ -342,7 +352,7 @@ export default function FormPanel({
         }
         onConceptChange?.(concept, tree);
       } catch {
-        setSchemaError('Could not load concept schema. Try again.');
+        setSchemaError(t('score:formPanel.conceptSchemaError'));
         setSchemaTree(null);
         setPropertyValues({});
         onConceptChange?.(concept, null);
@@ -350,7 +360,7 @@ export default function FormPanel({
         setIsLoadingSchema(false);
       }
     },
-    [session, onConceptChange, onRefinementChange],
+    [session, onConceptChange, onRefinementChange, t],
   );
 
   const handleRefinementChange = useCallback(
@@ -364,7 +374,7 @@ export default function FormPanel({
   const typeRefinements = schemaTree?.type_refinement.children ?? [];
 
   return (
-    <aside className={styles.panel} style={{ width: panelWidth }} aria-label="Annotation form">
+    <aside className={styles.panel} style={{ width: panelWidth }} aria-label={t('score:formPanel.annotationFormAria')}>
       {/* ── Resize handle (G6.1) ─────────────────────────────────────── */}
       <div
         className={styles.resizeHandle}
@@ -378,15 +388,15 @@ export default function FormPanel({
       {flags.fragmentSet && (
         <div className={styles.fragmentHeader}>
           <Type variant="label-sm" as="span" className={styles.fragmentHeaderLabel}>
-            Fragment
+            {t('score:formPanel.fragmentLabel')}
           </Type>
           <button
             type="button"
             className={styles.deleteButton}
             onClick={onDeleteFragment}
-            aria-label="Delete fragment and start over"
+            aria-label={t('score:formPanel.deleteAria')}
           >
-            <Type variant="label-sm" as="span">Delete</Type>
+            <Type variant="label-sm" as="span">{t('common:delete')}</Type>
           </button>
         </div>
       )}
@@ -394,7 +404,7 @@ export default function FormPanel({
       {/* ── Section: Concept ─────────────────────────────────────────── */}
       <section className={styles.section}>
         <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-          Concept
+          {t('score:formPanel.sectionConcept')}
         </Type>
         <ConceptPicker
           selectedConceptId={selectedConcept?.id ?? null}
@@ -402,7 +412,7 @@ export default function FormPanel({
         />
         {isLoadingSchema && (
           <Type variant="label-sm" as="p" className={styles.schemaStatus}>
-            Loading schema…
+            {t('score:formPanel.loadingSchema')}
           </Type>
         )}
         {schemaError && (
@@ -431,16 +441,17 @@ export default function FormPanel({
           Stageless concepts skip this section entirely (tagging-tool-design.md §8). */}
       {schemaTree && schemaTree.stages.length > 0 && (
         <section className={styles.section}>
-          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Stages
-          </Type>
-          {assignments.some(
-            a => !a.required && !a.absent && !a.confirmed && !a.orphaned,
-          ) && (
-            <Type variant="label-sm" as="p" className={styles.stagesHint}>
-              Drag brackets to confirm bounds, or toggle to mark absent.
+          {/* The interaction explanation lives behind the (i) — hover/focus —
+              instead of a permanent paragraph (Part 8 item 4). */}
+          <div className={styles.sectionHeadingRow}>
+            <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+              {t('score:formPanel.sectionStages')}
             </Type>
-          )}
+            <InfoHint
+              text={t('score:formPanel.stagesHint')}
+              ariaLabel={t('score:formPanel.stagesInfoAria')}
+            />
+          </div>
           <StageList
             assignments={assignments}
             activeStageId={activeStageId}
@@ -449,6 +460,7 @@ export default function FormPanel({
             subPartTags={subPartTags}
             onSubPartTagUpdate={onSubPartTagUpdate}
             subPartResetKey={subPartResetKey}
+            freezeOrder={stageDragActive}
           />
         </section>
       )}
@@ -461,7 +473,7 @@ export default function FormPanel({
       {schemaTree && schemaTree.schemas.length > 0 && (
         <section className={styles.section}>
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Properties
+            {t('score:formPanel.sectionProperties')}
           </Type>
           <PropertyForm
             schemas={schemaTree.schemas}
@@ -479,7 +491,7 @@ export default function FormPanel({
       {flags.fragmentSet && movementId && (
         <section className={styles.section}>
           <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Harmony
+            {t('score:formPanel.sectionHarmony')}
           </Type>
           <HarmonyPanel
             movementId={movementId}
@@ -496,23 +508,25 @@ export default function FormPanel({
           Phase 1 persists the raw text only (Step 17). */}
       {flags.fragmentSet && (
         <section className={styles.section}>
-          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            Commentary
-          </Type>
-          <label htmlFor="prose-annotation" className={styles.proseLabel}>
-            <Type variant="label-sm" as="span" className={styles.proseDescription}>
-              Expert commentary on this fragment. Stored verbatim; becomes the
-              searchable annotation corpus in Phase 3.
+          {/* The "what is this field for" description lives behind the (i)
+              instead of a permanent paragraph (Part 8 item 4). */}
+          <div className={styles.sectionHeadingRow}>
+            <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+              {t('score:formPanel.sectionCommentary')}
             </Type>
-          </label>
+            <InfoHint
+              text={t('score:formPanel.commentaryDescription')}
+              ariaLabel={t('score:formPanel.commentaryInfoAria')}
+            />
+          </div>
           <textarea
             id="prose-annotation"
             className={styles.proseTextarea}
             value={proseAnnotation}
             onChange={e => onProseChange?.(e.target.value)}
-            placeholder="Add analytical commentary…"
+            placeholder={t('score:formPanel.commentaryPlaceholder')}
             rows={5}
-            aria-label="Prose annotation"
+            aria-label={t('score:formPanel.proseAria')}
           />
         </section>
       )}

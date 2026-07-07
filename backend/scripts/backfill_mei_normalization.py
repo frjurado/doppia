@@ -110,16 +110,18 @@ def main() -> None:
 
             stripped = [c for c in report.changes_applied if "spurious" in c.lower()]
             total_stripped += len(stripped)
-            total_warnings += len(report.warnings)
+            actionable = [w for w in report.warnings if w.severity == "warning"]
+            total_warnings += len(actionable)
 
             print(f"    spurious accidentals stripped : {len(stripped)}")
             print(
                 f"    other changes applied         : {len(report.changes_applied) - len(stripped)}"
             )
             if report.warnings:
-                print(f"    warnings                      : {len(report.warnings)}")
+                print(f"    warnings (actionable)         : {len(actionable)}")
                 for w in report.warnings:
-                    print(f"      ! {w}")
+                    marker = "!" if w.severity == "warning" else "·"
+                    print(f"      {marker} [{w.severity}] {w.message}")
 
             if DRY_RUN:
                 print(f"    [DRY RUN] would upload to {norm_key}")

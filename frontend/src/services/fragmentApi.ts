@@ -233,6 +233,8 @@ export interface FragmentListItem {
   primary_concept_id: string | null;
   /** First alias of the primary concept (e.g. "PAC"), or null. */
   primary_concept_alias: string | null;
+  /** Full name of the primary concept (label fallback when no alias), or null. */
+  primary_concept_name: string | null;
   sub_parts: FragmentListItem[];
 }
 

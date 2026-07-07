@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildMcIndex, commitSelection } from '../selection';
+import { buildMcIndex, commitSelection, measureKeysForMcRange } from '../selection';
 import type { CommittedSelection } from '../selection';
 
 // ---------------------------------------------------------------------------
@@ -87,16 +87,34 @@ describe('buildMcIndex', () => {
     expect(idx.size).toBe(5);
   });
 
-  it('first occurrence wins for duplicate ghost keys (unusual but safe)', () => {
-    // Two measures with the same @n and no endings — should not happen in
-    // normalised MEI but the function must not panic or overwrite.
+  it('deduplicates repeated @n with #N suffixes, matching buildGhosts keys (G2.3)', () => {
+    // Two measures with the same @n outside endings (section-reset numbering).
+    // Both get an mc; the second key carries the '#1' suffix exactly as the
+    // ghost layer assigns it, so the two indexes stay aligned.
     const mei = `<mei><music><body><mdiv><score>
       <measure n="3"/><measure n="3"/>
     </score></mdiv></body></music></mei>`;
     const idx = buildMcIndex(mei);
-    // Only one entry; the first occurrence (mc=1) is kept.
     expect(idx.get('m3')).toBe(1);
-    expect(idx.size).toBe(1);
+    expect(idx.get('m3#1')).toBe(2);
+    expect(idx.size).toBe(2);
+  });
+
+  it('assigns finite fallback keys to measures with unparseable @n (I2)', () => {
+    // MuseScore X-numbered excluded measures (e.g. the partial bar after a
+    // repeat-start in K331/iii) must not produce NaN-keyed entries. The
+    // fallback bar number is the nearest preceding finite @n, deduplicated.
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="7"/>
+      <measure n="8" right="rptend"/>
+      <measure n="X1"/>
+      <measure n="9"/>
+    </score></mdiv></body></music></mei>`;
+    const idx = buildMcIndex(mei);
+    expect(idx.get('m8')).toBe(2);
+    expect(idx.get('m8#1')).toBe(3); // the X1 measure, keyed under bar 8
+    expect(idx.get('m9')).toBe(4);
+    expect([...idx.keys()].some(k => k.includes('NaN'))).toBe(false);
   });
 
   it('matches DCML mc for a Mozart-style passage', () => {
@@ -282,5 +300,147 @@ describe('commitSelection — failure and fallback', () => {
       beat_end: 2.5,
       repeat_context: null,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitSelection — key-based derivation (§6A.1)
+// ---------------------------------------------------------------------------
+
+describe('commitSelection — measure-key derivation', () => {
+  it('derives mc from the committed key list when present', () => {
+    // Discontiguous effective range entering a second ending: mc endpoints
+    // come from the first and last key, not from barN + repeat_context.
+    const mei = makeEndingMei([1, 2], [3], [3], [4]);
+    const idx = buildMcIndex(mei);
+
+    const result = commitSelection(
+      {
+        barStart: 2, barEnd: 3, beatStart: null, beatEnd: null,
+        repeatContext: 'second_ending',
+        measureKeys: ['m2', 'm3-e2'],
+      },
+      idx,
+    );
+    expect(result?.mc_start).toBe(2);
+    expect(result?.mc_end).toBe(4); // m3-e2 is document position 4
+  });
+
+  it('resolves duplicate-@n keys via their #N suffix', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="8"/><measure n="X1"/><measure n="9"/>
+    </score></mdiv></body></music></mei>`;
+    const idx = buildMcIndex(mei);
+
+    const result = commitSelection(
+      {
+        barStart: 8, barEnd: 8, beatStart: null, beatEnd: null,
+        repeatContext: null,
+        measureKeys: ['m8', 'm8#1'], // bar 8 + its X-numbered complement
+      },
+      idx,
+    );
+    expect(result?.mc_start).toBe(1);
+    expect(result?.mc_end).toBe(2);
+    expect(Number.isFinite(result?.bar_start)).toBe(true);
+    expect(Number.isFinite(result?.bar_end)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commitSelection — I2 guard (regression pin for the bar_start=NaN request)
+// ---------------------------------------------------------------------------
+
+describe('commitSelection — non-finite coordinate guard (I2)', () => {
+  // Pins the fixture SEL-04 failure mode: a selection whose human coordinate
+  // lookup failed used to reach the API as GET …/analysis/events?bar_start=NaN
+  // (422). commitSelection must return null instead of any payload carrying a
+  // non-finite value — the request can no longer be constructed.
+  const idx = buildMcIndex(makeMei([1, 2, 3]));
+
+  it('returns null when barStart is NaN', () => {
+    const result = commitSelection(
+      {
+        barStart: Number.NaN, barEnd: 2, beatStart: null, beatEnd: null,
+        repeatContext: null,
+        measureKeys: ['m1', 'm2'],
+      },
+      idx,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('returns null when barEnd is NaN', () => {
+    const result = commitSelection(
+      {
+        barStart: 1, barEnd: Number.NaN, beatStart: null, beatEnd: null,
+        repeatContext: null,
+        measureKeys: ['m1', 'm2'],
+      },
+      idx,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('returns null when a beat coordinate is non-finite', () => {
+    const result = commitSelection(
+      {
+        barStart: 1, barEnd: 2, beatStart: 1.0, beatEnd: Number.NaN,
+        repeatContext: null,
+        measureKeys: ['m1', 'm2'],
+      },
+      idx,
+    );
+    expect(result).toBeNull();
+  });
+
+  it('never produces a payload containing NaN for any committed key range', () => {
+    const mei = `<mei><music><body><mdiv><score>
+      <measure n="8"/><measure n="X1"/><measure n="X2"/><measure n="9"/>
+    </score></mdiv></body></music></mei>`;
+    const fullIdx = buildMcIndex(mei);
+    const result = commitSelection(
+      {
+        barStart: 8, barEnd: 9, beatStart: null, beatEnd: null,
+        repeatContext: null,
+        measureKeys: [...fullIdx.keys()],
+      },
+      fullIdx,
+    );
+    expect(result).not.toBeNull();
+    for (const v of Object.values(result!)) {
+      if (typeof v === 'number') expect(Number.isFinite(v)).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// measureKeysForMcRange (edit-flow seeding)
+// ---------------------------------------------------------------------------
+
+describe('measureKeysForMcRange', () => {
+  const mei = makeEndingMei([1, 2], [3], [3], [4]);
+  const idx = buildMcIndex(mei);
+  // Document order: m1(1) m2(2) m3-e1(3) m3-e2(4) m4(5)
+
+  it('returns the ordered keys inside the mc interval', () => {
+    expect(measureKeysForMcRange(idx, 1, 2, null)).toEqual(['m1', 'm2']);
+  });
+
+  it('excludes non-first endings for a first_ending fragment', () => {
+    expect(measureKeysForMcRange(idx, 2, 3, 'first_ending'))
+      .toEqual(['m2', 'm3-e1']);
+  });
+
+  it('excludes first endings for a second_ending fragment (discontiguous mc span)', () => {
+    // A stored body→second-ending fragment spans the first ending's mc values;
+    // the reconstruction drops them from the effective key list.
+    expect(measureKeysForMcRange(idx, 2, 4, 'second_ending'))
+      .toEqual(['m2', 'm3-e2']);
+  });
+
+  it('keeps all endings when repeat_context is null (row 1 / row 3)', () => {
+    expect(measureKeysForMcRange(idx, 1, 5, null))
+      .toEqual(['m1', 'm2', 'm3-e1', 'm3-e2', 'm4']);
   });
 });

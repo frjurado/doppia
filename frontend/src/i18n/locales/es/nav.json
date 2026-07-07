@@ -1,0 +1,15 @@
+{
+  "ariaMain": "Navegación principal",
+  "ariaHome": "Inicio de Doppia",
+  "browse": "Explorar",
+  "fragments": "Fragmentos",
+  "review": "Revisión",
+  "ariaUserMenu": "Menú de usuario",
+  "account": "Cuenta ▾",
+  "login": "Iniciar sesión",
+  "language": "Idioma",
+  "languageNames": {
+    "en": "English",
+    "es": "Español"
+  }
+}

@@ -19,11 +19,18 @@ const mockTransport = {
   state: 'stopped' as string,
   seconds: 0,
   position: '0:0:0',
-  start: vi.fn(function (this: typeof mockTransport) { this.state = 'started'; }),
-  stop: vi.fn(function (this: typeof mockTransport) { this.state = 'stopped'; }),
-  pause: vi.fn(function (this: typeof mockTransport) { this.state = 'paused'; }),
+  start: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'started';
+  }),
+  stop: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'stopped';
+  }),
+  pause: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'paused';
+  }),
   cancel: vi.fn(),
   schedule: vi.fn(),
+  scheduleOnce: vi.fn(),
 };
 
 vi.mock('tone', () => ({
@@ -33,12 +40,13 @@ vi.mock('tone', () => ({
   // with `new`, which is how useMidiPlayback instantiates the Sampler.
   Sampler: vi.fn().mockImplementation(function samplerMock(
     this: unknown,
-    { onload }: { onload?: () => void },
+    { onload }: { onload?: () => void }
   ) {
     if (onload) Promise.resolve().then(onload);
     return {
       toDestination: vi.fn().mockReturnThis(),
       triggerAttackRelease: vi.fn(),
+      releaseAll: vi.fn(),
       dispose: vi.fn(),
     };
   }),
@@ -69,14 +77,11 @@ import { Midi } from '@tonejs/midi';
 /** A valid-enough base64 string (content doesn't matter — Midi is mocked). */
 const MOCK_MIDI_BASE64 = btoa('FAKE_MIDI');
 
-function renderPlaybackHook(
-  midiBase64: string | null = null,
-  onPositionUpdate = vi.fn(),
-) {
+function renderPlaybackHook(midiBase64: string | null = null, onPositionUpdate = vi.fn()) {
   return renderHook(
     ({ midi, onUpdate }: { midi: string | null; onUpdate: (ms: number) => void }) =>
       useMidiPlayback(midi, onUpdate),
-    { initialProps: { midi: midiBase64, onUpdate: onPositionUpdate } },
+    { initialProps: { midi: midiBase64, onUpdate: onPositionUpdate } }
   );
 }
 
@@ -145,6 +150,19 @@ describe('useMidiPlayback — play()', () => {
     expect(mockTransport.start).toHaveBeenCalledTimes(1);
   });
 
+  it('starts with a lookahead offset so the first note is not missed (F2)', async () => {
+    const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
+
+    await act(async () => {
+      await result.current.play();
+    });
+
+    // A fresh schedule always includes a note at transport-relative time 0
+    // (the first note, or a play-from-position origin) — starting at literal
+    // "now" races the Web Audio lookahead clock and can drop it.
+    expect(mockTransport.start).toHaveBeenCalledWith(expect.stringMatching(/^\+0\.\d+$/));
+  });
+
   it('sets status to "playing" after play completes', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
@@ -168,9 +186,15 @@ describe('useMidiPlayback — play()', () => {
   it('does not call Tone.start() again on second play (instrument already loaded)', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
-    act(() => { result.current.stop(); });
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.stop();
+    });
+    await act(async () => {
+      await result.current.play();
+    });
 
     // Tone.start() should only be called once across multiple plays.
     expect(Tone.start).toHaveBeenCalledTimes(1);
@@ -179,7 +203,9 @@ describe('useMidiPlayback — play()', () => {
   it('schedules MIDI notes on the transport', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
 
     // The mock Midi has 2 notes across 1 track → 2 schedule calls.
     expect(mockTransport.schedule).toHaveBeenCalledTimes(2);
@@ -188,7 +214,9 @@ describe('useMidiPlayback — play()', () => {
   it('parses the MIDI base64 using the Midi constructor', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
 
     expect(Midi).toHaveBeenCalledTimes(1);
   });
@@ -196,7 +224,9 @@ describe('useMidiPlayback — play()', () => {
   it('does nothing when called with no MIDI available', async () => {
     const { result } = renderPlaybackHook(null);
 
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
 
     expect(Tone.start).not.toHaveBeenCalled();
     expect(mockTransport.start).not.toHaveBeenCalled();
@@ -205,16 +235,73 @@ describe('useMidiPlayback — play()', () => {
   it('resumes from pause without reloading Sampler or calling Tone.start() again', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
-    act(() => { result.current.pause(); });
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.pause();
+    });
     // Set transport to paused state so the resume branch is taken.
     mockTransport.state = 'paused';
 
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
 
     expect(Tone.start).toHaveBeenCalledTimes(1); // not called again
     expect(Tone.Sampler).toHaveBeenCalledTimes(1); // not recreated
     expect(result.current.status).toBe('playing');
+    // Resuming doesn't reschedule anything at time 0, so it isn't subject to
+    // the F2 race — no lookahead offset needed on this second start() call.
+    expect(mockTransport.start).toHaveBeenNthCalledWith(2);
+  });
+});
+
+describe('useMidiPlayback — play-from-position origin (Step 20)', () => {
+  it('schedules only notes at/after the origin, shifted so the origin is t=0', async () => {
+    // Mock Midi has notes at 0 s and 0.5 s. With a 500 ms origin, the first is
+    // skipped and the second is scheduled at transport time 0.
+    const { result } = renderHook(() =>
+      useMidiPlayback(MOCK_MIDI_BASE64, vi.fn(), { originMs: 500 })
+    );
+
+    await act(async () => {
+      await result.current.play();
+    });
+
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(1);
+    expect(mockTransport.schedule.mock.calls[0][1]).toBeCloseTo(0);
+  });
+
+  it('schedules every note when originMs is 0 (unchanged behaviour)', async () => {
+    const { result } = renderHook(() =>
+      useMidiPlayback(MOCK_MIDI_BASE64, vi.fn(), { originMs: 0 })
+    );
+
+    await act(async () => {
+      await result.current.play();
+    });
+
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(2);
+  });
+
+  it('clamps an origin note landing a hair before startSec to offset 0 (F2 residual)', async () => {
+    // Mock notes at 0 s and 0.5 s. An origin of 500.05 ms puts the 0.5 s note
+    // within the EPS admission window but *before* startSec — its raw offset
+    // is −5e-5 s, which Tone.js would silently drop. The clamp schedules it
+    // at exactly 0 instead (Part 8 item 5).
+    const { result } = renderHook(() =>
+      useMidiPlayback(MOCK_MIDI_BASE64, vi.fn(), { originMs: 500.05 })
+    );
+
+    await act(async () => {
+      await result.current.play();
+    });
+
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(1);
+    const offset = mockTransport.schedule.mock.calls[0][1] as number;
+    expect(offset).toBeGreaterThanOrEqual(0);
+    expect(offset).toBeCloseTo(0);
   });
 });
 
@@ -222,11 +309,29 @@ describe('useMidiPlayback — pause()', () => {
   it('calls Transport.pause() and sets status to paused', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
-    act(() => { result.current.pause(); });
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.pause();
+    });
 
     expect(mockTransport.pause).toHaveBeenCalledTimes(1);
     expect(result.current.status).toBe('paused');
+  });
+
+  it('releases any sounding notes (F1 — no hanging notes)', async () => {
+    const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
+
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.pause();
+    });
+
+    const sampler = vi.mocked(Tone.Sampler).mock.results[0]?.value;
+    expect(sampler.releaseAll).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -234,18 +339,40 @@ describe('useMidiPlayback — stop()', () => {
   it('calls Transport.stop() and Transport.cancel()', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
-    act(() => { result.current.stop(); });
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.stop();
+    });
 
     expect(mockTransport.stop).toHaveBeenCalled();
     expect(mockTransport.cancel).toHaveBeenCalled();
   });
 
+  it('releases any sounding notes (F1 — no hanging notes)', async () => {
+    const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
+
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.stop();
+    });
+
+    const sampler = vi.mocked(Tone.Sampler).mock.results[0]?.value;
+    expect(sampler.releaseAll).toHaveBeenCalledTimes(1);
+  });
+
   it('resets position display to bar 1, beat 1', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
-    act(() => { result.current.stop(); });
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.stop();
+    });
 
     expect(result.current.position).toEqual({ bar: 1, beat: 1 });
   });
@@ -253,8 +380,12 @@ describe('useMidiPlayback — stop()', () => {
   it('sets status back to ready when MIDI is still available', async () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
-    act(() => { result.current.stop(); });
+    await act(async () => {
+      await result.current.play();
+    });
+    act(() => {
+      result.current.stop();
+    });
 
     expect(result.current.status).toBe('ready');
   });
@@ -264,7 +395,9 @@ describe('useMidiPlayback — midiBase64 change (transposition follow-through, S
   it('stops the transport when midiBase64 changes while playing', async () => {
     const { result, rerender } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
     expect(result.current.status).toBe('playing');
 
     act(() => {
@@ -290,7 +423,9 @@ describe('useMidiPlayback — midiBase64 change (transposition follow-through, S
   it('resets position when midiBase64 changes', async () => {
     const { result, rerender } = renderPlaybackHook(MOCK_MIDI_BASE64);
 
-    await act(async () => { await result.current.play(); });
+    await act(async () => {
+      await result.current.play();
+    });
     // Simulate transport having advanced.
     mockTransport.position = '3:1:0';
     mockTransport.seconds = 6;
@@ -307,5 +442,74 @@ describe('useMidiPlayback — position display', () => {
   it('starts with bar 1, beat 1', () => {
     const { result } = renderPlaybackHook(MOCK_MIDI_BASE64);
     expect(result.current.position).toEqual({ bar: 1, beat: 1 });
+  });
+});
+
+describe('useMidiPlayback — fragment window (Step 18)', () => {
+  // The mock Midi has notes at time 0 s and 0.5 s. A window of [500, 1000] ms
+  // (0.5–1.0 s) excludes the first note and keeps the second.
+  const WINDOW = { startMs: 500, endMs: 1000 };
+
+  function renderWindowed(
+    win: { startMs: number; endMs: number } | null = WINDOW,
+    onEnded = vi.fn()
+  ) {
+    const result = renderHook(
+      ({ w }: { w: { startMs: number; endMs: number } | null }) =>
+        useMidiPlayback(MOCK_MIDI_BASE64, vi.fn(), { window: w, onEnded }),
+      { initialProps: { w: win } }
+    );
+    return { ...result, onEnded };
+  }
+
+  it('schedules only the notes that fall inside the window', async () => {
+    const { result } = renderWindowed();
+    await act(async () => {
+      await result.current.play();
+    });
+    // Of the two mock notes (0 s, 0.5 s) only the second is inside [0.5, 1.0] s.
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('schedules an auto-stop at the window end', async () => {
+    const { result } = renderWindowed();
+    await act(async () => {
+      await result.current.play();
+    });
+    expect(mockTransport.scheduleOnce).toHaveBeenCalledTimes(1);
+    // Stop is scheduled at (endSec - startSec) = (1.0 - 0.5) = 0.5 s.
+    expect(mockTransport.scheduleOnce.mock.calls[0][1]).toBeCloseTo(0.5);
+  });
+
+  it('returns to ready and fires onEnded when the window end is reached', async () => {
+    const { result, onEnded } = renderWindowed();
+    await act(async () => {
+      await result.current.play();
+    });
+    expect(result.current.status).toBe('playing');
+
+    // Invoke the auto-stop callback Tone would fire at the window end.
+    const endCallback = mockTransport.scheduleOnce.mock.calls[0][0] as () => void;
+    act(() => {
+      endCallback();
+    });
+
+    expect(result.current.status).toBe('ready');
+    expect(onEnded).toHaveBeenCalledTimes(1);
+    expect(mockTransport.stop).toHaveBeenCalled();
+    // F1: a note sounding right at the window boundary must be released, not
+    // left hanging.
+    const sampler = vi.mocked(Tone.Sampler).mock.results[0]?.value;
+    expect(sampler.releaseAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule an auto-stop when no window is given (whole movement)', async () => {
+    const { result } = renderWindowed(null);
+    await act(async () => {
+      await result.current.play();
+    });
+    // Both notes scheduled; no windowed auto-stop.
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(2);
+    expect(mockTransport.scheduleOnce).not.toHaveBeenCalled();
   });
 });

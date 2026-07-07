@@ -1,0 +1,39 @@
+/* InfoHint — ⓘ button + floating explanation (Component 9 Part 8 item 4).
+   Visuals match PropertyForm's field-description tooltip: transparent button,
+   tonal floating panel, 0px border-radius (design system). */
+
+.wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.button {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+  padding: 0;
+  margin-left: 0.3em;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.button:hover {
+  color: var(--color-on-surface);
+}
+
+/* Floating panel anchored below the icon. Fixed width so it reads as a
+   tooltip, not a layout block; does not push siblings down. */
+.floating {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 30;
+  display: block;
+  width: 240px;
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface-variant);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}

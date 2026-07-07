@@ -219,3 +219,35 @@ export async function getConceptTree(rootId: string): Promise<ConceptTreeRespons
     ConceptTreeResponseSchema,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Domain roots  (GET /api/v1/concepts/roots)
+// ---------------------------------------------------------------------------
+
+/** A domain root concept — non-stub, no IS_SUBTYPE_OF parent. */
+export interface ConceptRootItem {
+  id: string;
+  name: string;
+  aliases: string[];
+}
+
+const ConceptRootItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  aliases: z.array(z.string()),
+});
+
+const ConceptRootsResponseSchema = z.object({
+  roots: z.array(ConceptRootItemSchema),
+});
+
+/**
+ * Return all domain root concepts (non-stub nodes with no IS_SUBTYPE_OF parent).
+ *
+ * Used by the fragment browser to pre-populate the concept tree on mount
+ * without requiring the user to type a search query.
+ */
+export async function getConceptRoots(): Promise<ConceptRootItem[]> {
+  const res = await apiFetch(`${BASE}/concepts/roots`, undefined, ConceptRootsResponseSchema);
+  return res.roots;
+}

@@ -1,0 +1,94 @@
+# MEI source-corrections overlay — Mozart Piano Sonatas (DCML)
+#
+# See ADR-027 (mechanism + the coordinate locator) and
+# backend/seed/corrections/README.md (field reference). Applied by
+# mei_normalizer Pass 0 at ingest, before the structural passes. Targets are
+# located by COORDINATES (ADR-015 document-order `mc` + voice/pitch), which are
+# stable across a re-encode; xml:ids are not (the toolchain reassigns them, so a
+# pinned id silently stops resolving — the reason this overlay moved off them).
+#
+# Reference edition for every entry: the Neue Mozart-Ausgabe (NMA), which the
+# DCML corpus itself follows (see the corpus README). The NMA is freely
+# consultable at the Digital Mozart Edition: https://dme.mozarteum.at/DME/nma
+#
+# source_sha pins the DCML mozart_piano_sonatas commit each entry was authored
+# against (HEAD at authoring: 5337257a5318711e6302cfe85c3f1a6ade3c6271). On a
+# source bump, Pass 0's pre-state check (ADR-027 §3) re-validates every entry.
+
+composer: mozart
+corpus: piano-sonatas
+corrections:
+  # --- C2 (RETIRED 2026-07-01, ADR-033): K331/ii Trio strain-opening repeats ---
+  # The K331/ii Trio's two strains close with :| (mc64, mc100) but the source
+  # omits their opening |: (mc49, mc65). A post-import overlay erratum used to
+  # add |: at mc65, but it could NOT fix playback: Verovio freezes the MIDI
+  # <expansion> at MusicXML-import time, so a later MEI edit leaves the wrong
+  # expansion in place. The fix moved PRE-import — prepare_dcml_corpus.py's
+  # repair_section_opening_repeats supplies both strain-opening |: before the
+  # import, so the expansion is generated correctly (ADR-033). Both mc49 and
+  # mc65 get the explicit |: (Francisco 2026-07-01), superseding this entry.
+
+  # --- B3: K332/ii m24 — spurious C# (should be C natural) ------------------
+  # m24 is a cadential bar (V65–I–V64–V/HC in B-flat). The treble 16th-note
+  # figure has four C5s: C-natural at the end of beat 1, C-sharp on beat 2
+  # (chromatic, correct), then a C on the first note of beat 4, and the bar's
+  # last C. The NMA prints a natural on the beat-4 C (cancelling the beat-2
+  # sharp), so both it and the bar's last C sound C-natural. DCML/MuseScore
+  # prints no accidental there, leaving the beat-2 C# to carry forward as an
+  # implicit sharp — so the app plays C# on both. Restoring the printed natural
+  # on the beat-4 C fixes both notes: Pass 9 (ADR-028) then resolves the
+  # gestural pitch of this note and the bar's last same-pitch C to natural.
+  - movement: k332/movement-2
+    target:
+      mc: 24
+      staff: 1
+      layer: 1
+      pname: c
+      oct: 5
+      occurrence: 3
+      note: "beat-4 C5 (3rd of the four C5s in the treble figure; Pass 9 then
+        carries the natural to the bar's last C5)"
+    field: accid
+    expected: null
+    corrected: "n"
+    rationale: >-
+      DCML/MuseScore leaves the beat-4 C5 with no printed accidental, so the
+      beat-2 C# carries forward and the note (and the bar's last C5) play C#.
+      The NMA prints a natural here, making both C-natural. Restore the printed
+      natural; Pass 9 then resolves the gestural pitch of this and the bar's
+      last C5 to natural.
+    class: errata
+    upstream: none
+    source_sha: 5337257a5318711e6302cfe85c3f1a6ade3c6271
+    added: "2026-06-29 Francisco"
+
+  # --- B3: K279/ii m51 — missing cautionary flat on the bass B4 -------------
+  # In m51 the RH has an ornamental B-natural in octave 5; an accidental binds
+  # only its own pitch+octave+staff, so it must not affect the LH B4 an octave
+  # lower in the other staff. The DCML/MuseScore export drops the key-signature
+  # flat on that LH B4 (a converter over-reach corrected for playback by Pass 9,
+  # ADR-028), and also omits the *printed* accidental. The NMA prints a
+  # cautionary flat on the first LH B4 to make the B-flat unambiguous against
+  # the RH B-natural. Restore that printed cautionary flat.
+  - movement: k279/movement-2
+    target:
+      mc: 53
+      staff: 2
+      layer: 5
+      pname: b
+      oct: 4
+      occurrence: 1
+      note: "first bass B4 of the measure (mn 51)"
+    field: accid
+    expected: null
+    corrected: "f"
+    rationale: >-
+      The NMA prints a cautionary flat on the first LH B4 of m51 (disambiguating
+      it from the RH ornamental B-natural an octave above); DCML/MuseScore omits
+      the printed accidental (and the export drops its key-signature flat, which
+      Pass 9 restores for playback). Restore the printed cautionary flat to match
+      the edition.
+    class: errata
+    upstream: none
+    source_sha: 5337257a5318711e6302cfe85c3f1a6ade3c6271
+    added: "2026-06-29 Francisco"

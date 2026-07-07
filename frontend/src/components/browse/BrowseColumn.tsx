@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ApiError } from '../../services/api';
 import Type from '../ui/Type';
 import BrowseItem from './BrowseItem';
@@ -32,10 +33,11 @@ export default function BrowseColumn<T>({
   isLoading,
   getKey,
   renderItem,
-  emptyLabel = 'Nothing here',
+  emptyLabel,
   error,
   onRetry,
 }: BrowseColumnProps<T>) {
+  const { t } = useTranslation('common');
   if (error) {
     return (
       <div className={styles.column}>
@@ -45,7 +47,7 @@ export default function BrowseColumn<T>({
           </Type>
           {onRetry && (
             <button type="button" onClick={onRetry} className={styles.retryButton}>
-              Retry
+              {t('retry')}
             </button>
           )}
         </div>
@@ -83,7 +85,7 @@ export default function BrowseColumn<T>({
             variant="label-md"
             style={{ color: 'var(--color-on-surface-variant)' }}
           >
-            {emptyLabel}
+            {emptyLabel ?? t('nothingHere')}
           </Type>
         </div>
       </div>

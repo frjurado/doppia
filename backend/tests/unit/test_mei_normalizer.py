@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import lxml.etree
+from models.corrections import Correction
 from services.mei_normalizer import normalize_mei
 
 # ---------------------------------------------------------------------------
@@ -22,6 +23,7 @@ from services.mei_normalizer import normalize_mei
 # ---------------------------------------------------------------------------
 
 _FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "mei" / "normalizer"
+_NS_MEI = "http://www.music-encoding.org/ns/mei"
 
 
 def _fixture(name: str) -> Path:
@@ -204,9 +206,27 @@ class TestEndingNs:
         assert first_out == second_out
 
     def test_non_sequential_endings_warned(self, tmp_path: Path) -> None:
-        """Endings with @n=[1,3] (missing 2) produce a warning."""
+        """Endings with @n=[1,3] (missing 2) — a genuine gap stays a warning."""
         report, _ = _run(tmp_path, "ending_non_sequential.mei")
-        assert any("sequential" in w.lower() for w in report.warnings)
+        non_seq = [w for w in report.warnings if w.code == "ENDING_NON_SEQUENTIAL"]
+        assert non_seq, "Non-contiguous ending @n should still warn"
+        assert non_seq[0].severity == "warning"
+        assert report.is_clean is False
+
+    def test_repeated_volta_endings_info(self, tmp_path: Path) -> None:
+        """Endings with repeated volta numbers [1,1,2,2] are accepted (info)."""
+        report, _ = _run(tmp_path, "ending_repeated_volta.mei")
+        repeated = [w for w in report.warnings if w.code == "ENDING_REPEATED_VOLTA"]
+        assert repeated, "Repeated-volta endings should produce an info advisory"
+        assert repeated[0].severity == "info"
+        # No genuine defect → the file is clean despite the info advisory.
+        assert report.is_clean is True
+
+    def test_repeated_volta_idempotent(self, tmp_path: Path) -> None:
+        """Repeated-volta endings: second pass is byte-identical."""
+        _, first_out = _run(tmp_path, "ending_repeated_volta.mei")
+        second_out = _round_trip(tmp_path, first_out, "ending_repeated_volta.mei")
+        assert first_out == second_out
 
     def test_non_sequential_idempotent(self, tmp_path: Path) -> None:
         """Non-sequential endings: second pass is byte-identical."""
@@ -229,7 +249,7 @@ class TestRepeatBarlinePairing:
         paired_warnings = [
             w
             for w in report.warnings
-            if "unpaired" in w.lower() or "unmatched" in w.lower()
+            if "unpaired" in w.message.lower() or "unmatched" in w.message.lower()
         ]
         assert paired_warnings == []
 
@@ -239,10 +259,18 @@ class TestRepeatBarlinePairing:
         second_out = _round_trip(tmp_path, first_out, "rptend_unpaired_first.mei")
         assert first_out == second_out
 
-    def test_second_rptend_unpaired_warns(self, tmp_path: Path) -> None:
-        """Second rptend without a preceding rptstart produces a warning."""
+    def test_second_rptend_unpaired_info(self, tmp_path: Path) -> None:
+        """A second unpaired rptend is accepted (info), not actionable (ADR-025).
+
+        It is a benign artefact of written-out repeats / multi-section
+        movements, so it is downgraded from a warning to an info advisory and
+        does not make the report unclean.
+        """
         report, _ = _run(tmp_path, "rptend_unpaired_second.mei")
-        assert any("unpaired" in w.lower() for w in report.warnings)
+        unpaired = [w for w in report.warnings if w.code == "REPEAT_UNPAIRED_END"]
+        assert unpaired, "Second unpaired rptend should still be recorded"
+        assert unpaired[0].severity == "info"
+        assert report.is_clean is True
 
     def test_second_rptend_idempotent(self, tmp_path: Path) -> None:
         """Second unpaired rptend: second pass byte-identical."""
@@ -254,7 +282,8 @@ class TestRepeatBarlinePairing:
         """An rptstart with no matching rptend produces a warning."""
         report, _ = _run(tmp_path, "rptstart_no_close.mei")
         assert any(
-            "unclosed" in w.lower() or "rptstart" in w.lower() for w in report.warnings
+            "unclosed" in w.message.lower() or "rptstart" in w.message.lower()
+            for w in report.warnings
         )
 
     def test_rptstart_no_close_idempotent(self, tmp_path: Path) -> None:
@@ -269,7 +298,7 @@ class TestRepeatBarlinePairing:
         paired_warnings = [
             w
             for w in report.warnings
-            if "unpaired" in w.lower() or "unclosed" in w.lower()
+            if "unpaired" in w.message.lower() or "unclosed" in w.message.lower()
         ]
         assert paired_warnings == []
 
@@ -291,7 +320,7 @@ class TestMeasureNOutsideEndings:
     def test_duplicate_n_warns(self, tmp_path: Path) -> None:
         """Duplicate @n=2 outside endings produces a warning."""
         report, _ = _run(tmp_path, "duplicate_n_outside_ending.mei")
-        assert any("duplicate" in w.lower() for w in report.warnings)
+        assert any("duplicate" in w.message.lower() for w in report.warnings)
 
     def test_duplicate_n_idempotent(self, tmp_path: Path) -> None:
         """Duplicate @n: second pass byte-identical (no mutations in pass 5)."""
@@ -313,7 +342,10 @@ class TestMeasureNOutsideEndings:
         assert (
             "12a" in n_values
         ), "Pass 5 should NOT strip suffix from @n outside endings"
-        assert any("non-integer" in w.lower() or "12a" in w for w in report.warnings)
+        assert any(
+            "non-integer" in w.message.lower() or "12a" in w.message
+            for w in report.warnings
+        )
 
     def test_non_integer_n_idempotent(self, tmp_path: Path) -> None:
         """Non-integer @n outside ending: second pass byte-identical."""
@@ -326,12 +358,49 @@ class TestMeasureNOutsideEndings:
     def test_large_gap_warns(self, tmp_path: Path) -> None:
         """Gap of 14 (from @n=1 to @n=15) produces a warning."""
         report, _ = _run(tmp_path, "large_gap_n.mei")
-        assert any("gap" in w.lower() for w in report.warnings)
+        assert any("gap" in w.message.lower() for w in report.warnings)
 
     def test_large_gap_idempotent(self, tmp_path: Path) -> None:
         """Large gap: second pass byte-identical."""
         _, first_out = _run(tmp_path, "large_gap_n.mei")
         second_out = _round_trip(tmp_path, first_out, "large_gap_n.mei")
+        assert first_out == second_out
+
+    def test_dcml_x_n_outside_ending_info(self, tmp_path: Path) -> None:
+        """DCML X-prefixed @n outside endings is accepted (info), not warned."""
+        report, out_bytes = _run(tmp_path, "dcml_x_measure_n.mei")
+        x_issues = [w for w in report.warnings if w.code == "MEASURE_N_DCML_X"]
+        assert x_issues, "X-prefixed @n should be recorded as an advisory"
+        assert x_issues[0].severity == "info"
+        # Accepted, not corrected: the value is left as 'X1' (mc keys it; ADR-015).
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        bare = tree.xpath("//mei:measure[not(ancestor::mei:ending)]", namespaces=ns)
+        assert "X1" in [m.get("n") for m in bare]
+        assert report.is_clean is True
+
+    def test_dcml_x_n_idempotent(self, tmp_path: Path) -> None:
+        """DCML X-prefixed @n: second pass byte-identical (no mutation)."""
+        _, first_out = _run(tmp_path, "dcml_x_measure_n.mei")
+        second_out = _round_trip(tmp_path, first_out, "dcml_x_measure_n.mei")
+        assert first_out == second_out
+
+    def test_multi_section_duplicate_collapsed_to_info(self, tmp_path: Path) -> None:
+        """A clean @n restart (1-3 twice) collapses to one info, not per-bar warnings."""
+        report, _ = _run(tmp_path, "multi_section_duplicate_n.mei")
+        summary = [
+            w for w in report.warnings if w.code == "MEASURE_N_MULTI_SECTION_DUPLICATE"
+        ]
+        assert len(summary) == 1, "Expected exactly one collapsed advisory"
+        assert summary[0].severity == "info"
+        # No per-value MEASURE_N_DUPLICATE warnings are emitted in this case.
+        assert not [w for w in report.warnings if w.code == "MEASURE_N_DUPLICATE"]
+        assert report.is_clean is True
+
+    def test_multi_section_duplicate_idempotent(self, tmp_path: Path) -> None:
+        """Multi-section restart: second pass byte-identical."""
+        _, first_out = _run(tmp_path, "multi_section_duplicate_n.mei")
+        second_out = _round_trip(tmp_path, first_out, "multi_section_duplicate_n.mei")
         assert first_out == second_out
 
 
@@ -369,14 +438,35 @@ class TestEndingMeasureNs:
     def test_duplicate_within_ending_warns(self, tmp_path: Path) -> None:
         """Two measures with @n=2 inside the same ending produce a warning."""
         report, _ = _run(tmp_path, "ending_duplicate_n_within.mei")
-        assert any("duplicate" in w.lower() for w in report.warnings)
+        assert any("duplicate" in w.message.lower() for w in report.warnings)
 
     def test_duplicate_across_endings_no_warn(self, tmp_path: Path) -> None:
         """@n=2 appearing in ending n='1' and ending n='2' is expected — no warning."""
         report, _ = _run(tmp_path, "ending_suffix_n.mei")
         # After stripping, both endings have @n=2 — this is the shared-slot convention.
-        cross_ending_warnings = [w for w in report.warnings if "duplicate" in w.lower()]
+        cross_ending_warnings = [
+            w for w in report.warnings if "duplicate" in w.message.lower()
+        ]
         assert cross_ending_warnings == []
+
+    def test_dcml_x_n_inside_ending_info(self, tmp_path: Path) -> None:
+        """DCML X-prefixed @n inside an ending is accepted (info), not warned."""
+        report, out_bytes = _run(tmp_path, "ending_dcml_x_measure_n.mei")
+        x_issues = [w for w in report.warnings if w.code == "ENDING_MEASURE_N_DCML_X"]
+        assert x_issues, "X-prefixed ending @n should be recorded as an advisory"
+        assert x_issues[0].severity == "info"
+        # Accepted, not renumbered: the value is left as 'X1' (mc keys it; ADR-015).
+        tree = lxml.etree.fromstring(out_bytes)
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        ending_measures = tree.xpath("//mei:ending/mei:measure", namespaces=ns)
+        assert "X1" in [m.get("n") for m in ending_measures]
+        assert report.is_clean is True
+
+    def test_dcml_x_n_inside_ending_idempotent(self, tmp_path: Path) -> None:
+        """DCML X-prefixed ending @n: second pass byte-identical (no mutation)."""
+        _, first_out = _run(tmp_path, "ending_dcml_x_measure_n.mei")
+        second_out = _round_trip(tmp_path, first_out, "ending_dcml_x_measure_n.mei")
+        assert first_out == second_out
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +513,7 @@ class TestSplitMeasures:
     def test_no_complement_warns(self, tmp_path: Path) -> None:
         """When the close rptend is the very first measure, no complement exists → warn."""
         report, _ = _run(tmp_path, "split_measure_no_complement.mei")
-        assert any("complement" in w.lower() for w in report.warnings)
+        assert any("complement" in w.message.lower() for w in report.warnings)
 
     def test_no_complement_idempotent(self, tmp_path: Path) -> None:
         """No-complement warning case: second pass byte-identical."""
@@ -487,12 +577,102 @@ class TestDurationBars:
 
 
 # ---------------------------------------------------------------------------
-# Pass 8 — Spurious gestural accidentals
+# Pass 8 — Cross-barline tie completion
+# ---------------------------------------------------------------------------
+
+
+class TestCrossBarlineTieCompletion:
+    """Pass 8: complete endpoint-less cross-barline ties (ADR-026)."""
+
+    _NS = {"mei": "http://www.music-encoding.org/ns/mei"}
+    _XML = {"xml": "http://www.w3.org/XML/1998/namespace"}
+
+    def _by_id(self, tree: lxml.etree._Element, xml_id: str) -> lxml.etree._Element:
+        """Return the single element with the given ``xml:id`` (asserts existence)."""
+        els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=self._XML)
+        assert len(els) == 1, f"Expected exactly one element xml:id={xml_id!r}"
+        return els[0]
+
+    def test_endid_resolved_to_next_measure_note(self, tmp_path: Path) -> None:
+        """An endid-less tie points at the first same-pitch note in the next bar."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        tie = self._by_id(tree, "t_bb_m1")
+        assert tie.get("endid") == "#n_bb_m2"
+
+    def test_decoy_pitch_not_chosen(self, tmp_path: Path) -> None:
+        """The continuation, not a later explicit B-natural in the bar, is chosen."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "t_bb_m1").get("endid") == "#n_bb_m2"
+        assert self._by_id(tree, "t_bb_m1").get("endid") != "#n_decoy_b"
+
+    def test_second_tie_resolved(self, tmp_path: Path) -> None:
+        """A chained second endid-less tie resolves into the following measure."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "t_bb_m2").get("endid") == "#n_bb_m3"
+
+    def test_accid_ges_propagated_to_continuation(self, tmp_path: Path) -> None:
+        """Each continuation note gains accid.ges matching the tie origin's flat."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "a_bb_m2").get("accid.ges") == "f"
+        assert self._by_id(tree, "a_bb_m3").get("accid.ges") == "f"
+        # No notated accidental is added — the original engraving showed none.
+        assert "accid" not in self._by_id(tree, "a_bb_m2").attrib
+        assert "accid" not in self._by_id(tree, "a_bb_m3").attrib
+
+    def test_propagated_accid_ges_survives_pass9(self, tmp_path: Path) -> None:
+        """Pass 9 must not strip the tie continuation's accid.ges (C major, no key sig)."""
+        report, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        assert not any(
+            "spurious" in c.lower() for c in report.changes_applied
+        ), f"Pass 9 wrongly stripped a tied continuation: {report.changes_applied}"
+        tree = lxml.etree.fromstring(out_bytes)
+        assert self._by_id(tree, "a_bb_m2").get("accid.ges") == "f"
+
+    def test_complete_tie_untouched(self, tmp_path: Path) -> None:
+        """A tie that already has both endpoints is left exactly as-is."""
+        _, out_bytes = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        e5_tie = self._by_id(tree, "t_e5_m1")
+        assert e5_tie.get("endid") == "#n_e5_m2"
+        # The natural E continuation gains no gestural accidental.
+        assert "accid.ges" not in self._by_id(tree, "a_e5_m2").attrib
+
+    def test_completion_recorded(self, tmp_path: Path) -> None:
+        """Both completions are reported in changes_applied; no warnings."""
+        report, _ = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        completed = [
+            c for c in report.changes_applied if "cross-barline tie" in c.lower()
+        ]
+        assert len(completed) == 2
+        assert not report.warnings
+
+    def test_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on completed ties applies no further changes."""
+        _, first_out = _run(tmp_path, "tie_incomplete_crossbar.mei")
+        second_out = _round_trip(tmp_path, first_out, "tie_incomplete_crossbar.mei")
+        assert first_out == second_out
+
+    def test_unresolvable_tie_warns_and_is_left_alone(self, tmp_path: Path) -> None:
+        """No continuation in the next bar: warn, leave the tie endid-less."""
+        report, out_bytes = _run(tmp_path, "tie_incomplete_no_target.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        tie = self._by_id(tree, "t_bb_solo")
+        assert "endid" not in tie.attrib
+        assert not report.changes_applied
+        assert any("unresolved" in w.message.lower() for w in report.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Pass 9 — Spurious gestural accidentals
 # ---------------------------------------------------------------------------
 
 
 class TestSpuriousGesturalAccidentals:
-    """Pass 8: strip spurious accid.ges+glyph.auth from MEI conversion artefacts."""
+    """Pass 9: strip spurious accid.ges+glyph.auth from MEI conversion artefacts."""
 
     _NS = {"mei": "http://www.music-encoding.org/ns/mei"}
 
@@ -702,3 +882,694 @@ class TestSpuriousGesturalAccidentals:
             tmp_path, first_out, "keysig_section_boundary_change.mei"
         )
         assert first_out == second_out
+
+
+class TestGesturalAccidentalResolution:
+    """Pass 9 (ADR-028): the add/override/onset directions beyond ADR-022 strip."""
+
+    _XNS = {"xml": "http://www.w3.org/XML/1998/namespace"}
+
+    def _accid(self, out_bytes: bytes, xml_id: str) -> lxml.etree._Element:
+        tree = lxml.etree.fromstring(out_bytes)
+        els = tree.xpath(f"//*[@xml:id='{xml_id}']", namespaces=self._XNS)
+        assert len(els) == 1, f"Expected element {xml_id!r}"
+        return els[0]
+
+    def test_cross_octave_suppression_overridden(self, tmp_path: Path) -> None:
+        """A key-sig flat suppressed to accid.ges='n' is corrected back to 'f'."""
+        report, out = _run(tmp_path, "accid_cross_octave_suppression.mei")
+        assert self._accid(out, "a_bass_b4").get("accid.ges") == "f"
+        # The explicit treble natural is authoritative and untouched.
+        assert self._accid(out, "a_treble_bn5").get("accid.ges") == "n"
+        assert any("corrected accid.ges" in c for c in report.changes_applied)
+
+    def test_cross_octave_suppression_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_cross_octave_suppression.mei")
+        assert first == _round_trip(
+            tmp_path, first, "accid_cross_octave_suppression.mei"
+        )
+
+    def test_cross_voice_carry_added(self, tmp_path: Path) -> None:
+        """A second-voice note bound by voice 1's accidental gains accid.ges='s'."""
+        report, out = _run(tmp_path, "accid_cross_voice_carry.mei")
+        for xml_id in ("n_c5_b1", "n_c5_b2"):
+            note = self._accid(out, xml_id)
+            accid = note.find(f"{{{_NS_MEI}}}accid")
+            assert (
+                accid is not None and accid.get("accid.ges") == "s"
+            ), f"{xml_id}: cross-voice carry accid.ges='s' must be added"
+        assert any("added accid.ges" in c for c in report.changes_applied)
+
+    def test_cross_voice_carry_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_cross_voice_carry.mei")
+        assert first == _round_trip(tmp_path, first, "accid_cross_voice_carry.mei")
+
+    def test_backward_bleed_stripped_by_onset(self, tmp_path: Path) -> None:
+        """A sharp on an earlier-onset note in another voice is stripped."""
+        report, out = _run(tmp_path, "accid_backward_bleed.mei")
+        early = self._accid(out, "a_g4_early")
+        assert "accid.ges" not in early.attrib, "backward accid.ges must be stripped"
+        assert "glyph.auth" not in early.attrib
+        # The genuinely-notated G#4 (later onset) is preserved.
+        assert self._accid(out, "a_gs4").get("accid") == "s"
+        assert self._accid(out, "a_gs4").get("accid.ges") == "s"
+        assert any("spurious" in c for c in report.changes_applied)
+
+    def test_backward_bleed_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_backward_bleed.mei")
+        assert first == _round_trip(tmp_path, first, "accid_backward_bleed.mei")
+
+    def test_contradictory_ges_dropped(self, tmp_path: Path) -> None:
+        """A printed @accid wins: a contradicting accid.ges is dropped (ADR-027).
+
+        Mirrors the post-Pass-0 state where an errata correction changed the
+        printed accidental but the converter's stale gestural remained.
+        """
+        report, out = _run(tmp_path, "accid_contradictory_ges.mei")
+        corrected = self._accid(out, "n_corrected").find(f"{{{_NS_MEI}}}accid")
+        assert corrected.get("accid") == "n", "printed natural is preserved"
+        assert "accid.ges" not in corrected.attrib, "stale sharp gestural dropped"
+        # A clean explicit note (accid matches ges) is left untouched.
+        clean = self._accid(out, "n_clean").find(f"{{{_NS_MEI}}}accid")
+        assert clean.get("accid") == "f" and clean.get("accid.ges") == "f"
+        # The later bare C inherits the printed natural — stays natural (no ges).
+        carry = self._accid(out, "n_carry")
+        assert carry.find(f"{{{_NS_MEI}}}accid") is None
+        assert any(
+            "dropped contradictory accid.ges" in c for c in report.changes_applied
+        )
+
+    def test_contradictory_ges_idempotent(self, tmp_path: Path) -> None:
+        _, first = _run(tmp_path, "accid_contradictory_ges.mei")
+        assert first == _round_trip(tmp_path, first, "accid_contradictory_ges.mei")
+
+
+# ---------------------------------------------------------------------------
+# Pass 10 — Clef reconciliation (ADR-031, amended 2026-07-05)
+# ---------------------------------------------------------------------------
+
+
+class TestClefSilentSameas:
+    """Pass 10: a positioning <clef sameas> restatement stays SILENT.
+
+    Verovio 6.1.0 draws no glyph for an unresolved sameas but still
+    repositions the layer's notes (probed 2026-07-05), so resolving it to
+    explicit shape/line — the pre-amendment behaviour — is what produced the
+    A1b double-clef glyphs.  The anchor voice's explicit clef alone draws.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_positioning_sameas_kept_unresolved(self, tmp_path: Path) -> None:
+        """The layer-2 restatement keeps @sameas and gains no shape/line."""
+        _, out_bytes = _run(tmp_path, "clef_sameas.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        ref = tree.xpath("//mei:clef[@xml:id='clef-ref']", namespaces=self._ns)[0]
+        assert ref.get("shape") is None
+        assert ref.get("line") is None
+        assert ref.get("sameas") == "#clef-real"
+
+    def test_bearer_clef_untouched(self, tmp_path: Path) -> None:
+        """The anchor voice's explicit clef remains the single glyph bearer."""
+        _, out_bytes = _run(tmp_path, "clef_sameas.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        real = tree.xpath("//mei:clef[@xml:id='clef-real']", namespaces=self._ns)[0]
+        assert real.get("shape") == "G"
+        assert real.get("line") == "2"
+        assert "sameas" not in real.attrib
+        # Exactly one drawn (explicit) clef survives in the measure.
+        explicit = [
+            c
+            for c in tree.xpath("//mei:measure//mei:clef", namespaces=self._ns)
+            if c.get("shape") and c.get("line")
+        ]
+        assert len(explicit) == 1
+
+    def test_sameas_idempotent(self, tmp_path: Path) -> None:
+        """A reconciled restatement mutates nothing on a second pass."""
+        _, first_out = _run(tmp_path, "clef_sameas.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_sameas.mei")
+        assert first_out == second_out
+
+
+class TestClefRedundantDangling:
+    """Pass 10a (ADR-031): drop a dangling clef that duplicates a sibling voice."""
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_redundant_dangling_clef_dropped(self, tmp_path: Path) -> None:
+        """The layer-6 restatement that positions no note is removed (no double)."""
+        report, out_bytes = _run(tmp_path, "clef_redundant_dangling.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+
+        assert tree.xpath("//mei:clef[@xml:id='c-dup']", namespaces=self._ns) == []
+        # m.1 keeps exactly the positioning F clef (one glyph, not two).
+        m1 = tree.xpath("//mei:measure[@n='1']", namespaces=self._ns)[0]
+        clefs = m1.xpath(".//mei:clef", namespaces=self._ns)
+        assert len(clefs) == 1
+        assert clefs[0].xpath("@xml:id", namespaces=self._ns) == ["c-real"]
+        assert any("dropped a redundant clef" in c for c in report.changes_applied)
+
+    def test_positioning_clef_kept(self, tmp_path: Path) -> None:
+        """The real layer-5 clef (notes follow it) is untouched."""
+        _, out_bytes = _run(tmp_path, "clef_redundant_dangling.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        real = tree.xpath("//mei:clef[@xml:id='c-real']", namespaces=self._ns)
+        assert len(real) == 1
+        assert real[0].get("shape") == "F" and real[0].get("line") == "4"
+
+    def test_solo_dangling_clef_preserved(self, tmp_path: Path) -> None:
+        """A dangling clef with no positioning sibling (a courtesy) is kept."""
+        _, out_bytes = _run(tmp_path, "clef_redundant_dangling.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert len(tree.xpath("//mei:clef[@xml:id='c-solo']", namespaces=self._ns)) == 1
+
+    def test_reconciliation_idempotent(self, tmp_path: Path) -> None:
+        """A second pass drops nothing further and is byte-identical."""
+        _, first_out = _run(tmp_path, "clef_redundant_dangling.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_redundant_dangling.mei")
+        assert first_out == second_out
+
+
+class TestClefCoincidentVoices:
+    """Pass 10c (ADR-031): align a two-voice clef change to one onset (overlap)."""
+
+    _ns = {"mei": _NS_MEI}
+
+    @staticmethod
+    def _onset(layer: object, clef_id: str) -> int | None:
+        """Tick onset of the clef with *clef_id* among *layer*'s top-level children."""
+        t = 0
+        for child in layer:  # type: ignore[attr-defined]
+            local = child.tag.rsplit("}", 1)[-1]
+            if local == "clef" and child.xpath(
+                "@xml:id", namespaces={"xml": "http://www.w3.org/XML/1998/namespace"}
+            ) == [clef_id]:
+                return t
+            ppq = child.get("dur.ppq")
+            t += int(ppq) if ppq else 0
+        return None
+
+    def _layers(self, tree: object, measure_n: str) -> dict[str, object]:
+        m = tree.xpath(  # type: ignore[attr-defined]
+            f"//mei:measure[@n='{measure_n}']", namespaces=self._ns
+        )[0]
+        return {ly.get("n"): ly for ly in m.xpath(".//mei:layer", namespaces=self._ns)}
+
+    def test_boundary_align_overlaps_onsets(self, tmp_path: Path) -> None:
+        """m.1: the later voice's clef moves to the earlier onset (shared boundary)."""
+        report, out_bytes = _run(tmp_path, "clef_coincident_voices.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        layers = self._layers(tree, "1")
+        early = self._onset(layers["1"], "m1-early")
+        late = self._onset(layers["2"], "m1-late")
+        assert early == late == 4
+        assert any("aligned a clef" in c for c in report.changes_applied)
+
+    def test_space_split_align_overlaps_onsets(self, tmp_path: Path) -> None:
+        """m.2: an invisible <space> is split so the later clef reaches the onset."""
+        _, out_bytes = _run(tmp_path, "clef_coincident_voices.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        layers = self._layers(tree, "2")
+        assert self._onset(layers["1"], "m2-early") == 2
+        assert self._onset(layers["2"], "m2-late") == 2
+        # The quarter <space> became two eighth <space>s with the clef between.
+        l2_children = [c.tag.rsplit("}", 1)[-1] for c in layers["2"]]
+        assert l2_children[:3] == ["space", "clef", "space"]
+        spaces = layers["2"].xpath("mei:space", namespaces=self._ns)
+        assert spaces[0].get("dur") == "8" and spaces[1].get("dur") == "8"
+
+    def test_align_idempotent(self, tmp_path: Path) -> None:
+        """Re-running aligns nothing further and is byte-identical."""
+        _, first_out = _run(tmp_path, "clef_coincident_voices.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_coincident_voices.mei")
+        assert first_out == second_out
+
+    def test_late_voice_pulled_to_change_point(self, tmp_path: Path) -> None:
+        """K279/i m.86: surviving glyph lands on the change point; f4 re-clefed."""
+        _, out_bytes = _run(tmp_path, "clef_late_positioning_voice.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # Layer 5's noteless copy is dropped; layer 6's clef survives.
+        assert tree.xpath("//mei:clef[@xml:id='c-correct']", namespaces=self._ns) == []
+        assert len(tree.xpath("//mei:clef[@xml:id='c-late']", namespaces=self._ns)) == 1
+        # It is hoisted out of the beam to the layer and sits at onset 8 (beat 3).
+        l6 = self._layers(tree, "1")["6"]
+        assert self._onset(l6, "c-late") == 8
+        # The clef now precedes f4 in document order, so f4 is re-clefed under G.
+        order = [
+            "CLEF" if el.tag.rsplit("}", 1)[-1] == "clef" else el.get("pname")
+            for el in l6.iter()
+            if el.tag.rsplit("}", 1)[-1] in ("note", "clef")
+        ]
+        assert order.index("CLEF") < order.index("f")
+
+    def test_late_voice_idempotent(self, tmp_path: Path) -> None:
+        """Re-running the pull-back is a no-op and byte-identical."""
+        _, first_out = _run(tmp_path, "clef_late_positioning_voice.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_late_positioning_voice.mei")
+        assert first_out == second_out
+
+    def test_aligned_duplicate_explicit_is_silenced(self, tmp_path: Path) -> None:
+        """m.1: after alignment the later explicit copy is demoted to sameas.
+
+        Two explicit same-key clefs at one onset overlap into one glyph, but
+        the reconciled form keeps exactly one drawn clef per change — the
+        second copy positions its voice silently.
+        """
+        report, out_bytes = _run(tmp_path, "clef_coincident_voices.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        late = tree.xpath("//mei:clef[@xml:id='m1-late']", namespaces=self._ns)[0]
+        assert late.get("shape") is None and late.get("line") is None
+        assert late.get("sameas") == "#m1-early"
+        early = tree.xpath("//mei:clef[@xml:id='m1-early']", namespaces=self._ns)[0]
+        assert early.get("shape") == "G" and early.get("line") == "2"
+        assert any("silenced a restatement" in c for c in report.changes_applied)
+
+
+class TestClefCourtesyGroup:
+    """Amended Pass 10: a bar-end courtesy group keeps only its latest copy.
+
+    Models K309/ii m.77 / K331/i mX1: the courtesy for the next measure's
+    clef change is scattered across voices at unequal layer-end ticks (no
+    member positions a note).  Cross-measure clef state is staff-scoped
+    (probed 2026-07-05), so the latest-onset copy alone re-clefs the next
+    measure and draws just before the barline; the early copy is dropped.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_latest_copy_kept_and_materialized(self, tmp_path: Path) -> None:
+        report, out_bytes = _run(tmp_path, "clef_courtesy_group.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # The bar-end sameas survives, materialized to the drawn glyph.
+        barend = tree.xpath("//mei:clef[@xml:id='c-barend']", namespaces=self._ns)
+        assert len(barend) == 1
+        assert barend[0].get("shape") == "G" and barend[0].get("line") == "2"
+        assert "sameas" not in barend[0].attrib
+        # The short voice's early explicit copy is dropped.
+        assert tree.xpath("//mei:clef[@xml:id='c-early']", namespaces=self._ns) == []
+        assert any(
+            "materialized the bar-end courtesy" in c for c in report.changes_applied
+        )
+        assert any("dropped a duplicated courtesy" in c for c in report.changes_applied)
+
+    def test_courtesy_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_courtesy_group.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_courtesy_group.mei")
+        assert first_out == second_out
+
+
+class TestClefUnreachableRestatement:
+    """Amended Pass 10: a restatement a sounding note blocks stays put, silent.
+
+    Models K310/ii m.70: the change point falls mid-note in the second voice,
+    so its copy cannot move there (a note is never split).  Kept unresolved it
+    draws no glyph but still repositions the voice's later notes — no glyph
+    double, no note-splitting, no positioning regression.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_stuck_restatement_stays_silent(self, tmp_path: Path) -> None:
+        _, out_bytes = _run(tmp_path, "clef_unreachable_restatement.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        stuck = tree.xpath("//mei:clef[@xml:id='c-stuck']", namespaces=self._ns)[0]
+        assert stuck.get("shape") is None and stuck.get("line") is None
+        assert stuck.get("sameas") == "#c-anchor"
+        # Still after the quarter note (onset 4): the layer's children open
+        # with the sounding note, then the clef.
+        layer2 = tree.xpath("//mei:layer[@n='2']", namespaces=self._ns)[0]
+        kinds = [c.tag.rsplit("}", 1)[-1] for c in layer2]
+        assert kinds[:2] == ["note", "clef"]
+        # The anchor stays the single drawn glyph.
+        anchor = tree.xpath("//mei:clef[@xml:id='c-anchor']", namespaces=self._ns)[0]
+        assert anchor.get("shape") == "G" and anchor.get("line") == "2"
+
+    def test_unreachable_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_unreachable_restatement.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "clef_unreachable_restatement.mei"
+        )
+        assert first_out == second_out
+
+
+class TestClefPpqInference:
+    """_ppq_per_quarter: dotted/tuplet/grace notes must not poison inference.
+
+    K333/iii: the movement's first qualifying note is a dotted quarter
+    (dur=4 dur.ppq=72 at 48 ppq/quarter); the pre-fix inference returned 72,
+    _ppq_to_dur could then never express a split, and every clef alignment in
+    the movement silently declined.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_dotted_first_note_skipped_and_alignment_fires(
+        self, tmp_path: Path
+    ) -> None:
+        report, out_bytes = _run(tmp_path, "clef_dotted_ppq_alignment.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # The m.2 restatement was aligned into the split <space> at onset 4.
+        layer2 = tree.xpath(
+            "//mei:measure[@n='2']//mei:layer[@n='2']", namespaces=self._ns
+        )[0]
+        kinds = [c.tag.rsplit("}", 1)[-1] for c in layer2]
+        assert kinds[:3] == ["space", "clef", "space"]
+        spaces = layer2.xpath("mei:space", namespaces=self._ns)
+        assert spaces[0].get("dur.ppq") == "4" and spaces[1].get("dur.ppq") == "4"
+        assert any("aligned a clef" in c for c in report.changes_applied)
+
+    def test_dotted_ppq_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_dotted_ppq_alignment.mei")
+        second_out = _round_trip(tmp_path, first_out, "clef_dotted_ppq_alignment.mei")
+        assert first_out == second_out
+
+
+class TestClefRestatementPastCourtesy:
+    """K330/i m.123: event membership follows the @sameas edge, not onset.
+
+    A mid-measure G change's voice-2 restatement sits at the bar end,
+    coinciding with an UNRELATED F courtesy for the next measure.  The
+    restatement belongs to the G event (noteless there → dropped); treating
+    it as a same-onset courtesy of its own would materialize a second drawn
+    G glyph at the bar end.
+    """
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_restatement_joins_its_target_event(self, tmp_path: Path) -> None:
+        _, out_bytes = _run(tmp_path, "clef_restatement_past_courtesy.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        # The noteless G restatement is dropped, not materialized.
+        assert (
+            tree.xpath("//mei:clef[@xml:id='c-g-restatement']", namespaces=self._ns)
+            == []
+        )
+        # Exactly two drawn clefs remain: the mid-measure G and the F courtesy.
+        drawn = [
+            (c.get("shape"), c.get("line"))
+            for c in tree.xpath("//mei:measure//mei:clef", namespaces=self._ns)
+            if c.get("shape") and c.get("line")
+        ]
+        assert sorted(drawn) == [("F", "4"), ("G", "2")]
+
+    def test_restatement_past_courtesy_idempotent(self, tmp_path: Path) -> None:
+        _, first_out = _run(tmp_path, "clef_restatement_past_courtesy.mei")
+        second_out = _round_trip(
+            tmp_path, first_out, "clef_restatement_past_courtesy.mei"
+        )
+        assert first_out == second_out
+
+
+class TestClefDanglingSameas:
+    """Safety invariant: an unresolvable <clef sameas> is flagged, never silent."""
+
+    _ns = {"mei": _NS_MEI}
+
+    def test_dangling_reference_warns(self, tmp_path: Path) -> None:
+        report, out_bytes = _run(tmp_path, "clef_dangling_sameas.mei")
+        assert any(w.code == "CLEF_SAMEAS_DANGLING" for w in report.warnings)
+        # The clef is left in place (nothing to materialize from).
+        tree = lxml.etree.fromstring(out_bytes)
+        dangling = tree.xpath("//mei:clef[@xml:id='c-dangling']", namespaces=self._ns)
+        assert len(dangling) == 1
+        assert dangling[0].get("sameas") == "#no-such-clef"
+
+
+# ---------------------------------------------------------------------------
+# Pass 11 — Staff-presentation normalization (ADR-029)
+# ---------------------------------------------------------------------------
+
+_NS = {"mei": _NS_MEI}
+
+
+def _leaf_group(out_bytes: bytes) -> lxml.etree._Element:
+    """Return the staffGrp whose direct children include a staffDef."""
+    tree = lxml.etree.fromstring(out_bytes)
+    for grp in tree.xpath("//mei:scoreDef//mei:staffGrp", namespaces=_NS):
+        if grp.xpath("mei:staffDef", namespaces=_NS):
+            return grp
+    raise AssertionError("no leaf staffGrp found")
+
+
+class TestStaffPresentation:
+    """Pass 11: brace + bar.thru on the grand staff; strip redundant labels."""
+
+    def test_nested_unbraced_gains_brace(self, tmp_path: Path) -> None:
+        """Shape B: a brace is added to the leaf group; bar.thru already present."""
+        report, out_bytes = _run(tmp_path, "staff_unbraced_nested.mei")
+        group = _leaf_group(out_bytes)
+        grp_syms = group.xpath("mei:grpSym[@symbol='brace']", namespaces=_NS)
+        assert len(grp_syms) == 1
+        assert group.get("bar.thru") == "true"
+        # The brace is the group's first child (before instrDef/staffDef).
+        assert group[0].tag == f"{{{_NS_MEI}}}grpSym"
+        assert any("brace" in c for c in report.changes_applied)
+        # bar.thru already 'true' → no bar.thru change emitted.
+        assert not any("bar.thru" in c for c in report.changes_applied)
+
+    def test_nested_unbraced_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on the braced output is a clean no-op."""
+        _, first_out = _run(tmp_path, "staff_unbraced_nested.mei")
+        second_out = _round_trip(tmp_path, first_out, "staff_unbraced_nested.mei")
+        assert first_out == second_out
+
+    def test_flat_gains_brace_barthru_and_strips_labels(self, tmp_path: Path) -> None:
+        """Shape C: brace + bar.thru added; all labels stripped; instrDef kept."""
+        report, out_bytes = _run(tmp_path, "staff_flat_with_labels.mei")
+        group = _leaf_group(out_bytes)
+        assert group.xpath("mei:grpSym[@symbol='brace']", namespaces=_NS)
+        assert group.get("bar.thru") == "true"
+        tree = lxml.etree.fromstring(out_bytes)
+        # No labels anywhere; no @label attribute survives.
+        assert tree.xpath("//mei:label", namespaces=_NS) == []
+        assert tree.xpath("//mei:staffDef[@label]", namespaces=_NS) == []
+        # instrDef and its midi attributes are preserved.
+        instrs = tree.xpath("//mei:instrDef", namespaces=_NS)
+        assert len(instrs) == 2
+        assert all(i.get("midi.instrnum") == "0" for i in instrs)
+        assert any("bar.thru" in c for c in report.changes_applied)
+        assert any("label" in c for c in report.changes_applied)
+
+    def test_flat_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on the normalized flat output is a clean no-op."""
+        _, first_out = _run(tmp_path, "staff_flat_with_labels.mei")
+        second_out = _round_trip(tmp_path, first_out, "staff_flat_with_labels.mei")
+        assert first_out == second_out
+
+    def test_group_level_labels_stripped(self, tmp_path: Path) -> None:
+        """Labels on the <staffGrp> itself (K331/ii shape) are stripped (D1).
+
+        Pass 11 previously stripped only staffDef/instrDef labels, so a
+        group-level <label>/<labelAbbr> survived and rendered as "Piano" / "Pno."
+        Brace + bar.thru are already present here, so only the labels change.
+        """
+        report, out_bytes = _run(tmp_path, "staff_group_labels.mei")
+        tree = lxml.etree.fromstring(out_bytes)
+        assert tree.xpath("//mei:label", namespaces=_NS) == []
+        assert tree.xpath("//mei:labelAbbr", namespaces=_NS) == []
+        # The instrDef and its midi.* survive; the brace is untouched.
+        instrs = tree.xpath("//mei:instrDef", namespaces=_NS)
+        assert len(instrs) == 1 and instrs[0].get("midi.instrnum") == "0"
+        assert _leaf_group(out_bytes).xpath(
+            "mei:grpSym[@symbol='brace']", namespaces=_NS
+        )
+        assert any("<label> from staffGrp" in c for c in report.changes_applied)
+        assert any("<labelAbbr> from staffGrp" in c for c in report.changes_applied)
+
+    def test_group_level_labels_idempotent(self, tmp_path: Path) -> None:
+        """A second pass on the stripped output is a clean no-op."""
+        _, first_out = _run(tmp_path, "staff_group_labels.mei")
+        assert first_out == _round_trip(tmp_path, first_out, "staff_group_labels.mei")
+
+    def test_multi_instrument_is_noop(self, tmp_path: Path) -> None:
+        """More than one leaf group: staff presentation is left entirely untouched."""
+        report, out_bytes = _run(tmp_path, "staff_multi_instrument.mei")
+        assert not any(
+            c.startswith("Staff presentation") for c in report.changes_applied
+        )
+        tree = lxml.etree.fromstring(out_bytes)
+        assert tree.xpath("//mei:grpSym", namespaces=_NS) == []
+        assert tree.xpath("//mei:staffGrp[@bar.thru]", namespaces=_NS) == []
+        # The violin's label is preserved (not a single-instrument piano).
+        assert tree.xpath("//mei:staffDef[@label='Violin']", namespaces=_NS)
+
+
+# ---------------------------------------------------------------------------
+# Pass 0 — Source-corrections overlay (ADR-027)
+# ---------------------------------------------------------------------------
+
+
+def _correction(**kwargs: object) -> Correction:
+    """Build a :class:`Correction` from keyword overrides over a default entry.
+
+    Args:
+        **kwargs: Fields to override on the default correction template.
+
+    Returns:
+        A validated :class:`~models.corrections.Correction`.
+    """
+    base: dict[str, object] = {
+        "movement": "k1/m1",
+        "target": {"mc": 1, "staff": 1, "layer": 1, "pname": "b", "oct": 4},
+        "field": "accid",
+        "expected": "n",
+        "corrected": "f",
+        "rationale": "test rationale",
+        "class": "errata",
+        "source_sha": "abc",
+        "added": "2026-06-28 test",
+    }
+    base.update(kwargs)
+    return Correction.model_validate(base)
+
+
+def _run_corrections(
+    tmp_path: Path,
+    corrections: list[Correction],
+    fixture_name: str = "corrections_overlay.mei",
+) -> tuple[object, bytes]:
+    """Normalize the corrections fixture with *corrections* applied as Pass 0.
+
+    Args:
+        tmp_path: pytest temporary directory.
+        corrections: The overlay entries to pass to ``normalize_mei``.
+        fixture_name: MEI fixture to normalize.
+
+    Returns:
+        ``(report, output_bytes)``.
+    """
+    src = _fixture(fixture_name)
+    dst = tmp_path / fixture_name
+    report = normalize_mei(str(src), str(dst), corrections=corrections)
+    return report, dst.read_bytes()
+
+
+def _accid_value(out_bytes: bytes, note_id: str, attr: str = "accid") -> str | None:
+    """Return the ``<accid>`` child's *attr* of the note with *note_id*."""
+    ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+    tree = lxml.etree.fromstring(out_bytes)
+    accid = tree.xpath(f"//mei:note[@xml:id='{note_id}']/mei:accid", namespaces=ns)
+    return accid[0].get(attr) if accid else None
+
+
+class TestCorrectionsOverlay:
+    """Pass 0 applies a per-movement corrections overlay (ADR-027)."""
+
+    def test_no_corrections_is_noop(self, tmp_path: Path) -> None:
+        """With no corrections, Pass 0 changes nothing and stays clean."""
+        report, out_bytes = _run_corrections(tmp_path, [])
+        assert not any(
+            c.startswith("[errata]") or c.startswith("[editorial]")
+            for c in report.changes_applied
+        )
+        # n1's accid is untouched.
+        assert _accid_value(out_bytes, "n1") == "n"
+
+    def test_accid_correction_applied(self, tmp_path: Path) -> None:
+        """A matching pre-state correction rewrites the note's @accid."""
+        report, out_bytes = _run_corrections(tmp_path, [_correction()])
+        assert _accid_value(out_bytes, "n1") == "f"
+        assert any(
+            "Corrected accid on mc=1 staff=1 layer=1 b4 #1" in c
+            and "test rationale" in c
+            for c in report.changes_applied
+        )
+
+    def test_occurrence_selects_nth_match(self, tmp_path: Path) -> None:
+        """``occurrence`` picks the Nth same-pitch note in document order."""
+        # m4 has two a5 notes; the second (n6) holds accid='s'.
+        c = _correction(
+            target={
+                "mc": 4,
+                "staff": 1,
+                "layer": 1,
+                "pname": "a",
+                "oct": 5,
+                "occurrence": 2,
+            },
+            expected="s",
+            corrected="n",
+        )
+        _, out_bytes = _run_corrections(tmp_path, [c])
+        assert _accid_value(out_bytes, "n6") == "n"  # second a5 corrected
+        assert _accid_value(out_bytes, "n5") is None  # first a5 untouched
+
+    def test_field_target_shape_mismatch_warns(self, tmp_path: Path) -> None:
+        """A note field with a measure-shaped target (no pitch) is flagged."""
+        c = _correction(target={"mc": 1}, expected=None, corrected="f")
+        report, _ = _run_corrections(tmp_path, [c])
+        assert "CORRECTION_TARGET_MISMATCH" in [w.code for w in report.warnings]
+
+    def test_repeat_start_added(self, tmp_path: Path) -> None:
+        """A repeat-start correction sets @left on the target measure."""
+        c = _correction(
+            target={"mc": 2},
+            field="repeat-start",
+            expected=None,
+            corrected="rptstart",
+        )
+        report, out_bytes = _run_corrections(tmp_path, [c])
+        ns = {"mei": "http://www.music-encoding.org/ns/mei"}
+        tree = lxml.etree.fromstring(out_bytes)
+        m2 = tree.xpath("//mei:measure[@xml:id='m2']", namespaces=ns)[0]
+        assert m2.get("left") == "rptstart"
+        assert report.is_clean  # m2 rptstart pairs with m3 rptend
+
+    def test_prestate_mismatch_warns_and_skips(self, tmp_path: Path) -> None:
+        """When the element holds neither expected nor corrected, it is flagged."""
+        # n2 (mc1, c5) holds accid='s'; default expected 'n' does not match.
+        c = _correction(
+            target={"mc": 1, "staff": 1, "layer": 1, "pname": "c", "oct": 5}
+        )
+        report, out_bytes = _run_corrections(tmp_path, [c])
+        assert _accid_value(out_bytes, "n2") == "s"  # untouched
+        codes = [w.code for w in report.warnings]
+        assert "CORRECTION_PRESTATE_MISMATCH" in codes
+        assert not report.is_clean
+
+    def test_superseded_is_info_noop(self, tmp_path: Path) -> None:
+        """When the element already holds 'corrected', the correction is a no-op."""
+        # n2 already holds 's'; a correction targeting 's' is already satisfied.
+        c = _correction(
+            target={"mc": 1, "staff": 1, "layer": 1, "pname": "c", "oct": 5},
+            expected="x",
+            corrected="s",
+        )
+        report, _ = _run_corrections(tmp_path, [c])
+        codes = {w.code: w.severity for w in report.warnings}
+        assert codes.get("CORRECTION_SUPERSEDED") == "info"
+        assert report.is_clean  # info does not break cleanliness
+        assert not any("Corrected" in ch for ch in report.changes_applied)
+
+    def test_missing_target_warns(self, tmp_path: Path) -> None:
+        """Coordinates that do not resolve (out-of-range mc) are flagged."""
+        c = _correction(target={"mc": 99, "staff": 1, "pname": "b", "oct": 4})
+        report, _ = _run_corrections(tmp_path, [c])
+        assert "CORRECTION_TARGET_MISSING" in [w.code for w in report.warnings]
+        assert not report.is_clean
+
+    def test_unknown_field_warns(self, tmp_path: Path) -> None:
+        """An unsupported field is flagged rather than silently ignored."""
+        c = _correction(field="tie", expected="x", corrected="y")
+        report, _ = _run_corrections(tmp_path, [c])
+        assert "CORRECTION_UNKNOWN_FIELD" in [w.code for w in report.warnings]
+
+    def test_correction_idempotent(self, tmp_path: Path) -> None:
+        """Re-running with the same correction over corrected output is a no-op.
+
+        The second pass sees the element already holding 'corrected' (the
+        superseded branch), applies nothing, and produces byte-identical output.
+        """
+        corrections = [_correction()]
+        _, first_out = _run_corrections(tmp_path, corrections)
+
+        src2 = tmp_path / "second_corrections_overlay.mei"
+        src2.write_bytes(first_out)
+        dst2 = tmp_path / "second_out_corrections_overlay.mei"
+        report2 = normalize_mei(str(src2), str(dst2), corrections=corrections)
+        second_out = dst2.read_bytes()
+
+        assert second_out == first_out
+        assert not any("Corrected" in ch for ch in report2.changes_applied)
+        assert "CORRECTION_SUPERSEDED" in [w.code for w in report2.warnings]

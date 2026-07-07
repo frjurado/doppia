@@ -13,6 +13,7 @@ Test structure:
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -96,6 +97,7 @@ def _make_movement(**kwargs: Any) -> MagicMock:
             "meter",
             "duration_bars",
             "incipit_object_key",
+            "incipit_generated_at",
             "work_id",
         ]
     )
@@ -108,6 +110,9 @@ def _make_movement(**kwargs: Any) -> MagicMock:
     m.meter = kwargs.get("meter", "6/8")
     m.duration_bars = kwargs.get("duration_bars", 96)
     m.incipit_object_key = kwargs.get("incipit_object_key", None)
+    m.incipit_generated_at = kwargs.get(
+        "incipit_generated_at", datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc)
+    )
     m.work_id = kwargs.get("work_id", uuid.uuid4())
     return m
 
@@ -356,7 +361,9 @@ class TestListMovements:
         assert result is not None
         assert result[0].incipit_url == signed
         assert result[0].incipit_ready is True
-        storage.signed_url.assert_awaited_once_with(key, expires_in=3600)
+        storage.signed_url.assert_awaited_once_with(
+            key, expires_in=3600, version=movement.incipit_generated_at
+        )
 
     async def test_movement_fields(self) -> None:
         work = _make_work()
@@ -400,11 +407,14 @@ class TestGetMovementMeiUrl:
     def _make_row(self, **kwargs: Any) -> tuple[MagicMock, MagicMock, MagicMock]:
         """Return a (Movement, Work, Composer) mock tuple as returned by the join query."""
         movement = MagicMock(
-            spec_set=["id", "mei_object_key", "movement_number", "title"]
+            spec_set=["id", "mei_object_key", "updated_at", "movement_number", "title"]
         )
         movement.id = kwargs.get("id", uuid.uuid4())
         movement.mei_object_key = kwargs.get(
             "mei_object_key", "mozart/piano-sonatas/k331/movement-1.mei"
+        )
+        movement.updated_at = kwargs.get(
+            "updated_at", datetime(2026, 6, 21, 12, 0, 0, tzinfo=timezone.utc)
         )
         movement.movement_number = kwargs.get("movement_number", 1)
         movement.title = kwargs.get("movement_title", "Allegro")
@@ -453,4 +463,6 @@ class TestGetMovementMeiUrl:
         assert result.composer_name == "Wolfgang Amadeus Mozart"
         assert result.movement_number == 1
         assert result.movement_title == "Allegro"
-        storage.signed_url.assert_awaited_once_with(key, expires_in=3600)
+        storage.signed_url.assert_awaited_once_with(
+            key, expires_in=3600, version=movement.updated_at
+        )

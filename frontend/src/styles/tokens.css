@@ -1,37 +1,59 @@
 :root {
   /* Brand colours */
-  --color-primary:                   #3f5f77;
-  --color-primary-container:         #587891;
+  --color-primary: #3f5f77;
+  --color-primary-container: #587891;
+
+  /* primary-container is a mid-blue, so its on-colour must be light —
+     dark M3-style on-colours fail contrast on #587891. */
+  --color-on-primary-container: #ffffff;
+
+  /* Accent and status colours (Step 17 / F1). Values promoted from the
+     de-facto fallbacks that previously lived in components/score/*.module.css.
+     Status mapping: approved → primary, submitted → secondary,
+     rejected → error. tertiary is the warning/unreviewed accent. */
+  --color-secondary: #575e71;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #dce2f9;
+  --color-on-secondary-container: #1a237e;
+  --color-tertiary: #7a5900;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #ffdf9e;
+  --color-on-tertiary-container: #261a00;
+  --color-error: #b3261e;
+  --color-on-error: #ffffff;
+  --color-error-container: #f9dedc;
+  --color-on-error-container: #410002;
 
   /* Surface hierarchy (tonal layers, no borders) */
-  --color-surface:                   #fbf9f0; /* Urtext Cream — base canvas */
-  --color-surface-container-lowest:  #ffffff;
-  --color-surface-container-low:     #f6f4eb;
-  --color-surface-container:         #eeecde;
-  --color-surface-container-high:    #eae8df;
+  --color-surface: #fbf9f0; /* Urtext Cream — base canvas */
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f6f4eb;
+  --color-surface-container: #eeecde;
+  --color-surface-container-high: #eae8df;
   --color-surface-container-highest: #e4e3da;
 
   /* Text */
-  --color-on-background:             #1b1c17; /* never pure black */
-  --color-on-surface-variant:        #44483d;
-  --color-on-primary:                #ffffff;
+  --color-on-background: #1b1c17; /* never pure black */
+  --color-on-surface: #1b1c17; /* alias of on-background; some route CSS references it */
+  --color-on-surface-variant: #44483d;
+  --color-on-primary: #ffffff;
 
   /* Borders and outlines (ghost-only; never 100% opaque) */
-  --color-outline:                   #72787d;
-  --color-outline-variant:           rgba(114, 120, 125, 0.15);
+  --color-outline: #72787d;
+  --color-outline-variant: rgba(114, 120, 125, 0.15);
 
   /* Typography */
-  --font-serif:   'Newsreader', Georgia, 'Times New Roman', serif;
-  --font-sans:    'Public Sans', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
 
   /* Spacing scale (multiples of 0.25rem) */
-  --spacing-1:  0.25rem;
-  --spacing-2:  0.5rem;
-  --spacing-3:  0.75rem;
-  --spacing-4:  1rem;
-  --spacing-5:  1.25rem;
-  --spacing-6:  1.5rem;
-  --spacing-8:  2rem;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
   --spacing-10: 2.5rem;
   --spacing-12: 3rem;
 
@@ -39,7 +61,7 @@
   --border-radius: 0px;
 
   /* Translucent surface for frosted-glass overlays (e.g. fixed footer) */
-  --color-surface-translucent: rgba(251, 249, 240, 0.80);
+  --color-surface-translucent: rgba(251, 249, 240, 0.8);
 
   /* Shadows */
   --shadow-floating: 0 0 40px 0 rgba(27, 28, 23, 0.06);

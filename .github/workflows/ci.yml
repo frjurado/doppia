@@ -226,6 +226,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: unit
     services:
+      # Seeding writes the canonical English translation overlay to PostgreSQL
+      # as a logically-atomic unit with each Neo4j node (ADR-006 §3); the seed
+      # script therefore requires DATABASE_URL, so this job needs Postgres too.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: doppia
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: localpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d doppia"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
       neo4j:
         # NEO4J_PLUGINS downloads APOC from the internet on first start;
         # allow up to 200 s (20 × 10 s) for the health check to pass.
@@ -255,11 +272,38 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements-dev.txt
 
+      # PostgreSQL services in GH Actions do not run init.sql from a volume
+      # mount, so we create the extensions explicitly using psycopg2-binary
+      # (already installed from requirements.txt).
+      - name: Create PostgreSQL extensions
+        run: |
+          python - <<'EOF'
+          import psycopg2
+          conn = psycopg2.connect(
+              host="localhost", dbname="doppia",
+              user="postgres", password="localpassword",
+          )
+          conn.autocommit = True
+          cur = conn.cursor()
+          cur.execute('CREATE EXTENSION IF NOT EXISTS vector')
+          cur.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+          conn.close()
+          EOF
+
+      # The seed populates the translation-overlay tables (concept_translation
+      # et al.), so the schema must exist before seeding (ADR-006 §3).
+      - name: Run Alembic migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:localpassword@localhost/doppia
+        run: alembic upgrade head
+
       - name: Seed all domains
         env:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: localpassword
+          DATABASE_URL: postgresql+asyncpg://postgres:localpassword@localhost/doppia
         run: python scripts/seed.py --all
 
       - name: Validate graph structure

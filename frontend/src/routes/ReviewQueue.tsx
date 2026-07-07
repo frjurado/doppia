@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import BrowseColumn from '../components/browse/BrowseColumn';
 import BrowseItem from '../components/browse/BrowseItem';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
-import {
-  ReviewQueueItem,
-  ReviewQueueResponse,
-  listReviewQueue,
-} from '../services/fragmentApi';
+import { ReviewQueueItem, ReviewQueueResponse, listReviewQueue } from '../services/fragmentApi';
+import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './ReviewQueue.module.css';
 
 /**
@@ -24,7 +22,8 @@ import styles from './ReviewQueue.module.css';
  * Supports cursor-based "Load more" pagination.
  */
 export default function ReviewQueue() {
-  usePageTitle('Review Queue — Doppia');
+  const { t, i18n } = useTranslation(['review', 'common']);
+  usePageTitle(t('review:pageTitle'));
   const navigate = useNavigate();
 
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
@@ -68,17 +67,19 @@ export default function ReviewQueue() {
   }
 
   function formatBarRange(item: ReviewQueueItem): string {
-    return `bars ${item.bar_start}–${item.bar_end}`;
+    return t('review:barRange', { start: item.bar_start, end: item.bar_end });
   }
 
   function formatMovementLabel(item: ReviewQueueItem): string {
     const mvt = item.movement_title
       ? `${item.movement_number}. ${item.movement_title}`
-      : `Movement ${item.movement_number}`;
-    const catalogue = item.work_catalogue_number
-      ? ` (${item.work_catalogue_number})`
-      : '';
-    return `${item.work_title}${catalogue} — ${mvt}`;
+      : t('common:movementNumber', { number: item.movement_number });
+    // work_title already embeds the catalogue number (DCML corpus-prep
+    // convention); strip it before re-appending in parens so it renders once,
+    // not twice (Component 9 J2).
+    const title = stripEmbeddedCatalogue(item.work_title, item.work_catalogue_number);
+    const catalogue = item.work_catalogue_number ? ` (${item.work_catalogue_number})` : '';
+    return `${title}${catalogue} — ${mvt}`;
   }
 
   function formatSubmittedAt(iso: string): string {
@@ -86,45 +87,31 @@ export default function ReviewQueue() {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / 86_400_000);
-    if (diffDays === 0) return 'today';
-    if (diffDays === 1) return 'yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    if (diffDays === 0) return t('review:submittedToday');
+    if (diffDays === 1) return t('review:submittedYesterday');
+    if (diffDays < 7) return t('review:submittedDaysAgo', { count: diffDays });
+    return date.toLocaleDateString(i18n.language, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
   }
 
   return (
     <Surface layer="base" className={styles.page}>
-      {/* Page header with navigation back to corpus browser */}
-      <Surface layer="container-lowest" className={styles.header}>
-        <button
-          type="button"
-          className={styles.navLink}
-          onClick={() => navigate('/')}
-        >
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            ← Browse
-          </Type>
-        </button>
-        <Type variant="label-md" as="h1" className={styles.title}>
-          Review Queue
-        </Type>
-        <Link to="/concepts" className={styles.navLink}>
-          <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
-            Fragment Browser →
-          </Type>
-        </Link>
-      </Surface>
-
       {/* Queue list */}
       <div className={styles.body}>
         <Surface layer="container-low" className={styles.listPanel}>
           <div className={styles.listHeader}>
             <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
-              Submitted fragments
+              {t('review:submittedFragments')}
             </Type>
             {!isLoading && !error && (
               <Type variant="label-sm" style={{ color: 'var(--color-on-surface-variant)' }}>
-                {items.length}{nextCursor ? '+' : ''} item{items.length !== 1 ? 's' : ''}
+                {t('review:itemCount', {
+                  count: items.length,
+                  plus: nextCursor ? '+' : '',
+                })}
               </Type>
             )}
           </div>
@@ -135,7 +122,7 @@ export default function ReviewQueue() {
             onSelect={handleSelect}
             isLoading={isLoading}
             getKey={(item) => item.id}
-            emptyLabel="No fragments awaiting your review"
+            emptyLabel={t('review:empty')}
             error={error}
             onRetry={() => {
               setError(null);
@@ -172,9 +159,13 @@ export default function ReviewQueue() {
                   <Type
                     variant="label-sm"
                     as="span"
-                    style={{ color: 'var(--color-on-surface-variant)', display: 'block', opacity: 0.7 }}
+                    style={{
+                      color: 'var(--color-on-surface-variant)',
+                      display: 'block',
+                      opacity: 0.7,
+                    }}
                   >
-                    Submitted {formatSubmittedAt(item.submitted_at)}
+                    {t('review:submittedPrefix', { when: formatSubmittedAt(item.submitted_at) })}
                   </Type>
                 </div>
               </BrowseItem>
@@ -190,8 +181,8 @@ export default function ReviewQueue() {
                 onClick={handleLoadMore}
                 disabled={isLoadingMore}
               >
-                <Type variant="label-md" as="span">
-                  {isLoadingMore ? 'Loading…' : 'Load more'}
+                <Type variant="label-sm" as="span">
+                  {isLoadingMore ? t('common:loading') : t('common:loadMore')}
                 </Type>
               </button>
             </div>

@@ -20,6 +20,7 @@ from api.dependencies import require_role
 from fastapi import APIRouter, Depends
 from models.base import get_db
 from pydantic import BaseModel
+from services.task_dispatch import dispatch_task
 from services.tasks.ingest_analysis import ingest_movement_analysis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,7 +99,8 @@ async def dispatch_pending_analysis(
         movement_id: uuid.UUID = row.id
         analysis_source: str = row.analysis_source or "none"
         try:
-            ingest_movement_analysis.delay(
+            dispatch_task(
+                ingest_movement_analysis,
                 movement_id=str(movement_id),
                 analysis_source=analysis_source,
                 harmonies_tsv_content=None,

@@ -16,10 +16,11 @@ import os
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from models.base import get_db
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
+from services.i18n import normalize_language, parse_accept_language
 from services.object_storage import StorageClient, make_storage_client
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -130,6 +131,37 @@ def require_role(role: str) -> Annotated[AppUser, Depends]:
         return user
 
     return Depends(_check)
+
+
+def get_language(
+    request: Request,
+    language: str | None = Query(
+        None,
+        description=(
+            "Explicit BCP 47 language tag (e.g. 'es'). Overrides the "
+            "Accept-Language header. Unsupported values fall back to 'en'."
+        ),
+    ),
+) -> str:
+    """FastAPI dependency resolving the effective response language (ADR-006).
+
+    Resolution order: an explicit ``?language=`` query parameter wins;
+    otherwise the request's ``Accept-Language`` header is parsed; otherwise the
+    canonical default ('en'). The result is always a supported language — an
+    unsupported or malformed request degrades to 'en' rather than erroring, so
+    the translation overlay never raises on locale negotiation.
+
+    Args:
+        request: The incoming FastAPI request (source of ``Accept-Language``).
+        language: Optional explicit language query parameter.
+
+    Returns:
+        A language tag guaranteed to be in
+        :data:`~services.i18n.SUPPORTED_LANGUAGES`.
+    """
+    if language is not None:
+        return normalize_language(language)
+    return parse_accept_language(request.headers.get("accept-language"))
 
 
 async def get_neo4j(request: Request) -> AsyncDriver:

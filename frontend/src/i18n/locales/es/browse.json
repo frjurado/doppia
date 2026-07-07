@@ -1,0 +1,25 @@
+{
+  "pageTitle": "Explorar — Doppia",
+  "columns": {
+    "composer": "Compositor",
+    "corpus": "Corpus",
+    "work": "Obra",
+    "movement": "Movimiento"
+  },
+  "workCount_one": "{{count}} obra",
+  "workCount_other": "{{count}} obras",
+  "empty": {
+    "noCorpora": "No se encontraron corpus",
+    "selectComposer": "Selecciona un compositor",
+    "noWorks": "No se encontraron obras",
+    "selectCorpus": "Selecciona un corpus",
+    "noMovements": "No se encontraron movimientos",
+    "selectWork": "Selecciona una obra",
+    "selectMovement": "Selecciona un movimiento"
+  },
+  "openForTagging": "Abrir para etiquetar",
+  "incipit": {
+    "rendering": "Renderizando…",
+    "reloadToRefresh": "Recarga para actualizar"
+  }
+}

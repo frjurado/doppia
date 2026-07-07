@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture: endpoint-less cross-barline ties from MuseScore MEI export
+     (mirrors Mozart K279/i mm. 12-14, ADR-026).  C major, no key sig.
+
+     Staff 1, layer 1, three measures:
+       m1: chord {B-flat (accid="f"), E5}; tie on the B-flat has startid only
+           (no endid) -> must complete to the B in m2.  A second tie on E5 is
+           COMPLETE (startid+endid) and must be left untouched.
+       m2: chord {B continuation (empty <accid/>), E5 continuation}; then a
+           DECOY explicit B-natural (accid="n") that must NOT be chosen as the
+           tie target; then chord {B-flat (accid="f")} with another endid-less
+           tie -> must complete to the B in m3.
+       m3: chord {B continuation (empty <accid/>)}.
+
+     After pass 8 (tie completion):
+       - m1 B-flat tie gains endid -> #n_bb_m2; n_bb_m2 gains accid.ges="f".
+       - m2 B-flat tie gains endid -> #n_bb_m3; n_bb_m3 gains accid.ges="f".
+       - E5 tie unchanged; E5 continuation gains no accid.ges (no alteration).
+     After pass 9 (accidentals): the added accid.ges="f" on the two
+       continuations survives (tie-continuation legitimacy, ADR-026).
+-->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Incomplete cross-barline tie fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="n_pad_m1" dur="2" oct="5" pname="c">
+                    <accid xml:id="a_pad_m1"/>
+                  </note>
+                  <chord xml:id="ch_m1" dur="2">
+                    <note xml:id="n_bb_m1" oct="4" pname="b">
+                      <accid xml:id="a_bb_m1" accid="f" accid.ges="f"/>
+                    </note>
+                    <note xml:id="n_e5_m1" oct="5" pname="e">
+                      <accid xml:id="a_e5_m1"/>
+                    </note>
+                  </chord>
+                </layer>
+              </staff>
+              <tie xml:id="t_bb_m1" startid="#n_bb_m1"/>
+              <tie xml:id="t_e5_m1" startid="#n_e5_m1" endid="#n_e5_m2"/>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <chord xml:id="ch_m2" dur="4">
+                    <note xml:id="n_bb_m2" oct="4" pname="b">
+                      <accid xml:id="a_bb_m2"/>
+                    </note>
+                    <note xml:id="n_e5_m2" oct="5" pname="e">
+                      <accid xml:id="a_e5_m2"/>
+                    </note>
+                  </chord>
+                  <note xml:id="n_decoy_b" dur="4" oct="4" pname="b">
+                    <accid xml:id="a_decoy_b" accid="n" accid.ges="n"/>
+                  </note>
+                  <chord xml:id="ch_m2b" dur="2">
+                    <note xml:id="n_bb_m2b" oct="4" pname="b">
+                      <accid xml:id="a_bb_m2b" accid="f" accid.ges="f"/>
+                    </note>
+                  </chord>
+                </layer>
+              </staff>
+              <tie xml:id="t_bb_m2" startid="#n_bb_m2b"/>
+            </measure>
+            <measure n="3">
+              <staff n="1">
+                <layer n="1">
+                  <chord xml:id="ch_m3" dur="2">
+                    <note xml:id="n_bb_m3" oct="4" pname="b">
+                      <accid xml:id="a_bb_m3"/>
+                    </note>
+                  </chord>
+                  <note xml:id="n_pad_m3" dur="2" oct="5" pname="c">
+                    <accid xml:id="a_pad_m3"/>
+                  </note>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

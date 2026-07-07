@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { UseBrowseSelectionReturn } from '../../hooks/useBrowseSelection';
 import Surface from '../ui/Surface';
 import Type from '../ui/Type';
+import { stripEmbeddedCatalogue } from '../../utils/workTitle';
 import BrowseColumn from './BrowseColumn';
 import BrowseItem from './BrowseItem';
 import MovementCard from './MovementCard';
@@ -58,6 +60,7 @@ function AccordionSection({
  * when its parent level gains a selection.
  */
 export default function BrowseAccordion({ selection }: { selection: UseBrowseSelectionReturn }) {
+  const { t } = useTranslation(['browse', 'common']);
   const {
     composers,
     composerSlug,
@@ -95,8 +98,8 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
   return (
     <div className={styles.accordion}>
       <AccordionSection
-        title="Composer"
-        value={selectedComposer?.name ?? 'Select a composer'}
+        title={t('browse:columns.composer')}
+        value={selectedComposer?.name ?? t('browse:empty.selectComposer')}
         isOpen={openSection === 'composer'}
         onToggle={() => toggle('composer')}
       >
@@ -115,8 +118,8 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
       </AccordionSection>
 
       <AccordionSection
-        title="Corpus"
-        value={selectedCorpus?.title ?? 'Select a corpus'}
+        title={t('browse:columns.corpus')}
+        value={selectedCorpus?.title ?? t('browse:empty.selectCorpus')}
         isOpen={openSection === 'corpus'}
         onToggle={() => toggle('corpus')}
         disabled={!composerSlug}
@@ -132,13 +135,13 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
               <Type variant="body-lg" as="span">{c.title}</Type>
             </BrowseItem>
           )}
-          emptyLabel="No corpora found"
+          emptyLabel={t('browse:empty.noCorpora')}
         />
       </AccordionSection>
 
       <AccordionSection
-        title="Work"
-        value={selectedWork?.title ?? 'Select a work'}
+        title={t('browse:columns.work')}
+        value={selectedWork?.title ?? t('browse:empty.selectWork')}
         isOpen={openSection === 'work'}
         onToggle={() => toggle('work')}
         disabled={!corpusSlug}
@@ -151,7 +154,9 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
           getKey={(w) => w.id}
           renderItem={(w, isSelected, onSelect) => (
             <BrowseItem id={w.id} isSelected={isSelected} onClick={onSelect}>
-              <Type variant="body-lg" as="span">{w.title}</Type>
+              <Type variant="body-lg" as="span">
+                {stripEmbeddedCatalogue(w.title, w.catalogue_number)}
+              </Type>
               {w.catalogue_number && (
                 <Type
                   variant="label-sm"
@@ -163,16 +168,17 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
               )}
             </BrowseItem>
           )}
-          emptyLabel="No works found"
+          emptyLabel={t('browse:empty.noWorks')}
         />
       </AccordionSection>
 
       <AccordionSection
-        title="Movement"
+        title={t('browse:columns.movement')}
         value={
           selectedMovement
-            ? (selectedMovement.title ?? `Movement ${selectedMovement.movement_number}`)
-            : 'Select a movement'
+            ? (selectedMovement.title ??
+              t('common:movementNumber', { number: selectedMovement.movement_number }))
+            : t('browse:empty.selectMovement')
         }
         isOpen={openSection === 'movement'}
         onToggle={() => toggle('movement')}
@@ -187,7 +193,7 @@ export default function BrowseAccordion({ selection }: { selection: UseBrowseSel
           renderItem={(m, isSelected, onSelect) => (
             <MovementCard movement={m} isSelected={isSelected} onClick={onSelect} />
           )}
-          emptyLabel="No movements found"
+          emptyLabel={t('browse:empty.noMovements')}
         />
       </AccordionSection>
     </div>

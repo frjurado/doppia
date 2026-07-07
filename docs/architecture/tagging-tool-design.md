@@ -2,7 +2,7 @@
 
 **Status:** Active  
 **Date:** 2026-04-15  
-**See also:** `docs/architecture/prototype-tagging-tool.md` (prototype analysis, ghost layer architecture), `docs/adr/ADR-005-sub-measure-precision.md` (selection grid and sub-beat encoding)
+**See also:** `docs/architecture/prototype-tagging-tool.md` (prototype analysis, ghost layer architecture), `docs/adr/ADR-005-sub-measure-precision.md` (selection grid and sub-beat encoding), `docs/adr/ADR-015-dual-measure-coordinate-system.md` (coordinate model), `docs/adr/ADR-025-repeat-barlines-and-volta-selection-boundaries.md` (selection boundary rules)
 
 ---
 
@@ -190,6 +190,8 @@ When the annotator resizes the main bracket, stage positions update using a **hy
 - **The resize hard-clamps to protect active stages.** The main-bracket drag cannot shrink past the point that would force any active stage below one grid unit. The clamp fires only after the finer-grid escape valve is exhausted.
 - **No silent disappearance.** Active optional stages are never force-disappeared by a resize. The "outside main bracket" error state is reserved for genuine orphaning (e.g. a structural concept change that removes a stage's slot) — not for ordinary resizes.
 
+*As implemented (Component 9 Step 4):* `respondToMainResize()` in `stageFrame.ts`, recomputed from the committed state on the new selection's slot frame (§6A.4/§6A.5). Note the Component 7 implementation additionally kept default-position stages frozen when they all still fit inside the resized range; that deviation from the first bullet is removed — default stages now always re-lay out proportionally, which also makes repeated resizes idempotent (§6A.5 third post-condition).
+
 ### Handle-affordance lock during stage resize
 
 While a stage-split-handle drag is in progress, the main-bracket handle hover affordance is suppressed. The main ghost sits immediately adjacent to the stage brackets; without the lock, the cursor routinely crosses the main ghost mid-drag and triggers the show-handles animation, which is distracting and serves no purpose during an active stage resize. The lock is a single `stageDragActive` boolean on the interaction state; it is cleared the instant the drag ends. Normal main-ghost hover behaviour resumes immediately after the stage drag completes.
@@ -198,6 +200,125 @@ While a stage-split-handle drag is in progress, the main-bracket handle hover af
 
 - When the user drags or clicks a stage bracket in the score, the corresponding stage card in the form panel scrolls into view and highlights.
 - When the user clicks a stage card in the form panel, the score view centres on that bracket and highlights it briefly.
+
+---
+
+## 6A. Selection and Stage Geometry — Normative Rules
+
+**Added in Component 9 Step 2.** This section pins the interaction-model semantics that §§5–6 left implicit. It is written in the ADR-015 coordinate vocabulary — committed ghost range (selection state), bracket geometry (rendering), human coordinates (`bar_*`/`beat_*`, for display and the API), machine coordinates (`mc_*`, for Verovio) — and is the normative reference for the Component 9 selection and stage fixes (Steps 3–4). Each fixture in `docs/reports/component-9-reports/step-1-fixture-matrix.md` maps to a rule here (§6A.8).
+
+### 6A.1 Single source of truth
+
+A selection session has exactly one piece of committed spatial state: the **committed ghost range** — the set of ghost entries (measure, beat, or sub-beat keys) between the two committed endpoints, at the precision each endpoint was committed at.
+
+Everything else is derived from it, by pure functions, on every render:
+
+```
+committed ghost range
+   ├─→ bracket geometry      (px extents of every bracket segment)
+   ├─→ machine coordinates   (mc_start / mc_end, via render-order index)
+   ├─→ human coordinates     (bar_start/end, beat_start/end, repeat_context,
+   │                          via the measure map: mc → (@n raw, volta))
+   └─→ stage layout frame    (the coordinate space stages distribute over)
+```
+
+No derived surface computes its extent independently, caches it across edits, or repairs it from another derived surface. Three invariants follow:
+
+- **I1 — Bracket ≡ ghost.** The bracket renders exactly the committed ghost range — same first measure, same last measure, same beat/sub-beat endpoints — at every resolution, after every action. There is no state in which the bracket may legitimately cover more or less than the ghost range; any divergence is a derivation bug, never an acceptable rendering approximation.
+- **I2 — Total coordinate derivation.** The human-coordinate lookup is total over selectable ghosts: every ghost entry that can be committed maps to finite `bar`/`beat` values. A payload containing `NaN` or an unresolvable bar number must be impossible to construct from a committed range, and the client validates coordinates before emitting any API request. ("Request validation failed" reaching the annotator is two bugs at once: the lookup failed, and the failed value was emitted anyway.)
+- **I3 — Resolution changes never mutate committed state.** Switching the resolution toggle changes which ghost layer accepts *subsequent* input and nothing else. The committed ghost range, the bracket, and all stage boundaries are untouched. This strengthens §5 ("grid changes affect new edits, not existing ones"): the toggle must not inflate the bracket to match the ghost, deflate the ghost to match the bracket, or re-snap anything.
+
+### 6A.2 Selection boundaries
+
+**Repeat barlines are not boundaries** (ADR-025). A selection drag crosses repeat-end barlines (`:|`), repeat-start barlines (`|:`), and section boundaries freely, at every resolution. The previous hard gate at backward repeat barlines (ADR-005 edge-case table) is removed, not mirrored onto repeat-start. Rationale: the bars on either side of a repeat-end *are* heard in succession on the final pass, so a fragment spanning one is musically meaningful; the tool trusts the annotator. Playback consequences are in §6A.6.
+
+**Sibling volta endings are a hard gate.** A selection may never have one endpoint inside ending N and the other inside a sibling ending M ≠ N of the same volta group; and a selection anchored inside a non-final ending may not extend past the end of that ending's group (a first ending closes into the repeat jump, never into the continuation). Those bars are never heard in succession in any pass, so a fragment there denotes no performable music. The drag visibly clamps at the gate (I9).
+
+**Da capo and dal segno markers are a hard gate.** A selection may not cross a D.C. or D.S. marker: at those points the jump *always* fires — there is no final pass that proceeds directly into the following bar, so the bars on either side are never heard in succession. This is the difference from a repeat-end barline, which is crossable precisely because its final pass goes straight on. "To Coda" marks and "Fine" marks are **not** gates — the first pass proceeds directly past both. No separate rule is needed for coda sections: a selection from pre-coda material into a coda necessarily crosses the D.C./D.S. marker and is gated there.
+
+The unifying principle behind all the rules above (rationale, not an additional rule): **a selection is valid iff its effective measure sequence occurs as a contiguous run in at least one pass of the performed (repeat-expanded) score.** Crossing a repeat-end is contiguous on the final pass; entering exactly one ending is contiguous on that ending's pass; first-ending → second-ending succession occurs in no pass, and neither does the succession across a D.C./D.S. marker.
+
+### 6A.3 Volta endings and `repeat_context`
+
+| Selection shape | Valid? | `repeat_context` | Effective range |
+|---|---|---|---|
+| Entirely outside any volta group | valid | null | the mc interval |
+| Enters (or lies wholly inside) exactly one ending | valid | that ending | mc interval minus all sibling-ending measures |
+| Group wholly contained, **including** its repeat-start (the jump target) | valid | null | full mc interval, all endings included — the repeat structure is performable in full from within the fragment |
+| Group wholly contained, but its repeat-start lies **outside** the selection | valid | final ending | mc interval minus non-final-ending measures — the jump back is unreachable from within the fragment, so the non-final endings never sound |
+| One endpoint in ending N, the other in sibling ending M | **invalid — hard gate** | — | — |
+| Anchored in a non-final ending, extended past its group | **invalid — hard gate** | — | — |
+
+Note the two wholly-contained rows differ only in whether the repeat-start is inside the selection. A selection that starts *before* the volta group's repeat-start and runs past the group keeps both endings (row 3); one that starts *after* the repeat-start excludes the first ending exactly as if it had entered the second ending directly (row 4) — there is no configuration in which a fragment carries a first ending it cannot reach.
+
+- **Effective range.** When sibling endings are excluded (rows 2 and 4), their measures leave the fragment's effective range even where they fall inside the raw mc interval (entering a second ending from the body necessarily spans the first ending's mc values). The committed ghost range, the bracket, the stage layout frame, the harmony-event query (via `repeat_context`, see `fragment-schema.md`), and fragment playback all operate on the effective range.
+- **Discontiguous rendering.** Where the effective range skips an excluded ending, the bracket renders as segments with a visible gap over the excluded measures. A bracket painted continuously across an excluded ending — or extended over *other* endings elsewhere in the movement — is an I1 violation. Ghost keys are per-physical-measure (`m${n}-e${endingN}` measure keys and render-order beat encoding, ADR-005 G2 addendum); no derivation may aggregate ending measures by shared `@n`.
+- **Stages** distribute over the effective range. A stage that straddles an excluded ending renders segmented, like the main bracket.
+- **Repeat signs inside endings.** A first ending almost always closes with a `:|` barline; that barline is part of the volta group's structure, not a free-standing repeat. The rules in this section (and the playback rules in §6A.6) govern it via the group; the barline itself is never separately a selection gate (§6A.2), and no repeat-barline handling may shortcut the per-ending ghost keys. In particular, the clamp an annotator hits when extending a first-ending-anchored selection is the *ending-boundary* gate — the co-located `:|` is incidental.
+
+### 6A.4 Stage geometry — hard rules
+
+These hold at every resolution, in `contiguous` containment mode (the shipped mode for all current concepts); `free` mode differs only where stated.
+
+- **I6 — One moving boundary.** A split-handle drag moves exactly one shared boundary. Every other stage boundary — and both main-bracket edges — holds its committed value for the duration of the gesture. Space freed by the shrinking stage is absorbed entirely by the stage on the growing side of the dragged handle; a far-side stage absorbing it is a bug.
+- **I7 — Outer-edge pinning, exact.** First stage start ≡ main bracket start; last stage end ≡ main bracket end. Exactly — same ghost entry, not "within a grid unit" — at all resolutions, after every operation (drag, collapse, absent toggle, main resize, resolution change). Drift between a stage endpoint and the main ghost endpoint is a bug. (Restates §4 outer-edge pinning as a post-condition of *every* operation, not only pre-population.)
+- **I8 — Containment by construction.** Stage bounds never exit the main bracket in contiguous mode. The "outside main bracket" checklist error (§7.5) exists for structural orphaning only (§6, concept change) — it is not a reachable state of any drag or resize.
+- **Overlap prohibition.** Adjacent stages share a single boundary object holding a single grid-snapped value; both stages' geometry derives from that one value at every resolution. Overlap (and gap) is therefore impossible by construction in contiguous mode — including at beat and sub-beat resolution, where the shared value is a beat/sub-beat ghost key, not a pixel position. In `free` mode, overlap remains a checklist warning (§7.5), unchanged.
+- **I9 — Commit or clamp; never bounce.** On mouseup, a drag commits the dragged boundary to the nearest legal grid-snapped position. If the cursor is in illegal territory (past a clamp limit, past a hard gate), the boundary clamps at the last legal snapped position — visibly, during the drag, not on release. A handle never reverts to its pre-drag position.
+- **I10 — Minimum width and collapse.** Minimum stage width is one grid unit at the active resolution (§5). A drag squeezing a **required** stage clamps there (I9). A drag squeezing an **optional** stage past its minimum collapses it to absent — equivalent to the §4 absent toggle: its bracket disappears, the freed extent goes to the growing stage, and the gesture continues against the next boundary. Within the same gesture, dragging back past the collapse point restores the stage; the collapse commits only on mouseup.
+- **I11 — Cross-system drags.** In a multi-system fragment a split handle reaches every system of the selection: the drag's target system is resolved from the **cursor's y position on every tick** (nearest system band — the switchover sits midway between adjacent systems), and x then resolves to the nearest boundary on that system. A handle is never confined to the system it started on. *(Added 2026-07-07, Component 9 Part 8 item 2 — the original implementation froze the drag-start system, and since that system always offers a candidate, cross-system targets were unreachable.)*
+
+*As implemented (Component 9 Step 4, `stageFrame.ts`):* the stage layout frame is a **slot list** — one slot per grid unit of the selection's effective measure-key range at the active resolution (`buildStageSlots()`), with the selection's beat-precision endpoint filters applied, so the frame's ends are the main bracket's exact endpoints. K active stages are a partition of the slot list by K−1 interior boundary indices: the boundary index *is* the single shared value of the overlap-prohibition rule, and I7/I8 are properties of the partition rather than re-established post-conditions. `moveBoundary()` implements I6/I9/I10 as a total pure function (every cursor position maps to a legal clamped boundary vector; overtaken optional boundaries ride along with the drag; required stages bound the target by one slot). `StageBrackets` re-derives the displayed assignments from the gesture's *initial* frame on every drag tick, which is what makes mid-gesture collapse restoration (I10) automatic. Stage geometry, like the main bracket's, never consults `@n` intervals: a stage's bounds carry the physical measure keys of both boundaries (`StageBounds.keyStart`/`keyEnd`), and duplicate bar numbers elsewhere in the movement contribute nothing to a stage's pixels (STG-10) or its sub-part `mc` payload.
+
+### 6A.5 Main-bracket resize with stages
+
+The hybrid redistribution + clamp policy (§6, "Main bracket change after stages are committed") is retained and extended with three post-conditions:
+
+- After redistribution, **I7 holds exactly**: the recomputed stage frame's outer edges coincide with the new main range, with no off-by-one-grid-unit drift at any resolution.
+- A confirmed/active stage on the side **opposite** the dragged main handle keeps its absolute bounds, except where the hard-clamp + finer-grid escape-valve sequence forces proportional resizing — and then I7/I8 still hold.
+- Redistribution is recomputed from the committed state, not incrementally from the previous render; repeated resizes must not accumulate error.
+
+*As implemented (Component 9 Step 4):* `respondToMainResize()` (`stageFrame.ts`) rebuilds the slot frame from the new selection, pins every boundary flanked by a confirmed stage to its surviving slot (matched by measure key + beat onset — a resize on one side cannot move a confirmed stage on the other), redistributes unconfirmed runs by `default_weight` inside the gaps the anchors leave, and normalises the boundary vector so each required stage keeps one slot. I7 needs no outer-edge sync step: the frame's edges *are* the new selection's endpoints.
+
+### 6A.6 Playback of fragments containing repeat structure
+
+Because selections may cross repeat barlines (ADR-025), a fragment can contain a repeat directive whose jump target lies outside the fragment. The rule:
+
+- A repeat structure **wholly inside** the fragment's effective range — repeat-start, repeat-end, and any endings — plays expanded: both passes, endings honoured, exactly as in full-movement playback (§6A.3 row 3).
+- A repeat-end whose **paired repeat-start lies outside** the fragment is **ignored**: playback uses **final-pass semantics** — no jump, the fragment plays once, straight through its effective range, as the music sounds the last time through. When the truncated repeat has volta endings, this is already settled at the selection layer: §6A.3 row 4 excludes the non-final endings from the effective range, so playback simply plays what remains (the final ending), with no further special-casing.
+- Da capo / dal segno: a selection cannot cross a D.C./D.S. marker (§6A.2), so the only reachable case is a fragment whose last bar carries the directive. The directive is ignored; playback ends at the fragment boundary.
+
+This is a fragment-playback rule only; full-movement playback is unchanged (`playback-coordinates.md` § Repeat policy).
+
+**Play-from-position in tag mode (Step 20).** `Alt`-click (Option-click) on a measure is reserved for measure-level play-from-position and is **never** a selection action: the annotator bails out of the selection drag on an `Alt`-modified mousedown and hands the enclosing measure key to the play-from-position handler (a beat / sub-beat ghost resolves up to its measure). Plain click is unchanged. This is the same gesture the read-only score viewer uses, so it works identically whether or not tagging is active. Full spec: `playback-coordinates.md` § Play-from-position.
+
+### 6A.7 Edge-case register
+
+- **Partial bars (split measures, `@metcon="false"`).** Each half is an ordinary, independently selectable measure at every resolution; an endpoint on either half is legal; the bracket covers exactly the committed half. Unique per-physical-measure ghost keys (render-order index, G2.3) are the mechanism; any geometry keyed on `@n` alone will paint unrelated partial bars and violates I1.
+- **Pickup bar.** `@n="0"`, `mc=1`; an ordinary measure, selectable at all resolutions; `bar_start=0` is valid (see `playback-coordinates.md` § Pickup bar handling).
+- **Unparseable `@n` (MuseScore `X1`-style excluded-measure numbers).** The normalizer flags these but cannot auto-correct them (`mei-ingest-normalization.md`), so the live corpus contains them (K331/iii, K279/iii). The client's bar-number derivation is guarded: such a measure adopts the nearest preceding finite `@n` as its display bar (the DCML mn-sharing convention — the half-bar displays under the bar it completes), with the deduplicated per-physical-measure key (`#N` suffix) keeping it a distinct, independently selectable measure and `mc` keeping the exact machine coordinate. `parseInt(@n) → NaN` flowing into coordinates was the root cause of the SEL-04/SEL-05 family; under I2 it can no longer be constructed. The display-bar ambiguity disappears when Step 8 renumbers these measures corpus-side (the §7 normalization convention already mandates unique sequential integers).
+- **Empty measure (no note onsets).** At measure resolution: a normal ghost. At beat/sub-beat resolution the only-struck-beats rule (ADR-005) would leave an unselectable hole; the spec adds a **synthetic whole-measure ghost** — one selectable unit spanning the measure — so a range can pass through or terminate there. An endpoint in an empty measure is measure-precise: as a start it contributes `beat_start = 1.0`; as an end it contributes the measure's full extent.
+- **Sub-beat endpoints.** The bracket ends exactly at the committed sub-beat boundary: no rounding up to complete the beat, no dropping the final measure when the endpoint is that measure's first sub-beat. (Both are I1 violations.)
+- **Resolution mismatch states.** None exist. Per I3, the toggle can never produce a state where bracket and ghost disagree, so SEL-02's "repair by clicking another resolution" behaviours disappear along with the bug they repaired.
+- **Stage initialisation.** Stage brackets pre-populate immediately on concept select (§4). A state where stages exist in the model but render only after a main-fragment resize is a bug — covered by §6A.1's derive-on-every-render discipline.
+
+### 6A.8 Fixture → rule map
+
+| Fixture(s) | Governing rule |
+|---|---|
+| SEL-01, SEL-03, SEL-08 | I1 + partial-bar ghost keys (§6A.7) |
+| SEL-02 | I3 |
+| SEL-04, SEL-05, SEL-07 | I2 (+ I1 for the bracket symptoms) |
+| SEL-06 | Empty-measure synthetic ghost (§6A.7) |
+| SEL-09, SEL-10, SEL-14 | I1 sub-beat endpoints (§6A.7) |
+| SEL-11 | Obsolete — ADR-025 removes repeat-barline gates entirely |
+| SEL-12, SEL-13 | §6A.3 effective range + per-ending ghost keys |
+| STG-01, STG-03 | I6 |
+| STG-04 | I9 |
+| STG-06, STG-07 | I7 + §6A.5 |
+| STG-08 | §6A.5 opposite-side preservation |
+| STG-09 | §6A.7 stage initialisation |
+| STG-10 | Overlap prohibition + I8 |
 
 ---
 
@@ -234,21 +355,21 @@ If the children differ only in property values (not in stage structure), Type Re
 
 ### 7.3 Stage list
 
-Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, ordered by `order` edge property.
+Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, **ordered by physical position in the score** (bar, then beat; absent stages grouped last) — not by the abstract `order` edge property (Component 9 G2). During a split-handle drag the display order **freezes** at its pre-drag state, resorting once on release, so cards never jump around mid-gesture (Component 9 Part 8 item 4).
 
-Each card shows:
+Each card shows *(trimmed to essentials, Part 8 item 4 — the "Stages" interaction explanation lives behind an (i) hover affordance on the section heading rather than a permanent paragraph)*:
 
-- Stage concept name and colour swatch (matching its bracket track colour).
+- Stage concept name and colour swatch (matching its bracket track colour; colour keyed to the schema `order` so it is stable as position moves the card).
 - Required / optional indicator.
-- Current spatial bounds, updated live as the user drags (`bar 4 b2 – bar 5 b1`).
 - For **optional stages**: an absent toggle. Toggling absent collapses the bracket and redistributes space in contiguous mode (§4). Toggling back expands the bracket at the shared boundary, robbing space from the neighbours.
-- For **compound stages**: the card expands to show the sub-stage segment labels and their individual bounds.
+- Status labels only when needed: absent, orphaned, or bounds-error. Spatial bounds are **not** repeated on the card — they are visible on the score brackets themselves (changed in Part 8 item 4; the card previously mirrored the live bounds).
+- For **compound stages**: the card expands to show the sub-stage segment labels.
 
 Clicking anywhere on a stage card highlights and centres the corresponding bracket in the score.
 
 #### Stage-level property form
 
-Each stage concept may carry `HAS_PROPERTY_SCHEMA` edges of its own. When a stage card is active (selected in the form panel or clicked in the score), it expands to show an inline property form generated from those schemas — using the same control types as the main property form (§7.4): radio groups or selects for `ONE_OF`, checkboxes or multiselects for `MANY_OF`, toggles for `BOOL`.
+Each stage concept may carry `HAS_PROPERTY_SCHEMA` edges of its own. Every present stage card (not absent, not orphaned) shows an **always-open** inline property form generated from those schemas — using the same control types as the main property form (§7.4): radio groups or selects for `ONE_OF`, checkboxes or multiselects for `MANY_OF`, toggles for `BOOL`. *(Changed in Component 9 Part 8 item 4: the form previously opened only while its card was active, which was tedious — every stage needs the form — and easy to overlook entirely. Activation now only highlights.)*
 
 Every stage confirmed as present (required, or optional and not toggled absent) becomes a **child fragment** on submission, whether or not its property form was filled. Stage schemas are `required: false`; property completion is not a prerequisite for the child fragment to be created. A child fragment's `summary.properties` will be an empty object if no stage properties were recorded — the fragment's existence is the assertion of presence and location; the properties are optional enrichment.
 
@@ -314,9 +435,11 @@ The state machine simplifies accordingly: `stagesComplete` is trivially true for
 
 ## 9. Validation and Save States
 
-**Save Draft** commits the current annotation state to the database with `status: 'draft'`. All fields may be incomplete. The annotation is saved exactly as-is, including partially-assigned stages and missing properties. Drafts can be resumed in a later session.
+**Save Draft** commits the current annotation state to the database with `status: 'draft'`. All fields may be incomplete. The annotation is saved exactly as-is, including partially-assigned stages and missing properties. Drafts can be resumed in a later session. **The working state is preserved** — selection, ghosts, concept, stages, and properties all stay on screen so the annotator can keep editing — and the feedback is deliberately quiet: a persistent "Draft saved" note under the checklist.
 
-**Submit for Review** requires all blocking checklist items to be resolved. Sets `status: 'submitted'`.
+**Submit for Review** requires all blocking checklist items to be resolved. Sets `status: 'submitted'`. **On success the surface resets to its initial blank state** (selection cleared, ghosts removed, form remounted) and an unmissable confirmation banner is raised over the score. This is the post-condition that distinguishes Submit from Save Draft: a submitted fragment is immutable until a reviewer acts, so there is nothing left to edit, and the annotator must be left in no doubt that the submission landed before starting the next one.
+
+**As implemented (Component 9 Step 5).** Submit and Save Draft previously converged on the same end state — a brief "Draft saved" flash, no reset — which left annotators unsure whether a submission had succeeded. They are now differentiated as above. The reset is `resetAnnotation()` in `ScoreViewer.tsx`, shared with the Delete control (§6 G1.2); the confirmation is a `submitSuccess` banner owned by `ScoreViewer` (so it survives the form remount), auto-dismissed after a few seconds, cleared the moment a new selection begins, and manually dismissible. The intermediate "Draft saved" note is suppressed while a Submit is in flight (`SubmissionChecklist.tsx`), since Submit creates/updates the draft as an internal step and the note would otherwise flash mid-submit; the Submit button's own "Submitting…" state is the feedback during that window. The banner uses the submitted-status token family (`secondary`), per the Step 17 status-colour mapping.
 
 The server writes parent and all child fragment records atomically in a single transaction. Partial submissions are not possible — if any child write fails, the transaction is rolled back.
 

@@ -69,7 +69,11 @@ interface VerovioToolkitInstance {
    * Returns an object directly in Verovio 6.x WASM (not a JSON string as the
    * C++ API docs suggest — the JS binding deserialises before returning).
    */
-  getElementsAtTime(millisec: number): string | { notes?: string[]; chords?: string[]; measure?: string; page?: number; rests?: string[] };
+  getElementsAtTime(
+    millisec: number
+  ):
+    | string
+    | { notes?: string[]; chords?: string[]; measure?: string; page?: number; rests?: string[] };
   /**
    * Returns a JSON string (array) mapping real-time offsets (ms) to the MEI
    * element IDs that start or end at each offset. Repeat sections are fully
@@ -109,7 +113,9 @@ export function getVerovioToolkit(): Promise<VerovioToolkitInstance> {
     //                   constructor takes the resolved Emscripten module.
     _verovioPromise = Promise.all([
       import('verovio/wasm') as unknown as Promise<{ default: () => Promise<unknown> }>,
-      import('verovio/esm') as unknown as Promise<{ VerovioToolkit: new (m: unknown) => VerovioToolkitInstance }>,
+      import('verovio/esm') as unknown as Promise<{
+        VerovioToolkit: new (m: unknown) => VerovioToolkitInstance;
+      }>,
     ]).then(async ([wasmMod, esmMod]) => {
       const VerovioModule = await wasmMod.default();
       return new esmMod.VerovioToolkit(VerovioModule);
@@ -141,7 +147,7 @@ export async function renderPage(
   tk: VerovioToolkitInstance,
   meiText: string,
   options: RenderOptions,
-  pageNum: number,
+  pageNum: number
 ): Promise<string> {
   tk.setOptions({
     scale: options.scale,
@@ -160,6 +166,22 @@ export async function renderPage(
   return tk.renderToSVG(pageNum);
 }
 
+/** Options for renderFragment — RenderOptions plus the layout-break mode. */
+export interface FragmentRenderOptions extends RenderOptions {
+  /**
+   * System-break mode for the fragment render:
+   *   - 'none' (default): all selected measures on one long system. pageWidth
+   *     should be a wide fixed value (≥ 2200). Incipit-style rendering.
+   *   - 'smart': Verovio breaks systems at pageWidth, which should be the
+   *     container's measured pixel width (same convention as renderPage:
+   *     scaleToPageSize maps pageWidth to output pixels). The whole fragment
+   *     still renders as a single SVG page (large pageHeight, trimmed by
+   *     adjustPageHeight). Used by the fragment detail view (Component 9
+   *     Step 15) — system breaks are preferable to horizontal scrolling.
+   */
+  breaks?: 'none' | 'smart';
+}
+
 /**
  * Render a score fragment identified by mc (document-order position index)
  * coordinates.
@@ -169,14 +191,15 @@ export async function renderPage(
  *
  * mc_start and mc_end are the 1-based position indices stored on the fragment
  * row. They map directly to measureRange operands — no @n conversion needed.
- * A wide pageWidth (≥ 2200) combined with breaks:"none" places the entire
- * fragment on a single SVG page.
+ * Layout depends on options.breaks: 'none' places the entire fragment on one
+ * long system; 'smart' allows system breaks at the given pageWidth while
+ * keeping everything on a single SVG page.
  *
  * @param tk      - Toolkit instance from getVerovioToolkit().
  * @param meiText - Normalized MEI content string (not a URL).
  * @param mcStart - Fragment start: 1-based position index (= fragment.mc_start).
  * @param mcEnd   - Fragment end: 1-based position index (= fragment.mc_end).
- * @param options - Scale, transposition, and page-width settings.
+ * @param options - Scale, transposition, page-width, and break settings.
  * @returns SVG markup string for the fragment.
  */
 export async function renderFragment(
@@ -184,21 +207,26 @@ export async function renderFragment(
   meiText: string,
   mcStart: number,
   mcEnd: number,
-  options: RenderOptions,
+  options: FragmentRenderOptions
 ): Promise<string> {
+  const breaks = options.breaks ?? 'none';
   tk.setOptions({
     scale: options.scale,
     transpose: options.transpose,
     pageWidth: options.pageWidth,
     font: options.font,
     adjustPageHeight: true,
-    breaks: 'none',
+    breaks,
     pageMarginTop: 0,
     pageMarginBottom: 0,
     header: 'none',
     footer: 'none',
-    // No scaleToPageSize for fragment renders — the wide fixed pageWidth
-    // ensures all selected measures appear on one line without scaling.
+    // breaks:'none' — no scaleToPageSize: the wide fixed pageWidth ensures all
+    //   selected measures appear on one line without scaling.
+    // breaks:'smart' — scaleToPageSize so pageWidth is interpreted as output
+    //   pixels (renderPage convention); pageHeight is set high so adjustPageHeight
+    //   yields one page containing every system.
+    ...(breaks === 'smart' ? { scaleToPageSize: true, pageHeight: 60000 } : {}),
   });
   tk.loadData(meiText);
   tk.select({ measureRange: `${mcStart}-${mcEnd}` });
@@ -255,7 +283,7 @@ export async function renderProgressively(
   meiText: string,
   options: RenderOptions,
   onPage: (svg: string, pageNum: number) => void,
-  onComplete: (totalPages: number) => void,
+  onComplete: (totalPages: number) => void
 ): Promise<void> {
   tk.setOptions({
     scale: options.scale,
@@ -279,7 +307,7 @@ export async function renderProgressively(
 
   // Remaining pages: yield between each render so the browser stays responsive.
   for (let page = 2; page <= totalPages; page++) {
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     onPage(tk.renderToSVG(page), page);
   }
 
@@ -352,12 +380,20 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
     if (typeof DOMParser === 'undefined') return map;
     const doc = new DOMParser().parseFromString(meiText, 'text/xml');
     const measures = doc.getElementsByTagName('measure');
+    // Carries the last successfully-parsed @n forward across an unparseable
+    // one (e.g. the ADR-015 X-prefixed @n="X1" inside a volta ending) — the
+    // same guard walkMeasureKeys (ghosts.ts) applies for the selection layer.
+    // Without it, parseInt("X1", 10) is NaN and the transport bar readout
+    // shows "NaN" (Component 9 issue C1) for the rest of that ending.
+    let lastFiniteBarN = 0;
 
     for (let mi = 0; mi < measures.length; mi++) {
       const measure = measures[mi];
       const nAttr = measure.getAttribute('n');
       // @n = 0 is valid for pickup bars; missing @n → sequential 1-based index.
-      const barN = nAttr !== null ? parseInt(nAttr, 10) : mi + 1;
+      const parsedN = nAttr !== null ? parseInt(nAttr, 10) : mi + 1;
+      const barN = Number.isFinite(parsedN) ? parsedN : lastFiniteBarN;
+      if (Number.isFinite(parsedN)) lastFiniteBarN = parsedN;
       const isPickup = barN === 0;
 
       // Helper: read @xml:id from an element (namespace-safe).
@@ -391,9 +427,9 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
       // playback-coordinates spec: "0:1 for the first event, not 0:4".
       let pickupBeatMap: Map<number, number> | null = null;
       if (isPickup) {
-        const uniqueTs = [...new Set(
-          elements.map(el => getTimestamp(el)).filter((v): v is number => v !== null)
-        )].sort((a, b) => a - b);
+        const uniqueTs = [
+          ...new Set(elements.map((el) => getTimestamp(el)).filter((v): v is number => v !== null)),
+        ].sort((a, b) => a - b);
         pickupBeatMap = new Map(uniqueTs.map((ts, idx) => [ts, idx + 1]));
       }
 
@@ -404,9 +440,7 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
         const ts = getTimestamp(el);
         let beat = 0;
         if (ts !== null) {
-          beat = isPickup
-            ? (pickupBeatMap!.get(ts) ?? 1)
-            : Math.max(1, Math.floor(ts + 1e-9)); // floor: note on beat 1.5 shows beat 1
+          beat = isPickup ? (pickupBeatMap!.get(ts) ?? 1) : Math.max(1, Math.floor(ts + 1e-9)); // floor: note on beat 1.5 shows beat 1
         }
         map.set(id, { barN, beat });
       }
@@ -415,6 +449,40 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
     // Ignore parse errors — caller falls back to Tone.js position.
   }
   return map;
+}
+
+/**
+ * Collect the xml:ids of grace notes in a MEI document — Component 9 E2.
+ *
+ * A grace note's timemap onset sits at (or just before) its main note's beat
+ * rather than on it, so treating it as a caret anchor makes the caret jump
+ * ahead and back around an ornamented note. Grace notes carry no real
+ * duration (`@dur.ppq="0"` or absent — the same convention `ghosts.ts` uses
+ * to skip them when building selection ghosts); this set lets
+ * {@link module:caret.buildCaretTrack} filter their ids out of each timemap
+ * entry so the caret anchors only on real note onsets.
+ *
+ * @param meiText - Normalized MEI content string.
+ */
+export function collectGraceNoteIds(meiText: string): Set<string> {
+  const ids = new Set<string>();
+  try {
+    if (typeof DOMParser === 'undefined') return ids;
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+    const notes = doc.getElementsByTagName('note');
+    for (let i = 0; i < notes.length; i++) {
+      const note = notes[i]!;
+      const durPpq = parseInt(note.getAttribute('dur.ppq') ?? '0', 10);
+      if (durPpq > 0) continue; // real (non-grace) note
+      const id =
+        note.getAttribute('xml:id') ??
+        note.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
+      if (id) ids.add(id);
+    }
+  } catch {
+    // Ignore parse errors — caller treats an empty set as "no grace notes known".
+  }
+  return ids;
 }
 
 /**
@@ -430,11 +498,10 @@ export function buildNoteInfoMap(meiText: string): Map<string, NoteInfo> {
 export function getTimemapTempo(tk: VerovioToolkitInstance): number {
   try {
     const raw = tk.renderToTimemap();
-    const entries = (
+    const entries =
       typeof raw === 'string'
         ? (JSON.parse(raw) as Array<{ tempo?: unknown }>)
-        : (raw as Array<{ tempo?: unknown }>)
-    );
+        : (raw as Array<{ tempo?: unknown }>);
     for (const entry of entries) {
       if (typeof entry.tempo === 'number' && entry.tempo > 0) return entry.tempo;
     }
@@ -535,15 +602,14 @@ function stripRendSuffix(id: string): string {
  * @returns Sorted schedule for use with binary search in onPositionUpdate.
  */
 export function buildHighlightSchedule(
-  tk: VerovioToolkitInstance,
+  tk: VerovioToolkitInstance
 ): Array<{ timeMs: number; ids: string[] }> {
   try {
     const raw = tk.renderToTimemap();
-    const entries = (
+    const entries =
       typeof raw === 'string'
         ? (JSON.parse(raw) as Array<{ tstamp?: number; on?: string[] }>)
-        : (raw as Array<{ tstamp?: number; on?: string[] }>)
-    );
+        : (raw as Array<{ tstamp?: number; on?: string[] }>);
 
     const schedule: Array<{ timeMs: number; ids: string[] }> = [];
     for (const entry of entries) {
@@ -559,5 +625,251 @@ export function buildHighlightSchedule(
     // If renderToTimemap is unavailable or returns unexpected data, fall back
     // to an empty schedule (playback highlight disabled).
     return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fragment-scoped playback (Component 9 Step 18)
+// ---------------------------------------------------------------------------
+
+/**
+ * A fragment's playback time window, expressed in the **whole movement's** MIDI
+ * time (milliseconds).
+ *
+ * `startMs` is the onset of the first rendered measure; `endMs` is the onset of
+ * the measure immediately after the fragment (its exclusive upper bound), or
+ * `Number.POSITIVE_INFINITY` when the fragment runs to the end of the movement.
+ */
+export interface FragmentTimeWindow {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * Fragment playback bundle: the time window into the whole-movement MIDI plus a
+ * highlight schedule already clipped to that window and shifted so the fragment
+ * starts at 0 ms.
+ */
+export interface FragmentPlayback {
+  window: FragmentTimeWindow;
+  /** Windowed, fragment-relative highlight schedule (timeMs measured from the
+   *  fragment's first onset). */
+  schedule: Array<{ timeMs: number; ids: string[] }>;
+}
+
+/** Tolerance for ms comparisons against measure-onset boundaries. */
+const WINDOW_EPS_MS = 0.5;
+
+/** Read every `<measure>` xml:id in document order (= 1-based mc position). */
+function readMeasureIdsInOrder(meiText: string): string[] {
+  const ids: string[] = [];
+  try {
+    if (typeof DOMParser === 'undefined') {
+      // Node / non-DOM environments (some test runners): regex fallback.
+      for (const m of meiText.matchAll(/<measure\b[^>]*?\bxml:id="([^"]+)"/g)) {
+        ids.push(m[1]!);
+      }
+      return ids;
+    }
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+    const measures = doc.getElementsByTagName('measure');
+    for (let i = 0; i < measures.length; i++) {
+      const el = measures[i]!;
+      const id =
+        el.getAttribute('xml:id') ??
+        el.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
+      ids.push(id ?? '');
+    }
+  } catch {
+    // Return whatever was collected before the failure.
+  }
+  return ids;
+}
+
+/** Map each measure xml:id → its 1-based document-order position (mc). */
+function buildIdToMc(meiText: string): Map<string, number> {
+  const idToMc = new Map<string, number>();
+  readMeasureIdsInOrder(meiText).forEach((id, i) => {
+    if (id) idToMc.set(id, i + 1);
+  });
+  return idToMc;
+}
+
+/**
+ * Reconstruct the expanded (repeat-unrolled) measure-onset sequence from
+ * already-parsed timemap entries: `[{ mc, tstamp }, …]`, one entry per measure
+ * onset in time order (repeats expanded — a measure played twice appears twice
+ * at different `tstamp` values). On the second pass Verovio appends a `-rendN`
+ * suffix to the measure id, stripped here before matching against `idToMc`.
+ */
+function expandedMeasureOnsets(
+  entries: Array<{ tstamp?: number; measureOn?: string }>,
+  idToMc: Map<string, number>
+): Array<{ mc: number; tstamp: number }> {
+  const onsets: Array<{ mc: number; tstamp: number }> = [];
+  for (const e of entries) {
+    if (e.measureOn === undefined || e.tstamp === undefined) continue;
+    const mc = idToMc.get(stripRendSuffix(e.measureOn));
+    if (mc !== undefined) onsets.push({ mc, tstamp: e.tstamp });
+  }
+  return onsets;
+}
+
+/**
+ * Build a `mc → first-onset ms` index over the whole-movement timemap, for
+ * measure-level play-from-position (Component 9 Step 20).
+ *
+ * "First onset" means the earliest `tstamp` a measure sounds. A measure inside
+ * a repeat plays on more than one pass; the earliest pass is chosen, and the
+ * Step 19 caret retraces later passes automatically (the repeat-seam rule in
+ * `caret.ts`). Targeting a later pass of a repeated measure is out of Phase-1
+ * scope. Returns an empty map on any failure so play-from-position degrades to
+ * "not armable" rather than breaking playback.
+ *
+ * @param tk      - Toolkit with the movement already loaded/rendered.
+ * @param meiText - Normalized MEI for the loaded movement.
+ */
+export function buildMeasureOnsetIndex(
+  tk: VerovioToolkitInstance,
+  meiText: string
+): Map<number, number> {
+  const index = new Map<number, number>();
+  try {
+    const raw = tk.renderToTimemap({ includeMeasures: true });
+    const entries =
+      typeof raw === 'string'
+        ? (JSON.parse(raw) as Array<{ tstamp?: number; measureOn?: string }>)
+        : (raw as Array<{ tstamp?: number; measureOn?: string }>);
+    const idToMc = buildIdToMc(meiText);
+    if (idToMc.size === 0) return index;
+    for (const o of expandedMeasureOnsets(entries, idToMc)) {
+      const prev = index.get(o.mc);
+      if (prev === undefined || o.tstamp < prev) index.set(o.mc, o.tstamp);
+    }
+    return index;
+  } catch {
+    return index;
+  }
+}
+
+/**
+ * Build a fragment-scoped playback bundle from the whole-movement timemap.
+ *
+ * **Why windowing rather than `select()`.** `renderFragment()` constrains the
+ * *rendered SVG* via `select()` + `redoLayout()`, but Verovio's
+ * `renderToMIDI()` and `renderToTimemap()` ignore the selection — they always
+ * emit the whole movement (empirically confirmed in 6.1.0: identical byte-for-
+ * byte MIDI and identical timemap with or without an active selection). So
+ * fragment playback windows the whole-movement output to the fragment's measure
+ * span instead. This also preserves Verovio's running clef/key/meter/tempo
+ * context at `mc_start`, which an MEI slice would lose.
+ *
+ * The window is keyed on the rendered measure range (`mc_start`/`mc_end`), not
+ * on the beat-precise tagged range: playback follows the *rendered* fragment
+ * (whole measures), matching what the viewer shows.
+ *
+ * **Repeat handling (ADR-025 final-pass semantics).** Verovio fully expands
+ * repeats in the timemap: a measure played twice yields two `measureOn` onsets
+ * at different `tstamp` values (on the second pass Verovio appends a `-rendN`
+ * suffix to the measure id, stripped here before matching). Naively windowing
+ * from the *first* onset of `mcStart` to the next-measure onset would sweep up
+ * any repeat jump that lands before the fragment — e.g. a fragment ending on a
+ * repeat-end barline whose repeat-start lies earlier in the movement would
+ * play, then jump back outside itself. ADR-025 requires the opposite: a
+ * repeat-end whose paired start is *outside* the fragment is ignored (the
+ * fragment sounds once, as on the final pass), while a repeat *wholly
+ * contained* in the fragment still expands.
+ *
+ * Both fall out of a single rule on the expanded measure-onset sequence:
+ *   - **start** at the *last* onset of `mcStart` that is entered *from outside*
+ *     `[mcStart, mcEnd]` (its preceding played measure is `< mcStart` or
+ *     `> mcEnd`, or it is the very first onset). For a contained repeat this is
+ *     still the first onset (the repeat's internal jump re-enters from *inside*
+ *     the range, so later `mcStart` onsets are skipped); for a fragment sitting
+ *     inside a larger repeat it is the final pass.
+ *   - **end** at the first onset thereafter whose measure leaves
+ *     `[mcStart, mcEnd]` (a forward exit past `mcEnd`, or a backward jump below
+ *     `mcStart`). Absent (the fragment runs to the movement end) → play to the
+ *     end.
+ *
+ * Within that window, backward jumps that stay inside the range (a contained
+ * repeat) are preserved, so contained repeats play expanded.
+ *
+ * Falls back to a whole-movement window + `buildHighlightSchedule` on any
+ * failure (missing measureOn, unparseable MEI), so playback degrades to the
+ * previous behaviour rather than breaking.
+ *
+ * @param tk      - Toolkit with the fragment's movement already loaded/rendered.
+ * @param meiText - Normalized MEI for the loaded movement.
+ * @param mcStart - 1-based position index of the fragment's first measure.
+ * @param mcEnd   - 1-based position index of the fragment's last measure.
+ */
+export function buildFragmentPlayback(
+  tk: VerovioToolkitInstance,
+  meiText: string,
+  mcStart: number,
+  mcEnd: number
+): FragmentPlayback {
+  const fallback = (): FragmentPlayback => ({
+    window: { startMs: 0, endMs: Number.POSITIVE_INFINITY },
+    schedule: buildHighlightSchedule(tk),
+  });
+
+  try {
+    const raw = tk.renderToTimemap({ includeMeasures: true });
+    const entries =
+      typeof raw === 'string'
+        ? (JSON.parse(raw) as Array<{ tstamp?: number; on?: string[]; measureOn?: string }>)
+        : (raw as Array<{ tstamp?: number; on?: string[]; measureOn?: string }>);
+
+    // Map each measure xml:id → its 1-based document-order position (mc), then
+    // reconstruct the expanded (repeat-unrolled) measure-onset sequence in time
+    // order: [{ mc, tstamp }, …], one entry per measure onset.
+    const idToMc = buildIdToMc(meiText);
+    if (idToMc.size === 0) return fallback();
+    const onsets = expandedMeasureOnsets(entries, idToMc);
+    if (onsets.length === 0) return fallback();
+
+    const inRange = (mc: number): boolean => mc >= mcStart && mc <= mcEnd;
+
+    // startIndex: the last onset of mcStart entered from *outside* the range.
+    // The first occurrence (preceded by an out-of-range measure or nothing) is
+    // always a candidate; a contained repeat's internal jump re-enters from
+    // inside, so it is not. Falls back to the first mcStart onset, then to the
+    // whole-movement window if mcStart never sounds.
+    let startIndex = -1;
+    for (let i = 0; i < onsets.length; i++) {
+      if (onsets[i]!.mc !== mcStart) continue;
+      const enteredFromOutside = i === 0 || !inRange(onsets[i - 1]!.mc);
+      if (enteredFromOutside) startIndex = i;
+    }
+    if (startIndex === -1) {
+      startIndex = onsets.findIndex((o) => o.mc === mcStart);
+    }
+    if (startIndex === -1) return fallback();
+    const startMs = onsets[startIndex]!.tstamp;
+
+    // endMs: the first onset after startIndex whose measure leaves the range
+    // (forward past mcEnd, or backward below mcStart). Contained backward jumps
+    // that stay in range are kept, so wholly-contained repeats expand.
+    let endMs = Number.POSITIVE_INFINITY;
+    for (let i = startIndex + 1; i < onsets.length; i++) {
+      if (!inRange(onsets[i]!.mc)) {
+        endMs = onsets[i]!.tstamp;
+        break;
+      }
+    }
+
+    const schedule: Array<{ timeMs: number; ids: string[] }> = [];
+    for (const e of entries) {
+      if (!e.on || e.on.length === 0 || e.tstamp === undefined) continue;
+      if (e.tstamp < startMs - WINDOW_EPS_MS || e.tstamp >= endMs - WINDOW_EPS_MS) continue;
+      schedule.push({ timeMs: e.tstamp - startMs, ids: e.on.map(stripRendSuffix) });
+    }
+    schedule.sort((a, b) => a.timeMs - b.timeMs);
+
+    return { window: { startMs, endMs }, schedule };
+  } catch {
+    return fallback();
   }
 }

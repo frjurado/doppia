@@ -1,0 +1,29 @@
+{
+  "movementShort": "mov. {{number}}",
+  "browser": {
+    "pageTitle": "Explorador de fragmentos — Doppia",
+    "concepts": "Conceptos",
+    "clearSelectionAria": "Borrar selección: {{name}}",
+    "searchPlaceholder": "Busca la raíz de un concepto…",
+    "searchAria": "Buscar raíces de conceptos",
+    "searchToBrowse": "Busca un concepto para explorar",
+    "includeSubtypes": "Incluir subtipos",
+    "loadingFragments": "Cargando fragmentos…",
+    "noApprovedFound": "No se encontraron fragmentos aprobados",
+    "selectFromTree": "Selecciona un concepto del árbol",
+    "searchToStart": "Busca un concepto para empezar",
+    "previewGenerating": "Generando vista previa…",
+    "openFragmentAria": "Abrir fragmento {{concept}} {{range}}"
+  },
+  "detail": {
+    "pageTitle": "Fragmento — Doppia",
+    "backToBrowser": "← Explorador de fragmentos",
+    "loadingNotation": "Cargando notación…",
+    "couldNotRender": "No se pudo renderizar la notación.",
+    "meiUnavailable": "URL de MEI no disponible para este fragmento.",
+    "harmonyToggle": "Armonía",
+    "sources": "Fuentes: {{list}}",
+    "partLabel": "Parte {{number}}",
+    "alsoTagged": "También etiquetado"
+  }
+}

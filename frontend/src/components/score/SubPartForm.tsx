@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getConceptSchemas } from '../../services/conceptApi';
 import type { ConceptSchemaTree } from '../../services/conceptApi';
 import type { SubPartTag } from './stages';
@@ -72,6 +73,7 @@ export default function SubPartForm({
   resetKey,
   onUpdate,
 }: SubPartFormProps) {
+  const { t } = useTranslation('score');
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(
     initialTag?.schemaTree ?? null,
   );
@@ -103,7 +105,7 @@ export default function SubPartForm({
       })
       .catch(() => {
         if (fetchId !== fetchIdRef.current) return;
-        setSchemaError('Could not load stage schema.');
+        setSchemaError(t('subPartForm.loadError'));
       })
       .finally(() => {
         if (fetchId !== fetchIdRef.current) return;
@@ -135,7 +137,7 @@ export default function SubPartForm({
     return (
       <div className={styles.form} data-testid={`sub-part-form-${stageId}`}>
         <Type variant="label-sm" as="p" className={styles.status}>
-          Loading…
+          {t('common:loading')}
         </Type>
       </div>
     );
@@ -159,10 +161,10 @@ export default function SubPartForm({
     <div
       className={styles.form}
       data-testid={`sub-part-form-${stageId}`}
-      aria-label={`Stage properties for ${stageName}`}
+      aria-label={t('subPartForm.propertiesForAria', { name: stageName })}
     >
       <Type variant="label-sm" as="span" className={styles.heading}>
-        Stage properties
+        {t('subPartForm.propertiesHeading')}
       </Type>
       <PropertyForm
         schemas={schemaTree.schemas}

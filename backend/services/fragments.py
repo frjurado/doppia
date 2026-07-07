@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -64,10 +65,32 @@ from services.fragment_validation import (
     validate_containment,
 )
 from services.object_storage import StorageClient
+from services.task_dispatch import dispatch_task
 from services.tasks.render_fragment_preview import render_fragment_preview
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ADR-006 §4: a fragment's English prose annotation is mirrored into
+# fragment_annotation_translation as the canonical ('en', authoritative) record,
+# so the overlay/staleness machinery is uniform across languages. Upsert keyed
+# on (fragment_id, language); a null annotation deletes the row.
+_UPSERT_ANNOTATION_TRANSLATION = text(
+    """
+    INSERT INTO fragment_annotation_translation
+        (fragment_id, language, prose_annotation, status, source_hash, translated_at)
+    VALUES (:fragment_id, 'en', :prose, 'authoritative', :source_hash, now())
+    ON CONFLICT (fragment_id, language) DO UPDATE SET
+        prose_annotation = EXCLUDED.prose_annotation,
+        status           = EXCLUDED.status,
+        source_hash      = EXCLUDED.source_hash,
+        translated_at    = EXCLUDED.translated_at
+    """
+)
+_DELETE_ANNOTATION_TRANSLATION = text(
+    "DELETE FROM fragment_annotation_translation "
+    "WHERE fragment_id = :fragment_id AND language = 'en'"
+)
 
 
 @dataclass
@@ -195,6 +218,54 @@ def _decode_time_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
         raise ValueError(f"Invalid pagination cursor: {cursor!r}") from exc
 
 
+async def enqueue_preview_regeneration_for_movement(
+    db: AsyncSession, movement_id: uuid.UUID
+) -> int:
+    """Re-dispatch preview rendering for every active fragment on a movement.
+
+    ADR-008's MEI-correction trigger: re-ingesting a movement replaces its
+    normalized MEI, which invalidates the cached SVG previews of every
+    fragment on it. This is the entry point the ingest path calls after an
+    upsert commits (a movement ingested for the first time has no fragments,
+    so the call is a harmless no-op there).
+
+    Only ``submitted`` and ``approved`` fragments are dispatched — the same
+    statuses the preview task itself accepts; ``draft``/``rejected`` fragments
+    render no preview by design.
+
+    Module-level (not a service method) so the ingest service can call it with
+    just its session, without constructing a FragmentService (which requires a
+    Neo4j driver the ingest path has no other use for).
+    :meth:`FragmentService.enqueue_preview_regeneration_for_movement` wraps it.
+
+    Args:
+        db: Async database session.
+        movement_id: UUID of the re-ingested movement.
+
+    Returns:
+        Number of fragments whose preview regeneration was dispatched.
+    """
+    result = await db.execute(
+        select(Fragment.id)
+        .where(
+            Fragment.movement_id == movement_id,
+            Fragment.status.in_(("submitted", "approved")),
+        )
+        .order_by(Fragment.mc_start)
+    )
+    fragment_ids = list(result.scalars().all())
+    for fragment_id in fragment_ids:
+        dispatch_task(render_fragment_preview, fragment_id=str(fragment_id))
+    if fragment_ids:
+        logger.info(
+            "enqueue_preview_regeneration_for_movement: dispatched %d preview "
+            "task(s) for movement %s",
+            len(fragment_ids),
+            movement_id,
+        )
+    return len(fragment_ids)
+
+
 class FragmentService:
     """Business logic for the fragment write surface and review state machine.
 
@@ -272,6 +343,8 @@ class FragmentService:
                     self._db.add(child)
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
+
+                await self._sync_annotation_translations(parent.id)
         except IntegrityError as exc:
             logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
@@ -363,6 +436,8 @@ class FragmentService:
                     self._db.add(child)
                     await self._db.flush()
                     self._add_concept_tags(child.id, sp.concept_tags)
+
+                await self._sync_annotation_translations(fragment_id)
         except IntegrityError as exc:
             logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
@@ -447,7 +522,15 @@ class FragmentService:
                 subs_result = await self._db.execute(
                     select(Fragment)
                     .where(Fragment.parent_fragment_id == fragment_id)
-                    .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+                    .order_by(
+                        Fragment.mc_start.asc(),
+                        # Stages in the same measure differ only by beat;
+                        # without this tiebreaker their order is the UUID's
+                        # (i.e. random) — Component 9 Part 8 item 3 (G2).
+                        # NULL beat_start = starts at the measure start.
+                        Fragment.beat_start.asc().nulls_first(),
+                        Fragment.id.asc(),
+                    )
                 )
                 existing_subs = list(subs_result.scalars().all())
 
@@ -535,6 +618,10 @@ class FragmentService:
                         await self._db.flush()
                         self._add_concept_tags(child.id, sp.concept_tags)
 
+                # Sync the English annotation overlay for whichever branch ran
+                # (prose-only or analytic), covering parent and sub-parts.
+                await self._sync_annotation_translations(fragment_id)
+
         except IntegrityError as exc:
             logger.error("Fragment write IntegrityError: %s", exc.orig)
             raise FragmentValidationError(
@@ -542,10 +629,10 @@ class FragmentService:
                 detail={"integrity_error": str(exc.orig)},
             ) from exc
 
-        # Enqueue after commit so the task reads the updated mc_start/mc_end
+        # Dispatch after commit so the task reads the updated mc_start/mc_end
         # (ADR-008: bar-range edit on submitted/approved re-triggers preview generation).
         if _should_regenerate_preview:
-            render_fragment_preview.delay(str(fragment_id))
+            dispatch_task(render_fragment_preview, fragment_id=str(fragment_id))
 
         return FragmentUpdateResult(fragment=fragment, previous_status=previous_status)
 
@@ -584,10 +671,32 @@ class FragmentService:
             fragment.updated_at = datetime.now(tz=timezone.utc)
             self._db.add(fragment)
 
-        # Enqueue after the transaction commits so the task reads committed state
+            # Ensure the canonical English annotation record exists at submit
+            # time (ADR-006 §4: English records seeded when annotations are
+            # submitted), covering parent and sub-parts.
+            await self._sync_annotation_translations(fragment_id)
+
+        # Dispatch after the transaction commits so the task reads committed state
         # (ADR-008: preview is generated at the draft → submitted transition).
-        render_fragment_preview.delay(str(fragment_id))
+        dispatch_task(render_fragment_preview, fragment_id=str(fragment_id))
         return fragment
+
+    async def enqueue_preview_regeneration_for_movement(
+        self, movement_id: uuid.UUID
+    ) -> int:
+        """Re-dispatch preview rendering for the movement's active fragments.
+
+        Service-level entry point named by ADR-008; delegates to the
+        module-level :func:`enqueue_preview_regeneration_for_movement`, which
+        the ingest path calls directly with its session.
+
+        Args:
+            movement_id: UUID of the re-ingested/corrected movement.
+
+        Returns:
+            Number of fragments whose preview regeneration was dispatched.
+        """
+        return await enqueue_preview_regeneration_for_movement(self._db, movement_id)
 
     # ------------------------------------------------------------------
     # Public interface — read path (Component 7 Step 7)
@@ -654,11 +763,20 @@ class FragmentService:
         )
         parent_tags = list(tags_result.scalars().all())
 
-        # Load sub-parts (top-level only — ADR-011 two-level limit).
+        # Load sub-parts (top-level only — ADR-011 two-level limit), in score
+        # order. mc_start alone is measure-grained: stages of one cadence
+        # usually share the measure and differ only by beat, so without the
+        # beat_start tiebreaker the displayed order is the UUID's (i.e.
+        # random) — Component 9 Part 8 item 3 (G2). NULL beat_start = starts
+        # at the measure start, hence nulls first.
         sub_result = await self._db.execute(
             select(Fragment)
             .where(Fragment.parent_fragment_id == fragment_id)
-            .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+            .order_by(
+                Fragment.mc_start.asc(),
+                Fragment.beat_start.asc().nulls_first(),
+                Fragment.id.asc(),
+            )
         )
         sub_parts = list(sub_result.scalars().all())
 
@@ -722,6 +840,7 @@ class FragmentService:
                 Movement.movement_number,
                 Movement.title.label("movement_title"),
                 Movement.mei_object_key,
+                Movement.updated_at.label("movement_updated_at"),
                 Work.title.label("work_title"),
                 Work.catalogue_number.label("work_catalogue_number"),
                 Composer.name.label("composer_name"),
@@ -735,11 +854,15 @@ class FragmentService:
 
         mei_url: str | None = None
         if self._storage is not None and ctx.get("mei_object_key"):
-            mei_url = await self._storage.signed_url(ctx["mei_object_key"])
+            mei_url = await self._storage.signed_url(
+                ctx["mei_object_key"], version=ctx.get("movement_updated_at")
+            )
 
         preview_url: str | None = None
         if self._storage is not None and fragment.preview_object_key:
-            preview_url = await self._storage.signed_url(fragment.preview_object_key)
+            preview_url = await self._storage.signed_url(
+                fragment.preview_object_key, version=fragment.preview_generated_at
+            )
 
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
@@ -927,20 +1050,28 @@ class FragmentService:
             | {t.concept_id for tags in sub_tags_by_frag.values() for t in tags}
         )
         alias_map: dict[str, str | None] = {}
+        name_map: dict[str, str | None] = {}
         if all_concept_ids:
             async with self._driver.session() as neo_session:
                 for c in await get_concepts_by_ids(neo_session, all_concept_ids):
                     aliases: list[str] = c.get("aliases", [])
                     alias_map[c["id"]] = aliases[0] if aliases else None
+                    name_map[c["id"]] = c.get("name", c["id"])
 
-        def _primary(frag_id: uuid.UUID, tmap: dict) -> tuple[str | None, str | None]:
+        def _primary(
+            frag_id: uuid.UUID, tmap: dict
+        ) -> tuple[str | None, str | None, str | None]:
             for tag in tmap.get(frag_id, []):
                 if tag.is_primary:
-                    return tag.concept_id, alias_map.get(tag.concept_id)
-            return None, None
+                    return (
+                        tag.concept_id,
+                        alias_map.get(tag.concept_id),
+                        name_map.get(tag.concept_id),
+                    )
+            return None, None, None
 
         def _list_item(f: Fragment, tmap: dict, sp_tmap: dict) -> FragmentListItem:
-            p_id, p_alias = _primary(f.id, tmap)
+            p_id, p_alias, p_name = _primary(f.id, tmap)
             return FragmentListItem(
                 id=f.id,
                 movement_id=f.movement_id,
@@ -955,6 +1086,7 @@ class FragmentService:
                 status=f.status,
                 primary_concept_id=p_id,
                 primary_concept_alias=p_alias,
+                primary_concept_name=p_name,
                 sub_parts=[
                     FragmentListItem(
                         id=sp.id,
@@ -970,6 +1102,7 @@ class FragmentService:
                         status=sp.status,
                         primary_concept_id=_primary(sp.id, sp_tmap)[0],
                         primary_concept_alias=_primary(sp.id, sp_tmap)[1],
+                        primary_concept_name=_primary(sp.id, sp_tmap)[2],
                         sub_parts=[],
                     )
                     for sp in sub_by_parent.get(f.id, [])
@@ -1329,15 +1462,18 @@ class FragmentService:
         # Resolve preview signed URLs concurrently for all fragments that have
         # a stored preview_object_key (ADR-008: null until Celery task completes).
         async def _resolve_preview(
-            frag_id: uuid.UUID, key: str | None
+            frag_id: uuid.UUID, key: str | None, version: datetime | None
         ) -> tuple[uuid.UUID, str | None]:
             if self._storage is None or key is None:
                 return frag_id, None
-            return frag_id, await self._storage.signed_url(key)
+            return frag_id, await self._storage.signed_url(key, version=version)
 
         preview_url_map: dict[uuid.UUID, str | None] = dict(
             await asyncio.gather(
-                *[_resolve_preview(f.id, f.preview_object_key) for f in page]
+                *[
+                    _resolve_preview(f.id, f.preview_object_key, f.preview_generated_at)
+                    for f in page
+                ]
             )
         )
 
@@ -2157,6 +2293,7 @@ class FragmentService:
             repeat_context=payload.repeat_context,
             summary=payload.summary.model_dump(),
             prose_annotation=payload.prose_annotation,
+            language="en",  # Phase 1: all annotations authored in English (ADR-006)
             data_licence=data_licence,
             status=status,
             created_by=creator_id,
@@ -2182,6 +2319,7 @@ class FragmentService:
             parent_fragment_id=parent_id,
             summary=sp.summary.model_dump(),
             prose_annotation=sp.prose_annotation,
+            language="en",  # Phase 1: all annotations authored in English (ADR-006)
             data_licence=data_licence,
             status="draft",
         )
@@ -2200,6 +2338,46 @@ class FragmentService:
                     is_primary=tag.is_primary,
                 )
             )
+
+    async def _sync_annotation_translations(self, parent_id: uuid.UUID) -> None:
+        """Mirror canonical English prose into ``fragment_annotation_translation``.
+
+        Reads the current prose of the parent fragment and all its sub-parts
+        from the session (so it reflects the writes already flushed in this
+        transaction) and upserts the ('en', authoritative) record for each, or
+        deletes it when the prose is cleared. Idempotent — safe to call once at
+        the end of any mutating fragment operation (ADR-006 §4).
+
+        Must be invoked inside the caller's transaction so the translation
+        rows commit atomically with the fragment write.
+
+        Args:
+            parent_id: The parent fragment id; its sub-parts are synced too.
+        """
+        result = await self._db.execute(
+            select(Fragment.id, Fragment.prose_annotation).where(
+                or_(
+                    Fragment.id == parent_id,
+                    Fragment.parent_fragment_id == parent_id,
+                )
+            )
+        )
+        for fragment_id, prose in result.all():
+            if prose is None:
+                await self._db.execute(
+                    _DELETE_ANNOTATION_TRANSLATION, {"fragment_id": fragment_id}
+                )
+            else:
+                await self._db.execute(
+                    _UPSERT_ANNOTATION_TRANSLATION,
+                    {
+                        "fragment_id": fragment_id,
+                        "prose": prose,
+                        "source_hash": hashlib.sha256(
+                            prose.encode("utf-8")
+                        ).hexdigest(),
+                    },
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ Example usage::
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 import aioboto3
 from botocore.config import Config as BotocoreConfig
@@ -42,6 +43,29 @@ CLIENT_FACING_URL_TTL: int = 3600  # 1 hour
 # Backend-to-backend URLs (music21 processing, Verovio server-side rendering)
 # use 15 minutes — consumed immediately in a background task.
 BACKEND_PROCESSING_TTL: int = 900  # 15 minutes
+
+
+def _cache_bust_token(version: datetime) -> str:
+    """Return a compact, monotonic cache-busting token for *version*.
+
+    Public R2 object URLs (the ``public_url`` branch of
+    :meth:`StorageClient.signed_url`) are stable per object key and are served
+    through Cloudflare's edge cache on the ``r2.dev`` subdomain, which is not
+    purgeable on demand.  Overwriting an object (re-ingest, incipit/preview
+    regeneration) therefore leaves the old bytes cached under the same URL.
+    Appending ``?v=<token>`` derived from the artifact's last-write timestamp
+    yields a fresh cache key whenever the artifact changes, so a stale copy can
+    never shadow a newer one.
+
+    Args:
+        version: The artifact's last-write timestamp (e.g. ``movement.updated_at``
+            for MEI, ``incipit_generated_at`` / ``preview_generated_at`` for
+            generated SVGs).  Microsecond resolution avoids same-second collisions.
+
+    Returns:
+        A URL-safe integer string (epoch microseconds).
+    """
+    return str(int(version.timestamp() * 1_000_000))
 
 
 class StorageClient:
@@ -174,17 +198,26 @@ class StorageClient:
             )
 
     async def signed_url(
-        self, key: str, expires_in: int = CLIENT_FACING_URL_TTL
+        self,
+        key: str,
+        expires_in: int = CLIENT_FACING_URL_TTL,
+        version: datetime | None = None,
     ) -> str:
         """Return a URL for reading a stored file.
 
         When the client is configured with a ``public_url`` (Cloudflare R2
         public bucket), returns a plain public URL — no credentials, no expiry.
-        The ``expires_in`` argument is ignored in that case.
+        The ``expires_in`` argument is ignored in that case.  For mutable
+        artifacts (overwritten on re-ingest or regeneration), pass *version* so
+        a cache-busting ``?v=<token>`` is appended: the ``r2.dev`` edge cache
+        keys on the full URL including query string, so a changed token defeats
+        a stale cached copy (see :func:`_cache_bust_token`).
 
         Without a ``public_url`` (local MinIO), generates a pre-signed GET
-        URL valid for *expires_in* seconds.  Nothing persistent should store
-        the returned URL; store the object key and call this method at
+        URL valid for *expires_in* seconds.  *version* is ignored in that case:
+        a presigned URL is already unique per call, and an unsigned extra query
+        parameter would invalidate the signature.  Nothing persistent should
+        store the returned URL; store the object key and call this method at
         request time (ADR-002).
 
         Args:
@@ -192,12 +225,18 @@ class StorageClient:
             expires_in: Presigned URL lifetime in seconds (default:
                 ``CLIENT_FACING_URL_TTL``, 1 hour).  Ignored when
                 ``public_url`` is configured.
+            version: Optional last-write timestamp of the artifact, used to
+                derive a cache-busting query parameter on the public-URL branch.
+                Ignored on the presigned branch.
 
         Returns:
             A URL string suitable for direct browser access.
         """
         if self._public_url is not None:
-            return f"{self._public_url}/{key}"
+            url = f"{self._public_url}/{key}"
+            if version is not None:
+                url = f"{url}?v={_cache_bust_token(version)}"
+            return url
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             return await s3.generate_presigned_url(
                 "get_object",

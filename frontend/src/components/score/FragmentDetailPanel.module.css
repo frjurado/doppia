@@ -47,7 +47,7 @@
 }
 
 .errorText {
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   margin: 0;
 }
 
@@ -99,18 +99,18 @@
 }
 
 .statusSubmitted {
-  background-color: var(--color-secondary-container, #dce2f9);
-  color: var(--color-on-secondary-container, #1a237e);
+  background-color: var(--color-secondary-container);
+  color: var(--color-on-secondary-container);
 }
 
 .statusApproved {
-  background-color: var(--color-primary-container, #d3e8f0);
-  color: var(--color-on-primary-container, #003040);
+  background-color: var(--color-primary-container);
+  color: var(--color-on-primary-container);
 }
 
 .statusRejected {
-  background-color: var(--color-error-container, #f9dedc);
-  color: var(--color-error, #b3261e);
+  background-color: var(--color-error-container);
+  color: var(--color-error);
 }
 
 .conceptName {
@@ -171,10 +171,6 @@
 .rangeText {
   margin: 0;
   color: var(--color-on-background);
-}
-
-.beatRange {
-  color: var(--color-on-surface-variant);
 }
 
 .repeatContext {
@@ -387,7 +383,7 @@
   border: none;
   cursor: pointer;
   padding: var(--spacing-2) var(--spacing-3);
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   font-family: var(--font-sans);
   font-size: 0.75rem;
   font-weight: 500;
@@ -401,7 +397,7 @@
 }
 
 .rejectOpenButton:hover:not(:disabled) {
-  background-color: var(--color-error-container, #f9dedc);
+  background-color: var(--color-error-container);
 }
 
 .rejectTextarea {
@@ -423,8 +419,8 @@
 }
 
 .rejectSendButton {
-  background-color: var(--color-error, #b3261e);
-  color: var(--color-on-error, #ffffff);
+  background-color: var(--color-error);
+  color: var(--color-on-error);
   border: none;
   cursor: pointer;
   padding: var(--spacing-2) var(--spacing-3);
@@ -446,7 +442,7 @@
 
 .reviewErrorText {
   margin: 0;
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
 }
 
 /* ── Approval gate failure (Step 14) ──────────────────────────────────────── */
@@ -454,7 +450,7 @@
 .gateFailed {
   padding: var(--spacing-3) var(--spacing-4);
   padding-left: calc(var(--spacing-4) + 4px);
-  background-color: var(--color-error-container, #f9dedc);
+  background-color: var(--color-error-container);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3);
@@ -462,7 +458,7 @@
 
 .gateFailedIntro {
   margin: 0;
-  color: var(--color-on-error-container, #410002);
+  color: var(--color-on-error-container);
 }
 
 .gateItem {
@@ -473,7 +469,7 @@
 
 .gateItemLabel {
   margin: 0;
-  color: var(--color-on-error-container, #410002);
+  color: var(--color-on-error-container);
   flex-shrink: 0;
 }
 
@@ -490,12 +486,12 @@
   display: flex;
   align-items: baseline;
   gap: var(--spacing-3);
-  color: var(--color-on-error-container, #410002);
+  color: var(--color-on-error-container);
 }
 
 .gateNote {
   margin: 0;
-  color: var(--color-on-error-container, #410002);
+  color: var(--color-on-error-container);
   font-style: italic;
 }
 
@@ -504,7 +500,7 @@
 .deleteConfirm {
   padding: var(--spacing-3) var(--spacing-4);
   padding-left: calc(var(--spacing-4) + 4px);
-  background-color: var(--color-error-container, #f9dedc);
+  background-color: var(--color-error-container);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3);
@@ -512,12 +508,12 @@
 
 .deleteConfirmText {
   margin: 0;
-  color: var(--color-on-error-container, #410002);
+  color: var(--color-on-error-container);
 }
 
 .deleteErrorText {
   margin: 0;
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
 }
 
 .confirmActions {
@@ -526,8 +522,8 @@
 }
 
 .confirmDeleteButton {
-  background-color: var(--color-error, #b3261e);
-  color: var(--color-on-error, #ffffff);
+  background-color: var(--color-error);
+  color: var(--color-on-error);
   border: none;
   cursor: pointer;
   padding: var(--spacing-2) var(--spacing-3);
@@ -592,7 +588,7 @@
   border: none;
   cursor: pointer;
   padding: var(--spacing-2) var(--spacing-3);
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
   font-family: var(--font-sans);
   font-size: 0.75rem;
   font-weight: 500;
@@ -601,5 +597,5 @@
 }
 
 .deleteButton:hover {
-  background-color: var(--color-error-container, #f9dedc);
+  background-color: var(--color-error-container);
 }

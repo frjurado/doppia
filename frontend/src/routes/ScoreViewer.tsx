@@ -1,16 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
+import PlaybackCaret from '../components/score/PlaybackCaret';
+import {
+  applyCaretPlacement,
+  buildCaretTrack,
+  CARET_INTERPOLATE,
+  hideCaretEl,
+  resolveCaret,
+} from '../components/score/caret';
+import type { CaretTrack } from '../components/score/caret';
 import { buildGhosts, measureGhostKey } from '../components/score/ghosts';
 import type { GhostLayer, ResolutionMode } from '../components/score/ghosts';
-import { AnnotationSession, buildRepeatBarriers } from '../components/score/annotator';
-import type { AnnotationFlags, AnnotationSessionOptions, SelectionRange } from '../components/score/annotator';
-import { buildMcIndex, commitSelection } from '../components/score/selection';
+import { measureExclusiveEndBeat, normalizeStageBeats } from '../components/score/stageBeats';
+import {
+  AnnotationSession,
+  buildDirectiveBarriers,
+  buildVoltaIndex,
+} from '../components/score/annotator';
+import type {
+  AnnotationFlags,
+  AnnotationSessionOptions,
+  SelectionRange,
+} from '../components/score/annotator';
+import {
+  buildMcIndex,
+  commitSelection,
+  measureKeysForMcRange,
+} from '../components/score/selection';
 import type { CommittedSelection } from '../components/score/selection';
-import type { BeatSlot, StageBounds, StageAssignment, SubPartTag } from '../components/score/stages';
+import type {
+  BeatSlot,
+  StageBounds,
+  StageAssignment,
+  SubPartTag,
+} from '../components/score/stages';
 import {
   chooseStageGrid,
   computeResizeClamp,
@@ -18,9 +46,9 @@ import {
   prePopulateStages,
   prePopulateStagesAtGrid,
   reconcileWithNewConcept,
-  respondToMainResize,
   toggleStageAbsent,
 } from '../components/score/stages';
+import { buildStageSlots, respondToMainResize } from '../components/score/stageFrame';
 import FormPanel from '../components/score/FormPanel';
 import type { FormSubmitData } from '../components/score/FormPanel';
 import type { PropertyFormValues } from '../components/score/PropertyForm';
@@ -30,21 +58,36 @@ import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { fetchMeiUrl } from '../services/scoreApi';
 import type { ScoreTitle } from '../services/scoreApi';
-import { buildHighlightSchedule, buildNoteInfoMap, getTimemapTempo, getVerovioToolkit, parseMeiMeterUnit, renderMidi, renderProgressively } from '../services/verovio';
+import {
+  buildHighlightSchedule,
+  buildMeasureOnsetIndex,
+  buildNoteInfoMap,
+  collectGraceNoteIds,
+  getTimemapTempo,
+  getVerovioToolkit,
+  parseMeiMeterUnit,
+  renderMidi,
+  renderProgressively,
+} from '../services/verovio';
 import type { NoteInfo, RenderOptions } from '../services/verovio';
 import styles from './ScoreViewer.module.css';
 import { transposeKey } from '../utils/transposeKey';
-import type { ContainsStage, ConceptSchemaTree, ConceptSearchHit, TypeRefinementChild } from '../services/conceptApi';
+import type {
+  ContainsStage,
+  ConceptSchemaTree,
+  ConceptSearchHit,
+  TypeRefinementChild,
+} from '../services/conceptApi';
 import { getConceptSchemas } from '../services/conceptApi';
-import {
-  createFragment,
-  updateFragment,
-  submitFragment,
-} from '../services/fragmentApi';
+import { createFragment, updateFragment, submitFragment } from '../services/fragmentApi';
 import { getHarmonyEvents } from '../services/analysisApi';
 import type { HarmonyEventOut } from '../services/analysisApi';
 import { HarmonyOverlay } from '../components/score/harmonyOverlay';
-import type { FragmentDetailResponse, FragmentUpdatePayload, SubPartPayload } from '../services/fragmentApi';
+import type {
+  FragmentDetailResponse,
+  FragmentUpdatePayload,
+  SubPartPayload,
+} from '../services/fragmentApi';
 import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
 import { ApiError } from '../services/api';
@@ -59,7 +102,12 @@ const DEFAULT_SCALE = 45 as const;
 
 type ScalePreset = 35 | 45 | 55;
 
-const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 55: 'Large' };
+/** i18n keys (score namespace) for the staff-size preset labels. */
+const SCALE_LABEL_KEYS: Record<ScalePreset, string> = {
+  35: 'viewer.scale.small',
+  45: 'viewer.scale.medium',
+  55: 'viewer.scale.large',
+};
 
 /**
  * Transposition intervals mapped to Verovio transposition string format.
@@ -69,30 +117,27 @@ const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'Small', 45: 'Medium', 5
  * Ordered as up/down pairs by ascending interval size, per
  * docs/architecture/playback-coordinates.md § Dropdown ordering.
  */
-const TRANSPOSE_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: 'No transposition',  value: ''    },
-  { label: 'Minor 2nd up',      value: 'm2'  },
-  { label: 'Minor 2nd down',    value: '-m2' },
-  { label: 'Major 2nd up',      value: 'M2'  },
-  { label: 'Major 2nd down',    value: '-M2' },
-  { label: 'Minor 3rd up',      value: 'm3'  },
-  { label: 'Minor 3rd down',    value: '-m3' },
-  { label: 'Major 3rd up',      value: 'M3'  },
-  { label: 'Major 3rd down',    value: '-M3' },
-  { label: 'Perfect 4th up',    value: 'P4'  },
-  { label: 'Perfect 4th down',  value: '-P4' },
-  { label: 'Tritone up',        value: 'A4'  },
-  { label: 'Tritone down',      value: '-A4' },
+const TRANSPOSE_OPTIONS: ReadonlyArray<{ labelKey: string; value: string }> = [
+  { labelKey: 'viewer.transposeOptions.none', value: '' },
+  { labelKey: 'viewer.transposeOptions.m2up', value: 'm2' },
+  { labelKey: 'viewer.transposeOptions.m2down', value: '-m2' },
+  { labelKey: 'viewer.transposeOptions.maj2up', value: 'M2' },
+  { labelKey: 'viewer.transposeOptions.maj2down', value: '-M2' },
+  { labelKey: 'viewer.transposeOptions.m3up', value: 'm3' },
+  { labelKey: 'viewer.transposeOptions.m3down', value: '-m3' },
+  { labelKey: 'viewer.transposeOptions.maj3up', value: 'M3' },
+  { labelKey: 'viewer.transposeOptions.maj3down', value: '-M3' },
+  { labelKey: 'viewer.transposeOptions.p4up', value: 'P4' },
+  { labelKey: 'viewer.transposeOptions.p4down', value: '-P4' },
+  { labelKey: 'viewer.transposeOptions.tritoneUp', value: 'A4' },
+  { labelKey: 'viewer.transposeOptions.tritoneDown', value: '-A4' },
 ];
 
-/** Music notation fonts available in Verovio 6.1.0. Default: Bravura. */
-const FONT_OPTIONS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: 'Bravura', value: 'Bravura' },
-  { label: 'Leipzig', value: 'Leipzig' },
-  { label: 'Leland', value: 'Leland' },
-];
-
+/** Pinned music notation font for all Verovio renders. */
 const DEFAULT_FONT = 'Bravura';
+
+/** Env var name shown verbatim in the audio-unavailable notice (not translated). */
+const SOUNDFONT_ENV_VAR = 'VITE_SOUNDFONT_BASE_URL';
 
 /**
  * Fallback page width (pixels) used before the container is measured.
@@ -129,7 +174,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  *
  * Three-zone layout:
  *   1. Toolbar (container-high, scrolls with page): back link, staff size,
- *      transposition, and music font controls.
+ *      and transposition controls. Music font is pinned to Bravura.
  *   2. Score panel: Verovio SVG pages rendered progressively inside a
  *      centered max-width: 1200px container.
  *   3. Playback bar (container-highest, fixed bottom): transport controls
@@ -144,16 +189,17 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
  * overlay until the new render is complete. After re-render, renderMidi() is
  * called again so the MIDI follows the transposition (Step 14.6).
  *
- * Playback highlight (Step 14.4):
+ * Playback caret (Step 14.4; caret since Step 19):
  *   useMidiPlayback fires onPositionUpdate(timeMs) on each animation frame.
  *   handlePositionUpdate binary-searches a pre-built schedule (from
- *   buildHighlightSchedule / renderToTimemap) and toggles the global
- *   `.is-playing` CSS class on matching SVG elements via direct DOM mutation
- *   (not React state — avoids re-render at RAF frequency). The timemap-derived
- *   schedule correctly expands repeats so both passes are highlighted.
- *   Note: modifying a class on an existing Verovio SVG element is the one
- *   exception to the CLAUDE.md HTML-overlay rule; it adds no new nodes and is
- *   cleared automatically when Verovio re-renders the SVG.
+ *   buildHighlightSchedule / renderToTimemap) and drives a moving caret overlay
+ *   (PlaybackCaret) via direct style mutation (not React state — avoids
+ *   re-render at RAF frequency). The caret track (buildCaretTrack) maps the
+ *   schedule's onsets to pixel anchors; resolveCaret interpolates between them.
+ *   The timemap-derived schedule correctly expands repeats so the caret retraces
+ *   repeated sections. See docs/architecture/playback-coordinates.md §"Playback
+ *   caret". The caret is an HTML overlay above the SVG (CLAUDE.md overlay rule),
+ *   never injected into Verovio's output.
  *
  * Container width measurement:
  *   A ResizeObserver watches the .scoreContent element. On resize (debounced
@@ -169,7 +215,7 @@ type ViewerStatus = 'loading' | 'ready' | 'error';
 
 interface TransposeSelectProps {
   id: string;
-  options: ReadonlyArray<{ label: string; value: string }>;
+  options: ReadonlyArray<{ labelKey: string; value: string }>;
   value: string;
   onChange: (v: string) => void;
   /** Source key signature (e.g. "G major"). When provided, each option shows
@@ -178,6 +224,7 @@ interface TransposeSelectProps {
 }
 
 function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeSelectProps) {
+  const { t } = useTranslation('score');
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -189,7 +236,7 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, []);
 
-  const selected = options.find(o => o.value === value) ?? options[0];
+  const selected = options.find((o) => o.value === value) ?? options[0];
   const selectedResultKey = sourceKey && value ? transposeKey(sourceKey, value) : null;
 
   return (
@@ -200,17 +247,19 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
         aria-haspopup="listbox"
         aria-expanded={open}
         className={styles.transposeButton}
-        onClick={() => setOpen(prev => !prev)}
-        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+        onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setOpen(false);
+        }}
       >
-        <span>{selected.label}</span>
+        <span>{t(selected.labelKey)}</span>
         {selectedResultKey && (
           <span className={styles.transposeKeyHint}> ({selectedResultKey})</span>
         )}
       </button>
       {open && (
-        <ul role="listbox" aria-label="Transposition" className={styles.transposeDropdown}>
-          {options.map(opt => {
+        <ul role="listbox" aria-label={t('viewer.transpositionAria')} className={styles.transposeDropdown}>
+          {options.map((opt) => {
             const resultKey = sourceKey && opt.value ? transposeKey(sourceKey, opt.value) : null;
             return (
               <li
@@ -222,12 +271,13 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
                     ? `${styles.transposeOption} ${styles.transposeOptionSelected}`
                     : styles.transposeOption
                 }
-                onClick={() => { onChange(opt.value); setOpen(false); }}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
               >
-                <span>{opt.label}</span>
-                {resultKey && (
-                  <span className={styles.transposeKeyHint}> ({resultKey})</span>
-                )}
+                <span>{t(opt.labelKey)}</span>
+                {resultKey && <span className={styles.transposeKeyHint}> ({resultKey})</span>}
               </li>
             );
           })}
@@ -241,20 +291,15 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
 // Auto-grid pre-population helpers (Component 7 Step 2)
 // ---------------------------------------------------------------------------
 
-/** True when entry falls within the selection bounds (beat-precision aware). */
-function _inSelectionBounds(
-  entry: { barN: number; beatFloat: number },
-  sel: SelectionRange,
-): boolean {
-  if (entry.barN < sel.barStart || entry.barN > sel.barEnd) return false;
-  if (sel.beatStart !== null && entry.barN === sel.barStart && entry.beatFloat < sel.beatStart) return false;
-  if (sel.beatEnd   !== null && entry.barN === sel.barEnd   && entry.beatFloat >= sel.beatEnd) return false;
-  return true;
-}
-
 /**
  * Choose the finest grid that fits stageCount stages, compute beat/sub-beat
  * positions from the ghost layer, and return the pre-populated assignments.
+ *
+ * Positions derive from the stage layout frame's slot builder (§6A.1) — the
+ * selection's effective measure-key range with beat-precision endpoint
+ * filters — so pre-population, the split-handle frame, and the main bracket
+ * all agree on the same grid, including across duplicate `@n` values and
+ * excluded sibling endings.
  *
  * blocked is true when the selection cannot fit stages even at sub-beat
  * resolution — the caller should surface a UI note and keep assignments empty.
@@ -262,27 +307,32 @@ function _inSelectionBounds(
 function computeAutoPrePopulate(
   stages: ContainsStage[],
   selection: SelectionRange,
-  ghostLayer: GhostLayer | null,
+  ghostLayer: GhostLayer | null
 ): { assignments: StageAssignment[]; grid: ResolutionMode; blocked: boolean } {
-  // Collect beat and sub-beat positions within the selection from the ghost layer.
   const beatPositions: BeatSlot[] = [];
   const subBeatPositions: BeatSlot[] = [];
 
   if (ghostLayer) {
-    for (const entry of ghostLayer.beatIndex.values()) {
-      if (_inSelectionBounds(entry, selection)) beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    for (const s of buildStageSlots(selection, ghostLayer, 'beat')) {
+      beatPositions.push({ barN: s.barN, beatFloat: s.beatFloat ?? 1.0, measureKey: s.measureKey });
     }
-    beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
-
-    for (const entry of ghostLayer.subBeatIndex.values()) {
-      if (_inSelectionBounds(entry, selection)) subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
+    for (const s of buildStageSlots(selection, ghostLayer, 'subbeat')) {
+      subBeatPositions.push({
+        barN: s.barN,
+        beatFloat: s.beatFloat ?? 1.0,
+        measureKey: s.measureKey,
+      });
     }
-    subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
   }
 
-  const grid = chooseStageGrid(selection, stages.length, beatPositions.length, subBeatPositions.length);
+  const grid = chooseStageGrid(
+    selection,
+    stages.length,
+    beatPositions.length,
+    subBeatPositions.length
+  );
 
-  const measureSlots = selection.barEnd - selection.barStart + 1;
+  const measureSlots = selection.measureKeys?.length ?? selection.barEnd - selection.barStart + 1;
   const blocked =
     stages.length > 0 &&
     measureSlots < stages.length &&
@@ -313,53 +363,91 @@ function computeAutoPrePopulate(
 function buildStageAssignmentsFromSubParts(
   subParts: FragmentDetailResponse['sub_parts'],
   stages: ContainsStage[],
+  mcIndex: Map<string, number> | null
 ): StageAssignment[] {
   const subPartMap = new Map<string, FragmentDetailResponse['sub_parts'][number]>();
   for (const sp of subParts) {
-    const primary = sp.concept_tags.find(t => t.is_primary);
+    const primary = sp.concept_tags.find((t) => t.is_primary);
     if (primary) subPartMap.set(primary.concept_id, sp);
   }
 
   return stages.map((stage) => {
     const sp = subPartMap.get(stage.target_id);
+    // Recover the physical measure keys from the stored mc interval (§6A.1)
+    // so restored bounds project exactly even across duplicate bar numbers.
+    let keyStart: string | undefined;
+    let keyEnd: string | undefined;
+    if (sp && mcIndex) {
+      const ctx =
+        sp.repeat_context === 'first_ending' || sp.repeat_context === 'second_ending'
+          ? sp.repeat_context
+          : null;
+      const keys = measureKeysForMcRange(mcIndex, sp.mc_start, sp.mc_end, ctx);
+      keyStart = keys[0];
+      keyEnd = keys[keys.length - 1];
+    }
     const bounds: StageBounds | null = sp
       ? {
-          barStart:  sp.bar_start,
+          barStart: sp.bar_start,
           beatStart: sp.beat_start,
-          barEnd:    sp.bar_end,
-          beatEnd:   sp.beat_end,
+          barEnd: sp.bar_end,
+          beatEnd: sp.beat_end,
+          keyStart,
+          keyEnd,
         }
       : null;
     return {
-      stageId:         stage.target_id,
-      stageName:       stage.target_name,
-      order:           stage.order,
-      required:        stage.required,
-      displayMode:     stage.display_mode,
+      stageId: stage.target_id,
+      stageName: stage.target_name,
+      order: stage.order,
+      required: stage.required,
+      displayMode: stage.display_mode,
       containmentMode: stage.containment_mode,
-      defaultWeight:   stage.default_weight,
+      defaultWeight: stage.default_weight,
       bounds,
       // Treat restored stages as confirmed so they don't trigger "limbo" warnings.
-      confirmed:       bounds !== null,
-      absent:          bounds === null && !stage.required,
-      orphaned:        false,
-      error:           false,
+      confirmed: bounds !== null,
+      absent: bounds === null && !stage.required,
+      orphaned: false,
+      error: false,
     } satisfies StageAssignment;
   });
 }
 
+/**
+ * Finest ghost resolution required by a set of stored beat coordinates: sub-beat
+ * for any non-integer endpoint, beat for an integer beat endpoint, else measure.
+ *
+ * Used when restoring a fragment for edit/review so its beat-precise stage
+ * bounds project at their own precision. Without it the active resolution stays
+ * at its default ('measure') and findStartSlot snaps an off-beat-1 stage start
+ * to the whole-measure slot — the stage renders from the bar's left edge.
+ */
+function finestBeatResolution(
+  coords: ReadonlyArray<{ beat_start: number | null; beat_end: number | null }>
+): ResolutionMode {
+  const isSubBeat = (v: number | null): boolean => v !== null && !Number.isInteger(v);
+  let rank = 0; // measure
+  for (const c of coords) {
+    if (isSubBeat(c.beat_start) || isSubBeat(c.beat_end)) return 'subbeat';
+    if (c.beat_start !== null || c.beat_end !== null) rank = Math.max(rank, 1);
+  }
+  return rank === 1 ? 'beat' : 'measure';
+}
+
 export default function ScoreViewer() {
+  const { t } = useTranslation(['score', 'common']);
   const { movementId } = useParams<{ movementId: string }>();
   const [searchParams] = useSearchParams();
   /** Source key from the ?key= query param, e.g. "G major". Null if not provided. */
   const sourceKey = searchParams.get('key');
   /** Fragment UUID from ?fragmentId= — set by the review queue to auto-open a fragment. */
   const focusFragmentId = searchParams.get('fragmentId');
-  usePageTitle('Score Viewer — Doppia');
+  usePageTitle(t('score:viewer.pageTitle'));
 
   // ── Viewer state ────────────────────────────────────────────────────────
   const [status, setStatus] = useState<ViewerStatus>('loading');
-  const [loadingLabel, setLoadingLabel] = useState('Loading score…');
+  const [loadingLabel, setLoadingLabel] = useState(() => t('score:viewer.loadingScore'));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [svgPages, setSvgPages] = useState<string[]>([]);
   const [isRerendering, setIsRerendering] = useState(false);
@@ -377,7 +465,6 @@ export default function ScoreViewer() {
   // ── Controls state ───────────────────────────────────────────────────────
   const [scale, setScale] = useState<ScalePreset>(DEFAULT_SCALE);
   const [transpose, setTranspose] = useState('');
-  const [font, setFont] = useState<string>(DEFAULT_FONT);
 
   // ── MIDI state (Step 14) ─────────────────────────────────────────────────
   /**
@@ -398,7 +485,8 @@ export default function ScoreViewer() {
    * Falls back to playbackPosition when the bar schedule is empty.
    */
   const [displayPosition, setDisplayPosition] = useState<{ bar: number; beat: number }>({
-    bar: 1, beat: 1,
+    bar: 1,
+    beat: 1,
   });
 
   // ── Refs (stable across renders, safe to read inside async callbacks) ────
@@ -417,10 +505,11 @@ export default function ScoreViewer() {
   const pageWidthRef = useRef<number>(DEFAULT_PAGE_WIDTH);
   // Ref to the .scoreContent element for width measurement.
   const scorePanelRef = useRef<HTMLDivElement | null>(null);
-  // Currently highlighted SVG elements (is-playing class). One entry per
-  // sounding note (multiple staves, chords). Cleared on stop and on each
-  // position update. Using a ref avoids React re-renders at RAF freq.
-  const highlightedElsRef = useRef<Element[]>([]);
+  // Playback caret (Step 19): the overlay element, driven imperatively, and the
+  // caret track rebuilt after each render. Using refs avoids React re-renders at
+  // RAF frequency — the caret's transform is mutated directly per frame.
+  const caretElRef = useRef<HTMLDivElement | null>(null);
+  const caretTrackRef = useRef<CaretTrack | null>(null);
   // Highlight schedule from renderToTimemap(), rebuilt after each render.
   // Sorted { timeMs, ids } entries with repeats fully expanded — the same note
   // IDs appear twice (once per pass) at different timeMs values.
@@ -431,6 +520,10 @@ export default function ScoreViewer() {
   // and beats in the denominator unit (not quarter notes), fixing all three
   // transport-bar sub-defects: pickup phase drift, repeat bar count, 6/8 beats.
   const noteInfoMapRef = useRef<Map<string, NoteInfo>>(new Map());
+  // Grace-note xml:ids from collectGraceNoteIds(), built alongside
+  // noteInfoMapRef. Excludes ornament onsets from the caret track so the
+  // caret doesn't jump ahead and back around an ornamented note (E2).
+  const graceIdsRef = useRef<Set<string>>(new Set());
   // Beat duration in ms for the denominator unit (e.g. 250 ms for an eighth
   // note at quarter=120 in a 6/8 piece). Computed from the timemap tempo and
   // MEI @meter.unit after each render. Default 500 ms = quarter note at 120 BPM.
@@ -440,6 +533,22 @@ export default function ScoreViewer() {
   // changes so we can compute beat = floor((timeMs - barStartMs) / beatDurationMs) + 1.
   // Reset to { barN: 1, startMs: 0 } when playback stops or returns to ready/idle.
   const currentBarRef = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
+  // ── Play-from-position (Step 20) ─────────────────────────────────────────
+  // The armed playback origin (ms into the whole-movement MIDI). 0 = top of the
+  // movement (default). Set by Alt-click on a measure; reset to 0 by Rewind.
+  // originMsRef mirrors it for the RAF-frequency handlePositionUpdate and the
+  // useMidiPlayback play() read, neither of which should depend on React state.
+  const [playbackOriginMs, setPlaybackOriginMs] = useState<number>(0);
+  const originMsRef = useRef<number>(0);
+  // mc → first-onset ms index over the whole-movement timemap, rebuilt with the
+  // highlight schedule after each render. Maps an Alt-clicked measure to its
+  // playback origin. Whole-movement (score viewer) only — never set in the
+  // fragment detail viewer, which keeps its Step 18 fragment-from-top playback.
+  const measureOnsetIndexRef = useRef<Map<number, number>>(new Map());
+  // True while the Alt (Option) key is held: gates the play-from-here hover
+  // affordance (data-armable on .scoreContent). Tracked globally so it clears on
+  // window blur even if the keyup is missed.
+  const [altHeld, setAltHeld] = useState(false);
 
   // ── Ghost layer + annotation session (Step 11) ───────────────────────────
   // The ghost layer and annotation session are imperative objects managed
@@ -493,6 +602,10 @@ export default function ScoreViewer() {
   // so it can be re-applied when the main bracket changes.
   const [stageAssignments, setStageAssignments] = useState<StageAssignment[]>([]);
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
+  // True while a split-handle drag is in progress — mirrored from
+  // StageBrackets so the sidebar stage list freezes its display order for
+  // the gesture (Part 8 item 4).
+  const [stageDragActive, setStageDragActive] = useState(false);
   // The schema tree for the currently active concept (or its refinement child).
   // Cached so reconcileWithNewConcept can compute brand-new default placements.
   const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
@@ -534,15 +647,19 @@ export default function ScoreViewer() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Step 5 — unmissable post-submit confirmation. Owned here (not in FormPanel)
+  // so it survives the form remount that the success reset triggers. Auto-
+  // dismisses after a generous delay and is cleared as soon as the annotator
+  // starts a new fragment; the banner is also manually dismissible.
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const submitSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Stored-fragment overlay (Component 7 Step 10) ─────────────────────────
   // Fetches all stored fragments for the current movement so the overlay can
   // project and display them.  refresh() is called after a successful submit
   // so the newly submitted fragment appears immediately.
-  const {
-    fragments: storedFragments,
-    refresh: refreshStoredFragments,
-  } = useStoredFragments(movementId);
+  const { fragments: storedFragments, refresh: refreshStoredFragments } =
+    useStoredFragments(movementId);
 
   // ── Fragment detail panel (Component 7 Step 12) ──────────────────────────
   // selectedFragmentId: UUID of the stored fragment whose detail panel is open.
@@ -570,11 +687,11 @@ export default function ScoreViewer() {
     propertyValues: PropertyFormValues;
   } | null>(null);
 
-  // ── Position update callback (Step 14.4) ─────────────────────────────────
+  // ── Position update callback (Step 14.4; caret since Step 19) ────────────
   /**
    * Called by useMidiPlayback on each animation frame. Binary-searches the
-   * timemap-derived highlight schedule for the latest onset ≤ timeMs, then
-   * applies the `.is-playing` CSS class to matching DOM elements.
+   * timemap-derived highlight schedule for the latest onset ≤ timeMs, drives the
+   * playback caret (Step 19) from the caret track, and updates the transport bar.
    *
    * The schedule is built from renderToTimemap() after each render, which
    * expands repeats correctly: both passes of a repeated section have entries
@@ -582,53 +699,60 @@ export default function ScoreViewer() {
    * at playback time.
    */
   const handlePositionUpdate = useCallback((timeMs: number) => {
-    // ── SVG note highlight ───────────────────────────────────────────────────
     const schedule = highlightScheduleRef.current;
 
-    // Clear previous highlights unconditionally so they never get stuck.
-    for (const el of highlightedElsRef.current) {
-      el.classList.remove('is-playing');
-    }
-    highlightedElsRef.current = [];
+    // Play-from-position (Step 20): when an origin is armed, useMidiPlayback
+    // shifts playback so the origin is transport time 0, making `timeMs`
+    // origin-relative. The schedule and caret track are absolute (whole
+    // movement), so add the origin back to query them. originMs = 0 (no origin /
+    // after Rewind) makes this the identity — every path below is unchanged.
+    const t = timeMs + originMsRef.current;
 
-    if (schedule.length > 0) {
-      // Binary-search for the latest onset at or before the current time.
-      let lo = 0, hi = schedule.length - 1, idx = -1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (schedule[mid].timeMs <= timeMs) { idx = mid; lo = mid + 1; }
-        else hi = mid - 1;
-      }
-
-      if (idx >= 0) {
-        for (const id of schedule[idx].ids) {
-          const el = document.getElementById(id);
-          if (el) {
-            el.classList.add('is-playing');
-            highlightedElsRef.current.push(el);
-          }
-        }
-      }
+    // ── Playback caret (Step 19) ─────────────────────────────────────────────
+    // Drive the caret overlay imperatively from the caret track. resolveCaret
+    // interpolates x between onsets within a system and jumps at system breaks /
+    // repeat seams. Hidden before the first onset and when no track is built.
+    const caretEl = caretElRef.current;
+    if (caretEl) {
+      const placement = caretTrackRef.current
+        ? resolveCaret(caretTrackRef.current, t, CARET_INTERPOLATE)
+        : null;
+      if (placement) applyCaretPlacement(caretEl, placement);
+      else hideCaretEl(caretEl);
     }
 
     // ── Transport bar display (Step 18) ──────────────────────────────────────
-    // Look up the first highlighted element's id in noteInfoMapRef to get the
+    // Look up the current onset's first note id in noteInfoMapRef to get the
     // MEI @n bar number and the @tstamp-derived beat (in the time signature's
     // denominator unit). This fixes all three transport-bar sub-defects:
     //
     //   1. Pickup bars: barN = 0 (from MEI @n="0"), beats renumbered from 1.
     //      Tone.js calls the pickup "bar 1" and makes every subsequent bar wrong.
     //
-    //   2. Repeats: Step 17 stripped -rendN so the same element is highlighted
-    //      on both passes; the map returns the same barN on both passes.
+    //   2. Repeats: Step 17 stripped -rendN so the same id resolves on both
+    //      passes; the map returns the same barN on both passes.
     //      Tone.js would count linearly (bar 9, 10 … instead of 1, 2 …).
     //
     //   3. 6/8 beats: MEI @tstamp is in eighth-note units, so beat 1–6 are
     //      returned directly. Tone.js counts only 3 quarter-note beats.
     //
     // setDisplayPosition is stable (useState setter) — no extra deps needed.
-    if (highlightedElsRef.current.length > 0) {
-      const info = noteInfoMapRef.current.get(highlightedElsRef.current[0].id);
+    if (schedule.length > 0) {
+      // Binary-search for the latest onset at or before the current time
+      // (absolute, origin-adjusted).
+      let lo = 0,
+        hi = schedule.length - 1,
+        idx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (schedule[mid].timeMs <= t) {
+          idx = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+
+      const firstId = idx >= 0 ? schedule[idx].ids[0] : undefined;
+      const info = firstId ? noteInfoMapRef.current.get(firstId) : undefined;
       if (info) {
         if (info.beat > 0) {
           // @tstamp present — use directly (already in denominator units).
@@ -637,12 +761,13 @@ export default function ScoreViewer() {
           // @tstamp absent (e.g. OpenScore MEI) — compute beat from timing.
           // When the bar changes, record the new bar and its start time.
           if (info.barN !== currentBarRef.current.barN) {
-            currentBarRef.current = { barN: info.barN, startMs: timeMs };
+            currentBarRef.current = { barN: info.barN, startMs: t };
           }
-          const elapsed = timeMs - currentBarRef.current.startMs;
-          const beat = beatDurationMsRef.current > 0
-            ? Math.max(1, Math.floor(elapsed / beatDurationMsRef.current) + 1)
-            : 1;
+          const elapsed = t - currentBarRef.current.startMs;
+          const beat =
+            beatDurationMsRef.current > 0
+              ? Math.max(1, Math.floor(elapsed / beatDurationMsRef.current) + 1)
+              : 1;
           setDisplayPosition({ bar: info.barN, beat });
         }
       }
@@ -656,19 +781,148 @@ export default function ScoreViewer() {
     play,
     pause,
     stop,
-  } = useMidiPlayback(midiBase64, handlePositionUpdate);
+  } = useMidiPlayback(midiBase64, handlePositionUpdate, { originMs: playbackOriginMs });
+
+  // Keep originMsRef in sync for the RAF handler and the hook's play() read.
+  useEffect(() => {
+    originMsRef.current = playbackOriginMs;
+  }, [playbackOriginMs]);
+
+  // Track the Alt (Option) key for the play-from-here hover affordance (Step 20).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') setAltHeld(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') setAltHeld(false);
+    };
+    const onBlur = () => setAltHeld(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  // ── Play-from-position helpers (Step 20) ─────────────────────────────────
 
   /**
-   * Stop playback and also clear the SVG highlight immediately.
-   * Wraps stop() because the hook's stop() has no access to highlightedElsRef.
+   * Resolve the transport-bar display (MEI @n bar + beat) for an absolute
+   * whole-movement time, by the same schedule/noteInfo lookup the RAF handler
+   * uses. Returns 1:1 before the first onset or when the schedule is empty.
+   */
+  const displayPositionForAbsMs = useCallback((absMs: number): { bar: number; beat: number } => {
+    const schedule = highlightScheduleRef.current;
+    if (schedule.length === 0 || absMs <= 0) return { bar: 1, beat: 1 };
+    let lo = 0,
+      hi = schedule.length - 1,
+      idx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (schedule[mid].timeMs <= absMs) {
+        idx = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    const firstId = idx >= 0 ? schedule[idx].ids[0] : undefined;
+    const info = firstId ? noteInfoMapRef.current.get(firstId) : undefined;
+    if (info) return { bar: info.barN, beat: info.beat > 0 ? info.beat : 1 };
+    return { bar: 1, beat: 1 };
+  }, []);
+
+  /**
+   * Park a static caret at the armed origin (no playback). Hidden when the
+   * origin is 0 (top of movement) or no caret track is built yet.
+   */
+  const parkCaretAtOrigin = useCallback(() => {
+    const el = caretElRef.current;
+    if (!el) return;
+    const o = originMsRef.current;
+    const track = caretTrackRef.current;
+    const placement = o > 0 && track ? resolveCaret(track, o, CARET_INTERPOLATE) : null;
+    if (placement) applyCaretPlacement(el, placement);
+    else hideCaretEl(el);
+  }, []);
+
+  /**
+   * Stop playback and return the caret to the armed origin (Step 20: Stop →
+   * origin, for easy replay-from-here). Hides the caret when origin is 0.
+   * Wraps the hook's stop() because it has no access to caretElRef / origin.
    */
   const handleStop = useCallback(() => {
     stop();
-    for (const el of highlightedElsRef.current) {
-      el.classList.remove('is-playing');
+    parkCaretAtOrigin();
+  }, [stop, parkCaretAtOrigin]);
+
+  /**
+   * Arm a measure as the playback origin (Step 20). Called on Alt-click of a
+   * measure in either mode. Sets the origin, parks a static caret there, and
+   * updates the transport readout — but does not start playback (set-then-play).
+   * If playback is in progress it is stopped first so the new origin takes
+   * effect cleanly (the transport resets and the offset query stays consistent).
+   */
+  const onPlayFromMeasure = useCallback(
+    (mc: number) => {
+      const ms = measureOnsetIndexRef.current.get(mc);
+      if (ms === undefined) return;
+      if (playbackStatus === 'playing' || playbackStatus === 'paused') stop();
+      originMsRef.current = ms;
+      setPlaybackOriginMs(ms);
+      const disp = displayPositionForAbsMs(ms);
+      setDisplayPosition(disp);
+      currentBarRef.current = { barN: disp.bar, startMs: ms };
+      parkCaretAtOrigin();
+    },
+    [playbackStatus, stop, displayPositionForAbsMs, parkCaretAtOrigin]
+  );
+  // Measure-key entry point used by the annotator (tag mode) and the view-mode
+  // controller: resolve a measure ghost key → mc → arm the origin. Held in a ref
+  // so those long-lived imperative objects always call the latest closure.
+  const playFromMeasureKey = useCallback(
+    (measureKey: string) => {
+      const mc = mcIndexRef.current?.get(measureKey);
+      if (mc !== undefined) onPlayFromMeasure(mc);
+    },
+    [onPlayFromMeasure]
+  );
+  const playFromMeasureKeyRef = useRef(playFromMeasureKey);
+  useEffect(() => {
+    playFromMeasureKeyRef.current = playFromMeasureKey;
+  }, [playFromMeasureKey]);
+
+  /**
+   * Rewind the playback origin to the top of the movement (Step 20). Resets the
+   * caret and transport readout. Disabled while playing or already at the top.
+   */
+  const handleRewind = useCallback(() => {
+    originMsRef.current = 0;
+    setPlaybackOriginMs(0);
+    hideCaretEl(caretElRef.current);
+    setDisplayPosition({ bar: 1, beat: 1 });
+    currentBarRef.current = { barN: 1, startMs: 0 };
+  }, []);
+
+  // ── Caret track (Step 19) ────────────────────────────────────────────────
+  // Rebuild the caret track once the geometry (ghostLayer) and the highlight
+  // schedule are both ready — and again on every re-render (scale/transpose/
+  // resize change both signals), so the caret survives Verovio re-renders that
+  // discard overlay geometry. ghostLayer is set after the SVG is laid out;
+  // midiBase64 is set right after the schedule is built.
+  useEffect(() => {
+    const container = scorePanelRef.current;
+    if (!container || highlightScheduleRef.current.length === 0) {
+      caretTrackRef.current = null;
+      return;
     }
-    highlightedElsRef.current = [];
-  }, [stop]);
+    caretTrackRef.current = buildCaretTrack(
+      container,
+      highlightScheduleRef.current,
+      graceIdsRef.current
+    );
+  }, [ghostLayer, midiBase64]);
 
   // ── displayPosition sync (Step 18) ──────────────────────────────────────
 
@@ -686,12 +940,24 @@ export default function ScoreViewer() {
   // but the bar schedule is cleared on re-render so 1:1 is safe as default).
   useEffect(() => {
     if (playbackStatus === 'ready' || playbackStatus === 'idle') {
-      setDisplayPosition({ bar: 1, beat: 1 });
+      // Step 20: return to the armed origin (not 1:1) so Stop shows the
+      // play-from-here point; 1:1 when no origin is armed.
+      const o = originMsRef.current;
+      const disp = o > 0 ? displayPositionForAbsMs(o) : { bar: 1, beat: 1 };
+      setDisplayPosition(disp);
       // Also reset currentBarRef so the first bar after resuming gets a fresh
       // startMs rather than inheriting a stale value from a previous playback.
-      currentBarRef.current = { barN: 1, startMs: 0 };
+      currentBarRef.current = { barN: disp.bar, startMs: o };
     }
-  }, [playbackStatus]);
+  }, [playbackStatus, displayPositionForAbsMs]);
+
+  // Reset the play-from-position origin whenever the MIDI changes (score load,
+  // transpose, scale/font, resize). A stale origin must never survive a
+  // re-render whose timemap/geometry differ; the user re-arms on the new render.
+  useEffect(() => {
+    originMsRef.current = 0;
+    setPlaybackOriginMs(0);
+  }, [midiBase64]);
 
   // ── Re-render (triggered by options changes or container resize) ──────────
   /**
@@ -729,7 +995,7 @@ export default function ScoreViewer() {
             (svg) => {
               collectedPages.push(svg);
             },
-            () => {},
+            () => {}
           );
           // Atomically swap SVG pages once all are collected.
           setSvgPages([...collectedPages]);
@@ -739,17 +1005,21 @@ export default function ScoreViewer() {
           // which is unchanged by scale/transpose/font re-renders.
           const midi = await renderMidi(tkRef.current);
           highlightScheduleRef.current = buildHighlightSchedule(tkRef.current);
+          // mc → onset index for play-from-position (Step 20), rebuilt with the
+          // schedule so an armed origin always matches the current timemap.
+          measureOnsetIndexRef.current = buildMeasureOnsetIndex(
+            tkRef.current,
+            meiTextRef.current ?? ''
+          );
           // Recompute beat duration — transposition may change tempo in the timemap.
           const tempo = getTimemapTempo(tkRef.current);
           const meterUnit = parseMeiMeterUnit(meiTextRef.current ?? '');
           beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
           setMidiBase64(midi);
 
-          // Clear stale highlights — SVG element IDs may differ in new render.
-          for (const el of highlightedElsRef.current) {
-            el.classList.remove('is-playing');
-          }
-          highlightedElsRef.current = [];
+          // Hide the caret — its track is rebuilt against the new geometry by
+          // the caret-track effect (keyed on ghostLayer + midiBase64).
+          hideCaretEl(caretElRef.current);
         } catch {
           // Keep existing pages on render failure.
         } finally {
@@ -757,7 +1027,7 @@ export default function ScoreViewer() {
         }
       }, 200);
     },
-    [],
+    []
   );
 
   // ── ResizeObserver: re-render when the score panel width changes ─────────
@@ -803,12 +1073,24 @@ export default function ScoreViewer() {
   // Show a brief inline note when pre-population auto-drops the resolution.
   const showGridNote = useCallback((grid: ResolutionMode, stageCount: number) => {
     if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
-    const label = grid === 'beat' ? 'beat' : grid === 'subbeat' ? 'sub-beat' : 'measure';
-    setGridAutoSwitchNote(`Switched to ${label} resolution to fit ${stageCount} stage${stageCount === 1 ? '' : 's'}`);
+    const label =
+      grid === 'beat'
+        ? t('score:viewer.resolutionLabel.beat')
+        : grid === 'subbeat'
+          ? t('score:viewer.resolutionLabel.subbeat')
+          : t('score:viewer.resolutionLabel.measure');
+    setGridAutoSwitchNote(
+      t('score:viewer.gridAutoSwitch', { label, count: stageCount })
+    );
     gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
-  }, []);
+  }, [t]);
   // Clear the timer on unmount.
-  useEffect(() => () => { if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current); }, []);
+  useEffect(
+    () => () => {
+      if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
+    },
+    []
+  );
 
   // ── Stage handlers (Step 14) ─────────────────────────────────────────────
 
@@ -824,7 +1106,7 @@ export default function ScoreViewer() {
       // Clear sub-part tags and reset all SubPartForms whenever the parent
       // concept changes — stage structure may be entirely different.
       setSubPartTags({});
-      setSubPartResetKey(k => k + 1);
+      setSubPartResetKey((k) => k + 1);
 
       if (!concept || !schemaTree || schemaTree.stages.length === 0) {
         setStageAssignments([]);
@@ -838,8 +1120,21 @@ export default function ScoreViewer() {
       const editSubParts = editSubPartsRef.current;
       if (editSubParts !== null) {
         editSubPartsRef.current = null; // consume
-        setStageAssignments(buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages));
+        setStageAssignments(
+          buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages, mcIndexRef.current)
+        );
         setStageGridBlocked(false);
+        // Raise the active resolution to the finest grid the restored fragment
+        // needs, so beat/sub-beat stage bounds render at their own precision.
+        // (The auto-pre-populate branch below does the same for fresh stages.)
+        const editFragment = editPrefillRef.current;
+        const grid = finestBeatResolution(
+          editFragment ? [editFragment, ...editSubParts] : editSubParts
+        );
+        if ((GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+          resolutionRef.current = grid;
+          setResolution(grid);
+        }
         return;
       }
 
@@ -850,7 +1145,9 @@ export default function ScoreViewer() {
           return;
         }
         const { assignments, grid, blocked } = computeAutoPrePopulate(
-          schemaTree.stages, selectionRange, ghostLayerRef.current,
+          schemaTree.stages,
+          selectionRange,
+          ghostLayerRef.current
         );
         setStageAssignments(assignments);
         setStageGridBlocked(blocked);
@@ -861,12 +1158,12 @@ export default function ScoreViewer() {
         }
       } else {
         setStageGridBlocked(false);
-        setStageAssignments(prev =>
-          reconcileWithNewConcept(prev, schemaTree.stages, selectionRange),
+        setStageAssignments((prev) =>
+          reconcileWithNewConcept(prev, schemaTree.stages, selectionRange)
         );
       }
     },
-    [selectionRange, showGridNote],
+    [selectionRange, showGridNote]
   );
 
   /**
@@ -880,7 +1177,7 @@ export default function ScoreViewer() {
       // A refinement change can alter the stage structure, so clear sub-part
       // tags and reset all SubPartForms to avoid stale concept/property data.
       setSubPartTags({});
-      setSubPartResetKey(k => k + 1);
+      setSubPartResetKey((k) => k + 1);
 
       if (!option) {
         // No refinement selected — fall back to the parent concept's stages.
@@ -891,8 +1188,8 @@ export default function ScoreViewer() {
           return;
         }
         setStageGridBlocked(false);
-        setStageAssignments(prev =>
-          reconcileWithNewConcept(prev, parentTree.stages, selectionRange),
+        setStageAssignments((prev) =>
+          reconcileWithNewConcept(prev, parentTree.stages, selectionRange)
         );
         return;
       }
@@ -912,7 +1209,9 @@ export default function ScoreViewer() {
             return;
           }
           const { assignments, grid, blocked } = computeAutoPrePopulate(
-            childTree.stages, selectionRange, ghostLayerRef.current,
+            childTree.stages,
+            selectionRange,
+            ghostLayerRef.current
           );
           setStageAssignments(assignments);
           setStageGridBlocked(blocked);
@@ -923,15 +1222,15 @@ export default function ScoreViewer() {
           }
         } else {
           setStageGridBlocked(false);
-          setStageAssignments(prev =>
-            reconcileWithNewConcept(prev, childTree.stages, selectionRange),
+          setStageAssignments((prev) =>
+            reconcileWithNewConcept(prev, childTree.stages, selectionRange)
           );
         }
       } catch {
         // Schema fetch failure: keep existing assignments unchanged.
       }
     },
-    [selectionRange, showGridNote],
+    [selectionRange, showGridNote]
   );
 
   /** Called by StageBrackets on every split handle drag tick. */
@@ -946,16 +1245,13 @@ export default function ScoreViewer() {
 
   /** Called by StageList absent toggle. */
   const handleToggleAbsent = useCallback((stageId: string, absent: boolean) => {
-    setStageAssignments(prev => toggleStageAbsent(prev, stageId, absent));
+    setStageAssignments((prev) => toggleStageAbsent(prev, stageId, absent));
   }, []);
 
   /** Called by SubPartForm when a stage's sub-part tag is created or updated. */
-  const handleSubPartTagUpdate = useCallback(
-    (stageId: string, tag: SubPartTag | null) => {
-      setSubPartTags(prev => ({ ...prev, [stageId]: tag }));
-    },
-    [],
-  );
+  const handleSubPartTagUpdate = useCallback((stageId: string, tag: SubPartTag | null) => {
+    setSubPartTags((prev) => ({ ...prev, [stageId]: tag }));
+  }, []);
 
   // ── Delete fragment handler (G1.2) ──────────────────────────────────────
   /**
@@ -969,7 +1265,18 @@ export default function ScoreViewer() {
    * Any previously saved draft persists on the backend (no DELETE request is
    * made); it becomes an orphaned draft until a future delete endpoint removes it.
    */
-  const handleDeleteFragment = useCallback(() => {
+  /**
+   * Return the annotation surface to its initial blank state: clears the
+   * selection, all four concurrent flags, stage assignments, sub-part tags,
+   * prose annotation, and remounts FormPanel to a blank concept/property
+   * state. Shared by Delete (G1.2) and the post-submit reset (Step 5).
+   *
+   * Does not touch the backend: Delete leaves any saved draft orphaned, and
+   * the submit path has already persisted the fragment by the time it calls
+   * this. submitSuccess is intentionally left untouched so the caller controls
+   * the confirmation banner independently of the reset.
+   */
+  const resetAnnotation = useCallback(() => {
     annotationSessionRef.current?.reset();
     setSelectionRange(null);
     setCommittedSelection(null);
@@ -979,12 +1286,38 @@ export default function ScoreViewer() {
     setGridAutoSwitchNote(null);
     setActiveStageId(null);
     setSubPartTags({});
-    setSubPartResetKey(k => k + 1);
+    setSubPartResetKey((k) => k + 1);
     setProseAnnotation('');
     setFragmentDraftId(null);
     activeSchemaTreeRef.current = null;
-    setFragmentResetKey(k => k + 1);
+    setFragmentResetKey((k) => k + 1);
   }, []);
+
+  const handleDeleteFragment = useCallback(() => {
+    resetAnnotation();
+  }, [resetAnnotation]);
+
+  // ── Post-submit confirmation (Step 5) ──────────────────────────────────────
+  /** Raise the success banner and arm its auto-dismiss timer. */
+  const showSubmitSuccess = useCallback(() => {
+    if (submitSuccessTimerRef.current) clearTimeout(submitSuccessTimerRef.current);
+    setSubmitSuccess(true);
+    submitSuccessTimerRef.current = setTimeout(() => setSubmitSuccess(false), 6000);
+  }, []);
+
+  // Clear the pending auto-dismiss timer on unmount.
+  useEffect(
+    () => () => {
+      if (submitSuccessTimerRef.current) clearTimeout(submitSuccessTimerRef.current);
+    },
+    []
+  );
+
+  // Dismiss the confirmation the moment the annotator starts a new fragment —
+  // the banner has served its purpose once a fresh selection exists.
+  useEffect(() => {
+    if (selectionRange && submitSuccess) setSubmitSuccess(false);
+  }, [selectionRange, submitSuccess]);
 
   // ── Fragment detail panel handlers (Component 7 Step 12) ────────────────
 
@@ -1006,7 +1339,7 @@ export default function ScoreViewer() {
       editSubPartsRef.current = fragment.sub_parts;
 
       // Build a ConceptSearchHit from the primary concept tag.
-      const primaryTag = fragment.concept_tags.find(t => t.is_primary);
+      const primaryTag = fragment.concept_tags.find((t) => t.is_primary);
       if (!primaryTag) return;
       const concept: ConceptSearchHit = {
         id: primaryTag.concept_id,
@@ -1033,16 +1366,16 @@ export default function ScoreViewer() {
       setEditPrefillFormData({ concept, propertyValues });
       setProseAnnotation(fragment.prose_annotation ?? '');
       // Remount FormPanel so it consumes the editPrefill on mount.
-      setFragmentResetKey(k => k + 1);
+      setFragmentResetKey((k) => k + 1);
 
       // Trigger session rebuild to seed the selection on the score.
       if (tagMode === 'tag') {
-        setSessionRebuildKey(k => k + 1);
+        setSessionRebuildKey((k) => k + 1);
       } else {
         setTagMode('tag');
       }
     },
-    [tagMode],
+    [tagMode]
   );
 
   /**
@@ -1056,7 +1389,7 @@ export default function ScoreViewer() {
       setSelectedFragmentId(null);
       refreshStoredFragments();
     },
-    [refreshStoredFragments],
+    [refreshStoredFragments]
   );
 
   /**
@@ -1069,7 +1402,7 @@ export default function ScoreViewer() {
       void fragmentId;
       refreshStoredFragments();
     },
-    [refreshStoredFragments],
+    [refreshStoredFragments]
   );
 
   // ── Submission handlers (Step 18) ────────────────────────────────────────
@@ -1079,17 +1412,14 @@ export default function ScoreViewer() {
    * Falls back to the plain barN key when no ending context is needed, which
    * covers the vast majority of sub-part bounds (within the main selection).
    */
-  const resolveBarToMc = useCallback(
-    (barN: number): number | null => {
-      const idx = mcIndexRef.current;
-      if (!idx) return null;
-      // Try with no ending context first; sub-parts inherit the parent's
-      // ending context indirectly through their bar range.
-      const mc = idx.get(measureGhostKey(barN, null));
-      return mc ?? null;
-    },
-    [],
-  );
+  const resolveBarToMc = useCallback((barN: number): number | null => {
+    const idx = mcIndexRef.current;
+    if (!idx) return null;
+    // Try with no ending context first; sub-parts inherit the parent's
+    // ending context indirectly through their bar range.
+    const mc = idx.get(measureGhostKey(barN, null));
+    return mc ?? null;
+  }, []);
 
   /**
    * Build the mutable fragment fields from the current UI state.
@@ -1104,7 +1434,7 @@ export default function ScoreViewer() {
     (formData: FormSubmitData, meiText: string): FragmentUpdatePayload | null => {
       if (!committedSelection) return null;
 
-      const key   = parseMeiKey(meiText);
+      const key = parseMeiKey(meiText);
       const meter = parseMeiMeter(meiText);
 
       // Serialize property values: omit nulls, booleans become "true"/"false".
@@ -1124,8 +1454,17 @@ export default function ScoreViewer() {
       for (const a of stageAssignments) {
         if (a.absent || a.orphaned || a.error || !a.bounds) continue;
 
-        const mcStart = resolveBarToMc(a.bounds.barStart);
-        const mcEnd   = resolveBarToMc(a.bounds.barEnd);
+        // mc by physical measure key when the bounds carry one (§6A.1) — bar
+        // numbers are ambiguous across endings, split measures, and section
+        // resets. barN lookup remains the fallback for restored bounds.
+        const mcStart =
+          (a.bounds.keyStart !== undefined
+            ? (mcIndexRef.current?.get(a.bounds.keyStart) ?? null)
+            : null) ?? resolveBarToMc(a.bounds.barStart);
+        const mcEnd =
+          (a.bounds.keyEnd !== undefined
+            ? (mcIndexRef.current?.get(a.bounds.keyEnd) ?? null)
+            : null) ?? resolveBarToMc(a.bounds.barEnd);
         if (mcStart === null || mcEnd === null) continue;
 
         const stageProps: Record<string, string | string[]> = {};
@@ -1137,24 +1476,34 @@ export default function ScoreViewer() {
           }
         }
 
+        // ADR-005 beat pair: both null (measure-level) or both non-null. A
+        // beat-precise stage that is measure-aligned on one side has its null
+        // side filled with the measure boundary so the stored extent matches
+        // what was tagged; a cross-bar pair (beatStart may exceed beatEnd, beats
+        // being 1-indexed per measure) is preserved. See normalizeStageBeats.
+        const { beat_start, beat_end } = normalizeStageBeats(
+          a.bounds.beatStart,
+          a.bounds.beatEnd,
+          a.bounds.barStart,
+          a.bounds.barEnd,
+          measureExclusiveEndBeat(ghostLayerRef.current, a.bounds.keyEnd, meiText)
+        );
+
         subParts.push({
-          bar_start:      a.bounds.barStart,
-          bar_end:        a.bounds.barEnd,
-          mc_start:       mcStart,
-          mc_end:         mcEnd,
-          // ADR-005: both beats null (measure-level) or both non-null with
-          // beatStart < beatEnd.  Normalize any invalid pair to both-null here
-          // so backend validation never receives an asymmetric or inverted pair.
-          beat_start:     (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatStart : null,
-          beat_end:       (a.bounds.beatStart !== null && a.bounds.beatEnd !== null && a.bounds.beatStart < a.bounds.beatEnd) ? a.bounds.beatEnd   : null,
+          bar_start: a.bounds.barStart,
+          bar_end: a.bounds.barEnd,
+          mc_start: mcStart,
+          mc_end: mcEnd,
+          beat_start,
+          beat_end,
           repeat_context: committedSelection.repeat_context,
           summary: {
-            version:            1,
+            version: 1,
             key,
             meter,
-            music21_version:    null,
-            concepts:           [a.stageId],
-            properties:         stageProps,
+            music21_version: null,
+            concepts: [a.stageId],
+            properties: stageProps,
             concept_extensions: {},
           },
           concept_tags: [{ concept_id: a.stageId, is_primary: true }],
@@ -1162,28 +1511,28 @@ export default function ScoreViewer() {
       }
 
       return {
-        bar_start:       committedSelection.bar_start,
-        bar_end:         committedSelection.bar_end,
-        mc_start:        committedSelection.mc_start,
-        mc_end:          committedSelection.mc_end,
-        beat_start:      committedSelection.beat_start,
-        beat_end:        committedSelection.beat_end,
-        repeat_context:  committedSelection.repeat_context,
+        bar_start: committedSelection.bar_start,
+        bar_end: committedSelection.bar_end,
+        mc_start: committedSelection.mc_start,
+        mc_end: committedSelection.mc_end,
+        beat_start: committedSelection.beat_start,
+        beat_end: committedSelection.beat_end,
+        repeat_context: committedSelection.repeat_context,
         summary: {
-          version:            1,
+          version: 1,
           key,
           meter,
-          music21_version:    null,
-          concepts:           [formData.conceptId],
+          music21_version: null,
+          concepts: [formData.conceptId],
           properties,
           concept_extensions: {},
         },
         prose_annotation: proseAnnotation || null,
         concept_tags: [{ concept_id: formData.conceptId, is_primary: true }],
-        sub_parts:       subParts,
+        sub_parts: subParts,
       };
     },
-    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc],
+    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc]
   );
 
   /** Save the current annotation as a draft (incompleteness allowed). */
@@ -1197,7 +1546,7 @@ export default function ScoreViewer() {
 
       try {
         const fields = buildPayload(formData, mei);
-        if (!fields) throw new Error('Incomplete annotation — cannot save yet.');
+        if (!fields) throw new Error(t('score:viewer.incompleteSave'));
 
         if (fragmentDraftId) {
           await updateFragment(fragmentDraftId, fields);
@@ -1206,12 +1555,12 @@ export default function ScoreViewer() {
           setFragmentDraftId(response.id);
         }
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : 'Failed to save draft.');
+        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
       } finally {
         setIsSavingDraft(false);
       }
     },
-    [committedSelection, movementId, fragmentDraftId, buildPayload],
+    [committedSelection, movementId, fragmentDraftId, buildPayload, t]
   );
 
   /**
@@ -1229,7 +1578,7 @@ export default function ScoreViewer() {
 
       try {
         const fields = buildPayload(formData, mei);
-        if (!fields) throw new Error('Incomplete annotation — cannot submit.');
+        if (!fields) throw new Error(t('score:viewer.incompleteSubmit'));
 
         let draftId = fragmentDraftId;
         if (draftId) {
@@ -1241,19 +1590,32 @@ export default function ScoreViewer() {
         }
 
         await submitFragment(draftId);
-        // Reset draft ID on success — the submitted fragment is immutable
-        // until a reviewer rejects it; a new annotation starts clean.
-        setFragmentDraftId(null);
         // Refresh stored-fragment overlay so the newly submitted fragment
         // appears immediately (Component 7 Step 10).
         refreshStoredFragments();
+        // Step 5 — Submit returns the surface to its initial state (form and
+        // ghosts both cleared; the submitted fragment is immutable until a
+        // reviewer acts) and raises an unmissable confirmation. This replaces
+        // the old "draft saved" flash that left the annotator unsure whether
+        // the submission landed. resetAnnotation clears fragmentDraftId too.
+        resetAnnotation();
+        showSubmitSuccess();
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : 'Failed to submit.');
+        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.submitError'));
       } finally {
         setIsSubmitting(false);
       }
     },
-    [committedSelection, movementId, fragmentDraftId, buildPayload, refreshStoredFragments],
+    [
+      committedSelection,
+      movementId,
+      fragmentDraftId,
+      buildPayload,
+      refreshStoredFragments,
+      resetAnnotation,
+      showSubmitSuccess,
+      t,
+    ]
   );
 
   // Mirror stageAssignments into a ref so callbacks can read .length without
@@ -1285,7 +1647,9 @@ export default function ScoreViewer() {
       // First selection after concept chosen, or retry after a blocked selection
       // was extended — attempt auto-grid pre-population.
       const { assignments, grid, blocked } = computeAutoPrePopulate(
-        stages, selectionRange, ghostLayerRef.current,
+        stages,
+        selectionRange,
+        ghostLayerRef.current
       );
       setStageAssignments(assignments);
       setStageGridBlocked(blocked);
@@ -1297,32 +1661,16 @@ export default function ScoreViewer() {
     } else {
       if (stageAssignmentsRef.current.length === 0) return;
 
-      // Component 7 Step 3 — hybrid resize response.
-      // Collect beat/sub-beat positions within the new selection for the grid
-      // auto-drop (same approach as computeAutoPrePopulate in Step 2).
-      const beatPositions: BeatSlot[] = [];
-      const subBeatPositions: BeatSlot[] = [];
-      if (ghostLayerRef.current) {
-        for (const entry of ghostLayerRef.current.beatIndex.values()) {
-          if (_inSelectionBounds(entry, selectionRange)) {
-            beatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
-          }
-        }
-        beatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
-        for (const entry of ghostLayerRef.current.subBeatIndex.values()) {
-          if (_inSelectionBounds(entry, selectionRange)) {
-            subBeatPositions.push({ barN: entry.barN, beatFloat: entry.beatFloat });
-          }
-        }
-        subBeatPositions.sort((a, b) => a.barN !== b.barN ? a.barN - b.barN : a.beatFloat - b.beatFloat);
-      }
-
+      // Component 9 Step 4 — hybrid resize response on the stage layout
+      // frame (§6A.5): the new selection's slot list is rebuilt from the
+      // committed state, confirmed boundaries keep their surviving slots,
+      // unconfirmed runs redistribute by weight, and the frame's outer edges
+      // are the new selection's exact endpoints (I7).
       const { assignments, droppedGrid, blocked } = respondToMainResize(
         stageAssignmentsRef.current,
         selectionRange,
         resolutionRef.current,
-        beatPositions,
-        subBeatPositions,
+        ghostLayerRef.current
       );
 
       setStageAssignments(assignments);
@@ -1331,7 +1679,7 @@ export default function ScoreViewer() {
       if (!blocked && droppedGrid && droppedGrid !== resolutionRef.current) {
         resolutionRef.current = droppedGrid;
         setResolution(droppedGrid);
-        const total = assignments.filter(a => !a.absent && !a.orphaned).length;
+        const total = assignments.filter((a) => !a.absent && !a.orphaned).length;
         showGridNote(droppedGrid, total);
       }
     }
@@ -1367,13 +1715,13 @@ export default function ScoreViewer() {
       return;
     }
 
-    const mei       = meiTextRef.current;
+    const mei = meiTextRef.current;
     const container = scorePanelRef.current;
 
     // Determine whether this rebuild is a re-render of the same score
     // (same movementId AND same tagMode → SVG-only change) or a context
     // change (new score, or tagging mode entered/exited).
-    const scoreKey      = `${movementId ?? ''}:${tagMode}`;
+    const scoreKey = `${movementId ?? ''}:${tagMode}`;
     const isSameContext = prevScoreKeyRef.current === scoreKey;
     prevScoreKeyRef.current = scoreKey;
 
@@ -1393,9 +1741,9 @@ export default function ScoreViewer() {
     // annotationFlags) are captured at the render that triggered this effect
     // and are unaffected by cleanup — they remain the committed selection until
     // setSelectionRange(null) is explicitly called.
-    const hadFragment     = annotationFlags.fragmentSet;
-    const prevSelection   = selectionRange;
-    const prevFlags       = annotationFlags;
+    const hadFragment = annotationFlags.fragmentSet;
+    const prevSelection = selectionRange;
+    const prevFlags = annotationFlags;
     // Edit flow always forces a full reset so FormPanel starts clean.
     // The new session is then seeded with the stored fragment's selection.
     const shouldReproject = editFragment === null && isSameContext && hadFragment;
@@ -1405,8 +1753,8 @@ export default function ScoreViewer() {
     ghostLayerRef.current?.destroy();
     harmonyOverlayRef.current?.destroy();
     annotationSessionRef.current = null;
-    ghostLayerRef.current        = null;
-    harmonyOverlayRef.current    = null;
+    ghostLayerRef.current = null;
+    harmonyOverlayRef.current = null;
 
     if (!shouldReproject) {
       // Full reset — new score, tagMode change, no committed fragment, or edit.
@@ -1415,13 +1763,15 @@ export default function ScoreViewer() {
       setSelectionRange(null);
       setCommittedSelection(null);
       setAnnotationFlags({
-        fragmentSet: false, conceptSet: false,
-        stagesComplete: false, propertiesComplete: false,
+        fragmentSet: false,
+        conceptSet: false,
+        stagesComplete: false,
+        propertiesComplete: false,
       });
       setStageAssignments([]);
       setActiveStageId(null);
       setSubPartTags({});
-      setSubPartResetKey(k => k + 1);
+      setSubPartResetKey((k) => k + 1);
       // Edit flow: set fragmentDraftId to the stored fragment's id so subsequent
       // saves PATCH the existing record rather than creating a duplicate.
       if (editFragment !== null) {
@@ -1450,15 +1800,25 @@ export default function ScoreViewer() {
     const mcIdx = buildMcIndex(mei);
     mcIndexRef.current = mcIdx;
 
+    // View-mode play-from-position controller cleanup (Step 20), if attached.
+    let viewModeCleanup: (() => void) | null = null;
+
     // Create the annotation session only in tag mode. In view mode the ghost
-    // layer is built but all layers keep pointer-events: none (their initial
-    // state), so the score remains fully interactive for reading and MIDI
-    // playback with no selection affordances.
+    // layer is built but the selection layers keep pointer-events: none, so the
+    // score stays interactive for reading and MIDI playback with no selection
+    // affordances — except for the Alt-click play-from-position handler below.
     if (tagMode === 'tag') {
-      const barriers    = buildRepeatBarriers(mei);
+      // ADR-025: barriers are D.C./D.S. directives only; volta gates and
+      // effective-range exclusions come from the MEI-derived volta index.
+      const barriers = buildDirectiveBarriers(mei);
+      const volta = buildVoltaIndex(mei);
       const sessionOpts: AnnotationSessionOptions = {
-        closeRepeatMeasures: barriers,
+        barrierMeasures: barriers,
+        voltaIndex: volta,
         resolution: resolutionRef.current,
+        // Step 20: Alt-click arms play-from-position (via the stable ref) instead
+        // of starting a selection — same gesture as view mode.
+        onPlayFromMeasure: (key) => playFromMeasureKeyRef.current(key),
       };
 
       // Seed the session's initial selection either from an edit prefill
@@ -1466,24 +1826,35 @@ export default function ScoreViewer() {
       if (editFragment !== null) {
         // Edit flow: restore the stored fragment's bar/beat selection on the
         // score so the bracket appears immediately when FormPanel mounts.
+        // The effective key list is reconstructed from the stored machine
+        // interval (mc is exact where @n values repeat — §6A.1).
+        const repeatContext = editFragment.repeat_context as SelectionRange['repeatContext'];
         sessionOpts.initialSelection = {
-          barStart:      editFragment.bar_start,
-          barEnd:        editFragment.bar_end,
-          beatStart:     editFragment.beat_start,
-          beatEnd:       editFragment.beat_end,
-          repeatContext: editFragment.repeat_context as SelectionRange['repeatContext'],
+          barStart: editFragment.bar_start,
+          barEnd: editFragment.bar_end,
+          beatStart: editFragment.beat_start,
+          beatEnd: editFragment.beat_end,
+          repeatContext,
+          measureKeys: measureKeysForMcRange(
+            mcIdx,
+            editFragment.mc_start,
+            editFragment.mc_end,
+            repeatContext
+          ),
         };
         // No flags — FormPanel will set them as the user confirms concept/stages.
         sessionOpts.initialFlags = {
-          conceptSet: false, stagesComplete: false, propertiesComplete: false,
+          conceptSet: false,
+          stagesComplete: false,
+          propertiesComplete: false,
         };
       } else if (shouldReproject && prevSelection && prevFlags) {
         // G1.3: seed the new session with the logical selection so ghosts are
         // re-highlighted on the fresh geometry without firing React callbacks.
         sessionOpts.initialSelection = prevSelection;
         sessionOpts.initialFlags = {
-          conceptSet:         prevFlags.conceptSet,
-          stagesComplete:     prevFlags.stagesComplete,
+          conceptSet: prevFlags.conceptSet,
+          stagesComplete: prevFlags.stagesComplete,
           propertiesComplete: prevFlags.propertiesComplete,
         };
       }
@@ -1513,32 +1884,54 @@ export default function ScoreViewer() {
         ghostLayer: layer,
         mcIndex: mcIdx,
         events: allHarmonyEventsRef.current,
+        scale: scaleRef.current,
         onLabelClick: (mn, volta, beat) => {
           setHarmonyFocusKey(`${mn}:${volta ?? ''}:${beat}`);
         },
       });
+    } else {
+      // View mode (Step 20): no annotation session, but Alt-click still arms
+      // play-from-position. Activate the measure ghost layer for pointer events
+      // (the ghosts stay invisible until the data-armable hover affordance) and
+      // route Alt-clicks to the play-from-measure handler. Plain clicks remain
+      // inert — view mode has no selection.
+      layer.setResolution('measure');
+      const overlay = layer.overlay;
+      const onViewMouseDown = (e: MouseEvent) => {
+        if (!e.altKey) return;
+        const target = e.target as HTMLElement | null;
+        const ghost = target?.closest('.ghost-measure');
+        const key = ghost instanceof HTMLElement ? ghost.dataset['key'] : undefined;
+        if (key) {
+          e.preventDefault();
+          playFromMeasureKeyRef.current(key);
+        }
+      };
+      overlay.addEventListener('mousedown', onViewMouseDown);
+      viewModeCleanup = () => overlay.removeEventListener('mousedown', onViewMouseDown);
     }
 
     return () => {
       // DOM cleanup only — setState calls on unmounted components are
       // ignored by React 18 without warning, but avoiding them keeps
       // intent clear. The refs are nulled to prevent stale-closure access.
+      viewModeCleanup?.();
       annotationSessionRef.current?.destroy();
       ghostLayerRef.current?.destroy();
       harmonyOverlayRef.current?.destroy();
       annotationSessionRef.current = null;
-      ghostLayerRef.current        = null;
-      harmonyOverlayRef.current    = null;
+      ghostLayerRef.current = null;
+      harmonyOverlayRef.current = null;
     };
-  // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
-  // tagMode entering 'tag' creates the session; leaving destroys it.
-  // status gates the effect from running during loading.
-  // sessionRebuildKey is incremented by handleEditFragment when already in tag
-  // mode so the edit selection is seeded without toggling tagMode.
-  // movementId is intentionally read from the closure (not the dep array):
-  // route changes always co-occur with status/tagMode/svgPages changes, so
-  // adding movementId would fire the effect before the new SVG is ready.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // svgPages changes on every SVG rebuild (scale/font/transpose/resize).
+    // tagMode entering 'tag' creates the session; leaving destroys it.
+    // status gates the effect from running during loading.
+    // sessionRebuildKey is incremented by handleEditFragment when already in tag
+    // mode so the edit selection is seeded without toggling tagMode.
+    // movementId is intentionally read from the closure (not the dep array):
+    // route changes always co-occur with status/tagMode/svgPages changes, so
+    // adding movementId would fire the effect before the new SVG is ready.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, svgPages, tagMode, sessionRebuildKey]);
 
   // Forward resolution changes to the active annotation session (Step 10).
@@ -1567,7 +1960,9 @@ export default function ScoreViewer() {
       .catch(() => {
         // Non-fatal: overlay stays empty until the next successful fetch.
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [tagMode, movementId]);
 
   /**
@@ -1593,7 +1988,7 @@ export default function ScoreViewer() {
 
     const load = async () => {
       setStatus('loading');
-      setLoadingLabel('Loading score…');
+      setLoadingLabel(t('score:viewer.loadingScore'));
       setSvgPages([]);
       setScoreTitle(null);
       setErrorMessage(null);
@@ -1601,6 +1996,7 @@ export default function ScoreViewer() {
       // Reset note info map so stale data from a previous score is not used
       // while the new MEI loads. Rebuilt synchronously after meiText is fetched.
       noteInfoMapRef.current = new Map();
+      graceIdsRef.current = new Set();
 
       // Measure container width before any await — DOM is synchronously
       // available at effect time. This value is used for the initial render;
@@ -1628,9 +2024,10 @@ export default function ScoreViewer() {
         // Build note info map synchronously from MEI (DOMParser, no toolkit needed).
         // Built once per score load; does not need rebuilding on options re-renders.
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
+        graceIdsRef.current = collectGraceNoteIds(meiText);
 
         // 2. Load Verovio WASM (singleton — loads at most once per session).
-        setLoadingLabel('Loading score renderer…');
+        setLoadingLabel(t('score:viewer.loadingRenderer'));
         const tk = await getVerovioToolkit();
         if (cancelled) return;
         tkRef.current = tk;
@@ -1659,7 +2056,7 @@ export default function ScoreViewer() {
               setSvgPages((prev) => [...prev, svg]);
             }
           },
-          () => {},
+          () => {}
         );
 
         // 4. Generate MIDI and build highlight schedule from the toolkit's
@@ -1670,6 +2067,8 @@ export default function ScoreViewer() {
             const midi = await renderMidi(tk);
             if (!cancelled) {
               highlightScheduleRef.current = buildHighlightSchedule(tk);
+              // mc → onset index for play-from-position (Step 20).
+              measureOnsetIndexRef.current = buildMeasureOnsetIndex(tk, meiTextRef.current ?? '');
               // Compute beat duration for timing-based beat fallback (Step 18.3).
               // beatDurationMs = (60 000 / bpm) × (4 / meterUnit), where meterUnit
               // is the denominator of the time signature (4 for 4/4, 8 for 6/8, etc.)
@@ -1684,7 +2083,7 @@ export default function ScoreViewer() {
         }
       } catch (err) {
         if (!cancelled) {
-          setErrorMessage(err instanceof Error ? err.message : 'Failed to load score');
+          setErrorMessage(err instanceof Error ? err.message : t('score:viewer.failedLoadScore'));
           setStatus('error');
         }
       }
@@ -1694,6 +2093,9 @@ export default function ScoreViewer() {
     return () => {
       cancelled = true;
     };
+  // Re-run only when the movement changes; `t` is read for loading/error labels
+  // but a language switch should not reload the score.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movementId]);
 
   // ── Control handlers ─────────────────────────────────────────────────────
@@ -1710,12 +2112,6 @@ export default function ScoreViewer() {
     scheduleRerender(scaleRef.current, newTranspose, fontRef.current);
   };
 
-  const handleFontChange = (newFont: string) => {
-    setFont(newFont);
-    fontRef.current = newFont;
-    scheduleRerender(scaleRef.current, transposeRef.current, newFont);
-  };
-
   // ── Render ───────────────────────────────────────────────────────────────
 
   const isPlaybackAvailable = midiBase64 !== null;
@@ -1727,39 +2123,38 @@ export default function ScoreViewer() {
     <div className={styles.viewer}>
       {/* Visually-hidden h1 for screen readers: provides a page landmark
           without affecting the visual toolbar layout. */}
-      <Type variant="headline" as="h1" className={styles.srOnly}>Score Viewer</Type>
+      <Type variant="headline" as="h1" className={styles.srOnly}>
+        {t('score:viewer.srTitle')}
+      </Type>
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <Surface layer="container-high" className={styles.toolbar}>
         <Link to="/" className={styles.backLink}>
-          <Type variant="label-md" as="span">← Browse</Type>
+          <Type variant="label-md" as="span">
+            {t('score:viewer.backToBrowse')}
+          </Type>
         </Link>
 
         {/* Centred controls group — middle column of the 1fr/auto/1fr grid */}
         <div className={styles.toolbarControls}>
           {/* Staff size presets */}
-          <div className={styles.staffSizeControl} role="group" aria-label="Staff size">
-            <Type
-              variant="label-md"
-              as="span"
-              style={{ color: 'var(--color-on-surface-variant)' }}
-            >
-              Size
+          <div className={styles.staffSizeControl} role="group" aria-label={t('common:staffSize')}>
+            <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+              {t('score:viewer.size')}
             </Type>
             {([35, 45, 55] as ScalePreset[]).map((s) => (
               <button
                 key={s}
                 type="button"
-                className={[
-                  styles.sizeButton,
-                  scale === s ? styles.sizeButtonActive : '',
-                ]
+                className={[styles.sizeButton, scale === s ? styles.sizeButtonActive : '']
                   .filter(Boolean)
                   .join(' ')}
                 onClick={() => handleScaleChange(s)}
                 aria-pressed={scale === s}
               >
-                <Type variant="label-sm" as="span">{SCALE_LABELS[s]}</Type>
+                <Type variant="label-sm" as="span">
+                  {t(`score:${SCALE_LABEL_KEYS[s]}`)}
+                </Type>
               </button>
             ))}
           </div>
@@ -1772,7 +2167,7 @@ export default function ScoreViewer() {
                 as="span"
                 style={{ color: 'var(--color-on-surface-variant)' }}
               >
-                Transpose
+                {t('score:viewer.transpose')}
               </Type>
             </label>
             <TransposeSelect
@@ -1784,49 +2179,25 @@ export default function ScoreViewer() {
             />
           </div>
 
-          {/* Music font select */}
-          <div className={styles.toolbarSelectControl}>
-            <label htmlFor="font-select" className={styles.toolbarSelectLabel}>
-              <Type
-                variant="label-md"
-                as="span"
-                style={{ color: 'var(--color-on-surface-variant)' }}
-              >
-                Music font
-              </Type>
-            </label>
-            <select
-              id="font-select"
-              className={styles.toolbarSelect}
-              value={font}
-              onChange={(e) => handleFontChange(e.target.value)}
-            >
-              {FONT_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
           {/* Resolution toggle — visible only in tag mode (G1.1) */}
           {tagMode === 'tag' && (
             <div
               className={styles.resolutionControl}
               role="group"
-              aria-label="Selection resolution"
+              aria-label={t('score:viewer.selectionResolutionAria')}
             >
               <Type
                 variant="label-md"
                 as="span"
                 style={{ color: 'var(--color-on-surface-variant)' }}
               >
-                Select
+                {t('score:viewer.selectLabel')}
               </Type>
               {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
                 const ARIA_LABELS: Record<ResolutionMode, string> = {
-                  measure: 'Measure resolution',
-                  beat: 'Beat resolution',
-                  subbeat: 'Sub-beat resolution',
+                  measure: t('score:viewer.resolutionAria.measure'),
+                  beat: t('score:viewer.resolutionAria.beat'),
+                  subbeat: t('score:viewer.resolutionAria.subbeat'),
                 };
                 return (
                   <button
@@ -1876,31 +2247,25 @@ export default function ScoreViewer() {
           <div className={styles.toolbarRight}>
             <button
               type="button"
-              className={[
-                styles.tagButton,
-                tagMode === 'tag' ? styles.tagButtonActive : '',
-              ].filter(Boolean).join(' ')}
+              className={[styles.tagButton, tagMode === 'tag' ? styles.tagButtonActive : '']
+                .filter(Boolean)
+                .join(' ')}
               onClick={() => setTagMode(tagMode === 'view' ? 'tag' : 'view')}
               aria-pressed={tagMode === 'tag'}
             >
               <Type variant="label-sm" as="span">
-                {tagMode === 'tag' ? 'Done' : 'Tag'}
+                {tagMode === 'tag' ? t('score:viewer.done') : t('score:viewer.tag')}
               </Type>
             </button>
           </div>
         )}
-
       </Surface>
 
       {/* Narrow-screen notice — shown when container is below 480px */}
       {isNarrow && (
         <div className={styles.narrowNotice}>
-          <Type
-            variant="label-md"
-            as="span"
-            style={{ color: 'var(--color-on-surface-variant)' }}
-          >
-            Score is best viewed at wider widths.
+          <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+            {t('score:viewer.narrowNotice')}
           </Type>
         </div>
       )}
@@ -1912,14 +2277,16 @@ export default function ScoreViewer() {
             measure the container width even before the first render. */}
         {status === 'loading' && (
           <Surface layer="base" className={styles.statusPanel}>
-            <Type variant="label-md" as="p">{loadingLabel}</Type>
+            <Type variant="label-md" as="p">
+              {loadingLabel}
+            </Type>
           </Surface>
         )}
 
         {status === 'error' && (
           <Surface layer="base" className={styles.statusPanel}>
             <Type variant="body-lg" as="p">
-              {errorMessage ?? 'Failed to load score'}
+              {errorMessage ?? t('score:viewer.failedLoadScore')}
             </Type>
           </Surface>
         )}
@@ -1930,7 +2297,11 @@ export default function ScoreViewer() {
           {/* .scoreContent is the measured element: ResizeObserver watches it.
               Its offsetWidth (≤ 1200px via max-width) is what we pass to
               Verovio as pageWidth, so the SVG fills the container exactly. */}
-          <div ref={scorePanelRef} className={styles.scoreContent}>
+          <div
+            ref={scorePanelRef}
+            className={styles.scoreContent}
+            data-armable={altHeld && isPlaybackAvailable ? 'true' : undefined}
+          >
             {/* G7: HTML title block sourced from the DB via the mei-url response.
                 Replaces Verovio's suppressed <pgHead> output. Rendered here
                 so the score SVG starts at the top of the container and the
@@ -1938,26 +2309,14 @@ export default function ScoreViewer() {
                 Three lines (all centered): composer → work title → movement. */}
             {scoreTitle && (
               <div className={styles.scoreTitle}>
-                <Type
-                  variant="label-md"
-                  as="p"
-                  className={styles.scoreTitleComposer}
-                >
+                <Type variant="label-md" as="p" className={styles.scoreTitleComposer}>
                   {scoreTitle.composer_name}
                 </Type>
-                <Type
-                  variant="headline"
-                  as="h2"
-                  className={styles.scoreTitleWork}
-                >
+                <Type variant="headline" as="h2" className={styles.scoreTitleWork}>
                   {scoreTitle.work_title}
                 </Type>
                 {scoreTitle.movement_title && (
-                  <Type
-                    variant="title"
-                    as="p"
-                    className={styles.scoreTitleMovement}
-                  >
+                  <Type variant="title" as="p" className={styles.scoreTitleMovement}>
                     {`${scoreTitle.movement_number}. ${scoreTitle.movement_title}`}
                   </Type>
                 )}
@@ -2000,8 +2359,14 @@ export default function ScoreViewer() {
                 onStageActivate={handleStageActivate}
                 onSplitHandleMove={handleSplitHandleMove}
                 session={annotationSessionRef.current}
+                onDragActiveChange={setStageDragActive}
               />
             </FragmentOverlay>
+
+            {/* Playback caret (Step 19): a moving overlay bar driven imperatively
+                by handlePositionUpdate. Sibling of the fragment overlay so it
+                shares the .scoreContent coordinate origin. */}
+            <PlaybackCaret ref={caretElRef} />
           </div>
         </div>
 
@@ -2034,6 +2399,7 @@ export default function ScoreViewer() {
             activeStageId={activeStageId}
             onStageActivate={handleStageActivate}
             onToggleAbsent={handleToggleAbsent}
+            stageDragActive={stageDragActive}
             subPartTags={subPartTags}
             onSubPartTagUpdate={handleSubPartTagUpdate}
             subPartResetKey={subPartResetKey}
@@ -2056,7 +2422,31 @@ export default function ScoreViewer() {
         {/* Re-render overlay: sits above both panels while options change */}
         {isRerendering && (
           <div className={styles.rerenderOverlay} role="status" aria-live="polite">
-            <Type variant="label-md" as="span">Re-rendering…</Type>
+            <Type variant="label-md" as="span">
+              {t('score:viewer.rerendering')}
+            </Type>
+          </div>
+        )}
+
+        {/* Post-submit confirmation (Step 5): an unmissable banner shown after
+            a fragment is submitted and the surface has reset to blank. Uses the
+            submitted-status token family (secondary). Auto-dismisses after a
+            few seconds, clears on the next selection, and is dismissible. */}
+        {submitSuccess && (
+          <div className={styles.submitSuccessBanner} role="status" aria-live="assertive">
+            <Type variant="label-md" as="span" className={styles.submitSuccessText}>
+              {t('score:viewer.submitSuccess')}
+            </Type>
+            <button
+              type="button"
+              className={styles.submitSuccessDismiss}
+              onClick={() => setSubmitSuccess(false)}
+              aria-label={t('score:viewer.dismissConfirmationAria')}
+            >
+              <Type variant="label-sm" as="span">
+                {t('score:viewer.dismiss')}
+              </Type>
+            </button>
           </div>
         )}
       </div>
@@ -2064,38 +2454,41 @@ export default function ScoreViewer() {
       {/* ── Playback bar (Step 14.5) ─────────────────────────────────────── */}
       <Surface layer="container-highest" className={styles.playbackBar}>
         {isLoadingInstrument ? (
-          <Type
-            variant="label-md"
-            as="span"
-            className={styles.loadingInstrumentLabel}
-          >
-            Loading instrument…
+          <Type variant="label-md" as="span" className={styles.loadingInstrumentLabel}>
+            {t('common:loadingInstrument')}
           </Type>
         ) : isInstrumentError ? (
-          <Type
-            variant="label-md"
-            as="span"
-            className={styles.instrumentErrorLabel}
-          >
-            Audio unavailable — set{' '}
-            <code>VITE_SOUNDFONT_BASE_URL</code> and upload piano samples.
-            <button
-              type="button"
-              className={styles.retryButton}
-              onClick={play}
-            >
-              Retry
+          <Type variant="label-md" as="span" className={styles.instrumentErrorLabel}>
+            {t('score:viewer.audioUnavailablePre')}
+            <code>{SOUNDFONT_ENV_VAR}</code>
+            {t('score:viewer.audioUnavailablePost')}
+            <button type="button" className={styles.retryButton} onClick={play}>
+              {t('common:retry')}
             </button>
           </Type>
         ) : (
           <>
+            {/* Rewind to top (Step 20): clears an armed play-from-position
+                origin so the next Play starts at the movement top. Disabled
+                while playing or already at the top. */}
+            <button
+              type="button"
+              className={styles.transportButton}
+              onClick={handleRewind}
+              disabled={!isPlaybackAvailable || isPlaying || playbackOriginMs === 0}
+              aria-label={t('score:viewer.rewindAria')}
+              title={t('score:viewer.rewindAria')}
+            >
+              ⏮
+            </button>
+
             {/* Play / Pause */}
             <button
               type="button"
               className={styles.transportButton}
               onClick={isPlaying ? pause : play}
               disabled={!isPlaybackAvailable || isLoadingInstrument}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
+              aria-label={isPlaying ? t('common:pause') : t('common:play')}
             >
               {isPlaying ? '⏸' : '▶'}
             </button>
@@ -2105,8 +2498,10 @@ export default function ScoreViewer() {
               type="button"
               className={styles.transportButton}
               onClick={handleStop}
-              disabled={!isPlaybackAvailable || playbackStatus === 'ready' || playbackStatus === 'idle'}
-              aria-label="Stop"
+              disabled={
+                !isPlaybackAvailable || playbackStatus === 'ready' || playbackStatus === 'idle'
+              }
+              aria-label={t('common:stop')}
             >
               ⏹
             </button>
@@ -2120,11 +2515,12 @@ export default function ScoreViewer() {
               as="span"
               className={styles.positionDisplay}
               aria-live="polite"
-              aria-label={`Bar ${displayPosition.bar}, beat ${displayPosition.beat}`}
+              aria-label={t('score:viewer.positionAria', {
+                bar: displayPosition.bar,
+                beat: displayPosition.beat,
+              })}
             >
-              {isPlaybackAvailable
-                ? `${displayPosition.bar}:${displayPosition.beat}`
-                : '—'}
+              {isPlaybackAvailable ? `${displayPosition.bar}:${displayPosition.beat}` : '—'}
             </Type>
           </>
         )}

@@ -82,14 +82,20 @@ async def set_subtree_cache(
 _TREE_KEY_PREFIX: str = "tree"
 
 
-def _tree_cache_key(root_id: str) -> str:
-    """Return the Redis key for a concept subtree response (GET /api/v1/concepts/tree)."""
-    return f"{_TREE_KEY_PREFIX}:{root_id}"
+def _tree_cache_key(root_id: str, language: str) -> str:
+    """Return the Redis key for a concept subtree response (GET /api/v1/concepts/tree).
+
+    The language is part of the key so a localised response is never served
+    from another locale's cache entry (ADR-006). The ``tree:*`` invalidation
+    pattern in :func:`invalidate_subtree_cache_sync` covers every suffix.
+    """
+    return f"{_TREE_KEY_PREFIX}:{root_id}:{language}"
 
 
 async def get_tree_cache(
     redis: Redis,
     root_id: str,
+    language: str,
 ) -> dict | None:
     """Return the cached concept-tree response dict for root_id, or None on a miss.
 
@@ -98,13 +104,14 @@ async def get_tree_cache(
     Args:
         redis: Async Redis client.
         root_id: The root concept id whose tree was cached.
+        language: The response language the cached entry was built for.
 
     Returns:
         The cached response dict (as returned by ``model.model_dump()``), or
         ``None`` on a miss or Redis error.
     """
     try:
-        raw = await redis.get(_tree_cache_key(root_id))
+        raw = await redis.get(_tree_cache_key(root_id, language))
         if raw is None:
             return None
         return json.loads(raw)
@@ -116,6 +123,7 @@ async def get_tree_cache(
 async def set_tree_cache(
     redis: Redis,
     root_id: str,
+    language: str,
     data: dict,
 ) -> None:
     """Write a concept-tree response dict to the cache with a 1-hour TTL.
@@ -123,11 +131,12 @@ async def set_tree_cache(
     Args:
         redis: Async Redis client.
         root_id: The root concept id whose tree is being cached.
+        language: The response language the entry was built for.
         data: The response dict (``ConceptTreeResponse.model_dump()``).
     """
     try:
         await redis.set(
-            _tree_cache_key(root_id),
+            _tree_cache_key(root_id, language),
             json.dumps(data),
             ex=_TTL_SECONDS,
         )

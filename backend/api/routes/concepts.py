@@ -13,10 +13,11 @@ docs/roadmap/component-8-fragment-browsing.md § Step 7.
 
 from __future__ import annotations
 
-from api.dependencies import get_neo4j, get_redis, require_role
+from api.dependencies import get_language, get_neo4j, get_redis, require_role
 from fastapi import APIRouter, Depends, Path, Query
 from models.base import get_db
 from models.concepts import (
+    ConceptRootsResponse,
     ConceptSchemaTreeResponse,
     ConceptSearchResponse,
     ConceptTreeResponse,
@@ -29,19 +30,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 router = APIRouter(prefix="/concepts", tags=["Concepts"])
 
 
-def get_concept_service(driver: AsyncDriver = Depends(get_neo4j)) -> ConceptService:
+def get_concept_service(
+    driver: AsyncDriver = Depends(get_neo4j),
+    db: AsyncSession = Depends(get_db),
+) -> ConceptService:
     """FastAPI dependency that constructs a :class:`~services.concepts.ConceptService`.
 
     Separated from the route handler so tests can override it via
-    ``app.dependency_overrides[get_concept_service]``.
+    ``app.dependency_overrides[get_concept_service]``. The SQLAlchemy session is
+    wired in so the translation overlay (ADR-006) can resolve localised concept
+    content for non-English locales; the English path never touches it.
 
     Args:
         driver: Async Neo4j driver (injected by ``get_neo4j``).
+        db: Async SQLAlchemy session (injected by ``get_db``).
 
     Returns:
-        A :class:`~services.concepts.ConceptService` bound to the driver.
+        A :class:`~services.concepts.ConceptService` bound to the driver and db.
     """
-    return ConceptService(driver)
+    return ConceptService(driver, db=db)
 
 
 def get_concept_tree_service(
@@ -81,6 +88,7 @@ async def search_concepts(
     cursor: str | None = Query(
         None, description="Pagination cursor from a previous response"
     ),
+    language: str = Depends(get_language),
     service: ConceptService = Depends(get_concept_service),
 ) -> ConceptSearchResponse:
     """Search the concept graph for taggable concepts matching *q*.
@@ -104,7 +112,7 @@ async def search_concepts(
         :class:`~models.concepts.ConceptSearchResponse` with ordered hits and
         an optional ``next_cursor``.
     """
-    return await service.search(q=q, domain=domain, cursor=cursor)
+    return await service.search(q=q, domain=domain, cursor=cursor, language=language)
 
 
 @router.get(
@@ -126,6 +134,7 @@ async def get_concept_tree(
             "All non-stub IS_SUBTYPE_OF descendants are included."
         ),
     ),
+    language: str = Depends(get_language),
     service: ConceptService = Depends(get_concept_tree_service),
 ) -> ConceptTreeResponse:
     """Return the IS_SUBTYPE_OF subtree rooted at *root* for the tag browser.
@@ -148,7 +157,35 @@ async def get_concept_tree(
     Returns:
         :class:`~models.concepts.ConceptTreeResponse`.
     """
-    return await service.get_tree(root)
+    return await service.get_tree(root, language=language)
+
+
+@router.get(
+    "/roots",
+    response_model=ConceptRootsResponse,
+    dependencies=[require_role("editor")],
+    summary="List all domain root concepts",
+    response_description=(
+        "All non-stub concepts with no IS_SUBTYPE_OF parent, sorted alphabetically. "
+        "These are the natural entry points for the concept-tree navigator."
+    ),
+)
+async def list_concept_roots(
+    language: str = Depends(get_language),
+    service: ConceptService = Depends(get_concept_service),
+) -> ConceptRootsResponse:
+    """Return all domain root concepts.
+
+    A domain root is a non-stub Concept node with no IS_SUBTYPE_OF parent —
+    the top-level entry point for each seeded knowledge domain (e.g. 'Cadence').
+    The fragment browser uses this list to pre-populate the concept tree on load
+    without requiring the user to search for a root first.
+
+    Returns:
+        :class:`~models.concepts.ConceptRootsResponse` with roots sorted
+        alphabetically by name.
+    """
+    return await service.get_roots(language=language)
 
 
 @router.get(
@@ -165,6 +202,7 @@ async def get_concept_schemas(
     concept_id: str = Path(
         ..., description="Immutable concept identifier (e.g. 'PerfectAuthenticCadence')"
     ),
+    language: str = Depends(get_language),
     service: ConceptService = Depends(get_concept_service),
 ) -> ConceptSchemaTreeResponse:
     """Return everything the form panel needs to render for a concept.
@@ -194,4 +232,4 @@ async def get_concept_schemas(
     Returns:
         :class:`~models.concepts.ConceptSchemaTreeResponse`.
     """
-    return await service.get_schema_tree(concept_id)
+    return await service.get_schema_tree(concept_id, language=language)

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-031, Pass 10 reconciliation): the converter scatters one
+     staff-wide clef change across two voices.  In m.1 the change is real in
+     layer 5 (notes follow) and restated via <clef sameas> in layer 6 where only
+     a <space> follows — the dangling restatement positions nothing and renders
+     as the 2nd glyph of a "double clef" (the K283/ii m.19 shape).  Pass 10a must
+     drop the layer-6 clef (a positioning sibling of the same shape/line exists).
+     In m.2 a dangling clef is the *only* clef of its shape on the staff (no
+     sibling) — a possible courtesy — and must be KEPT. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Redundant dangling clef — per-voice double</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef>
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="5">
+                  <note dur="4" oct="4" pname="d"/>
+                  <clef xml:id="c-real" shape="F" line="4"/>
+                  <note dur="4" oct="2" pname="g"/>
+                </layer>
+                <layer n="6">
+                  <note dur="4" oct="4" pname="b"/>
+                  <clef xml:id="c-dup" sameas="#c-real"/>
+                  <space dur="4"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note dur="4" oct="2" pname="g"/>
+                  <clef xml:id="c-solo" shape="G" line="2"/>
+                  <space dur="4"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

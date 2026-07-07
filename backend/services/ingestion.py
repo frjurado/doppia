@@ -10,9 +10,14 @@ Implements the seven-step upload workflow described in
    normalisation (:func:`~services.mei_normalizer.normalize_mei`).
 5. Intra-corpus coherence checks (catalogue uniqueness, year plausibility).
 6. Single DB transaction with storage writes: upsert all entities, write MEI files.
-7. Dispatch two Celery tasks per accepted movement:
+7. Dispatch background tasks per accepted movement (via
+   ``services.task_dispatch`` — inline in-process by default, Celery when
+   ``TASK_EXECUTION_MODE=celery``; ADR-034):
    - ingest_movement_analysis (DCML harmony parsing)
    - generate_incipit (Verovio first-page SVG render)
+   - render_fragment_preview for every submitted/approved fragment already on
+     the movement (ADR-008 — an upsert over an existing movement invalidates
+     its stored fragment previews; no-op for first-time movements)
 
 The public surface is a single async function:
 
@@ -48,9 +53,12 @@ from models.ingestion import (
 from models.music import Composer, Corpus, Movement, Work
 from models.normalization import NormalizationReport
 from pydantic import ValidationError
+from services.corrections_overlay import load_corrections
+from services.fragments import enqueue_preview_regeneration_for_movement
 from services.mei_normalizer import normalize_mei
 from services.mei_validator import validate_mei
 from services.object_storage import StorageClient
+from services.task_dispatch import dispatch_task
 from services.tasks.generate_incipit import generate_incipit
 from services.tasks.ingest_analysis import ingest_movement_analysis
 from sqlalchemy import func
@@ -201,11 +209,19 @@ async def ingest_corpus(
                 )
                 continue
 
-            # Normalise MEI (writes to tmp files; normalize_mei takes paths)
+            # Normalise MEI (writes to tmp files; normalize_mei takes paths).
+            # Pass 0 applies any per-movement source-corrections overlay (ADR-027)
+            # before the structural passes; an absent overlay yields no corrections.
+            corrections = load_corrections(
+                metadata.composer.slug,
+                metadata.corpus.slug,
+                work_meta.slug,
+                mov_meta.slug,
+            )
             src = tmp / f"src_{work_meta.slug}_{mov_meta.slug}.mei"
             dst = tmp / f"norm_{work_meta.slug}_{mov_meta.slug}.mei"
             src.write_bytes(mei_bytes)
-            norm_report = normalize_mei(str(src), str(dst))
+            norm_report = normalize_mei(str(src), str(dst), corrections=corrections)
             normalized_bytes = dst.read_bytes()
 
             # Read harmonies TSV if present
@@ -315,20 +331,25 @@ async def ingest_corpus(
                 )
 
     # ------------------------------------------------------------------
-    # 8. Dispatch Celery tasks (outside transaction, after commit)
+    # 8. Dispatch background tasks (outside transaction, after commit)
     # ------------------------------------------------------------------
     for entry in dispatch_entries:
         try:
-            ingest_movement_analysis.delay(
+            dispatch_task(
+                ingest_movement_analysis,
                 movement_id=str(entry.movement_id),
                 analysis_source=entry.analysis_source,
                 harmonies_tsv_content=(
                     entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
                 ),
             )
-            generate_incipit.delay(movement_id=str(entry.movement_id))
+            dispatch_task(generate_incipit, movement_id=str(entry.movement_id))
+            # ADR-008: an upsert over an existing movement replaces its
+            # normalized MEI, so every stored fragment preview on it is stale.
+            # No-op for first-time movements (they have no fragments yet).
+            await enqueue_preview_regeneration_for_movement(db, entry.movement_id)
         except Exception as exc:
-            # Broker unavailable (e.g. misconfigured Redis in staging). The
+            # Broker unavailable (celery mode with misconfigured Redis). The
             # upload itself has already succeeded — DB records committed and
             # MEI files stored. Log and continue; tasks can be re-enqueued
             # manually once the broker is reachable.
@@ -504,8 +525,15 @@ async def _upsert_movement(
     Returns:
         The ``movement.id`` UUID (existing or newly inserted).
     """
+    # Persist the column only when there is at least one actionable
+    # (``"warning"``-severity) issue, i.e. when the report is not clean.  The
+    # full issue list (including accepted ``"info"`` advisories) is stored for
+    # context.  ``"info"``-only movements (e.g. K331/ii's written-out repeat)
+    # therefore leave the column null and raise no per-movement indicator.
     normalization_warnings: dict[str, Any] | None = (
-        {"warnings": norm_report.warnings} if norm_report.warnings else None
+        {"warnings": [w.model_dump() for w in norm_report.warnings]}
+        if not norm_report.is_clean
+        else None
     )
     ins = pg_insert(Movement).values(
         work_id=work_id,

@@ -187,7 +187,9 @@ async def get_movement_mei_url(
         return None
     movement, work, composer = result
     url = await storage.signed_url(
-        movement.mei_object_key, expires_in=CLIENT_FACING_URL_TTL
+        movement.mei_object_key,
+        expires_in=CLIENT_FACING_URL_TTL,
+        version=movement.updated_at,
     )
     return MeiUrlResponse(
         url=url,
@@ -234,7 +236,9 @@ async def list_movements(
         incipit_url: str | None = None
         if m.incipit_object_key is not None:
             incipit_url = await storage.signed_url(
-                m.incipit_object_key, expires_in=CLIENT_FACING_URL_TTL
+                m.incipit_object_key,
+                expires_in=CLIENT_FACING_URL_TTL,
+                version=m.incipit_generated_at,
             )
         responses.append(
             MovementResponse(

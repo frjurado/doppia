@@ -13,16 +13,20 @@
  *  - Resolution toggle flips pointer-events on layers; session does not
  *    re-run ghost construction on toggle (ADR-005 §"Resolution toggle").
  *
- * Selection constraints (prototype-tagging-tool.md §"Selection constraints"):
- *  - Backward repeat barlines (:|), da capo, and dal segno clamp the
- *    selection at the barrier measure; it cannot extend past the barline.
- *  - When a selection falls inside a repeat ending, repeat_context is
- *    captured from the ghost's endingN.
+ * Selection constraints (tagging-tool-design.md §6A.2, ADR-025):
+ *  - Repeat barlines are NOT selection boundaries; drags cross them freely.
+ *  - Da capo / dal segno markers are hard gates: the selection clamps at the
+ *    marker measure and cannot extend past it (buildDirectiveBarriers).
+ *  - Sibling volta endings are hard gates with effective-range exclusion:
+ *    a selection never has endpoints in two sibling endings, never extends a
+ *    non-final-ending anchor past its group, and skips excluded sibling
+ *    endings it spans (computeSelectionKeys, §6A.3).
+ *  - repeat_context derives from the effective range (deriveRepeatContext).
  *  - Endpoint re-selection: clicking the first or last ghost of a committed
  *    selection re-anchors the drag from the opposite end.
  *
- * References: prototype-tagging-tool.md, tagging-tool-design.md §2, ADR-005,
- * ADR-011 §2.
+ * References: prototype-tagging-tool.md, tagging-tool-design.md §§2, 6A,
+ * ADR-005, ADR-011 §2, ADR-025.
  */
 
 import type {
@@ -33,7 +37,7 @@ import type {
   ResolutionMode,
   SubBeatGhostEntry,
 } from './ghosts';
-import { measureGhostKey } from './ghosts';
+import { walkMeasureKeys } from './ghosts';
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -81,19 +85,33 @@ export interface SelectionRange {
   beatEnd: number | null;
   /** Ending context when the selection falls inside a written repeat ending. */
   repeatContext: 'first_ending' | 'second_ending' | null;
+  /**
+   * Component 9 Step 3 (§6A.1) — the committed effective range as the ordered
+   * list of physical-measure ghost keys, excluded sibling endings omitted.
+   * This is the single source of truth every derived surface (bracket
+   * geometry, mc coordinates, stage frame) consumes; barStart/barEnd above are
+   * display projections of it. Optional only because restore paths (stored
+   * fragments) may reconstruct it from the human coordinates + repeatContext.
+   */
+  measureKeys?: string[];
 }
 
 export interface AnnotationSessionOptions {
   /**
-   * Measure ghost keys (from measureGhostKey()) whose right barline is a
-   * close-repeat (:|) or da capo/dal segno marker. The selection may include
-   * a barrier measure but cannot extend past its right barline.
-   * Build with buildRepeatBarriers().
-   *
-   * Ending-transition barriers (G2.2) are derived automatically from the ghost
-   * layer in the AnnotationSession constructor and do not need to be included here.
+   * Measure ghost keys carrying a da capo / dal segno directive. The selection
+   * may include a barrier measure but cannot extend past it (§6A.2, ADR-025 —
+   * repeat barlines are NOT barriers and must not be included here).
+   * Build with buildDirectiveBarriers().
    */
-  closeRepeatMeasures?: Set<string>;
+  barrierMeasures?: Set<string>;
+  /**
+   * Volta group index for the ending gates and effective-range exclusions
+   * (§6A.3). Build with buildVoltaIndex(meiText). When omitted, a fallback is
+   * derived from the ghost layer (voltaIndexFromLayer) — correct for the gate
+   * rules, but with unknown jump targets, so wholly-contained groups always
+   * take the conservative row-4 path.
+   */
+  voltaIndex?: VoltaIndex;
   /** Initial resolution mode. Defaults to 'measure'. */
   resolution?: ResolutionMode;
   /**
@@ -121,124 +139,174 @@ export interface AnnotationSessionOptions {
    * assignments change.
    */
   minBarRange?: { minBarStart: number; maxBarEnd: number } | null;
+  /**
+   * Component 9 Step 20 — play-from-position. Called when the user Alt-clicks a
+   * measure (or a beat / sub-beat ghost, resolved up to its enclosing measure)
+   * instead of starting a selection drag. The handler arms that measure as the
+   * playback origin; selection state is never touched. Receives the measure
+   * ghost key.
+   */
+  onPlayFromMeasure?: (measureKey: string) => void;
 }
 
 // ---------------------------------------------------------------------------
-// MEI barrier parsing
+// MEI barrier and volta parsing (ADR-025, tagging-tool-design.md §6A.2–6A.3)
 // ---------------------------------------------------------------------------
-
-/** Walk up a MEI DOM element to find the containing <ending @n>, if any. */
-function endingNFromEl(el: Element): number | null {
-  let cursor: Element | null = el.parentElement;
-  while (cursor) {
-    if (cursor.tagName === 'ending') {
-      const n = cursor.getAttribute('n');
-      if (n !== null) {
-        const v = parseInt(n, 10);
-        return isNaN(v) ? null : v;
-      }
-      return null;
-    }
-    cursor = cursor.parentElement;
-  }
-  return null;
-}
 
 /**
  * Parse a normalised MEI document and return the set of measure ghost keys
- * that act as hard selection barriers (prototype-tagging-tool.md
- * §"Selection constraints — Backward repeat barlines as selection barriers").
+ * that act as hard selection barriers: measures carrying a da capo or dal
+ * segno directive. At those markers the jump always fires — there is no final
+ * pass that proceeds directly into the following bar — so a selection may end
+ * on the marker measure but cannot extend past it (§6A.2).
  *
- * A barrier measure may be the last measure of a selection, but the
- * selection cannot extend past it: the close-repeat barline is a hard stop.
+ * Repeat barlines (rptend/rptboth/rptstart) are deliberately NOT barriers:
+ * ADR-025 removed the repeat-end gate rather than mirroring it. "To Coda" and
+ * "Fine" marks are not gates either.
  *
- * G2.3: uses the same deduplicated key scheme as buildGhosts — when two
- * measures share the same @n (section-reset numbering), '#N' suffixes keep the
- * keys consistent between the two functions.
+ * Keys come from walkMeasureKeys(), the same derivation buildGhosts() uses,
+ * so barrier keys always match measureIndex keys (G2.3, §6A.1).
  */
-export function buildRepeatBarriers(meiText: string): Set<string> {
+export function buildDirectiveBarriers(meiText: string): Set<string> {
   const doc = new DOMParser().parseFromString(meiText, 'text/xml');
   const barriers = new Set<string>();
 
-  // Mirrors the seenBaseKeys tracking in buildGhosts so the keys produced here
-  // match the deduplicated keys stored in measureIndex (G2.3).
-  const seenBaseKeys = new Map<string, number>();
-
-  const measures = doc.getElementsByTagName('measure');
-  for (let i = 0; i < measures.length; i++) {
-    const m = measures[i]!;
-    let isBarrier = false;
-
-    const right = m.getAttribute('right');
-    if (right === 'rptend' || right === 'rptboth') {
-      isBarrier = true;
-    }
-
-    if (!isBarrier) {
-      const dirs = m.getElementsByTagName('dir');
-      for (let j = 0; j < dirs.length; j++) {
-        const text = dirs[j]?.textContent ?? '';
-        if (
-          text.includes('D.C.') ||
-          text.includes('D.S.') ||
-          text.includes('da capo') ||
-          text.includes('dal segno')
-        ) {
-          isBarrier = true;
-          break;
-        }
+  for (const info of walkMeasureKeys(doc)) {
+    const dirs = info.el.getElementsByTagName('dir');
+    for (let j = 0; j < dirs.length; j++) {
+      const text = dirs[j]?.textContent ?? '';
+      if (
+        text.includes('D.C.') ||
+        text.includes('D.S.') ||
+        text.includes('da capo') ||
+        text.includes('dal segno')
+      ) {
+        barriers.add(info.key);
+        break;
       }
-    }
-
-    const barN    = parseInt(m.getAttribute('n') ?? `${i + 1}`, 10);
-    const endingN = endingNFromEl(m);
-    const baseKey = measureGhostKey(barN, endingN);
-    const cnt     = seenBaseKeys.get(baseKey) ?? 0;
-    seenBaseKeys.set(baseKey, cnt + 1);
-    const mKey = cnt === 0 ? baseKey : `${baseKey}#${cnt}`;
-
-    if (isBarrier) {
-      barriers.add(mKey);
     }
   }
 
   return barriers;
 }
 
-/**
- * Return the set of measure ghost keys that form ending-transition barriers.
- *
- * Crossing from inside one repeat ending into a different ending is
- * structurally forbidden — a selection must stay within its ending context.
- * The last measure of each ending group is marked as a barrier whenever the
- * adjacent next measure belongs to a different non-null ending (e.g. ending 1
- * → ending 2). Entering an ending from the main body (null → non-null) and
- * exiting back to the main body (non-null → null) are permitted.
- *
- * The AnnotationSession constructor calls this automatically and merges the
- * result with closeRepeatMeasures. Callers need not invoke it directly.
- *
- * References: ADR-005 §"Edge cases — Repeat sections", G2.2.
- */
-export function buildEndingBarriers(
-  measureIndex: Map<string, MeasureGhostEntry>,
-): Set<string> {
-  const barriers = new Set<string>();
-  const entries = [...measureIndex.values()];
+/** One volta group: a contiguous run of <ending> measures (§6A.3). */
+export interface VoltaGroupInfo {
+  /** Ordered measure ghost keys per ending number. */
+  endings: Map<number, string[]>;
+  /** Ordered keys of every measure in the group (document order). */
+  allKeys: string[];
+  /** Highest ending number — the final (continuation) ending. */
+  finalN: number;
+  /**
+   * Ghost key of the repeat-start measure the group's repeat jumps back to
+   * (the measure with @left="rptstart", or the one after @right="rptboth"/
+   * "rptstart"; the first measure of the piece when no repeat-start exists).
+   * Null when unknown (layer-derived index) — treated as outside any
+   * selection, i.e. the conservative §6A.3 row-4 reading.
+   */
+  jumpTargetKey: string | null;
+}
 
-  for (let i = 0; i < entries.length - 1; i++) {
-    const curr = entries[i]!;
-    const next = entries[i + 1]!;
-    if (
-      curr.endingN !== null &&
-      next.endingN !== null &&
-      curr.endingN !== next.endingN
-    ) {
-      barriers.add(curr.key);
+/** Volta lookup structure consumed by computeSelectionKeys(). */
+export interface VoltaIndex {
+  /** Measure ghost key → owning group index + ending number. */
+  byKey: Map<string, { groupIdx: number; endingN: number }>;
+  groups: VoltaGroupInfo[];
+}
+
+/**
+ * Parse a normalised MEI document into a VoltaIndex: volta groups (contiguous
+ * runs of measures inside <ending> elements), their ending membership, and
+ * each group's repeat-start jump target.
+ */
+export function buildVoltaIndex(meiText: string): VoltaIndex {
+  const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+  const byKey = new Map<string, { groupIdx: number; endingN: number }>();
+  const groups: VoltaGroupInfo[] = [];
+
+  const infos = walkMeasureKeys(doc);
+  let current: VoltaGroupInfo | null = null;
+  // Jump target of the open repeat in force; defaults to the piece start.
+  let jumpTargetKey: string | null = infos[0]?.key ?? null;
+  let nextIsJumpTarget = false;
+
+  for (const info of infos) {
+    if (nextIsJumpTarget) {
+      jumpTargetKey = info.key;
+      nextIsJumpTarget = false;
     }
+    if (info.el.getAttribute('left') === 'rptstart') {
+      jumpTargetKey = info.key;
+    }
+    const right = info.el.getAttribute('right');
+    if (right === 'rptboth' || right === 'rptstart') {
+      nextIsJumpTarget = true;
+    }
+
+    if (info.endingN === null) {
+      current = null;
+      continue;
+    }
+
+    if (current === null) {
+      current = {
+        endings: new Map(),
+        allKeys: [],
+        finalN: info.endingN,
+        jumpTargetKey,
+      };
+      groups.push(current);
+    }
+
+    const groupIdx = groups.length - 1;
+    current.allKeys.push(info.key);
+    current.finalN = Math.max(current.finalN, info.endingN);
+    const list = current.endings.get(info.endingN) ?? [];
+    list.push(info.key);
+    current.endings.set(info.endingN, list);
+    byKey.set(info.key, { groupIdx, endingN: info.endingN });
   }
 
-  return barriers;
+  return { byKey, groups };
+}
+
+/**
+ * Derive a VoltaIndex from an already-built ghost layer's measure index.
+ *
+ * Fallback used when the AnnotationSession is constructed without an
+ * MEI-derived index (tests, callers without the MEI text). Groups are runs of
+ * consecutive ending-bearing entries, split when the ending number resets;
+ * jump targets are unknown (null), which makes wholly-contained groups take
+ * the conservative §6A.3 row-4 path (non-final endings excluded).
+ */
+export function voltaIndexFromLayer(measureIndex: Map<string, MeasureGhostEntry>): VoltaIndex {
+  const byKey = new Map<string, { groupIdx: number; endingN: number }>();
+  const groups: VoltaGroupInfo[] = [];
+  let current: VoltaGroupInfo | null = null;
+  let prevEndingN: number | null = null;
+
+  for (const entry of measureIndex.values()) {
+    if (entry.endingN === null) {
+      current = null;
+      prevEndingN = null;
+      continue;
+    }
+    if (current === null || (prevEndingN !== null && entry.endingN < prevEndingN)) {
+      current = { endings: new Map(), allKeys: [], finalN: entry.endingN, jumpTargetKey: null };
+      groups.push(current);
+    }
+    const groupIdx = groups.length - 1;
+    current.allKeys.push(entry.key);
+    current.finalN = Math.max(current.finalN, entry.endingN);
+    const list = current.endings.get(entry.endingN) ?? [];
+    list.push(entry.key);
+    current.endings.set(entry.endingN, list);
+    byKey.set(entry.key, { groupIdx, endingN: entry.endingN });
+    prevEndingN = entry.endingN;
+  }
+
+  return { byKey, groups };
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +373,7 @@ export function measureKeyRange(
   anchorKey: string,
   currentKey: string,
   orderedKeys: string[],
-  barriers: Set<string>,
+  barriers: Set<string>
 ): string[] {
   const anchorIdx = orderedKeys.indexOf(anchorKey);
   const currentIdx = orderedKeys.indexOf(currentKey);
@@ -338,18 +406,172 @@ export function measureKeyRange(
 }
 
 /**
+ * Compute the effective selection key list between anchor and current
+ * (tagging-tool-design.md §6A.2–6A.3, ADR-025).
+ *
+ * Three layers, applied in order:
+ *  1. D.C./D.S. barrier clamp — measureKeyRange() semantics: the drag cannot
+ *     pass a directive barrier in either direction.
+ *  2. Volta gate clamp — when the interval (anchor, current) is invalid
+ *     (endpoints in sibling endings, or a non-final-ending endpoint with the
+ *     other endpoint past the group's end), the moving end retreats toward the
+ *     anchor until the interval is legal. The clamp is position-by-position,
+ *     so a drag that passes *through* an illegal region (e.g. backward from
+ *     ending 2 across ending 1 into the body) becomes legal again once the
+ *     moving end leaves the sibling ending.
+ *  3. Effective-range exclusion — sibling endings the legal interval spans
+ *     but cannot perform are filtered out (§6A.3 rows 2 and 4); a wholly
+ *     contained group keeps all endings only when its repeat-start jump
+ *     target lies inside the interval (row 3).
+ *
+ * The result is ordered in document order and may be discontiguous in
+ * document-order terms (gaps over excluded endings).
+ */
+export function computeSelectionKeys(
+  anchorKey: string,
+  currentKey: string,
+  orderedKeys: string[],
+  barriers: Set<string>,
+  volta: VoltaIndex | null
+): string[] {
+  const anchorIdx = orderedKeys.indexOf(anchorKey);
+  if (anchorIdx === -1) return [];
+
+  // 1. Directive barrier clamp (also handles currentKey not in orderedKeys).
+  const clamped = measureKeyRange(anchorKey, currentKey, orderedKeys, barriers);
+  if (clamped.length === 0) return [];
+  let lo = orderedKeys.indexOf(clamped[0]!);
+  let hi = orderedKeys.indexOf(clamped[clamped.length - 1]!);
+
+  if (!volta || volta.groups.length === 0) {
+    return orderedKeys.slice(lo, hi + 1);
+  }
+
+  const pos = new Map<string, number>();
+  orderedKeys.forEach((k, i) => pos.set(k, i));
+
+  /** Endpoint's volta context iff it belongs to the given group. */
+  const endpointIn = (idx: number, groupIdx: number) => {
+    const ctx = volta.byKey.get(orderedKeys[idx]!);
+    return ctx && ctx.groupIdx === groupIdx ? ctx : null;
+  };
+
+  const isLegal = (loIdx: number, hiIdx: number): boolean => {
+    for (let gi = 0; gi < volta.groups.length; gi++) {
+      const g = volta.groups[gi]!;
+      const gLo = pos.get(g.allKeys[0]!);
+      const gHi = pos.get(g.allKeys[g.allKeys.length - 1]!);
+      if (gLo === undefined || gHi === undefined) continue;
+      if (gHi < loIdx || gLo > hiIdx) continue;
+
+      const loIn = endpointIn(loIdx, gi);
+      const hiIn = endpointIn(hiIdx, gi);
+      // Endpoints in two sibling endings: never performable.
+      if (loIn && hiIn && loIn.endingN !== hiIn.endingN) return false;
+      // Starts inside a non-final ending and extends past the group's end:
+      // a non-final ending closes into the repeat jump, never the continuation.
+      if (loIn && !hiIn && hiIdx > gHi && loIn.endingN !== g.finalN) return false;
+    }
+    return true;
+  };
+
+  // 2. Volta gate clamp: retreat the moving end toward the anchor until legal.
+  // The anchor is always one end of the clamped interval; the other end moves.
+  if (anchorIdx === lo) {
+    while (hi > anchorIdx && !isLegal(lo, hi)) hi--;
+  } else {
+    while (lo < anchorIdx && !isLegal(lo, hi)) lo++;
+  }
+
+  // 3. Effective-range exclusion of unreachable sibling endings.
+  const excluded = new Set<string>();
+  for (let gi = 0; gi < volta.groups.length; gi++) {
+    const g = volta.groups[gi]!;
+    const gLo = pos.get(g.allKeys[0]!);
+    const gHi = pos.get(g.allKeys[g.allKeys.length - 1]!);
+    if (gLo === undefined || gHi === undefined) continue;
+    if (gHi < lo || gLo > hi) continue;
+
+    const loIn = endpointIn(lo, gi);
+    const hiIn = endpointIn(hi, gi);
+    const endpointN = loIn?.endingN ?? hiIn?.endingN ?? null;
+
+    if (endpointN !== null) {
+      // Row 2: an endpoint fixes the performed ending; siblings are excluded.
+      for (const [n, keys] of g.endings) {
+        if (n === endpointN) continue;
+        for (const k of keys) {
+          const p = pos.get(k);
+          if (p !== undefined && p >= lo && p <= hi) excluded.add(k);
+        }
+      }
+    } else {
+      // Group wholly contained. Row 3 (jump target inside: all endings
+      // performable) vs row 4 (jump target outside: non-final endings
+      // unreachable from within the fragment).
+      const jtPos = g.jumpTargetKey !== null ? pos.get(g.jumpTargetKey) : undefined;
+      const jumpInside = jtPos !== undefined && jtPos >= lo && jtPos <= hi;
+      if (!jumpInside) {
+        for (const [n, keys] of g.endings) {
+          if (n === g.finalN) continue;
+          for (const k of keys) {
+            const p = pos.get(k);
+            if (p !== undefined && p >= lo && p <= hi) excluded.add(k);
+          }
+        }
+      }
+    }
+  }
+
+  const slice = orderedKeys.slice(lo, hi + 1);
+  return excluded.size === 0 ? slice : slice.filter((k) => !excluded.has(k));
+}
+
+/**
+ * Derive repeat_context from an effective key list (§6A.3).
+ *
+ * The first volta group represented by exactly one ending number decides the
+ * context (row 2 / row 4); a group represented by two or more endings is the
+ * fully-performable row-3 shape and contributes null. No ending measures →
+ * null.
+ */
+export function deriveRepeatContext(
+  selectedKeys: readonly string[],
+  volta: VoltaIndex | null
+): SelectionRange['repeatContext'] {
+  if (!volta) return null;
+
+  const present = new Map<number, Set<number>>();
+  for (const k of selectedKeys) {
+    const ctx = volta.byKey.get(k);
+    if (!ctx) continue;
+    const set = present.get(ctx.groupIdx) ?? new Set<number>();
+    set.add(ctx.endingN);
+    present.set(ctx.groupIdx, set);
+  }
+
+  for (const ns of present.values()) {
+    if (ns.size === 1) {
+      const n = [...ns][0]!;
+      return n === 1 ? 'first_ending' : 'second_ending';
+    }
+  }
+  return null;
+}
+
+/**
  * Return the ordered slice of numeric beat/sub-beat keys covering [lo, hi]
  * (both inclusive). orderedKeys must be sorted ascending.
  */
 export function numericKeyRange(
   anchorKey: number,
   currentKey: number,
-  orderedKeys: number[],
+  orderedKeys: number[]
 ): number[] {
   const lo = Math.min(anchorKey, currentKey);
   const hi = Math.max(anchorKey, currentKey);
 
-  const startIdx = orderedKeys.findIndex(k => k >= lo);
+  const startIdx = orderedKeys.findIndex((k) => k >= lo);
   if (startIdx === -1) return [];
   // If the first candidate key is already above hi, nothing falls in [lo, hi].
   if (orderedKeys[startIdx]! > hi) return [];
@@ -362,18 +584,6 @@ export function numericKeyRange(
 }
 
 // ---------------------------------------------------------------------------
-// Repeat-context resolution
-// ---------------------------------------------------------------------------
-
-function repeatContextFromEndingN(
-  endingN: number | null,
-): SelectionRange['repeatContext'] {
-  if (endingN === 1) return 'first_ending';
-  if (endingN !== null && endingN >= 2) return 'second_ending';
-  return null;
-}
-
-// ---------------------------------------------------------------------------
 // AnnotationSession
 // ---------------------------------------------------------------------------
 
@@ -381,10 +591,10 @@ function repeatContextFromEndingN(
  * Manages a single annotation session: ghost-layer interaction, concurrent
  * flags, and the committed selection range.
  *
- * On construction, ending-transition barriers are derived automatically from
- * the ghost layer and merged with any caller-supplied closeRepeatMeasures (G2.2).
- * Callers only need to supply repeat-barline barriers; ending barriers are
- * always present without extra configuration.
+ * Selection boundaries follow §6A.2/§6A.3: D.C./D.S. directive barriers clamp
+ * the drag; volta gates and effective-range exclusions are applied by
+ * computeSelectionKeys() from the volta index (caller-supplied or derived
+ * from the ghost layer).
  *
  * Lifecycle: construct after buildGhosts() resolves; call destroy() before
  * the score re-renders or the ghost layer is destroyed.
@@ -392,6 +602,7 @@ function repeatContextFromEndingN(
 export class AnnotationSession {
   private readonly _layer: GhostLayer;
   private readonly _barriers: Set<string>;
+  private readonly _volta: VoltaIndex;
 
   // Ordered key arrays (cached from layer indexes at construction time).
   // measureIndex insertion order = MEI document order (Maps preserve insertion).
@@ -442,6 +653,8 @@ export class AnnotationSession {
   // Subscriber callbacks.
   private _onSelectionChange: ((sel: SelectionRange | null) => void) | null = null;
   private _onFlagsChange: ((flags: AnnotationFlags) => void) | null = null;
+  // Step 20 — play-from-position handoff (Alt-click). Null disables the gesture.
+  private readonly _onPlayFromMeasure: ((measureKey: string) => void) | null;
 
   // Concurrent flags.
   private _flags: AnnotationFlags = {
@@ -454,19 +667,15 @@ export class AnnotationSession {
   constructor(layer: GhostLayer, options: AnnotationSessionOptions = {}) {
     this._layer = layer;
 
-    // G2.2: auto-derive ending-transition barriers and merge with any
-    // caller-supplied close-repeat barriers. A crossing between two distinct
-    // ending contexts (e.g. ending 1 → ending 2) is always a hard gate,
-    // independent of whether a close-repeat barline is also present.
-    const endingBarriers = buildEndingBarriers(layer.measureIndex);
-    const closeRepeat = options.closeRepeatMeasures ?? new Set<string>();
-    this._barriers =
-      endingBarriers.size === 0
-        ? closeRepeat
-        : new Set([...closeRepeat, ...endingBarriers]);
+    // §6A.2: the barrier set is D.C./D.S. directives only (ADR-025 — no
+    // repeat-barline gates). Volta ending gates and exclusions are handled by
+    // computeSelectionKeys() from the volta index, not by barrier clamping.
+    this._barriers = options.barrierMeasures ?? new Set<string>();
+    this._volta = options.voltaIndex ?? voltaIndexFromLayer(layer.measureIndex);
 
     this._resolution = options.resolution ?? 'measure';
     this._minBarRange = options.minBarRange ?? null;
+    this._onPlayFromMeasure = options.onPlayFromMeasure ?? null;
 
     this._orderedMeasureKeys = [...layer.measureIndex.keys()];
     this._orderedBeatKeys = [...layer.beatIndex.keys()].sort((a, b) => a - b);
@@ -485,8 +694,8 @@ export class AnnotationSession {
     }
     if (options.initialFlags) {
       const { conceptSet, stagesComplete, propertiesComplete } = options.initialFlags;
-      if (conceptSet !== undefined)        this._flags = { ...this._flags, conceptSet };
-      if (stagesComplete !== undefined)    this._flags = { ...this._flags, stagesComplete };
+      if (conceptSet !== undefined) this._flags = { ...this._flags, conceptSet };
+      if (stagesComplete !== undefined) this._flags = { ...this._flags, stagesComplete };
       if (propertiesComplete !== undefined) this._flags = { ...this._flags, propertiesComplete };
     }
   }
@@ -630,123 +839,99 @@ export class AnnotationSession {
   // ── Private: G1.3 re-projection ───────────────────────────────────────────
 
   /**
+   * Resolve a SelectionRange to its effective measure-key list (§6A.1).
+   *
+   * Uses sel.measureKeys when present (commit and G1.3 reproject paths).
+   * Otherwise reconstructs it from the human coordinates: bar range filtered
+   * by the repeat_context exclusion (a 'first_ending'/'second_ending' context
+   * excludes the sibling endings; null keeps everything — §6A.3 rows 1/3).
+   */
+  private _effectiveKeysFor(sel: SelectionRange): string[] {
+    if (sel.measureKeys && sel.measureKeys.length > 0) return sel.measureKeys;
+    return this._orderedMeasureKeys.filter((k) => {
+      const e = this._layer.measureIndex.get(k);
+      if (!e) return false;
+      if (!(e.barN >= sel.barStart && e.barN <= sel.barEnd)) return false;
+      if (e.endingN !== null) {
+        if (sel.repeatContext === 'first_ending' && e.endingN !== 1) return false;
+        if (sel.repeatContext === 'second_ending' && e.endingN === 1) return false;
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Highlight the ghosts of a selection on the active resolution layer.
+   *
+   * Measure level uses the effective key list directly. Beat/sub-beat levels
+   * include entries whose parent measure key is in the effective set, with
+   * the beat-precision constraints applied only to the first and last
+   * measure of the selection (by key, not by barN — duplicate @n values must
+   * not truncate middle bars).
+   */
+  private _highlightSelection(sel: SelectionRange): void {
+    const keys = this._effectiveKeysFor(sel);
+    if (keys.length === 0) return;
+
+    if (this._resolution === 'measure') {
+      for (const k of keys) {
+        const entry = this._layer.measureIndex.get(k);
+        if (entry) {
+          addClass(entry.el, 'dark');
+          this._darkGhosts.add(entry.el);
+        }
+      }
+      return;
+    }
+
+    const keySet = new Set(keys);
+    const firstKey = keys[0]!;
+    const lastKey = keys[keys.length - 1]!;
+    const beatStart = sel.beatStart;
+    const beatEnd = sel.beatEnd;
+    const index = this._resolution === 'beat' ? this._layer.beatIndex : this._layer.subBeatIndex;
+
+    for (const entry of index.values()) {
+      if (!keySet.has(entry.measureKey)) continue;
+      if (beatStart !== null && entry.measureKey === firstKey && entry.beatFloat < beatStart)
+        continue;
+      if (beatEnd !== null && entry.measureKey === lastKey && entry.beatFloat >= beatEnd) continue;
+      addClass(entry.el, 'dark');
+      this._darkGhosts.add(entry.el);
+    }
+  }
+
+  /**
    * Re-project a committed SelectionRange onto the freshly rebuilt ghost layer.
    *
    * Called from the constructor when `options.initialSelection` is provided
-   * (SVG re-render path: zoom / resize / font change). Sets _selection and
-   * re-highlights the appropriate ghost elements as dark so endpoint re-anchor
-   * (G1.2) continues to work after the geometry change.
-   *
-   * For measure-level selections (beatStart null) the measure index is used.
-   * For beat/sub-beat selections the active resolution index is used; the
-   * resolution must therefore be set in options before this method runs.
+   * (SVG re-render path: zoom / resize / font change; edit flow for stored
+   * fragments). Sets _selection (with the effective key list materialised)
+   * and re-highlights the matching ghosts as dark so endpoint re-anchor (G1.2)
+   * continues to work after the geometry change.
    *
    * Callbacks are NOT fired — the React state in ScoreViewer already holds
    * the preserved selection and flags, so there is nothing to notify.
    */
   private _restoreSelection(sel: SelectionRange): void {
-    this._selection = sel;
-
-    if (sel.beatStart === null) {
-      // Measure-level: highlight all measure ghosts in [barStart, barEnd].
-      for (const entry of this._layer.measureIndex.values()) {
-        if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
-          addClass(entry.el, 'dark');
-          this._darkGhosts.add(entry.el);
-        }
-      }
-    } else {
-      // Beat / sub-beat: highlight the fine-grained ghosts for the selection
-      // range using the currently active resolution index.
-      //
-      // beatStart/beatEnd are bar-relative beat positions that apply only to
-      // the FIRST and LAST bar respectively. Middle bars include all positions.
-      // (Applying them uniformly to all bars is wrong for multi-bar selections
-      // with a partial start or end — it truncates every bar to the partial range.)
-      const beatStart = sel.beatStart;
-      const beatEnd   = sel.beatEnd;
-      if (this._resolution === 'beat') {
-        for (const entry of this._layer.beatIndex.values()) {
-          if (
-            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-            (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
-            (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
-          ) {
-            addClass(entry.el, 'dark');
-            this._darkGhosts.add(entry.el);
-          }
-        }
-      } else {
-        // 'subbeat' (or any future mode that carries beatStart)
-        for (const entry of this._layer.subBeatIndex.values()) {
-          if (
-            entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-            (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
-            (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
-          ) {
-            addClass(entry.el, 'dark');
-            this._darkGhosts.add(entry.el);
-          }
-        }
-      }
-    }
-
+    const keys = this._effectiveKeysFor(sel);
+    this._selection = { ...sel, measureKeys: keys };
+    this._highlightSelection(this._selection);
     this._flags = { ...this._flags, fragmentSet: true };
     this._updateHandleGhosts();
   }
 
   /**
-   * Re-project the committed selection onto the current resolution's ghost layer.
-   *
-   * Called from setResolution() when fragmentSet is true so that the handle
-   * re-anchor paths (_startHandleDrag, _sortedDark*Keys) always find elements
-   * from the active resolution index in _darkGhosts.
-   *
-   * For measure-level selections (beatStart null) switching to beat/subbeat,
-   * all ghosts in the bar range are illuminated so the user can refine with
-   * handle drags at finer granularity. Does NOT modify _selection or _flags.
+   * Re-project the committed selection onto the current resolution's ghost
+   * layer. Called from setResolution() when fragmentSet is true so that the
+   * handle re-anchor paths (_startHandleDrag, _sortedDark*Keys) always find
+   * elements from the active resolution index in _darkGhosts. Does NOT modify
+   * _selection or _flags (§6A.1 I3 — resolution changes never mutate
+   * committed state).
    */
   private _reprojectSelection(): void {
     if (!this._selection) return;
-    const sel = this._selection;
-
-    if (this._resolution === 'measure') {
-      for (const entry of this._layer.measureIndex.values()) {
-        if (entry.barN >= sel.barStart && entry.barN <= sel.barEnd) {
-          addClass(entry.el, 'dark');
-          this._darkGhosts.add(entry.el);
-        }
-      }
-    } else if (this._resolution === 'beat') {
-      // Per-bar beat filter: beatStart applies only to the first bar, beatEnd
-      // only to the last bar. Middle bars include all positions. Null beatStart
-      // or beatEnd means the selection spans full bar boundaries at that end.
-      const beatStart = sel.beatStart;
-      const beatEnd   = sel.beatEnd;
-      for (const entry of this._layer.beatIndex.values()) {
-        if (
-          entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-          (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
-          (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
-        ) {
-          addClass(entry.el, 'dark');
-          this._darkGhosts.add(entry.el);
-        }
-      }
-    } else {
-      const beatStart = sel.beatStart;
-      const beatEnd   = sel.beatEnd;
-      for (const entry of this._layer.subBeatIndex.values()) {
-        if (
-          entry.barN >= sel.barStart && entry.barN <= sel.barEnd &&
-          (beatStart === null || entry.barN > sel.barStart || entry.beatFloat >= beatStart) &&
-          (beatEnd   === null || entry.barN < sel.barEnd   || entry.beatFloat <  beatEnd)
-        ) {
-          addClass(entry.el, 'dark');
-          this._darkGhosts.add(entry.el);
-        }
-      }
-    }
+    this._highlightSelection(this._selection);
   }
 
   // ── Private: min-bar-range clamp helpers (Component 7 Step 3) ───────────
@@ -767,7 +952,7 @@ export class AnnotationSession {
     if (!this._minBarRange) return currentKey;
 
     const { minBarStart, maxBarEnd } = this._minBarRange;
-    const anchorEntry  = this._layer.measureIndex.get(anchorKey);
+    const anchorEntry = this._layer.measureIndex.get(anchorKey);
     const currentEntry = this._layer.measureIndex.get(currentKey);
     if (!anchorEntry || !currentEntry) return currentKey;
 
@@ -803,12 +988,12 @@ export class AnnotationSession {
   private _clampBeatKey(
     currentKey: number,
     anchorKey: number,
-    index: Map<number, { barN: number }>,
+    index: Map<number, { barN: number }>
   ): number {
     if (!this._minBarRange) return currentKey;
 
     const { minBarStart, maxBarEnd } = this._minBarRange;
-    const anchorEntry  = index.get(anchorKey);
+    const anchorEntry = index.get(anchorKey);
     const currentEntry = index.get(currentKey);
     if (!anchorEntry || !currentEntry) return currentKey;
 
@@ -855,7 +1040,7 @@ export class AnnotationSession {
       () => overlay.removeEventListener('mousedown', onMouseDown),
       () => overlay.removeEventListener('mouseover', onMouseOver),
       () => overlay.removeEventListener('mouseleave', onMouseLeave),
-      () => document.removeEventListener('mouseup', onMouseUp),
+      () => document.removeEventListener('mouseup', onMouseUp)
     );
   }
 
@@ -865,6 +1050,19 @@ export class AnnotationSession {
     if (this._hoverGhost) {
       removeClass(this._hoverGhost, 'light');
       this._hoverGhost = null;
+    }
+
+    // Step 20: Alt-click arms play-from-position instead of selecting. Resolve
+    // the ghost under the cursor up to its enclosing measure and hand off; never
+    // start or mutate a selection drag.
+    if (e.altKey) {
+      const ghost = ghostFromTarget(e.target);
+      const measureKey = ghost ? this._measureKeyForGhost(ghost) : null;
+      if (measureKey !== null) {
+        e.preventDefault();
+        this._onPlayFromMeasure?.(measureKey);
+      }
+      return;
     }
 
     // Handle ghost click: endpoint re-anchor from outside the selection boundary.
@@ -898,10 +1096,42 @@ export class AnnotationSession {
     }
   }
 
+  /**
+   * Resolve the enclosing measure ghost key for any ghost (measure, beat, or
+   * sub-beat). Beat / sub-beat ghosts map up to their parent measure — Step 20
+   * play-from-position is measure-resolution. Returns null when the element is
+   * not a ghost or carries no resolvable key.
+   */
+  private _measureKeyForGhost(ghost: HTMLElement): string | null {
+    const key = ghostDataKey(ghost);
+    if (key === null) return null;
+    if (ghost.classList.contains('ghost-measure')) return key;
+    const num = parseInt(key, 10);
+    if (isNaN(num)) return null;
+    if (ghost.classList.contains('ghost-beat')) {
+      return this._layer.beatIndex.get(num)?.measureKey ?? null;
+    }
+    if (ghost.classList.contains('ghost-subbeat')) {
+      return this._layer.subBeatIndex.get(num)?.measureKey ?? null;
+    }
+    return null;
+  }
+
   private _handleMouseOver(e: MouseEvent): void {
     const ghost = ghostFromTarget(e.target);
 
     if (!this._dragging) {
+      // Step 20: under Alt the armable (play-from-here) affordance is shown by
+      // CSS (data-armable on the panel); suppress the selection hover light and
+      // the handle affordance so the two interactions don't visually collide.
+      if (e.altKey) {
+        if (this._hoverGhost) {
+          removeClass(this._hoverGhost, 'light');
+          this._hoverGhost = null;
+        }
+        this._layer.hideHandles();
+        return;
+      }
       // Light hover is only meaningful before a selection is committed.
       // Once fragmentSet is true, clicking a non-dark ghost does nothing, so
       // showing the hover affordance would imply an incorrect interaction model.
@@ -966,7 +1196,7 @@ export class AnnotationSession {
     // the committed selection, re-anchor the drag from the opposite end
     // (prototype-tagging-tool.md §"Endpoint re-selection").
     if (this._darkGhosts.size >= 2) {
-      const darkMeasureKeys = this._orderedMeasureKeys.filter(k => {
+      const darkMeasureKeys = this._orderedMeasureKeys.filter((k) => {
         const entry = this._layer.measureIndex.get(k);
         return entry !== undefined && this._darkGhosts.has(entry.el);
       });
@@ -1005,11 +1235,12 @@ export class AnnotationSession {
     // are never forced outside the resulting selection.
     const effectiveKey = this._clampMeasureKey(currentKey, this._anchorMeasureKey);
 
-    const range = measureKeyRange(
+    const range = computeSelectionKeys(
       this._anchorMeasureKey,
       effectiveKey,
       this._orderedMeasureKeys,
       this._barriers,
+      this._volta
     );
 
     this._clearDark();
@@ -1037,9 +1268,7 @@ export class AnnotationSession {
     if (entries.length === 0) return;
 
     entries.sort(
-      (a, b) =>
-        this._orderedMeasureKeys.indexOf(a.key) -
-        this._orderedMeasureKeys.indexOf(b.key),
+      (a, b) => this._orderedMeasureKeys.indexOf(a.key) - this._orderedMeasureKeys.indexOf(b.key)
     );
 
     const first = entries[0]!;
@@ -1051,20 +1280,15 @@ export class AnnotationSession {
       this._darkGhosts.add(entry.el);
     }
 
-    let repeatContext: SelectionRange['repeatContext'] = null;
-    for (const entry of entries) {
-      if (entry.endingN !== null) {
-        repeatContext = repeatContextFromEndingN(entry.endingN);
-        break;
-      }
-    }
+    const measureKeys = entries.map((e) => e.key);
 
     this._selection = {
       barStart: first.barN,
       barEnd: last.barN,
       beatStart: null,
       beatEnd: null,
-      repeatContext,
+      repeatContext: deriveRepeatContext(measureKeys, this._volta),
+      measureKeys,
     };
 
     this._setFlag('fragmentSet', true);
@@ -1107,26 +1331,31 @@ export class AnnotationSession {
     if (this._anchorBeatKey === null) return;
 
     // Component 7 Step 3: clamp beat drag to the min-bar-range.
-    const effectiveBeatKey = this._clampBeatKey(currentKey, this._anchorBeatKey, this._layer.beatIndex);
+    const effectiveBeatKey = this._clampBeatKey(
+      currentKey,
+      this._anchorBeatKey,
+      this._layer.beatIndex
+    );
 
-    // G2.3: Enforce measure-level barriers at beat resolution. The close-repeat
-    // barline is a hard gate in all resolution modes, not just measure mode.
-    // Resolve which measure keys are reachable from the anchor under the active
-    // barriers, then filter the numeric beat range to those measures only.
+    // G2.3 / §6A.2: enforce measure-level boundaries at beat resolution —
+    // directive barriers clamp, volta gates clamp, and excluded sibling
+    // endings are filtered out of the reachable measure set, in all
+    // resolution modes alike.
     //
     // Skip the filter when the measure index is unpopulated (empty ordered
     // list) or when the anchor's measureKey is not in the ordered list — that
     // signals a test fixture or a score where ghost building was not run, so
-    // there is no barrier information to apply.
-    const anchorEntry  = this._layer.beatIndex.get(this._anchorBeatKey);
+    // there is no boundary information to apply.
+    const anchorEntry = this._layer.beatIndex.get(this._anchorBeatKey);
     const currentEntry = this._layer.beatIndex.get(effectiveBeatKey);
     const allowedMeasureRange =
       anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
-        ? measureKeyRange(
+        ? computeSelectionKeys(
             anchorEntry.measureKey,
             currentEntry.measureKey,
             this._orderedMeasureKeys,
             this._barriers,
+            this._volta
           )
         : null;
     const allowedMeasureKeys: Set<string> | null =
@@ -1134,11 +1363,7 @@ export class AnnotationSession {
         ? new Set(allowedMeasureRange)
         : null;
 
-    const range = numericKeyRange(
-      this._anchorBeatKey,
-      effectiveBeatKey,
-      this._orderedBeatKeys,
-    );
+    const range = numericKeyRange(this._anchorBeatKey, effectiveBeatKey, this._orderedBeatKeys);
 
     this._clearDark();
     for (const k of range) {
@@ -1170,13 +1395,10 @@ export class AnnotationSession {
     const first = entries[0]!;
     const last = entries[entries.length - 1]!;
 
-    const barNs = entries.map(e => e.barN);
-    const barStart = Math.min(...barNs);
-    const barEnd = Math.max(...barNs);
-
-    // beat_end is the exclusive upper bound for onset-based inclusion:
-    // the next beat float after the last selected beat (+1 step).
-    const beatEnd = last.beatFloat + 1.0;
+    // beat_end is the exclusive upper bound for onset-based inclusion: the
+    // last entry's own end float (its grid step, or the measure's full extent
+    // for a synthetic empty-measure ghost) — never estimated from neighbours.
+    const beatEnd = last.endFloat;
 
     this._clearDark();
     for (const entry of entries) {
@@ -1184,20 +1406,22 @@ export class AnnotationSession {
       this._darkGhosts.add(entry.el);
     }
 
-    let repeatContext: SelectionRange['repeatContext'] = null;
+    // Effective measure-key list in document order (entries are sorted by
+    // encodedKey, which encodes render order).
+    const measureKeys: string[] = [];
     for (const entry of entries) {
-      if (entry.endingN !== null) {
-        repeatContext = repeatContextFromEndingN(entry.endingN);
-        break;
+      if (measureKeys[measureKeys.length - 1] !== entry.measureKey) {
+        measureKeys.push(entry.measureKey);
       }
     }
 
     this._selection = {
-      barStart,
-      barEnd,
+      barStart: first.barN,
+      barEnd: last.barN,
       beatStart: first.beatFloat,
       beatEnd,
-      repeatContext,
+      repeatContext: deriveRepeatContext(measureKeys, this._volta),
+      measureKeys,
     };
 
     this._setFlag('fragmentSet', true);
@@ -1240,18 +1464,23 @@ export class AnnotationSession {
     if (this._anchorSubBeatKey === null) return;
 
     // Component 7 Step 3: clamp sub-beat drag to the min-bar-range.
-    const effectiveSubBeatKey = this._clampBeatKey(currentKey, this._anchorSubBeatKey, this._layer.subBeatIndex);
+    const effectiveSubBeatKey = this._clampBeatKey(
+      currentKey,
+      this._anchorSubBeatKey,
+      this._layer.subBeatIndex
+    );
 
-    // G2.3: same barrier enforcement as beat resolution.
-    const anchorEntry  = this._layer.subBeatIndex.get(this._anchorSubBeatKey);
+    // G2.3 / §6A.2: same boundary enforcement as beat resolution.
+    const anchorEntry = this._layer.subBeatIndex.get(this._anchorSubBeatKey);
     const currentEntry = this._layer.subBeatIndex.get(effectiveSubBeatKey);
     const allowedMeasureRange =
       anchorEntry && currentEntry && this._orderedMeasureKeys.length > 0
-        ? measureKeyRange(
+        ? computeSelectionKeys(
             anchorEntry.measureKey,
             currentEntry.measureKey,
             this._orderedMeasureKeys,
             this._barriers,
+            this._volta
           )
         : null;
     const allowedMeasureKeys: Set<string> | null =
@@ -1262,7 +1491,7 @@ export class AnnotationSession {
     const range = numericKeyRange(
       this._anchorSubBeatKey,
       effectiveSubBeatKey,
-      this._orderedSubBeatKeys,
+      this._orderedSubBeatKeys
     );
 
     this._clearDark();
@@ -1295,16 +1524,11 @@ export class AnnotationSession {
     const first = entries[0]!;
     const last = entries[entries.length - 1]!;
 
-    const barNs = entries.map(e => e.barN);
-    const barStart = Math.min(...barNs);
-    const barEnd = Math.max(...barNs);
-
-    // Estimate the sub-beat step size from adjacent entries; fall back to 0.5.
-    let subBeatStep = 0.5;
-    if (entries.length >= 2) {
-      subBeatStep = last.beatFloat - entries[entries.length - 2]!.beatFloat;
-    }
-    const beatEnd = last.beatFloat + subBeatStep;
+    // The last entry's own end float — exact at every endpoint (§6A.7).
+    // The previous neighbour-difference estimate produced wrong (even
+    // negative) steps when the last two entries sat in different beats or
+    // measures (fixtures SEL-09/SEL-14).
+    const beatEnd = last.endFloat;
 
     this._clearDark();
     for (const entry of entries) {
@@ -1312,20 +1536,20 @@ export class AnnotationSession {
       this._darkGhosts.add(entry.el);
     }
 
-    let repeatContext: SelectionRange['repeatContext'] = null;
+    const measureKeys: string[] = [];
     for (const entry of entries) {
-      if (entry.endingN !== null) {
-        repeatContext = repeatContextFromEndingN(entry.endingN);
-        break;
+      if (measureKeys[measureKeys.length - 1] !== entry.measureKey) {
+        measureKeys.push(entry.measureKey);
       }
     }
 
     this._selection = {
-      barStart,
-      barEnd,
+      barStart: first.barN,
+      barEnd: last.barN,
       beatStart: first.beatFloat,
       beatEnd,
-      repeatContext,
+      repeatContext: deriveRepeatContext(measureKeys, this._volta),
+      measureKeys,
     };
 
     this._setFlag('fragmentSet', true);
@@ -1351,7 +1575,7 @@ export class AnnotationSession {
     this._layer.hideHandles();
 
     if (this._resolution === 'measure') {
-      const darkMeasureKeys = this._orderedMeasureKeys.filter(k => {
+      const darkMeasureKeys = this._orderedMeasureKeys.filter((k) => {
         const entry = this._layer.measureIndex.get(k);
         return entry !== undefined && this._darkGhosts.has(entry.el);
       });
@@ -1445,9 +1669,13 @@ export class AnnotationSession {
     const handleOpacity = this._resolution === 'beat' ? 0.55 : 0.45;
 
     this._layer.positionHandles(
-      firstBounds.left, firstBounds.top, firstBounds.height,
-      lastBounds.left + lastBounds.width, lastBounds.top, lastBounds.height,
-      handleOpacity,
+      firstBounds.left,
+      firstBounds.top,
+      firstBounds.height,
+      lastBounds.left + lastBounds.width,
+      lastBounds.top,
+      lastBounds.height,
+      handleOpacity
     );
     this._handlesReady = true;
     // Handles are positioned at opacity 0 (interactive but invisible) —

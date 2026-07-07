@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { signInWithPassword, AuthError } from '../services/supabaseAuth';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
@@ -18,6 +19,7 @@ import styles from './Login.module.css';
  * docs/mockups/opus_urtext/DESIGN.md §5 "Input Fields".
  */
 export default function Login() {
+  const { t } = useTranslation(['auth', 'errors']);
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,7 +35,7 @@ export default function Login() {
       navigate('/', { replace: true });
     } catch (err) {
       const message =
-        err instanceof AuthError ? err.message : 'An unexpected error occurred.';
+        err instanceof AuthError ? err.message : t('errors:unexpected');
       setError(message);
     } finally {
       setSubmitting(false);
@@ -51,7 +53,7 @@ export default function Login() {
               Doppia
             </Type>
             <Type variant="label-md" as="p" className={styles.subtitle}>
-              Open Music Analysis
+              {t('auth:subtitle')}
             </Type>
           </div>
 
@@ -60,7 +62,7 @@ export default function Login() {
 
             <div className={styles.field}>
               <label htmlFor="email" className={styles.label}>
-                <Type variant="label-md" as="span">Email</Type>
+                <Type variant="label-md" as="span">{t('auth:email')}</Type>
               </label>
               <input
                 id="email"
@@ -76,7 +78,7 @@ export default function Login() {
 
             <div className={styles.field}>
               <label htmlFor="password" className={styles.label}>
-                <Type variant="label-md" as="span">Password</Type>
+                <Type variant="label-md" as="span">{t('auth:password')}</Type>
               </label>
               <input
                 id="password"
@@ -102,7 +104,7 @@ export default function Login() {
               disabled={submitting}
             >
               <Type variant="label-md" as="span">
-                {submitting ? 'Signing in…' : 'Sign in'}
+                {submitting ? t('auth:signingIn') : t('auth:signIn')}
               </Type>
             </button>
 
@@ -111,7 +113,7 @@ export default function Login() {
           {/* Footer note */}
           <p className={styles.note}>
             <Type variant="body-sm" as="span">
-              Access is by invitation. Contact your administrator.
+              {t('auth:invitationNote')}
             </Type>
           </p>
 

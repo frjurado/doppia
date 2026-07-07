@@ -181,3 +181,26 @@ describe('SubmissionChecklist — Save Draft button', () => {
     expect(screen.getByRole('button', { name: 'Save Draft' })).not.toBeDisabled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — Draft saved indicator (Step 5)
+// ---------------------------------------------------------------------------
+
+describe('SubmissionChecklist — Draft saved indicator', () => {
+  it('shows "Draft saved" once a draft exists (quiet Save Draft feedback)', () => {
+    renderChecklist({ flags: fragmentOnly, draftId: 'draft-1' });
+    expect(screen.getByText('Draft saved')).toBeInTheDocument();
+  });
+
+  it('suppresses "Draft saved" while a Submit is in flight (no mid-submit flash)', () => {
+    // Submit creates/updates the draft as an intermediate step; the "Draft
+    // saved" note must not flash during that sequence (Step 5).
+    renderChecklist({ flags: allTrue, draftId: 'draft-1', isSubmitting: true });
+    expect(screen.queryByText('Draft saved')).not.toBeInTheDocument();
+  });
+
+  it('suppresses "Draft saved" when an error is present', () => {
+    renderChecklist({ flags: fragmentOnly, draftId: 'draft-1', submitError: 'Failed to save draft.' });
+    expect(screen.queryByText('Draft saved')).not.toBeInTheDocument();
+  });
+});

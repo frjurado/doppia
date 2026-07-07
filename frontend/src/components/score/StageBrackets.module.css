@@ -49,8 +49,8 @@
 
 /* Error state: red tint — bounds outside main bracket. */
 .error {
-  background-color: color-mix(in srgb, var(--color-error, #b3261e) 40%, transparent);
-  outline: 1.5px solid var(--color-error, #b3261e);
+  background-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  outline: 1.5px solid var(--color-error);
 }
 
 /* ── Stage label ──────────────────────────────────────────────────────────── */

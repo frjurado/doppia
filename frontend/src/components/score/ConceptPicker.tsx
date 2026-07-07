@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { searchConcepts } from '../../services/conceptApi';
 import type { ConceptSearchHit } from '../../services/conceptApi';
 import Type from '../ui/Type';
@@ -59,9 +60,13 @@ export interface ConceptPickerProps {
  * e.g. "Cadence › Authentic Cadence" for PerfectAuthenticCadence.
  */
 function HierarchyPath({ path }: { path: string[] }) {
+  const { t } = useTranslation('score');
   if (path.length === 0) return null;
   return (
-    <span className={styles.hierarchyPath} aria-label={`Under: ${path.join(' › ')}`}>
+    <span
+      className={styles.hierarchyPath}
+      aria-label={t('conceptPicker.underPath', { path: path.join(' › ') })}
+    >
       {path.join(' › ')}
     </span>
   );
@@ -77,6 +82,7 @@ function ConceptCard({
   isSelected: boolean;
   onSelect: (c: ConceptSearchHit) => void;
 }) {
+  const { t } = useTranslation('score');
   const aliasSnippet =
     concept.aliases.length > 0
       ? concept.aliases.slice(0, 2).join(', ')
@@ -97,7 +103,7 @@ function ConceptCard({
           {concept.name}
         </Type>
         {isSelected && (
-          <span className={styles.selectedBadge} aria-label="Selected">✓</span>
+          <span className={styles.selectedBadge} aria-label={t('conceptPicker.selected')}>✓</span>
         )}
       </span>
       {aliasSnippet && (
@@ -113,6 +119,7 @@ function ConceptCard({
 // ---------------------------------------------------------------------------
 
 export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPickerProps) {
+  const { t } = useTranslation('score');
   const [query, setQuery] = useState('');
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
   const [results, setResults] = useState<ConceptSearchHit[]>([]);
@@ -144,7 +151,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
           setResults(page.items);
         } catch (err) {
           if ((err as Error).name !== 'AbortError') {
-            setError('Search failed. Check your connection and try again.');
+            setError(t('conceptPicker.searchFailed'));
             setResults([]);
           }
         } finally {
@@ -152,7 +159,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
         }
       }, DEBOUNCE_MS);
     },
-    [],
+    [t],
   );
 
   useEffect(() => {
@@ -194,10 +201,10 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
         <input
           type="search"
           className={styles.searchInput}
-          placeholder="Search concepts…"
+          placeholder={t('conceptPicker.searchPlaceholder')}
           value={query}
           onChange={handleQueryChange}
-          aria-label="Search concepts"
+          aria-label={t('conceptPicker.searchAria')}
           autoComplete="off"
           data-testid="concept-search-input"
         />
@@ -206,7 +213,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
             type="button"
             className={styles.clearButton}
             onClick={handleClear}
-            aria-label="Clear selection"
+            aria-label={t('conceptPicker.clearSelection')}
           >
             ✕
           </button>
@@ -214,7 +221,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
       </div>
 
       {/* Domain facets */}
-      <div className={styles.facets} role="group" aria-label="Domain filter">
+      <div className={styles.facets} role="group" aria-label={t('conceptPicker.domainFilter')}>
         <button
           type="button"
           className={[styles.facetPill, activeDomain === null ? styles.facetPillActive : '']
@@ -223,7 +230,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
           onClick={() => setActiveDomain(null)}
           aria-pressed={activeDomain === null}
         >
-          <Type variant="label-sm" as="span">All</Type>
+          <Type variant="label-sm" as="span">{t('conceptPicker.all')}</Type>
         </button>
         {DOMAINS.map(({ key, label }) => (
           <button
@@ -245,10 +252,10 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
       </div>
 
       {/* Results area */}
-      <div className={styles.results} role="list" aria-label="Concept search results">
+      <div className={styles.results} role="list" aria-label={t('conceptPicker.resultsAria')}>
         {isLoading && (
           <Type variant="label-sm" as="p" className={styles.statusMsg}>
-            Searching…
+            {t('common:searching')}
           </Type>
         )}
         {!isLoading && error && (
@@ -258,12 +265,12 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
         )}
         {!isLoading && !error && hasQuery && results.length === 0 && (
           <Type variant="label-sm" as="p" className={styles.statusMsg}>
-            No concepts found.
+            {t('conceptPicker.noConceptsFound')}
           </Type>
         )}
         {!isLoading && !error && !hasQuery && !selectedConceptId && (
           <Type variant="label-sm" as="p" className={styles.statusMsg}>
-            Type to search for a concept.
+            {t('conceptPicker.typeToSearch')}
           </Type>
         )}
         {results.map(concept => (

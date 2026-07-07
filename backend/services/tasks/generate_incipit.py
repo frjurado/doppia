@@ -135,6 +135,13 @@ async def _generate_incipit_async(movement_id: str) -> None:
                 "adjustPageHeight": True,
                 "breaks": "none",
                 "scale": 35,
+                # Suppress Verovio's auto-generated page header (the encoded
+                # movement title, e.g. "Andante grazioso").  In the incipit
+                # thumbnail it consumes vertical space without adding
+                # information the card UI does not already provide, reducing
+                # the visible score content at fixed thumbnail height.
+                # See component-9 Step 8b.
+                "header": "none",
             }
         )
         # Strip XML comments before loading: Verovio's XML parser does not

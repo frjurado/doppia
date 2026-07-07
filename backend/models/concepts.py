@@ -24,11 +24,15 @@ class ReferencedConcept(BaseModel):
         id: Immutable concept identifier.
         name: Human-readable concept name.
         definition: Long-form definition text, or ``None`` if not set.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this concept and English values are served as a
+            fallback (ADR-006 §6). Always ``False`` for English.
     """
 
     id: str
     name: str
     definition: str | None = None
+    translation_missing: bool = False
 
 
 class PropertyValueItem(BaseModel):
@@ -41,12 +45,16 @@ class PropertyValueItem(BaseModel):
             ``HAS_VALUE`` edge); ``None`` when not declared (sorts last).
         referenced_concept: If this value has a ``VALUE_REFERENCES`` edge,
             the target concept's id, name, and definition; ``None`` otherwise.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this value and the English label is served as a
+            fallback (ADR-006 §6). Always ``False`` for English.
     """
 
     id: str
     name: str
     order: int | None = None
     referenced_concept: ReferencedConcept | None = None
+    translation_missing: bool = False
 
 
 class PropertySchemaItem(BaseModel):
@@ -63,6 +71,9 @@ class PropertySchemaItem(BaseModel):
         group: Optional cluster label grouping related schemas in the form
             (from the ``HAS_PROPERTY_SCHEMA`` edge); ``None`` for ungrouped schemas.
         values: Permitted values; empty list for BOOL schemas.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this schema and English values are served as a
+            fallback (ADR-006 §6). Always ``False`` for English.
     """
 
     id: str
@@ -73,6 +84,7 @@ class PropertySchemaItem(BaseModel):
     order: int | None = None
     group: str | None = None
     values: list[PropertyValueItem] = Field(default_factory=list)
+    translation_missing: bool = False
 
 
 class ContainsStageItem(BaseModel):
@@ -88,6 +100,9 @@ class ContainsStageItem(BaseModel):
         containment_mode: ``"contiguous"`` (shared split handle) or
             ``"free"`` (independent endpoints; not implemented in Phase 1).
         default_weight: Relative width in the pre-populated bracket layout.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for the stage concept (``target_name`` falls back to
+            English) (ADR-006 §6). Always ``False`` for English.
     """
 
     target_id: str
@@ -97,6 +112,7 @@ class ContainsStageItem(BaseModel):
     display_mode: str
     containment_mode: str
     default_weight: float
+    translation_missing: bool = False
 
 
 class TypeRefinementChild(BaseModel):
@@ -106,11 +122,15 @@ class TypeRefinementChild(BaseModel):
         id: Concept id of the child.
         name: Concept name.
         definition: Definition text for the tooltip; ``None`` if absent.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this child concept (ADR-006 §6). Always ``False``
+            for English.
     """
 
     id: str
     name: str
     definition: str | None = None
+    translation_missing: bool = False
 
 
 class TypeRefinement(BaseModel):
@@ -167,6 +187,9 @@ class ConceptSearchItem(BaseModel):
         hierarchy_path: Ancestor names from root to this concept, inclusive
             (e.g. ``["Cadence", "Authentic Cadence", "Perfect Authentic Cadence"]``).
         definition: Long-form definition text, or ``None`` if not set.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this concept and English values are served as a
+            fallback (ADR-006 §6). Always ``False`` for English.
     """
 
     id: str
@@ -174,6 +197,7 @@ class ConceptSearchItem(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     hierarchy_path: list[str] = Field(default_factory=list)
     definition: str | None = None
+    translation_missing: bool = False
 
 
 class ConceptSearchResponse(BaseModel):
@@ -214,6 +238,9 @@ class ConceptTreeNode(BaseModel):
         fragment_count: Number of ``approved`` fragments whose concept tags
             include this concept (cross-reference tags count, not only
             ``is_primary``).
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this concept and English values are served as a
+            fallback (ADR-006 §6). Always ``False`` for English.
     """
 
     id: str
@@ -222,6 +249,7 @@ class ConceptTreeNode(BaseModel):
     hierarchy_path: list[str] = Field(default_factory=list)
     parent_id: str | None = None
     fragment_count: int = 0
+    translation_missing: bool = False
 
 
 class ConceptTreeResponse(BaseModel):
@@ -240,3 +268,36 @@ class ConceptTreeResponse(BaseModel):
 
     root_id: str
     nodes: list[ConceptTreeNode]
+
+
+# ---------------------------------------------------------------------------
+# Domain roots response model  (GET /api/v1/concepts/roots)
+# ---------------------------------------------------------------------------
+
+
+class ConceptRootItem(BaseModel):
+    """A domain root concept — a non-stub concept with no IS_SUBTYPE_OF parent.
+
+    Attributes:
+        id: Immutable concept identifier (e.g. ``"Cadence"``).
+        name: Human-readable concept name.
+        aliases: Alternative names / abbreviations; empty list if none.
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this concept and English values are served as a
+            fallback (ADR-006 §6). Always ``False`` for English.
+    """
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    translation_missing: bool = False
+
+
+class ConceptRootsResponse(BaseModel):
+    """All domain root concepts, sorted alphabetically.
+
+    Attributes:
+        roots: Ordered list of domain root items.
+    """
+
+    roots: list[ConceptRootItem]

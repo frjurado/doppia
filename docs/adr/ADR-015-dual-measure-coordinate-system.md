@@ -71,3 +71,21 @@ Considered. Rejected because it would require a data migration of all existing f
 
 **Maintain a separate `measure_map` table in PostgreSQL.**
 Considered for movements without DCML data. Rejected as premature: for Phase 1 all movements are DCML-annotated and the tagging tool derives position indices from the MEI at tag time. A materialised map table adds schema complexity with no current benefit. Revisit in Phase 2 if non-DCML movements require it.
+
+---
+
+## Amendment (2026-06-16) — Duplicate `@n` is an accepted human-coordinate ambiguity
+
+*Context: Component 9 Step 8 ingestion-warning triage. Decision taken with Francisco 2026-06-16.*
+
+Some staging movements carry **duplicate `@n` values outside `<ending>` elements** because the source MuseScore-to-MEI export writes a section out twice rather than expressing it as a repeat structure. The clearest case is **K.331/movement-2 (Menuetto)**, whose 48 bars are numbered 1–48 twice (a written-out repeat / multi-section restart — *not* the "minuet+trio renumbering" the issue backlog assumed). The same structure produces two unpaired `rptend` barlines.
+
+This ADR's machine coordinate (`mc` / position index) is **unaffected**: `mc` is a document-order rank and remains unique across the duplicated runs, so rendering, fragment ranges, and harmony alignment are all correct. The ambiguity is confined to the **human coordinate** (`bar_start`/`bar_end`, derived from `@n`): "m. 12" alone cannot distinguish the two passes.
+
+**Decision.** Duplicate `@n` outside `<ending>` arising from a clean section restart is an **accepted** condition, not a defect:
+
+- The normalizer collapses it to a single `info`-severity advisory (`MEASURE_N_MULTI_SECTION_DUPLICATE`) and does not flag each measure (see `mei-ingest-normalization.md` § Warning severity and dispositions).
+- The corpus source is **not** re-prepared; the written-out repeat is musically faithful and `mc` makes it safe to ingest as-is.
+- `mc_start`/`mc_end` remain the sole machine identifiers; any consumer needing to disambiguate the human label must qualify it by section/pass, not by `@n` alone.
+
+**Deferred.** Display-time disambiguation of duplicate bar labels (e.g. a "Menuetto" vs. "Menuetto da capo" qualifier on the fragment viewer and bracket) is out of scope here and is carried to the Component 9 fragment-viewer / harmony-overlay work (Step 15). Until then the duplicate label is shown as-is; it is never used as a join key, so no data is at risk.

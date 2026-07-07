@@ -1,0 +1,31 @@
+{
+  "retry": "Reintentar",
+  "loadMore": "Cargar más",
+  "loading": "Cargando…",
+  "searching": "Buscando…",
+  "collapse": "Contraer",
+  "expand": "Expandir",
+  "movementNumber": "Movimiento {{number}}",
+  "barRangeMm": "cc. {{start}}–{{end}}",
+  "nothingHere": "Nada por aquí",
+  "play": "Reproducir",
+  "pause": "Pausar",
+  "stop": "Detener",
+  "save": "Guardar",
+  "cancel": "Cancelar",
+  "close": "Cerrar",
+  "edit": "Editar",
+  "delete": "Eliminar",
+  "back": "Volver",
+  "yes": "Sí",
+  "no": "No",
+  "staffSize": "Tamaño del pentagrama",
+  "loadingInstrument": "Cargando instrumento…",
+  "instrumentUnavailable": "Instrumento no disponible",
+  "status": {
+    "draft": "borrador",
+    "submitted": "enviado",
+    "approved": "aprobado",
+    "rejected": "rechazado"
+  }
+}

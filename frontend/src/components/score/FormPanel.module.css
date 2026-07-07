@@ -56,6 +56,13 @@
   margin: 0;
 }
 
+/* Heading + (i) info affordance on one line (Part 8 item 4). */
+.sectionHeadingRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-1);
+}
+
 /* ── Schema fetch status ─────────────────────────────────────────────────── */
 
 .schemaStatus {
@@ -64,29 +71,11 @@
 }
 
 .schemaError {
-  color: var(--color-error, #b3261e);
-  margin: 0;
-}
-
-/* ── Stages section hint ─────────────────────────────────────────────────── */
-
-/* Shown once below the Stages heading when optional stages are unconfirmed. */
-.stagesHint {
-  color: var(--color-on-surface-variant, #41484d);
+  color: var(--color-error);
   margin: 0;
 }
 
 /* ── Prose annotation ─────────────────────────────────────────────────────── */
-
-.proseLabel {
-  display: block;
-}
-
-.proseDescription {
-  color: var(--color-on-surface-variant);
-  display: block;
-  margin-bottom: var(--spacing-2);
-}
 
 .proseTextarea {
   width: 100%;
@@ -134,11 +123,11 @@
   border: none;
   cursor: pointer;
   padding: var(--spacing-1) var(--spacing-2);
-  color: var(--color-error, #b3261e);
+  color: var(--color-error);
 }
 
 .deleteButton:hover {
-  background-color: var(--color-error-container, #f9dedc);
+  background-color: var(--color-error-container);
 }
 
 /* ── No-selection hint ────────────────────────────────────────────────────── */

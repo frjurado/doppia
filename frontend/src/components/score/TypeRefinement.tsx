@@ -21,6 +21,7 @@
  * References: tagging-tool-design.md §7.2, ADR-011 §7.
  */
 
+import { useTranslation } from 'react-i18next';
 import type { TypeRefinementChild } from '../../services/conceptApi';
 import Type from '../ui/Type';
 import styles from './TypeRefinement.module.css';
@@ -50,6 +51,7 @@ export interface TypeRefinementProps {
  * regardless of call site.
  */
 export default function TypeRefinement({ options, selectedId, onChange }: TypeRefinementProps) {
+  const { t } = useTranslation('score');
   if (options.length === 0) return null;
 
   const handleChange = (option: TypeRefinementChild) => {
@@ -65,12 +67,12 @@ export default function TypeRefinement({ options, selectedId, onChange }: TypeRe
   return (
     <div className={styles.section} data-testid="type-refinement">
       <Type variant="label-sm" as="p" className={styles.label}>
-        Refine type
+        {t('typeRefinement.refineType')}
       </Type>
       <div
         className={styles.radioGroup}
         role="radiogroup"
-        aria-label="Type Refinement"
+        aria-label={t('typeRefinement.ariaLabel')}
         data-testid="type-refinement-group"
       >
         {options.map(option => {

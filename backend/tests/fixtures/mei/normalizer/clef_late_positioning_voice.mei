@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture (ADR-031, Pass 10c — the K279/i m.86 shape): the clef change is
+     shown at the change point (onset 8) on the SILENT voice (layer 5, no notes
+     after it), while the PLAYING voice (layer 6) carries the change a little
+     late, nested in a beam and AFTER its own first note f4 (which belongs under
+     the new clef).  Reconciliation must pull layer 6's clef back to the earliest
+     onset (8) — hoisting it out of the beam so it precedes f4 (re-clefing f4) —
+     and then drop layer 5's now-coincident noteless copy.  Net: one glyph at the
+     change point, f4 under G.  4 ppq per quarter. -->
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Late positioning voice — pull clef to the change point</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef meter.count="4" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="F" clef.line="4" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure n="1">
+              <staff n="1">
+                <layer n="5">
+                  <note dur="4" dur.ppq="4" oct="4" pname="c"/>
+                  <note dur="4" dur.ppq="4" oct="3" pname="b"/>
+                  <clef xml:id="c-correct" shape="G" line="2"/>
+                  <space dur="2" dur.ppq="8"/>
+                </layer>
+                <layer n="6">
+                  <note dur="4" dur.ppq="8" oct="3" pname="g"/>
+                  <beam>
+                    <note dur="8" dur.ppq="2" oct="4" pname="f"/>
+                    <clef xml:id="c-late" shape="G" line="2"/>
+                    <note dur="8" dur.ppq="2" oct="5" pname="c"/>
+                    <note dur="8" dur.ppq="2" oct="4" pname="b"/>
+                    <note dur="8" dur.ppq="2" oct="5" pname="c"/>
+                  </beam>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

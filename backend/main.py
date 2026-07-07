@@ -215,7 +215,7 @@ def create_app() -> FastAPI:
         allow_origins=origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
     )
 
     # Versioned API router — all endpoints live under /api/v1/.
