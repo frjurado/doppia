@@ -568,3 +568,66 @@ export function respondToMainResize(
   const updated = frameToAssignments(assignments, active, slots, boundaries);
   return { assignments: updated, droppedGrid, blocked: false };
 }
+
+// ---------------------------------------------------------------------------
+// Split-handle drag targeting (§6A.4 I9, I11)
+// ---------------------------------------------------------------------------
+
+/** Max systemBottom distance (px) for a slot to count as "on this system". */
+const SYS_TOLERANCE = 20;
+
+/**
+ * Resolve which system a cursor y falls on: the distinct slot systemBottom
+ * nearest to y. Systems are far apart vertically relative to the bracket
+ * lane's offsets, so nearest-bottom partitions the container into horizontal
+ * bands with the switchover midway between adjacent systems.
+ *
+ * This is what lets a split-handle drag cross systems (§6A.4 I11, Component 9
+ * Part 8 item 2): the target system follows the cursor tick by tick instead
+ * of staying frozen at the drag-start handle's system.
+ */
+export function nearestSystemBottom(slots: StageSlot[], y: number): number {
+  let best = slots[0]!.systemBottom;
+  let bestDist = Infinity;
+  for (const slot of slots) {
+    const dist = Math.abs(slot.systemBottom - y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = slot.systemBottom;
+    }
+  }
+  return best;
+}
+
+/**
+ * Map a cursor x to the nearest boundary position (slot index 0..N) on the
+ * cursor's system (resolved per mousemove tick via `nearestSystemBottom` —
+ * not the drag-start system, so the handle can jump systems mid-drag, I11).
+ * Total: always returns a position — there is no tolerance radius whose
+ * failure would leave the handle behind the cursor (I9).
+ * Boundary k sits at slot k's left edge; boundary N at the last slot's right.
+ */
+export function nearestBoundaryTarget(
+  slots: StageSlot[],
+  x: number,
+  systemBottom: number,
+): number {
+  let best = 0;
+  let bestDist = Infinity;
+  let bestOnSystem = false;
+
+  for (let k = 0; k <= slots.length; k++) {
+    const ref = k < slots.length ? slots[k]! : slots[slots.length - 1]!;
+    const edgeX = k < slots.length ? ref.left : ref.right;
+    const onSystem = Math.abs(ref.systemBottom - systemBottom) <= SYS_TOLERANCE;
+    const dist = Math.abs(edgeX - x);
+
+    // Prefer candidates on the cursor's system; fall back to any system.
+    if (onSystem === bestOnSystem ? dist < bestDist : onSystem) {
+      best = k;
+      bestDist = dist;
+      bestOnSystem = onSystem;
+    }
+  }
+  return best;
+}

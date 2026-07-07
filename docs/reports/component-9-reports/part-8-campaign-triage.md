@@ -62,6 +62,15 @@ Contained in one function + its unit tests. If the spec
 (`tagging-tool-design.md` §6A.4) is silent on multi-system boundary drags,
 add the clause in the same change.
 
+**Done (2026-07-07, pending Francisco's in-app verification):**
+`nearestSystemBottom` resolves the cursor's system per mousemove tick and
+`nearestBoundaryTarget` targets boundaries on *that* system;
+`DragState.systemBottom` (the frozen drag-start system) removed. Spec clause
+added as §6A.4 **I11**. Unit-tested over two-system slot fixtures
+(`StageBrackets.test.ts`), including the pre-fix counterexample (same x,
+cursor on system 2 → boundary on system 2, where the old code returned the
+system-1 boundary).
+
 ### 3. G2 (stage list ordering) — two of three surfaces still unsorted
 
 The Band-2 position sort landed only in the tagging sidebar

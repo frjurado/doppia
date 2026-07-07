@@ -11,12 +11,15 @@
  *
  * Split handles appear between adjacent non-absent stages in contiguous mode.
  * Dragging a handle moves the shared boundary to the nearest slot edge at the
- * active resolution. The move is total (I9 — the handle clamps visibly at
- * hard limits, never bounces back on release), moves exactly one boundary
- * with the growing side absorbing all freed space (I6), and collapses
- * optional stages it overtakes — restoring them if the drag retreats, since
- * every tick re-derives from the gesture's initial frame (I10; the collapse
- * commits on mouseup).
+ * active resolution, on the system under the cursor — the target system
+ * follows the cursor's y tick by tick, so a boundary can be dragged across
+ * system breaks in a multi-system fragment (I11, Component 9 Part 8 item 2).
+ * The move is total (I9 — the handle clamps visibly at hard limits, never
+ * bounces back on release), moves exactly one boundary with the growing side
+ * absorbing all freed space (I6), and collapses optional stages it
+ * overtakes — restoring them if the drag retreats, since every tick
+ * re-derives from the gesture's initial frame (I10; the collapse commits on
+ * mouseup).
  *
  * Required stages render with a solid bracket; optional stages render dashed.
  * Orphaned stages render grey with reduced opacity and a warning indicator.
@@ -42,6 +45,8 @@ import {
   moveBoundary,
   frameToAssignments,
   foldStageSegments,
+  nearestBoundaryTarget,
+  nearestSystemBottom,
 } from './stageFrame';
 import styles from './StageBrackets.module.css';
 
@@ -59,8 +64,6 @@ const BELOW_STAFF_GAP = 20;
 const HANDLE_W = 20;
 /** Half-width of the split handle hit target. */
 const SPLIT_HANDLE_HW = 8;
-/** Max systemBottom distance (px) for a slot to count as "on this system". */
-const SYS_TOLERANCE = 20;
 
 // ---------------------------------------------------------------------------
 // Props
@@ -109,48 +112,12 @@ interface SplitHandle {
 /** Gesture state frozen at drag start — every tick re-derives from this. */
 interface DragState {
   boundaryIdx: number;
-  systemBottom: number;
   slots: StageSlot[];
   boundaries: number[];
   required: boolean[];
   initialAssignments: StageAssignment[];
   initialActive: StageAssignment[];
   flankIds: Set<string>;
-}
-
-// ---------------------------------------------------------------------------
-// Spatial helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Map a cursor x to the nearest boundary position (slot index 0..N) on the
- * drag's system. Total: always returns a position — there is no tolerance
- * radius whose failure would leave the handle behind the cursor (I9).
- * Boundary k sits at slot k's left edge; boundary N at the last slot's right.
- */
-function nearestBoundaryTarget(
-  slots: StageSlot[],
-  x: number,
-  systemBottom: number,
-): number {
-  let best = 0;
-  let bestDist = Infinity;
-  let bestOnSystem = false;
-
-  for (let k = 0; k <= slots.length; k++) {
-    const ref = k < slots.length ? slots[k]! : slots[slots.length - 1]!;
-    const edgeX = k < slots.length ? ref.left : ref.right;
-    const onSystem = Math.abs(ref.systemBottom - systemBottom) <= SYS_TOLERANCE;
-    const dist = Math.abs(edgeX - x);
-
-    // Prefer candidates on the drag's system; fall back to any system.
-    if (onSystem === bestOnSystem ? dist < bestDist : onSystem) {
-      best = k;
-      bestDist = dist;
-      bestOnSystem = onSystem;
-    }
-  }
-  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,8 +153,15 @@ export default function StageBrackets({
 
     const containerRect = handleContainerRef.current.getBoundingClientRect();
     const x = e.clientX - containerRect.left;
+    const y = e.clientY - containerRect.top;
 
-    const target = nearestBoundaryTarget(drag.slots, x, drag.systemBottom);
+    // The target system follows the cursor, so a boundary can be dragged
+    // onto another system of a multi-system fragment (I11, Part 8 item 2).
+    const target = nearestBoundaryTarget(
+      drag.slots,
+      x,
+      nearestSystemBottom(drag.slots, y),
+    );
     const moved = moveBoundary(
       drag.boundaries,
       drag.boundaryIdx,
@@ -213,7 +187,7 @@ export default function StageBrackets({
   }, [handleMouseMove, session]);
 
   const startSplitDrag = useCallback(
-    (e: React.MouseEvent, boundaryIdx: number, systemBottom: number) => {
+    (e: React.MouseEvent, boundaryIdx: number) => {
       if (!selection || !layer) return;
       e.stopPropagation();
       e.preventDefault();
@@ -227,7 +201,6 @@ export default function StageBrackets({
 
       dragRef.current = {
         boundaryIdx,
-        systemBottom,
         slots,
         boundaries,
         required: active.map(a => a.required),
@@ -387,7 +360,7 @@ export default function StageBrackets({
               height: BRACKET_H + SPLIT_HANDLE_HW * 2,
             }}
             data-testid={`split-handle-${sh.boundaryIdx}`}
-            onMouseDown={e => startSplitDrag(e, sh.boundaryIdx, sh.systemBottom)}
+            onMouseDown={e => startSplitDrag(e, sh.boundaryIdx)}
           />
         );
       })}
