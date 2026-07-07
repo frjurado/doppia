@@ -10,9 +10,14 @@ Implements the seven-step upload workflow described in
    normalisation (:func:`~services.mei_normalizer.normalize_mei`).
 5. Intra-corpus coherence checks (catalogue uniqueness, year plausibility).
 6. Single DB transaction with storage writes: upsert all entities, write MEI files.
-7. Dispatch two Celery tasks per accepted movement:
+7. Dispatch background tasks per accepted movement (via
+   ``services.task_dispatch`` — inline in-process by default, Celery when
+   ``TASK_EXECUTION_MODE=celery``; ADR-034):
    - ingest_movement_analysis (DCML harmony parsing)
    - generate_incipit (Verovio first-page SVG render)
+   - render_fragment_preview for every submitted/approved fragment already on
+     the movement (ADR-008 — an upsert over an existing movement invalidates
+     its stored fragment previews; no-op for first-time movements)
 
 The public surface is a single async function:
 
@@ -49,9 +54,11 @@ from models.music import Composer, Corpus, Movement, Work
 from models.normalization import NormalizationReport
 from pydantic import ValidationError
 from services.corrections_overlay import load_corrections
+from services.fragments import enqueue_preview_regeneration_for_movement
 from services.mei_normalizer import normalize_mei
 from services.mei_validator import validate_mei
 from services.object_storage import StorageClient
+from services.task_dispatch import dispatch_task
 from services.tasks.generate_incipit import generate_incipit
 from services.tasks.ingest_analysis import ingest_movement_analysis
 from sqlalchemy import func
@@ -324,20 +331,25 @@ async def ingest_corpus(
                 )
 
     # ------------------------------------------------------------------
-    # 8. Dispatch Celery tasks (outside transaction, after commit)
+    # 8. Dispatch background tasks (outside transaction, after commit)
     # ------------------------------------------------------------------
     for entry in dispatch_entries:
         try:
-            ingest_movement_analysis.delay(
+            dispatch_task(
+                ingest_movement_analysis,
                 movement_id=str(entry.movement_id),
                 analysis_source=entry.analysis_source,
                 harmonies_tsv_content=(
                     entry.harmonies_bytes.decode() if entry.harmonies_bytes else None
                 ),
             )
-            generate_incipit.delay(movement_id=str(entry.movement_id))
+            dispatch_task(generate_incipit, movement_id=str(entry.movement_id))
+            # ADR-008: an upsert over an existing movement replaces its
+            # normalized MEI, so every stored fragment preview on it is stale.
+            # No-op for first-time movements (they have no fragments yet).
+            await enqueue_preview_regeneration_for_movement(db, entry.movement_id)
         except Exception as exc:
-            # Broker unavailable (e.g. misconfigured Redis in staging). The
+            # Broker unavailable (celery mode with misconfigured Redis). The
             # upload itself has already succeeded — DB records committed and
             # MEI files stored. Log and continue; tasks can be re-enqueued
             # manually once the broker is reachable.

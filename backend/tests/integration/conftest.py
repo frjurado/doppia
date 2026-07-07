@@ -202,6 +202,10 @@ async def integration_test_client(
         ("R2_BUCKET_NAME", "doppia-local"),
         ("R2_ACCESS_KEY_ID", "minioadmin"),
         ("R2_SECRET_ACCESS_KEY", "minioadmin"),
+        # Integration tests assert on Celery .delay() (patched or against the
+        # Docker Redis broker), so pin celery mode; the inline default
+        # (ADR-034) is unit-tested in test_task_dispatch.py.
+        ("TASK_EXECUTION_MODE", "celery"),
     ):
         if not os.environ.get(key):
             monkeypatch.setenv(key, default)

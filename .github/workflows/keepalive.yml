@@ -1,0 +1,38 @@
+# Staging keep-alive ping — free-tier operations (Component 9 Part 8 triage,
+# 2026-07-07; see docs/deployment.md § "Free-tier operations").
+#
+# Supabase pauses free projects after ~1 week without activity (taking auth
+# down with it) and Neo4j AuraDB Free pauses after ~3 days idle (taking
+# concept search/browse down). A daily request to /api/v1/health/deep runs a
+# trivial query against both stores, registering activity on each — and Fly's
+# auto_start_machines wakes the app machine to serve it.
+#
+# Runs daily; well inside the shorter (3-day) pause window even if a run or
+# two fails. Manual trigger available for a post-pause resume check.
+
+name: Staging keep-alive
+
+on:
+  schedule:
+    - cron: "23 6 * * *" # daily, 06:23 UTC (off the full hour to avoid cron congestion)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping deep health endpoint (Supabase + Neo4j + Fly wake)
+        run: |
+          # Retry a few times: the first request after an idle spell may hit a
+          # cold-starting Fly machine and time out before uvicorn is up.
+          for attempt in 1 2 3; do
+            if curl --fail --silent --show-error --max-time 90 \
+                "https://doppia-staging.fly.dev/api/v1/health/deep"; then
+              echo " — ok (attempt ${attempt})"
+              exit 0
+            fi
+            echo "attempt ${attempt} failed; retrying in 30s..."
+            sleep 30
+          done
+          echo "deep health ping failed after 3 attempts" >&2
+          exit 1

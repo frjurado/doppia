@@ -65,6 +65,7 @@ from services.fragment_validation import (
     validate_containment,
 )
 from services.object_storage import StorageClient
+from services.task_dispatch import dispatch_task
 from services.tasks.render_fragment_preview import render_fragment_preview
 from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -215,6 +216,54 @@ def _decode_time_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
         return datetime.fromisoformat(ts_str), uuid.UUID(id_str)
     except Exception as exc:
         raise ValueError(f"Invalid pagination cursor: {cursor!r}") from exc
+
+
+async def enqueue_preview_regeneration_for_movement(
+    db: AsyncSession, movement_id: uuid.UUID
+) -> int:
+    """Re-dispatch preview rendering for every active fragment on a movement.
+
+    ADR-008's MEI-correction trigger: re-ingesting a movement replaces its
+    normalized MEI, which invalidates the cached SVG previews of every
+    fragment on it. This is the entry point the ingest path calls after an
+    upsert commits (a movement ingested for the first time has no fragments,
+    so the call is a harmless no-op there).
+
+    Only ``submitted`` and ``approved`` fragments are dispatched — the same
+    statuses the preview task itself accepts; ``draft``/``rejected`` fragments
+    render no preview by design.
+
+    Module-level (not a service method) so the ingest service can call it with
+    just its session, without constructing a FragmentService (which requires a
+    Neo4j driver the ingest path has no other use for).
+    :meth:`FragmentService.enqueue_preview_regeneration_for_movement` wraps it.
+
+    Args:
+        db: Async database session.
+        movement_id: UUID of the re-ingested movement.
+
+    Returns:
+        Number of fragments whose preview regeneration was dispatched.
+    """
+    result = await db.execute(
+        select(Fragment.id)
+        .where(
+            Fragment.movement_id == movement_id,
+            Fragment.status.in_(("submitted", "approved")),
+        )
+        .order_by(Fragment.mc_start)
+    )
+    fragment_ids = list(result.scalars().all())
+    for fragment_id in fragment_ids:
+        dispatch_task(render_fragment_preview, fragment_id=str(fragment_id))
+    if fragment_ids:
+        logger.info(
+            "enqueue_preview_regeneration_for_movement: dispatched %d preview "
+            "task(s) for movement %s",
+            len(fragment_ids),
+            movement_id,
+        )
+    return len(fragment_ids)
 
 
 class FragmentService:
@@ -572,10 +621,10 @@ class FragmentService:
                 detail={"integrity_error": str(exc.orig)},
             ) from exc
 
-        # Enqueue after commit so the task reads the updated mc_start/mc_end
+        # Dispatch after commit so the task reads the updated mc_start/mc_end
         # (ADR-008: bar-range edit on submitted/approved re-triggers preview generation).
         if _should_regenerate_preview:
-            render_fragment_preview.delay(str(fragment_id))
+            dispatch_task(render_fragment_preview, fragment_id=str(fragment_id))
 
         return FragmentUpdateResult(fragment=fragment, previous_status=previous_status)
 
@@ -619,10 +668,27 @@ class FragmentService:
             # submitted), covering parent and sub-parts.
             await self._sync_annotation_translations(fragment_id)
 
-        # Enqueue after the transaction commits so the task reads committed state
+        # Dispatch after the transaction commits so the task reads committed state
         # (ADR-008: preview is generated at the draft → submitted transition).
-        render_fragment_preview.delay(str(fragment_id))
+        dispatch_task(render_fragment_preview, fragment_id=str(fragment_id))
         return fragment
+
+    async def enqueue_preview_regeneration_for_movement(
+        self, movement_id: uuid.UUID
+    ) -> int:
+        """Re-dispatch preview rendering for the movement's active fragments.
+
+        Service-level entry point named by ADR-008; delegates to the
+        module-level :func:`enqueue_preview_regeneration_for_movement`, which
+        the ingest path calls directly with its session.
+
+        Args:
+            movement_id: UUID of the re-ingested/corrected movement.
+
+        Returns:
+            Number of fragments whose preview regeneration was dispatched.
+        """
+        return await enqueue_preview_regeneration_for_movement(self._db, movement_id)
 
     # ------------------------------------------------------------------
     # Public interface — read path (Component 7 Step 7)

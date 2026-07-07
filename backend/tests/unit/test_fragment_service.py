@@ -1167,3 +1167,77 @@ class TestCheckDeletePermission:
             FragmentService._check_delete_permission(
                 fragment, str(uuid.uuid4()), "editor"
             )
+
+
+class TestEnqueuePreviewRegeneration:
+    """enqueue_preview_regeneration_for_movement — ADR-008 re-ingest trigger.
+
+    The status filter lives in the SQL WHERE clause, so these tests assert
+    the dispatch fan-out and return value against the ids the (mocked) query
+    yields, plus the where-criteria composition on the emitted statement.
+    """
+
+    async def test_dispatches_one_preview_task_per_active_fragment(self) -> None:
+        from services.fragments import enqueue_preview_regeneration_for_movement
+
+        movement_id = uuid.uuid4()
+        fragment_ids = [uuid.uuid4(), uuid.uuid4()]
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            return_value=_make_execute_result(scalars_list=fragment_ids)
+        )
+
+        with patch("services.fragments.dispatch_task") as mock_dispatch:
+            count = await enqueue_preview_regeneration_for_movement(db, movement_id)
+
+        assert count == 2
+        assert mock_dispatch.call_count == 2
+        dispatched = [c.kwargs["fragment_id"] for c in mock_dispatch.call_args_list]
+        assert dispatched == [str(fid) for fid in fragment_ids]
+
+    async def test_noop_for_movement_without_fragments(self) -> None:
+        """A first-time-ingested movement has no fragments — zero dispatches."""
+        from services.fragments import enqueue_preview_regeneration_for_movement
+
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_make_execute_result(scalars_list=[]))
+
+        with patch("services.fragments.dispatch_task") as mock_dispatch:
+            count = await enqueue_preview_regeneration_for_movement(db, uuid.uuid4())
+
+        assert count == 0
+        mock_dispatch.assert_not_called()
+
+    async def test_query_filters_by_movement_and_active_statuses(self) -> None:
+        """The emitted SELECT restricts to the movement and submitted/approved."""
+        from services.fragments import enqueue_preview_regeneration_for_movement
+
+        movement_id = uuid.uuid4()
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_make_execute_result(scalars_list=[]))
+
+        with patch("services.fragments.dispatch_task"):
+            await enqueue_preview_regeneration_for_movement(db, movement_id)
+
+        stmt = db.execute.call_args[0][0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        # SQLAlchemy renders the UUID literal unhyphenated (uuid.hex).
+        assert movement_id.hex in compiled or str(movement_id) in compiled
+        assert "submitted" in compiled
+        assert "approved" in compiled
+        assert "draft" not in compiled
+
+    async def test_service_method_delegates(self) -> None:
+        """The ADR-008-named service entry point wraps the module function."""
+        movement_id = uuid.uuid4()
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            return_value=_make_execute_result(scalars_list=[uuid.uuid4()])
+        )
+        service = _make_service(db=db)
+
+        with patch("services.fragments.dispatch_task") as mock_dispatch:
+            count = await service.enqueue_preview_regeneration_for_movement(movement_id)
+
+        assert count == 1
+        mock_dispatch.assert_called_once()

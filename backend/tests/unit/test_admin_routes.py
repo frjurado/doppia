@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -96,6 +97,19 @@ def _make_row(movement_id: uuid.UUID, analysis_source: str = "DCML") -> MagicMoc
     row.id = movement_id
     row.analysis_source = analysis_source
     return row
+
+
+# ---------------------------------------------------------------------------
+# Autouse: pin celery dispatch mode
+# ---------------------------------------------------------------------------
+# The route dispatches via services.task_dispatch (ADR-034). These tests
+# assert on the patched task objects' .delay() calls, which is the celery-mode
+# path; inline mode (the default) is covered by test_task_dispatch.py.
+
+
+@pytest.fixture(autouse=True)
+def _celery_dispatch_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TASK_EXECUTION_MODE", "celery")
 
 
 # ---------------------------------------------------------------------------

@@ -67,7 +67,9 @@ running, a Celery worker running, MuseScore 3.6.2, and a clone of
      -F "archive=@/tmp/mozart-browser-staging.zip"
    ```
    The upload re-normalizes, rewrites original + normalized MEI, and re-dispatches
-   `ingest_movement_analysis` (ADR-004) and `generate_incipit` per movement.
+   `ingest_movement_analysis` (ADR-004), `generate_incipit`, and — since
+   2026-07-07 — `render_fragment_preview` for every submitted/approved fragment
+   on each movement (ADR-008 trigger, ADR-034 dispatch).
 
 4. **Verify mc stability:**
    ```bash
@@ -77,15 +79,19 @@ running, a Celery worker running, MuseScore 3.6.2, and a clone of
    the exposed fragments (SQL printed by the script) and migrate/flag them per
    Step 9 before continuing; document the incident in this directory.
 
-5. **Regenerate fragment previews** (the upload path does not — ADR-008's
-   MEI-correction trigger fires per-fragment, not on bulk ingest; see
-   `preview-regeneration-gap.md` for the pending automation). Run after
-   `verify` is clean:
+5. **Verify fragment previews regenerated** *(automated 2026-07-07: the
+   upload path now calls `enqueue_preview_regeneration_for_movement` per
+   accepted movement — ADR-008 implementation note, ADR-034; the gap report
+   is resolved)*. After `verify` is clean, confirm the app logs show one
+   `enqueue_preview_regeneration_for_movement: dispatched N preview task(s)`
+   line per re-ingested movement that carries fragments, and spot-check one
+   preview in the fragment browser. In inline dispatch mode (the default) the
+   renders run in the app process — no worker window needed. Only if previews
+   are visibly stale, fall back to the ad-hoc script:
    ```bash
    python scripts/regenerate_fragment_previews.py   # all submitted/approved fragments
    ```
-   On staging, run it on the app machine (`fly ssh console -C ...`) while the
-   worker is on. **Note (2026-07-05):** the default snapshot path does not
+   **Note (2026-07-05):** the default snapshot path does not
    exist inside the Docker image — run the `snapshot`/`verify` steps with an
    explicit `--output`/`--snapshot` path (e.g. `/tmp/mc-after.json`), or diff
    the machine's fingerprints against the committed snapshot locally.
