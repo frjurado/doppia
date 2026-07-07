@@ -3,7 +3,7 @@
 **Date:** 2026-07-07
 **Author:** Francisco (raw list) · investigation & triage in Claude Code
 **Source:** Francisco's exploration/tagging pass over the full 54-movement corpus (Part 8, Step 27 in progress), plus the previously filed `preview-regeneration-gap.md`.
-**Status:** dispositions **decided with Francisco (2026-07-07)**; fix-now items pending implementation.
+**Status:** dispositions **decided with Francisco (2026-07-07)**. Item 1 **done** (0e829c0 + 71b3853: ADR-034 inline dispatch, ADR-008 regeneration entry point, `/health/deep` + keep-alive workflow; staging previews regenerated 16/16 in-process, 2026-07-07). Items 2–8 pending.
 
 This report is the canonical surface for this batch, per Step 28 of
 `docs/roadmap/component-9-corpus-population-and-hardening.md`. Every raw item
@@ -191,7 +191,24 @@ browser/detail view, visible status badges on fragment surfaces, and a short
 
 ---
 
-## Deferred to Phase 2
+## Additional findings (surfaced while fixing, routed onward)
+
+### Integration test not isolated against campaign data → Step 30
+
+`tests/integration/test_review_queue_api.py::TestReviewQueue::test_cursor_pagination`
+assumes the review queue contains only the 3 fragments the test inserts, but
+the queue endpoint lists **all** submitted fragments in the database. Against
+a dev DB carrying real campaign data (verified 2026-07-07: 1 submitted /
+10 approved / 44 draft locally) the queue had 4 entries, so page 2 returned 2
+items where the test asserts 1. Any DB with at least one real `submitted`
+fragment trips it, and it will keep tripping as the campaign adds more —
+CI (empty DB) stays green, which is why it never surfaced there.
+
+**Disposition: fix at Step 30 (test review), not now.** The fix is small —
+scope the pagination assertions to the inserted fragment ids, or count
+relative to the pre-existing queue size captured before insertion — and the
+Step 30 sweep should check the other integration suites for the same
+empty-database assumption while at it.
 
 | Item | Mechanism / note (so the future fix is cheap) |
 |---|---|
