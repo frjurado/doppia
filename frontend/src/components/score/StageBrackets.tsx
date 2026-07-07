@@ -95,6 +95,12 @@ export interface StageBracketsProps {
    * so the main-ghost handle affordance is suppressed during the drag.
    */
   session?: AnnotationSession | null;
+  /**
+   * React-state mirror of the drag lock (Part 8 item 4): fires true at drag
+   * start and false on release, so ScoreViewer can freeze the sidebar stage
+   * list's display order for the duration of the gesture.
+   */
+  onDragActiveChange?: (active: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +140,7 @@ export default function StageBrackets({
   onStageActivate,
   onSplitHandleMove,
   session,
+  onDragActiveChange,
 }: StageBracketsProps) {
   const { t } = useTranslation('score');
   // Drag state for split handles: tracked in a ref to avoid re-renders during
@@ -182,9 +189,10 @@ export default function StageBrackets({
   const handleMouseUp = useCallback(() => {
     dragRef.current = null;
     session?.setStageDragActive(false);
+    onDragActiveChange?.(false);
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
-  }, [handleMouseMove, session]);
+  }, [handleMouseMove, session, onDragActiveChange]);
 
   const startSplitDrag = useCallback(
     (e: React.MouseEvent, boundaryIdx: number) => {
@@ -209,19 +217,30 @@ export default function StageBrackets({
         flankIds: new Set([left.stageId, right.stageId]),
       };
       session?.setStageDragActive(true);
+      onDragActiveChange?.(true);
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     },
-    [assignments, selection, layer, resolution, handleMouseMove, handleMouseUp, session],
+    [
+      assignments,
+      selection,
+      layer,
+      resolution,
+      handleMouseMove,
+      handleMouseUp,
+      session,
+      onDragActiveChange,
+    ],
   );
 
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
+      if (dragRef.current) onDragActiveChange?.(false);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [handleMouseMove, handleMouseUp]);
+  }, [handleMouseMove, handleMouseUp, onDragActiveChange]);
 
   // ── Render guard ─────────────────────────────────────────────────────────
 

@@ -602,6 +602,10 @@ export default function ScoreViewer() {
   // so it can be re-applied when the main bracket changes.
   const [stageAssignments, setStageAssignments] = useState<StageAssignment[]>([]);
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
+  // True while a split-handle drag is in progress — mirrored from
+  // StageBrackets so the sidebar stage list freezes its display order for
+  // the gesture (Part 8 item 4).
+  const [stageDragActive, setStageDragActive] = useState(false);
   // The schema tree for the currently active concept (or its refinement child).
   // Cached so reconcileWithNewConcept can compute brand-new default placements.
   const activeSchemaTreeRef = useRef<ConceptSchemaTree | null>(null);
@@ -2355,6 +2359,7 @@ export default function ScoreViewer() {
                 onStageActivate={handleStageActivate}
                 onSplitHandleMove={handleSplitHandleMove}
                 session={annotationSessionRef.current}
+                onDragActiveChange={setStageDragActive}
               />
             </FragmentOverlay>
 
@@ -2394,6 +2399,7 @@ export default function ScoreViewer() {
             activeStageId={activeStageId}
             onStageActivate={handleStageActivate}
             onToggleAbsent={handleToggleAbsent}
+            stageDragActive={stageDragActive}
             subPartTags={subPartTags}
             onSubPartTagUpdate={handleSubPartTagUpdate}
             subPartResetKey={subPartResetKey}

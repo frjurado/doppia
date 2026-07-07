@@ -73,10 +73,12 @@
     "conceptSchemaError": "Could not load concept schema. Try again.",
     "sectionStages": "Stages",
     "stagesHint": "Drag brackets to confirm bounds, or toggle to mark absent.",
+    "stagesInfoAria": "About stages",
     "sectionProperties": "Properties",
     "sectionHarmony": "Harmony",
     "sectionCommentary": "Commentary",
     "commentaryDescription": "Expert commentary on this fragment. Stored verbatim; becomes the searchable annotation corpus in Phase 3.",
+    "commentaryInfoAria": "About commentary",
     "commentaryPlaceholder": "Add analytical commentary…",
     "proseAria": "Prose annotation"
   },

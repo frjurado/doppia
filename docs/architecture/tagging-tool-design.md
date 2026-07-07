@@ -355,21 +355,21 @@ If the children differ only in property values (not in stage structure), Type Re
 
 ### 7.3 Stage list
 
-Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, ordered by `order` edge property.
+Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, **ordered by physical position in the score** (bar, then beat; absent stages grouped last) — not by the abstract `order` edge property (Component 9 G2). During a split-handle drag the display order **freezes** at its pre-drag state, resorting once on release, so cards never jump around mid-gesture (Component 9 Part 8 item 4).
 
-Each card shows:
+Each card shows *(trimmed to essentials, Part 8 item 4 — the "Stages" interaction explanation lives behind an (i) hover affordance on the section heading rather than a permanent paragraph)*:
 
-- Stage concept name and colour swatch (matching its bracket track colour).
+- Stage concept name and colour swatch (matching its bracket track colour; colour keyed to the schema `order` so it is stable as position moves the card).
 - Required / optional indicator.
-- Current spatial bounds, updated live as the user drags (`bar 4 b2 – bar 5 b1`).
 - For **optional stages**: an absent toggle. Toggling absent collapses the bracket and redistributes space in contiguous mode (§4). Toggling back expands the bracket at the shared boundary, robbing space from the neighbours.
-- For **compound stages**: the card expands to show the sub-stage segment labels and their individual bounds.
+- Status labels only when needed: absent, orphaned, or bounds-error. Spatial bounds are **not** repeated on the card — they are visible on the score brackets themselves (changed in Part 8 item 4; the card previously mirrored the live bounds).
+- For **compound stages**: the card expands to show the sub-stage segment labels.
 
 Clicking anywhere on a stage card highlights and centres the corresponding bracket in the score.
 
 #### Stage-level property form
 
-Each stage concept may carry `HAS_PROPERTY_SCHEMA` edges of its own. When a stage card is active (selected in the form panel or clicked in the score), it expands to show an inline property form generated from those schemas — using the same control types as the main property form (§7.4): radio groups or selects for `ONE_OF`, checkboxes or multiselects for `MANY_OF`, toggles for `BOOL`.
+Each stage concept may carry `HAS_PROPERTY_SCHEMA` edges of its own. Every present stage card (not absent, not orphaned) shows an **always-open** inline property form generated from those schemas — using the same control types as the main property form (§7.4): radio groups or selects for `ONE_OF`, checkboxes or multiselects for `MANY_OF`, toggles for `BOOL`. *(Changed in Component 9 Part 8 item 4: the form previously opened only while its card was active, which was tedious — every stage needs the form — and easy to overlook entirely. Activation now only highlights.)*
 
 Every stage confirmed as present (required, or optional and not toggled absent) becomes a **child fragment** on submission, whether or not its property form was filled. Stage schemas are `required: false`; property completion is not a prerequisite for the child fragment to be created. A child fragment's `summary.properties` will be an empty object if no stage properties were recorded — the fragment's existence is the assertion of presence and location; the properties are optional enrichment.
 

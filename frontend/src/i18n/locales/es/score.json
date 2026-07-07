@@ -73,10 +73,12 @@
     "conceptSchemaError": "No se pudo cargar el esquema del concepto. Inténtalo de nuevo.",
     "sectionStages": "Etapas",
     "stagesHint": "Arrastra los corchetes para confirmar los límites, o alterna para marcar como ausente.",
+    "stagesInfoAria": "Acerca de las etapas",
     "sectionProperties": "Propiedades",
     "sectionHarmony": "Armonía",
     "sectionCommentary": "Comentario",
     "commentaryDescription": "Comentario experto sobre este fragmento. Se almacena literalmente; constituirá el corpus de anotaciones consultable en la Fase 3.",
+    "commentaryInfoAria": "Acerca del comentario",
     "commentaryPlaceholder": "Añade comentario analítico…",
     "proseAria": "Anotación en prosa"
   },

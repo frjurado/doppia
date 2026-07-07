@@ -113,6 +113,20 @@ All local to `StageList` / `FormPanel`:
   with active-state highlight only. (Interacts with the drag-order freeze in
   item 3 — always-open cards make mid-drag reordering more disruptive.)
 
+**Done (2026-07-07, pending Francisco's in-app verification).** All four
+pieces: (a) new `ui/InfoHint` (i)-hover affordance (same pattern as
+PropertyForm's field tooltips) carries the Stages and Commentary
+explanations on the section headings; the permanent hint paragraph and the
+commentary description block are gone. (b) Stage cards no longer repeat
+measure/beat bounds; the status row renders only for absent / orphaned /
+bounds-error. (c) `SubPartForm` renders always-open for every present stage;
+activation only highlights (spec §7.3 updated accordingly). (d) The stage
+list's display order freezes during a split-handle drag
+(`StageBrackets.onDragActiveChange` → ScoreViewer state → `StageList
+freezeOrder`), resorting once on release. Unit-tested
+(`StageList.test.tsx` rewritten: status row, always-open gating, ordering,
+freeze/release round trip).
+
 ### 5. F2 (play-from-position first-note race) — residual hole
 
 The Band-2 fix (`transport.start('+0.05')`,

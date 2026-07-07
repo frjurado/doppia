@@ -56,6 +56,13 @@
   margin: 0;
 }
 
+/* Heading + (i) info affordance on one line (Part 8 item 4). */
+.sectionHeadingRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-1);
+}
+
 /* ── Schema fetch status ─────────────────────────────────────────────────── */
 
 .schemaStatus {
@@ -68,25 +75,7 @@
   margin: 0;
 }
 
-/* ── Stages section hint ─────────────────────────────────────────────────── */
-
-/* Shown once below the Stages heading when optional stages are unconfirmed. */
-.stagesHint {
-  color: var(--color-on-surface-variant, #41484d);
-  margin: 0;
-}
-
 /* ── Prose annotation ─────────────────────────────────────────────────────── */
-
-.proseLabel {
-  display: block;
-}
-
-.proseDescription {
-  color: var(--color-on-surface-variant);
-  display: block;
-  margin-bottom: var(--spacing-2);
-}
 
 .proseTextarea {
   width: 100%;

@@ -58,6 +58,7 @@ import SubmissionChecklist from './SubmissionChecklist';
 import type { PropertyFormValues } from './PropertyForm';
 import { carryOverValues, computeIsComplete } from './propertyFormHelpers';
 import Type from '../ui/Type';
+import InfoHint from '../ui/InfoHint';
 import styles from './FormPanel.module.css';
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,12 @@ export interface FormPanelProps {
   onStageActivate?: (stageId: string | null) => void;
   /** Called when the annotator toggles a stage's absent checkbox. */
   onToggleAbsent?: (stageId: string, absent: boolean) => void;
+  /**
+   * True while a stage split-handle drag is in progress — freezes the stage
+   * list's display order so cards don't jump mid-gesture (Part 8 item 4);
+   * the list resorts by position once on release.
+   */
+  stageDragActive?: boolean;
 
   // ── Step 15: Sub-part tags passed down from ScoreViewer ────────────────────
 
@@ -248,6 +255,7 @@ export default function FormPanel({
   activeStageId = null,
   onStageActivate,
   onToggleAbsent,
+  stageDragActive = false,
   subPartTags,
   onSubPartTagUpdate,
   subPartResetKey,
@@ -433,16 +441,17 @@ export default function FormPanel({
           Stageless concepts skip this section entirely (tagging-tool-design.md §8). */}
       {schemaTree && schemaTree.stages.length > 0 && (
         <section className={styles.section}>
-          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            {t('score:formPanel.sectionStages')}
-          </Type>
-          {assignments.some(
-            a => !a.required && !a.absent && !a.confirmed && !a.orphaned,
-          ) && (
-            <Type variant="label-sm" as="p" className={styles.stagesHint}>
-              {t('score:formPanel.stagesHint')}
+          {/* The interaction explanation lives behind the (i) — hover/focus —
+              instead of a permanent paragraph (Part 8 item 4). */}
+          <div className={styles.sectionHeadingRow}>
+            <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+              {t('score:formPanel.sectionStages')}
             </Type>
-          )}
+            <InfoHint
+              text={t('score:formPanel.stagesHint')}
+              ariaLabel={t('score:formPanel.stagesInfoAria')}
+            />
+          </div>
           <StageList
             assignments={assignments}
             activeStageId={activeStageId}
@@ -451,6 +460,7 @@ export default function FormPanel({
             subPartTags={subPartTags}
             onSubPartTagUpdate={onSubPartTagUpdate}
             subPartResetKey={subPartResetKey}
+            freezeOrder={stageDragActive}
           />
         </section>
       )}
@@ -498,14 +508,17 @@ export default function FormPanel({
           Phase 1 persists the raw text only (Step 17). */}
       {flags.fragmentSet && (
         <section className={styles.section}>
-          <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
-            {t('score:formPanel.sectionCommentary')}
-          </Type>
-          <label htmlFor="prose-annotation" className={styles.proseLabel}>
-            <Type variant="label-sm" as="span" className={styles.proseDescription}>
-              {t('score:formPanel.commentaryDescription')}
+          {/* The "what is this field for" description lives behind the (i)
+              instead of a permanent paragraph (Part 8 item 4). */}
+          <div className={styles.sectionHeadingRow}>
+            <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
+              {t('score:formPanel.sectionCommentary')}
             </Type>
-          </label>
+            <InfoHint
+              text={t('score:formPanel.commentaryDescription')}
+              ariaLabel={t('score:formPanel.commentaryInfoAria')}
+            />
+          </div>
           <textarea
             id="prose-annotation"
             className={styles.proseTextarea}
