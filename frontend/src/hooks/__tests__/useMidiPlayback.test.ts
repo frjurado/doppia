@@ -284,6 +284,25 @@ describe('useMidiPlayback — play-from-position origin (Step 20)', () => {
 
     expect(mockTransport.schedule).toHaveBeenCalledTimes(2);
   });
+
+  it('clamps an origin note landing a hair before startSec to offset 0 (F2 residual)', async () => {
+    // Mock notes at 0 s and 0.5 s. An origin of 500.05 ms puts the 0.5 s note
+    // within the EPS admission window but *before* startSec — its raw offset
+    // is −5e-5 s, which Tone.js would silently drop. The clamp schedules it
+    // at exactly 0 instead (Part 8 item 5).
+    const { result } = renderHook(() =>
+      useMidiPlayback(MOCK_MIDI_BASE64, vi.fn(), { originMs: 500.05 })
+    );
+
+    await act(async () => {
+      await result.current.play();
+    });
+
+    expect(mockTransport.schedule).toHaveBeenCalledTimes(1);
+    const offset = mockTransport.schedule.mock.calls[0][1] as number;
+    expect(offset).toBeGreaterThanOrEqual(0);
+    expect(offset).toBeCloseTo(0);
+  });
 });
 
 describe('useMidiPlayback — pause()', () => {

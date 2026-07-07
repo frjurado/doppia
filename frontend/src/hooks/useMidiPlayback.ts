@@ -449,6 +449,11 @@ export function useMidiPlayback(
     midiData.tracks.forEach((track) => {
       track.notes.forEach((note) => {
         if (note.time < startSec - EPS_SEC || note.time >= endSec - EPS_SEC) return;
+        // Clamp to 0: the window filter admits notes down to startSec − EPS,
+        // so an origin note whose time lands a hair below startSec would be
+        // scheduled at a *negative* transport offset — silently dropped, and
+        // no start lookahead can save it (F2 residual, Part 8 item 5).
+        const offsetSec = Math.max(0, note.time - startSec);
         transport.schedule((audioTime) => {
           samplerRef.current?.triggerAttackRelease(
             note.name,
@@ -456,7 +461,7 @@ export function useMidiPlayback(
             audioTime,
             note.velocity
           );
-        }, note.time - startSec);
+        }, offsetSec);
       });
     });
 

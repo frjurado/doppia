@@ -173,6 +173,13 @@ export function resolveCaret(
 // ---------------------------------------------------------------------------
 
 /**
+ * Vertical caret overhang beyond the staff block, in staff spaces per side
+ * (Component 9 Part 8: exactly staff-height reads as too short against notes
+ * above/below the lines; 1.5 spaces of air each side reads naturally).
+ */
+const CARET_MARGIN_STAFF_SPACES = 1.5;
+
+/**
  * Derive a system's staff-line extents — top of the topmost staff's lines to
  * bottom of the bottommost — from the direct `<path>` children of its
  * `<g class="staff">` elements. Noteheads, stems, beams, slurs, dynamics, and
@@ -181,13 +188,17 @@ export function resolveCaret(
  * balloon with whatever else a system happens to render that pass — a slur,
  * a dynamic mark, or (K331/ii) the trio's section label (Component 9 E1).
  *
+ * The block is then extended by {@link CARET_MARGIN_STAFF_SPACES} on each
+ * side; the staff-space unit is the measured five-line staff height / 4, so
+ * the margin scales with zoom exactly like the staves do.
+ *
  * Mirrors `ghosts.ts`'s `staffLineBounds` (same Verovio SVG structure; the
  * measure-ghost and stage-bracket layers already use it), applied directly to
  * a whole system instead of per-measure-then-union, so the caret's vertical
  * placement lines up with the ghost/bracket layer it moves alongside.
  *
- * Falls back to the system element's own bounding box when no staff-line
- * paths are found (e.g. a synthetic SVG in a test fixture).
+ * Falls back to the system element's own bounding box (no margin) when no
+ * staff-line paths are found (e.g. a synthetic SVG in a test fixture).
  */
 function systemStaffLineBounds(
   sysEl: Element,
@@ -195,6 +206,7 @@ function systemStaffLineBounds(
 ): { top: number; bottom: number } {
   let top = Infinity;
   let bottom = -Infinity;
+  let staffSpace = 0;
   for (const staffEl of sysEl.querySelectorAll('g.staff')) {
     const linePaths = staffEl.querySelectorAll(':scope > path');
     if (linePaths.length === 0) continue;
@@ -202,12 +214,18 @@ function systemStaffLineBounds(
     const lastRect = linePaths[linePaths.length - 1]!.getBoundingClientRect();
     top = Math.min(top, firstRect.top - containerRect.top);
     bottom = Math.max(bottom, lastRect.bottom - containerRect.top);
+    // Five staff lines span four staff spaces; any one staff of the system
+    // gives the unit (grand-staff staves share their size).
+    if (linePaths.length > 1 && staffSpace === 0) {
+      staffSpace = (lastRect.bottom - firstRect.top) / 4;
+    }
   }
   if (!Number.isFinite(top) || !Number.isFinite(bottom)) {
     const sr = sysEl.getBoundingClientRect();
     return { top: sr.top - containerRect.top, bottom: sr.bottom - containerRect.top };
   }
-  return { top, bottom };
+  const margin = CARET_MARGIN_STAFF_SPACES * staffSpace;
+  return { top: top - margin, bottom: bottom + margin };
 }
 
 /**

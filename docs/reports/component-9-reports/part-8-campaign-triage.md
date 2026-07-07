@@ -139,6 +139,13 @@ symptom regardless of lookahead. Fix: clamp the scheduled offset to
 `Math.max(0, note.time − startSec)`; verify with a repro at a known-failing
 origin.
 
+**Done (2026-07-07, pending Francisco's in-app verification).** The clamp is
+in (`useMidiPlayback.ts` schedule loop), unit-tested by constructing the
+exact race: an origin 0.05 ms past a note's time admits it through the EPS
+window at a −5e-5 s offset — now scheduled at exactly 0. If the symptom ever
+reproduces after this, the next suspect is sampler voice allocation, not
+scheduling.
+
 ### 6. "Authentication required" untranslated (I2 sibling) + envelope violation
 
 `backend/api/dependencies.py` L75–79 raises a bare `HTTPException` with an
@@ -168,6 +175,14 @@ dropdown) stays Phase 2.
 matches the ghost boxes exactly, with no margin. Extend the caret by ~1.5
 staff spaces on each side; the staff-space unit is derivable from the staff
 line spacing already measured there.
+
+**Done (2026-07-07, pending Francisco's in-app verification).**
+`CARET_MARGIN_STAFF_SPACES = 1.5`; the unit is the measured five-line staff
+height / 4 (any one staff of the system — grand-staff staves share their
+size), so the margin scales with zoom exactly like the staves. The
+no-staff-lines test-fixture fallback stays margin-free. Geometry is
+jsdom-invisible (zero rects), same as the rest of the caret layer — manual
+verification only.
 
 ---
 
