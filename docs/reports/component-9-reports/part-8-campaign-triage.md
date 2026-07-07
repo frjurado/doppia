@@ -3,7 +3,7 @@
 **Date:** 2026-07-07
 **Author:** Francisco (raw list) · investigation & triage in Claude Code
 **Source:** Francisco's exploration/tagging pass over the full 54-movement corpus (Part 8, Step 27 in progress), plus the previously filed `preview-regeneration-gap.md`.
-**Status:** dispositions **decided with Francisco (2026-07-07)**. Item 1 **done** (0e829c0 + 71b3853: ADR-034 inline dispatch, ADR-008 regeneration entry point, `/health/deep` + keep-alive workflow; staging previews regenerated 16/16 in-process, 2026-07-07). Items 2–8 pending.
+**Status:** dispositions **decided with Francisco (2026-07-07)**. **All eight fix-now items implemented (2026-07-07)** — items 1–5 committed and verified in-app; items 6–8 pending Francisco's in-app pass. Commits: item 1 `0e829c0`+`71b3853` (ADR-034 inline dispatch, ADR-008 regeneration, `/health/deep`+keep-alive; staging previews regenerated 16/16), item 2 `e8fb2f3` (cross-system stage drag), item 3 `c8e4015` (sub_parts score order), item 4 `b93ccb8` (sidebar batch), items 5+8 `cd2d0d1` (F2 clamp + caret margin), items 6+7 pending commit (auth 401 handling + JWT `exp` decode). Investigation answers and Phase-2 deferrals below unchanged.
 
 This report is the canonical surface for this batch, per Step 28 of
 `docs/roadmap/component-9-corpus-population-and-hardening.md`. Every raw item
@@ -159,6 +159,23 @@ both ends:
   clear the stored token, substitute the translated `auth:sessionExpired`
   string.
 
+**Done (2026-07-07, pending Francisco's in-app verification) — with a
+correction to the premise.** The "no error-envelope code" claim was
+imprecise: `get_current_user`'s bare 401 *is* wrapped into a valid envelope
+by `http_exception_handler`, which maps status 401 → `UNAUTHORIZED` (the
+generic map is by design for auth-middleware/framework HTTPExceptions). So
+no new backend code was needed; the two 401 sources are already correctly and
+distinctly coded — `UNAUTHORIZED` (no valid session, from `get_current_user`)
+vs. `INVALID_TOKEN` (token present but bad, from `AuthMiddleware`). A test
+now pins the `UNAUTHORIZED` envelope (`test_auth_middleware.py`
+`test_require_role_editor_with_no_token`). The real bug was purely frontend:
+`apiFetch` special-cased only `INVALID_TOKEN`, leaking the raw
+`UNAUTHORIZED` message. Now it keys on `response.status === 401` — clears the
+token and substitutes `auth:sessionExpired` for either code (unit-tested,
+`api.test.ts`). No new `AUTH_REQUIRED` code added: `UNAUTHORIZED` already
+exists and is semantically correct, and proliferating codes the frontend
+treats identically adds nothing.
+
 ### 7. I1 (login button) — minimal patch now
 
 Root cause of the persistence: `getSession()`
@@ -168,6 +185,16 @@ reads as authenticated until a 401 round-trip *and* a NavBar re-render.
 return `null` when expired; the login button then reappears on the next
 render/navigation. The full session UX (Supabase client, refresh, user
 dropdown) stays Phase 2.
+
+**Done (2026-07-07, pending Francisco's in-app verification).** `getSession()`
+now base64-decodes the JWT payload (signature unverified — the backend does
+the authoritative check), and an expired `exp` returns `null` *and* clears
+the stored token, so the NavBar shows the login link before any request
+round-trips a 401. Non-JWT dev tokens (`dev-token`/`admin-token`) and JWTs
+without an `exp` claim are treated as non-expiring. Unit-tested
+(`auth.test.ts`: future/expired/no-exp/dev-token/malformed cases). Pairs with
+item 6 — a 401 from an already-cleared session still substitutes the
+translated message.
 
 ### 8. Caret extra length (small, bundled with 5)
 

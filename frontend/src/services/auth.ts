@@ -22,14 +22,42 @@ export interface Session {
 }
 
 /**
- * Return the current session, or null if no token is stored.
+ * Decode a JWT's `exp` claim (seconds since epoch) without verifying the
+ * signature — the backend does the authoritative verification. Returns null
+ * when the token is not a JWT with a numeric `exp` (e.g. the local dev tokens
+ * `dev-token` / `admin-token`, which have no expiry and are always valid).
+ */
+function jwtExpiryMs(token: string): number | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    // Base64URL → base64, then decode the payload segment.
+    const payload = JSON.parse(atob(parts[1]!.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return the current session, or null if no valid token is stored.
  *
- * Reads from localStorage. In local dev, seed with:
+ * Reads from localStorage. A stored JWT whose `exp` has passed is treated as
+ * no session at all — and cleared — so the UI (e.g. the NavBar login link vs.
+ * account badge) reflects the real auth state before any request round-trips
+ * a 401 (Component 9 I1). Non-JWT dev tokens have no `exp` and never expire.
+ *
+ * In local dev, seed with:
  *   localStorage.setItem('doppia_access_token', 'dev-token')
  */
 export function getSession(): Session | null {
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token) return null;
+  const expiryMs = jwtExpiryMs(token);
+  if (expiryMs !== null && expiryMs <= Date.now()) {
+    localStorage.removeItem(TOKEN_KEY);
+    return null;
+  }
   return { access_token: token };
 }
 

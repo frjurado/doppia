@@ -269,9 +269,19 @@ async def test_require_role_editor_with_insufficient_role(
 
 
 async def test_require_role_editor_with_no_token(supabase_client: AsyncClient) -> None:
-    """An unauthenticated request to a protected route returns 401."""
+    """An unauthenticated request to a protected route returns 401.
+
+    Also pins the error envelope (Component 9 item 6): get_current_user's bare
+    HTTPException is wrapped by http_exception_handler into the standard
+    envelope with the UNAUTHORIZED code — distinct from AuthMiddleware's
+    INVALID_TOKEN (token present but bad). The frontend keys on the 401 status
+    to substitute a translated message, so the raw English text is never shown.
+    """
     response = await supabase_client.get("/api/v1/protected")
     assert response.status_code == 401
+    body = response.json()
+    assert body["error"]["code"] == "UNAUTHORIZED"
+    assert body["error"]["message"]  # a human-readable message is present
 
 
 async def test_dev_token_rejected_in_supabase_mode(

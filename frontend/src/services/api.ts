@@ -21,7 +21,7 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly status?: number,
-    public readonly detail?: unknown,
+    public readonly detail?: unknown
   ) {
     super(message);
     this.name = 'ApiError';
@@ -52,7 +52,7 @@ export class ApiError extends Error {
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
-  schema?: z.ZodSchema<T>,
+  schema?: z.ZodSchema<T>
 ): Promise<T> {
   const session = getSession();
 
@@ -83,7 +83,7 @@ export async function apiFetch<T>(
   } catch (err) {
     throw new ApiError(
       'NETWORK_ERROR',
-      err instanceof Error ? err.message : 'Network request failed',
+      err instanceof Error ? err.message : 'Network request failed'
     );
   }
 
@@ -103,15 +103,17 @@ export async function apiFetch<T>(
       // response body was not valid JSON; keep the defaults above
     }
 
-    // The auth middleware's INVALID_TOKEN message is raw English backend text
-    // (it covers several distinct causes — expired, malformed, missing claim —
-    // that all mean the same thing to the user: sign in again). Translate it
-    // here, once, rather than at each of the call sites that render
-    // ApiError.message directly. A stale token also means the caller is no
-    // longer authenticated even though one is still stored, so clear it: the
-    // next NavBar render (any navigation) then correctly shows the login link
-    // instead of the account badge (I1's root cause).
-    if (code === 'INVALID_TOKEN') {
+    // Any 401 means the caller is not authenticated — whether the backend sent
+    // INVALID_TOKEN (token present but expired/malformed/missing-claim, from
+    // AuthMiddleware) or UNAUTHORIZED (a protected route reached with no valid
+    // session, from get_current_user). Both carry raw English backend messages
+    // ("Token has expired.", "Authentication required.") never meant for
+    // verbatim display, and both mean the same thing to the user: sign in
+    // again. Substitute one translated string here, once, rather than at each
+    // call site that renders ApiError.message. Clearing the stored token also
+    // fixes the account-badge-vs-login-link state: the next NavBar render (any
+    // navigation) then correctly shows the login link (I1/I2 root cause).
+    if (response.status === 401) {
       clearToken();
       message = i18next.t('auth:sessionExpired');
     }
