@@ -77,7 +77,7 @@ Design points:
   54-movement corpus; for bulk windows the runbook's celery mode remains the
   documented path.
 - Tests that assert on `.delay()` pin `TASK_EXECUTION_MODE=celery`; inline
-  behaviour is unit-tested in `tests/unit/test_task_dispatch.py`.
+  behaviour is unit-tested in `backend/tests/unit/test_task_dispatch.py`.
 - ADR-017 (fire-and-forget result policy) and ADR-018 (partial-failure
   recovery) are unaffected: dispatch remains fire-and-forget in both modes,
   and `pending_analysis` recovery now *executes* inline when no worker

@@ -230,6 +230,8 @@ Everything that surfaces is recorded as a per-issue report under `docs/reports/c
 
 **First batch triaged (2026-07-07):** `docs/reports/component-9-reports/part-8-campaign-triage.md` — the mid-campaign issue batch from Francisco's full-corpus tagging pass, folding in `preview-regeneration-gap.md`. Eight fix-now items (headlined by the preview-pipeline/worker gap, which silently leaves campaign fragments without previews), two answered investigations (harmony confirmation workflow — `harmony_gate` seeding verified safe to defer; fragment edit lifecycle), and six Phase-2 deferrals with their mechanisms recorded.
 
+**All eight fix-now items landed (2026-07-07):** ADR-034 in-process task dispatch + ADR-008 preview regeneration + free-tier keep-alive (`0e829c0`, `71b3853`); cross-system stage-handle drag (`e8fb2f3`); `sub_parts` in score order (`c8e4015`); tagging-sidebar batch — (i)-hints, lean stage cards, always-open forms, drag-stable order (`b93ccb8`); F2 play-from-position clamp + caret margin (`cd2d0d1`); any-401 translation + JWT-expiry session check (`8f3ee29`). The batch's remaining content is Phase-2 backlog (G1 beat-display rework, caret-at-repeat-barline, pickup beat numbering, `harmony_gate` seeding, fragment-edit UI) and the two investigation answers — none in-component. Per this step's gate, the fix-now backlog for this batch is closed; further campaign findings open a new report.
+
 ---
 
 ## Part 9 — Full Project Review & Phase-1 Close-out
