@@ -364,6 +364,67 @@ class TestGetFragment:
         # No harmony events (no movement_analysis seeded).
         assert body["harmony_events"] == []
 
+    async def test_sub_parts_ordered_by_position_with_beat_tiebreaker(
+        self,
+        read_client: AsyncClient,
+        seeded_movement: str,
+    ) -> None:
+        """sub_parts come back in score order: (mc_start, beat_start nulls first).
+
+        Component 9 Part 8 item 3 (G2): cadence stages typically share a
+        measure and differ only by beat, so mc_start alone left their order
+        to the UUID tiebreaker (random). The payload deliberately scrambles
+        the stages; the read must return them in musical order.
+        """
+        sub = {
+            "summary": _min_summary(concepts=["CadentialDominant"]),
+            "concept_tags": [_min_tag("CadentialDominant")],
+        }
+        sub_parts = [
+            # Scrambled on purpose: beat 3 first, whole-measure mc 1 last.
+            {
+                **sub,
+                "bar_start": 2,
+                "bar_end": 2,
+                "mc_start": 2,
+                "mc_end": 2,
+                "beat_start": 3.0,
+                "beat_end": 4.0,
+            },
+            {
+                **sub,
+                "bar_start": 2,
+                "bar_end": 2,
+                "mc_start": 2,
+                "mc_end": 2,
+                "beat_start": 1.0,
+                "beat_end": 2.0,
+            },
+            {
+                **sub,
+                "bar_start": 2,
+                "bar_end": 2,
+                "mc_start": 2,
+                "mc_end": 2,
+                "beat_start": 2.0,
+                "beat_end": 3.0,
+            },
+            {**sub, "bar_start": 1, "bar_end": 1, "mc_start": 1, "mc_end": 1},
+        ]
+        fragment_id = await self._create(
+            read_client, seeded_movement, sub_parts=sub_parts
+        )
+
+        resp = await read_client.get(
+            f"/api/v1/fragments/{fragment_id}",
+            headers={"Authorization": "Bearer dev-token"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+
+        got = [(sp["mc_start"], sp["beat_start"]) for sp in body["sub_parts"]]
+        assert got == [(1, None), (2, 1.0), (2, 2.0), (2, 3.0)]
+
     async def test_returns_harmony_events_in_range(
         self,
         read_client: AsyncClient,

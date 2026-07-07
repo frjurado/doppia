@@ -522,7 +522,15 @@ class FragmentService:
                 subs_result = await self._db.execute(
                     select(Fragment)
                     .where(Fragment.parent_fragment_id == fragment_id)
-                    .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+                    .order_by(
+                        Fragment.mc_start.asc(),
+                        # Stages in the same measure differ only by beat;
+                        # without this tiebreaker their order is the UUID's
+                        # (i.e. random) — Component 9 Part 8 item 3 (G2).
+                        # NULL beat_start = starts at the measure start.
+                        Fragment.beat_start.asc().nulls_first(),
+                        Fragment.id.asc(),
+                    )
                 )
                 existing_subs = list(subs_result.scalars().all())
 
@@ -755,11 +763,20 @@ class FragmentService:
         )
         parent_tags = list(tags_result.scalars().all())
 
-        # Load sub-parts (top-level only — ADR-011 two-level limit).
+        # Load sub-parts (top-level only — ADR-011 two-level limit), in score
+        # order. mc_start alone is measure-grained: stages of one cadence
+        # usually share the measure and differ only by beat, so without the
+        # beat_start tiebreaker the displayed order is the UUID's (i.e.
+        # random) — Component 9 Part 8 item 3 (G2). NULL beat_start = starts
+        # at the measure start, hence nulls first.
         sub_result = await self._db.execute(
             select(Fragment)
             .where(Fragment.parent_fragment_id == fragment_id)
-            .order_by(Fragment.mc_start.asc(), Fragment.id.asc())
+            .order_by(
+                Fragment.mc_start.asc(),
+                Fragment.beat_start.asc().nulls_first(),
+                Fragment.id.asc(),
+            )
         )
         sub_parts = list(sub_result.scalars().all())
 

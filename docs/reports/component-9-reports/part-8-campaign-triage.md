@@ -82,7 +82,19 @@ order (the orderings Francisco observed):
 
 **Fix server-side:** sort `sub_parts` by `(bar_start, beat_start)` where the
 fragment detail response is assembled, so every present and future surface
-inherits the order. The "stages reorder dynamically during tagging" is the
+inherits the order.
+
+**Done (2026-07-07, pending Francisco's in-app verification).** Root cause
+sharpened during the fix: the detail read *did* sort — by `(mc_start, id)` —
+but cadence stages typically share the measure and differ only by beat, so
+ties fell to the UUID (random). Both sub-part read sites
+(`services/fragments.py` detail response + the update path's sub-part load)
+gained the `beat_start` tiebreaker (`nulls_first` — a null beat starts at the
+measure start). Integration-tested with a deliberately scrambled four-stage
+payload (`test_fragment_read_api.py::test_sub_parts_ordered_by_position_with_beat_tiebreaker`).
+The tagging sidebar's own live sort already agrees (`?? 0` treats missing
+beats as first); the drag-order freeze noted above remains open as a
+follow-up under item 4's sidebar work. The "stages reorder dynamically during tagging" is the
 StageList live position sort reacting to bound edits mid-drag — legal but
 jarring; **freeze the display order during an active drag**. (If a *stable*
 wrong order is ever observed in the tagging sidebar specifically, capture the
