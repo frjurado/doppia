@@ -2,6 +2,14 @@
 
 **Status:** Accepted  
 **Date:** 2026-05-10  
+
+> **Note (2026-07-07, ADR-034):** the premise "no worker is deployed, so all dispatch
+> calls fail silently" no longer holds — ADR-034's inline mode executes dispatched
+> tasks in the API process by default, so uploads normally complete their analysis
+> without a worker. The `pending_analysis` flag and the admin re-dispatch endpoint
+> remain the recovery surface for the failure modes that survive (inline task failure,
+> crash between response and task completion, celery-mode broker outages).
+
 **Refs:** Report 2 Issue 12; `docs/roadmap/component-4-knowledge-graph.md` § Step 3
 
 ---

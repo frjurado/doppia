@@ -3,6 +3,13 @@
 **Status:** Accepted  
 **Date:** 2026-04-13
 
+> **Note (2026-07-07, ADR-034):** preview tasks are now dispatched via
+> `services/task_dispatch.dispatch_task()` — executed in-process by default, so
+> previews generate on staging with no worker deployed. "Celery task" below refers to
+> the task module, not to broker dispatch. Regeneration on re-ingest/MEI correction is
+> implemented (`scripts/regenerate_fragment_previews.py` + the ADR-008 trigger in
+> `services/ingestion.py`).
+
 ---
 
 ## Context

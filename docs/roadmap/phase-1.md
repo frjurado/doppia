@@ -10,12 +10,13 @@ Nothing in Phase 2 can be built without the fragment database. Nothing in Phase 
 
 ## What Phase 1 Delivers
 
-- A version-controlled MEI corpus with validated metadata and measure-number integrity
-- Score rendering (Verovio) and MIDI playback for whole movements and individual fragments
+- A version-controlled MEI corpus with validated metadata and measure-number integrity — *as built: the full DCML Mozart piano sonatas corpus, 18 sonatas / 54 movements, normalized and frozen (Component 9 Part 3)*
+- Score rendering (Verovio) and MIDI playback for whole movements and individual fragments — *as built: including a playback caret and Alt-click play-from-position (Component 9 Part 5)*
 - A seeded knowledge graph covering the cadence domain — the first of 11 confirmed domains planned for the full knowledge graph (see `docs/architecture/knowledge-graph-domain-map.md`) — with visualization tooling
-- A tagging tool allowing expert annotators to select fragments, classify them against the knowledge graph, record property values, and attach music21-derived summaries and prose annotations
+- A tagging tool allowing expert annotators to select fragments, classify them against the knowledge graph, record property values, and attach music21-derived summaries and prose annotations — *as built: music21 auto-summaries deferred with Component 6; harmonic data comes from the DCML analysis timeline*
 - A fragment database with full CRUD, peer-review workflow, and browsing by concept tag
-- Enough populated data to validate the full pipeline end to end before any public launch
+- A UI shipping in English and Spanish, with the ADR-006 translation infrastructure complete (Component 9 Part 7)
+- Enough populated data to validate the full pipeline end to end before any public launch — *the Component 9 Part 8 tagging campaign*
 
 ---
 
@@ -171,6 +172,8 @@ Before any MEI file is stored, validate:
 
 ### MEI Normalization
 
+**As built (Component 9, 2026-06/07):** normalization grew far beyond the brief below into a multi-pass pipeline specified in `docs/architecture/mei-ingest-normalization.md`, with its decisions recorded in ADR-021/022 (accidental normalization), ADR-026 (tie completion), ADR-027 (source-corrections overlay), ADR-028 (gestural accidental resolution), ADR-029 (grand-staff presentation), ADR-030 (deterministic xml:ids), ADR-031 (clef reconciliation), and — pre-import, in `scripts/prepare_dcml_corpus.py` — ADR-032/033. Warning families carry severities with recorded dispositions (`mei-ingest-normalization.md` § Warning severity); the dual machine/human measure coordinate system is ADR-015; originals are retained per ADR-014.
+
 MEI files from different corpus sources (MuseScore exports, Humdrum conversions, scholarly editions) are inconsistent in areas where the spec does not enforce uniqueness or presence — particularly around pickup bar encoding, `<ending>` structure, and meter change propagation. The tagging tool's ghost construction logic depends on these attributes being present and consistent. Rather than building defensive fallbacks into the front-end, normalization runs at ingest time and the stored MEI in S3 is always the normalized version. The original source file is retained separately for provenance.
 
 The normalization step runs after validation and before storage. A file that fails validation is rejected; a file that passes validation but requires normalization is normalized and the changes logged in the ingestion report. The full normalization specification — including the exact transformations applied and edge cases handled — is in `docs/architecture/mei-ingest-normalization.md`. The Measure Number Protocol section below establishes the coordinate conventions that normalization enforces.
@@ -235,6 +238,8 @@ The `mei_object_key` on `movement` is the S3 object key (`{composer_slug}/{corpu
 
 ### Incipit Preview
 
+*As built: implemented as specified (SVG, `incipit_object_key` on `movement`), dispatched per ADR-034 (in-process by default), with movement titles stripped from the incipit render (Component 9 Step 8b) and regeneration on re-ingest.*
+
 Rather than loading an entire MEI file to show a preview, generate a static incipit image at upload time:
 
 - After a successful MEI upload, a background task (Celery job) runs Verovio server-side (Python bindings) to render the first 4 bars as an SVG or PNG.
@@ -258,8 +263,8 @@ The tagging tool is a desktop-only workflow — no mobile adaptation needed for 
 - Multiple display modes (to decide)
 - Staff size control and automatic system breaks
 - Transposition via drop-down
-- MIDI playback with playback position indicator
-- Midway playback start deferred to Phase 2
+- MIDI playback with playback position indicator — *as built: a moving caret overlay replaced note highlighting (Component 9 Step 19; design in `playback-coordinates.md`)*
+- Midway playback start — *originally deferred to Phase 2; shipped in Component 9 Step 20 as Alt-click measure-level play-from-position (score viewer only; spec in `playback-coordinates.md` § Play-from-position)*
 
 ### Display Mode Decision
 
@@ -287,7 +292,7 @@ Verovio's JavaScript/WASM build is used client-side. Key decisions:
    ```javascript
    onPositionUpdate({ bar: noteBar, beat: noteBeat });
    ```
-5. The `onPositionUpdate` handler calls `verovio.getElementsAtTime()` to identify the sounding SVG element and applies the highlight class. Highlight is simpler to implement than a caret; start there.
+5. The `onPositionUpdate` handler calls `verovio.getElementsAtTime()` to identify the sounding SVG element. *As built: Phase 1 started with a highlight class and upgraded to an interpolating caret overlay in Component 9 Step 19.*
 6. Playback controls: play, pause, stop, scrub. Tone.js Transport supports all of these with correct position tracking.
 
 **The `onPositionUpdate(bar, beat)` callback is the sole interface between the playback layer and the score viewer.** Neither the MIDI player nor any future real audio player calls into the score viewer directly. Both MIDI synthesis and real audio call the same callback; switching between them is a configuration change, not a refactor.
@@ -420,7 +425,7 @@ This is the most technically complex component in Phase 1. It should be scoped a
 
 **Rhythmic subdivision grid:** selection at beat or sub-beat precision is implemented in Phase 1. **Decision (ADR-005):** implement beat-level and sub-beat-level precision in Phase 1. `beat_start` / `beat_end` columns are nullable (null = "full extent of the measure range") but populated from the first annotation session. The original deferral to Phase 2 is superseded — see ADR-005 for the rationale. See also ADR-011 for the multi-level tagging design decisions.
 
-**Repeat section handling:** see the measure number protocol note above. The tagging tool must surface a disambiguation field if the selected measure range falls within a repeated section.
+**Repeat section handling:** see the measure number protocol note above. The tagging tool must surface a disambiguation field if the selected measure range falls within a repeated section. *As built: the full selection-boundary rules — no repeat-barline gates, hard gates at sibling volta-ending crossings and D.C./D.S. markers, `repeat_context` disambiguation — are decided in ADR-025 and specified in `tagging-tool-design.md` §6A (Component 9 Part 1).*
 
 ### 5.2 Concept Search and Selection
 
@@ -488,6 +493,8 @@ Add a `status` enum column to the `fragment` table, and a separate `fragment_rev
 ---
 
 ## Component 6 — music21 Preprocessing Pipeline
+
+**As built: deferred beyond Phase 1** (decision recorded in the Component 9 plan § "Decisions taken into this plan"). The analysis-ingestion *pipeline* shipped — DCML `harmonies.tsv` is imported into `movement_analysis` for the whole corpus, dispatched on upload per ADR-004 (execution per ADR-034) — but the music21 auto-analysis fallback and the bass/soprano top-up pass were never needed for the Phase-1 corpus and remain unbuilt. `bass_pitch`/`soprano_pitch` render as "not computed". The source-priority design below stands and governs whenever a non-DCML corpus arrives.
 
 **Purpose:** Automatically extract structured musical information from tagged fragments, reducing manual annotation burden and populating the `summary` JSONB field.
 
@@ -638,16 +645,18 @@ The individual fragment detail view is the same Verovio rendering + MIDI playbac
 
 ---
 
-## Component 9 — Initial Corpus Population & Testing
+## Component 9 — Corpus Population, Hardening & Phase-1 Close-out
 
 **Purpose:** Validate the entire pipeline with real data before Phase 2 begins.
 
-### Scope
+**As built:** the component grew well beyond the original "populate and test" scope; the full plan and its outcomes are in `component-9-corpus-population-and-hardening.md`. What shipped, relative to the scope below:
 
-- Ingest a coherent test corpus (e.g. 5–10 Mozart piano sonata movements)
-- Tag a meaningful set of fragments (target: 50–100 fragments across the cadence domain)
-- Exercise every code path: upload → validation → corpus browsing → tagging → music21 preprocessing → fragment DB → peer review → fragment browsing
-- Document all bugs, edge cases, and data quality issues encountered
+- **Corpus:** not 5–10 movements but the **full 18 sonatas / 54 movements**, after a substantial rendering/normalization correctness campaign (clefs, ties, accidental playback, corrections overlay — Parts 2–3) and re-ingestion of the initial 15 with mc-stability verification. The corpus is frozen for Phase 1.
+- **Selection/stages hardening first:** the tagging tool's interaction model was specified (`tagging-tool-design.md` §6A, ADR-025) and fixed against a fixture matrix *before* volume tagging began (Part 1).
+- **Scope additions:** Spanish UI + completed ADR-006 i18n infrastructure (Part 7); playback caret and play-from-position (Part 5); harmonic label display upgrade (Part 6); nav bar redesign and UI/UX remediation across all surfaces (Part 4).
+- **Campaign & bug capture:** the test-target table below is executed against the full corpus (Part 8); issues are recorded under `docs/reports/component-9-reports/` and triaged fix-now vs. Phase-2 (`part-8-campaign-triage.md`); the first fix-now batch (preview-pipeline gap headline, resolved by ADR-034 in-process dispatch) is closed.
+- **The music21 preprocessing path** is exercised only as far as DCML ingestion — the music21 fallback stays deferred with Component 6.
+- **Close-out:** the component ends with the full project review (docs, code, security, cleanup — Part 9), which is the Phase 1 → Phase 2 gate.
 
 ### Test Targets
 
@@ -703,17 +712,26 @@ All architectural decisions have been recorded as ADRs in `docs/adr/`. The table
 | Auth provider | Supabase Auth | ADR-001 |
 | File storage | Cloudflare R2 (production), MinIO (local) | ADR-002 |
 | Default score display mode | Vertical infinite scroll | ADR-003 |
-| music21 pipeline trigger | On MEI upload, async via Celery | ADR-004 |
+| Analysis pipeline trigger | On MEI upload, async background task (dispatched per ADR-034) | ADR-004 |
 | Sub-measure precision | Implement beat-level and sub-beat-level selection in Phase 1; `beat_start`/`beat_end` are populated from the first annotation session | ADR-005 |
-| Internationalisation strategy | English as canonical; language-agnostic IDs; translation tables scaffolded in Phase 1; second language deferred | ADR-006 |
+| Internationalisation strategy | English as canonical; language-agnostic IDs; Phase-1 infrastructure complete and the UI ships in Spanish (Component 9 Part 7); concept/prose translation deferred | ADR-006 |
 | MIDI player library | `@tonejs/midi` + Tone.js | ADR-012 |
-| Repeat section handling in selection | Flag as known limitation; add `repeat_context` column; defer disambiguation UI to Phase 2 | — |
+| Repeat section handling in selection | Resolved in Component 9: no repeat-barline gates; hard gates at sibling volta-ending crossings and D.C./D.S.; `repeat_context` disambiguation | ADR-025 |
 | Prose annotation vector embedding | Store raw text now; scaffold pgvector; generate embeddings in Phase 3 | ADR-007 |
 | Fragment preview generation | Server-side static image at submit time (Celery + Verovio Python bindings) | ADR-008 |
 | DCML licensing constraint | CC BY-SA 4.0 per-fragment `data_licence` field; ABC corpus excluded from public API | ADR-009 |
 | Frontend framework | React 18 + Vite + TypeScript + React Router v6; no SSR | ADR-010 |
 | Multi-level tagging design | See ADR | ADR-011 |
 | Fragment rendering context | Structured `context.mode` contract (not a `context_bars` int); Phase 1 implements `none` only | ADR-024 |
+| Verovio version policy | Pinned 6.1.0, client and server; upgrade is a deliberate, verified event | ADR-013 |
+| Original MEI retention | Pre-normalization original kept alongside the normalized file | ADR-014 |
+| Measure coordinates | Dual system: machine `mc` (document order, authoritative) + human `mn` (`@n` display); duplicate `@n` accepted as human-coordinate ambiguity | ADR-015 |
+| JWT browser storage | `localStorage` for Phase 1's internal deployment; revisit before public launch | ADR-016 |
+| Celery broker/result config | No result backend; non-Upstash broker outside production; applies in `celery` dispatch mode | ADR-017 |
+| Ingestion partial-failure recovery | `pending_analysis` flag + admin re-dispatch endpoint | ADR-018 |
+| MEI normalization family | Accidentals (keysig-aware), tie completion, corrections overlay, gestural-accidental resolution, staff presentation, deterministic xml:ids, clef reconciliation, pre-import measure renumber & repeat repair | ADR-021/022, 026–033 |
+| Graph modelling details | Bool-property cardinality; cadence prerequisite edges; property/value ordering | ADR-019, 020, 023 |
+| Background task execution | In-process (`inline`) dispatch by default; Celery mode reserved for bulk ingest windows | ADR-034 |
 
 ---
 

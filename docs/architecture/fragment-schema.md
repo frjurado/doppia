@@ -373,7 +373,7 @@ This two-step pattern is the canonical approach. No component queries across dat
 
 ### `movement_analysis`
 
-The authoritative record of beat-level harmonic analysis for each movement. Created by the Celery task triggered on MEI upload (see `docs/adr/ADR-004-music21-pipeline-trigger.md`). One row per analysed movement; the preprocessing service slices the relevant beat range at read time when a fragment needs harmony data, and writes back into the same row when an annotator corrects a chord.
+The authoritative record of beat-level harmonic analysis for each movement. Created by the analysis-ingestion task dispatched on MEI upload (trigger and smart-merge policy: `docs/adr/ADR-004-music21-pipeline-trigger.md`; execution mode — in-process by default: `docs/adr/ADR-034-in-process-task-execution.md`). One row per analysed movement; the preprocessing service slices the relevant beat range at read time when a fragment needs harmony data, and writes back into the same row when an annotator corrects a chord.
 
 ```sql
 CREATE TABLE movement_analysis (

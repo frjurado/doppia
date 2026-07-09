@@ -151,6 +151,9 @@ CREATE TABLE movement (
     mei_original_object_key TEXT,             -- pre-normalization; nullable
     duration_bars           INTEGER,          -- cached last bar @n; populated by the normalizer
     normalization_warnings  JSONB,            -- structured warnings; null = clean
+    incipit_object_key      TEXT,             -- S3 key of the rendered incipit SVG; nullable until generated
+    incipit_generated_at    TIMESTAMPTZ,      -- cache-buster input for the public-URL branch (see security-model.md §4)
+    pending_analysis        BOOLEAN NOT NULL DEFAULT TRUE,  -- ADR-018: cleared when analysis ingestion completes
     ingested_at             TIMESTAMPTZ DEFAULT now(),
     created_at              TIMESTAMPTZ DEFAULT now(),
     updated_at              TIMESTAMPTZ DEFAULT now(),
@@ -316,14 +319,18 @@ The `soundfonts/piano/` prefix is a public-read path (no signed URL required). T
 
 ---
 
-### 5. Redis — Caching and Session State (Phase 2+)
+### 5. Redis — Caching and Task Broker
 
-**Role:** Not required in Phase 1. Introduced in Phase 2 when user sessions and repeated knowledge graph queries start to matter.
+**Role:** Live from Phase 1, in two capacities: the cache for knowledge-graph read queries (the Component 8 concept-subtree/tree cache, language-scoped keys, invalidated on seed), and the Celery broker for the `celery` dispatch mode (ADR-017; since ADR-034 the default dispatch mode is in-process, so broker traffic occurs only in deliberate bulk-ingest windows).
 
-**What it stores:**
-- User session tokens (if not using a managed auth service like Supabase Auth)
-- Cached knowledge graph query results — concept neighbourhoods, prerequisite chains, schema lookups — which are expensive to recompute and change infrequently
+**What it stores (Phase 1):**
+- Cached concept subtree/tree query results (`services/cache.py`)
+- Celery broker state, only while a worker window is active
+
+**Phase 2 additions:**
+- User session state if needed beyond Supabase Auth JWTs
 - Cached exercise distractor sets per concept
+- Rate-limit counters (`slowapi` — see `security-model.md` §2)
 
 **Local dev:** `redis:7` image in Docker Compose.
 
@@ -345,7 +352,7 @@ The `soundfonts/piano/` prefix is a public-read path (no signed URL required). T
 | DB migrations | Alembic | PostgreSQL schema migrations only; graph seeding handled separately |
 | Music processing | music21 | Auto-extraction of harmonic and structural summaries from MEI |
 | Score rendering (server-side) | Verovio Python bindings | Generating rendered snippets or validating MEI in preprocessing pipelines |
-| Task queue | Celery + Redis | Required from Phase 1 for async music21 preprocessing (on MEI upload); also used in Phase 2 for embedding generation |
+| Background tasks | Celery task modules + `services/task_dispatch.py` (ADR-034) | Incipit generation, fragment previews, analysis ingestion. Executed in-process by default; Celery + Redis broker mode reserved for bulk ingest windows (ADR-017). music21 preprocessing (Component 6) deferred |
 | Embedding generation | OpenAI Python SDK | `text-embedding-3-small`; called from a background task, not inline |
 
 ### Frontend
@@ -356,9 +363,10 @@ The `soundfonts/piano/` prefix is a public-read path (no signed URL required). T
 | Language | TypeScript | All frontend code; props typed with interfaces, no unexcused `any` |
 | Build tool | Vite | Dev server with `/api` proxy to FastAPI; produces static bundle for deployment |
 | Routing | React Router v6 | Client-side navigation; explicit route definitions in a top-level config |
-| Score rendering | Verovio (JS, WASM) | Client-side MEI rendering; MIDI playback via embedded synth |
-| Graph visualization (embedded) | Cytoscape.js | Served by a FastAPI endpoint returning Cytoscape JSON format |
-| Blog editor | Block-based editor (TipTap preferred; Lexical as fallback) | Custom fragment-picker block backed by the fragment DB; TipTap is React-native |
+| Score rendering | Verovio (JS, WASM) | Client-side MEI rendering, pinned 6.1.0 client and server (ADR-013); MIDI playback via Tone.js (ADR-012) |
+| Internationalisation | i18next + react-i18next | UI ships in English and Spanish (ADR-006); language switcher in the nav bar; `eslint-plugin-i18next` guards against hardcoded strings |
+| Graph visualization (embedded) | Cytoscape.js — *Phase 2, not yet built* | Served by a FastAPI endpoint returning Cytoscape JSON format |
+| Blog editor | Block-based editor (TipTap preferred; Lexical as fallback) — *Phase 2, not yet built* | Custom fragment-picker block backed by the fragment DB; TipTap is React-native |
 
 ### Infrastructure & Tooling
 
@@ -421,8 +429,10 @@ pgvector is enabled on the PostgreSQL container via an init script (`CREATE EXTE
 | `neo4j` container | Neo4j AuraDB | Free tier for development; Professional for production |
 | `postgres` container | Supabase (or AWS RDS) | Supabase preferred early — includes pgvector, auth helpers, and UI |
 | `redis` container | Upstash (serverless Redis) | Low cost for early production traffic |
-| `api` container | Fly.io, Railway, or AWS App Runner | Stateless FastAPI; scales independently of databases |
-| pgvector (in postgres) | Supabase Vector / pgvector on RDS | No migration needed unless scale demands a dedicated vector DB |
+| `api` container | Fly.io | Stateless FastAPI; scales independently of databases |
+| pgvector (in postgres) | Supabase Vector | No migration needed unless scale demands a dedicated vector DB |
+
+The deployed mapping (Supabase, Cloudflare R2, Upstash, Fly.io) and the full environment-variable list are authoritative in `docs/deployment.md`.
 
 All credentials are injected as environment variables. No credentials in code or Docker Compose files in the production path. The application code references the same environment variable names regardless of environment.
 
@@ -437,7 +447,7 @@ All credentials are injected as environment variables. No credentials in code or
 | Fragment database | PostgreSQL 16 + JSONB | MEI pointers, structured analytical summaries, concept tag joins |
 | User infrastructure | PostgreSQL 16 (same instance) | Accounts, collections, exercise history, reading history |
 | Prose/RAG layer | pgvector (→ Weaviate/Pinecone if scale demands) | Semantic retrieval over concept annotations, fragment prose, blog content |
-| Caching / sessions | Redis | Session tokens, cached graph query results, exercise distractor sets |
+| Caching / task broker | Redis | Concept-subtree cache (Phase 1); Celery broker in `celery` dispatch mode (ADR-017/034); sessions and distractor sets in Phase 2 |
 | ORM / migrations | SQLAlchemy 2 + Alembic | PostgreSQL access and schema versioning |
 | Write-time validation | Pydantic v2 | Schema constraints enforced before any database write |
 | Seed management | YAML + Python seeding script | Version-controlled graph seeding via idempotent Cypher `MERGE` |
