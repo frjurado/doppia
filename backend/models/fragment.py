@@ -543,14 +543,13 @@ class Fragment(Base):
     # Machine coordinates (ADR-015): 1-based document-order position indices
     # over <measure> elements in the MEI source. Map directly to Verovio
     # measureRange operands at render time without any conversion.
-    # TODO(tagging-tool): mc_start, mc_end must be supplied at write time by
-    # the tagging tool (Component 3), which computes them from the MEI in
-    # memory. Do not derive from bar_start/bar_end — they are different
-    # coordinate systems.
+    # mc_start, mc_end are supplied at write time by the tagging tool, which
+    # computes them from the MEI in memory. Never derive them from
+    # bar_start/bar_end — they are different coordinate systems.
     mc_start: Mapped[int] = mapped_column(Integer, nullable=False)
     mc_end: Mapped[int] = mapped_column(Integer, nullable=False)
-    # Sub-measure precision (ADR-005); null in Phase 1 until beat-level
-    # extraction is implemented.
+    # Sub-measure precision (ADR-005); null means "full extent of the
+    # measure range".
     beat_start: Mapped[float | None] = mapped_column(Float, nullable=True)
     beat_end: Mapped[float | None] = mapped_column(Float, nullable=True)
     repeat_context: Mapped[str | None] = mapped_column(String, nullable=True)

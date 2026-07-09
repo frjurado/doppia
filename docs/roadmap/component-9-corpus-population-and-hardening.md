@@ -246,6 +246,8 @@ Every file in `docs/architecture/` and `docs/adr/` checked against shipped reali
 
 Conventions sweep (type hints, docstrings, async rules, no magic relationship strings, error envelope, cursor pagination); dead-code and TODO sweep; invariants spot-audit (immutable concept ids, `MERGE`-only seeds, Pydantic-before-write, `require_role()` only, summary versioning, object-key-not-URL); test-coverage review against the campaign's exercised paths; dependency audit (outdated/vulnerable packages, `npm audit` / `pip-audit`); Verovio version policy check (ADR-013).
 
+**Done (2026-07-09):** `docs/reports/component-9-reports/step-30-code-test-dependency-review.md`. Conventions, invariants, and ADR-013 all pass; two stale comments fixed; npm vulnerabilities 8 → 0 (lockfile-only); three safe backend security bumps applied and test-verified (786 + 827 green). Decided with Francisco: the fastapi/starlette + lxml bumps and the pip-audit/CI wiring land as a **pre-Step-32 batch** post-campaign; the PyJWT migration (python-jose/ecdsa unfixables) is Phase-2 backlog.
+
 ### Step 31 — Security review
 
 Verify `security-model.md` against the deployed reality: CORS policy, rate limiting, signed-URL lifecycle and expiry, dev auth bypass demonstrably off in staging/production, JWT handling (ADR-016), RLS policies from migration 0005 actually enforced, role checks on every Component 7–9 endpoint (including that service-layer status filtering cannot be bypassed), and secrets hygiene (nothing committed, `.env.example` current). Findings are fixed in-component if small, or recorded with severity and a Phase-2 deadline if not.
