@@ -95,6 +95,12 @@ mispplied). Two checks:
 
 Record both results here when done.
 
+> **Result (2026-07-10, Francisco):** ✅ `fly secrets list` — no `AUTH_MODE`
+> entry anywhere; `SUPABASE_SERVICE_ROLE_KEY` present in secrets only (not in
+> `fly.toml`); `ENVIRONMENT` set via `fly.toml [env]`, not duplicated in
+> secrets. Both operator checks pass; Step 31 verification is complete. The
+> § 5 public-URL decision remains the only open item of this review.
+
 ## 5. Open decision — § 4 public-URL branch (this review must close it)
 
 `security-model.md` § 4 records that `R2_PUBLIC_URL` serves MEI/incipit/preview
@@ -126,5 +132,5 @@ internal, access-gated, and the bucket holds only open-licensed scores.
 | Doc/docstring nits | Fixed |
 | OpenAPI docs exposure | Recorded; Phase-2 decision |
 | RLS PostgREST probe | ✅ Verified 2026-07-10 — all tables `200 []` (default-deny enforced) |
-| fly secrets inventory | **Operator checklist (Francisco)** — pending |
+| fly secrets inventory | ✅ Verified 2026-07-10 — no `AUTH_MODE`; service-role key in secrets only; `ENVIRONMENT` in `fly.toml [env]` |
 | § 4 public-URL branch | **Decision pending (recommendation: (b) at Phase-2 start)** |
