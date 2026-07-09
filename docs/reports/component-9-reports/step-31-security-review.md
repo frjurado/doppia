@@ -81,6 +81,12 @@ mispplied). Two checks:
    environment — run `alembic upgrade head` and re-check. (`?select=id` keeps
    any accidental output to ids only.)
 
+   > **Result (2026-07-10, Francisco):** ✅ all four tables (`app_user`,
+   > `fragment`, `movement`, `alembic_version`) return `200` with body `[]`
+   > against the staging Supabase project with the anon key. RLS default-deny
+   > is enforced; PostgREST exposes nothing. This is the control that makes
+   > the anon key in `fly.toml` build args safe to commit.
+
 2. **Staging secrets inventory.** `fly secrets list -a <staging-app>` — confirm
    **no `AUTH_MODE`** entry exists, `ENVIRONMENT=staging` is set (env var or
    `fly.toml [env]`), and the Supabase **service-role key** appears only as a
@@ -119,5 +125,6 @@ internal, access-gated, and the bucket holds only open-licensed scores.
 | JWT `iss` comment / verification | Comment fixed; `issuer=` check → pre-Step-32 batch |
 | Doc/docstring nits | Fixed |
 | OpenAPI docs exposure | Recorded; Phase-2 decision |
-| RLS PostgREST probe + fly secrets inventory | **Operator checklist (Francisco)** |
+| RLS PostgREST probe | ✅ Verified 2026-07-10 — all tables `200 []` (default-deny enforced) |
+| fly secrets inventory | **Operator checklist (Francisco)** — pending |
 | § 4 public-URL branch | **Decision pending (recommendation: (b) at Phase-2 start)** |
