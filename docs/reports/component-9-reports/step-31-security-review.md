@@ -118,7 +118,12 @@ Phase 2 (it must land before any public URL exists; R2 public access is
 bucket-scoped, so it likely means a second, soundfonts-only public bucket —
 non-trivial), and keep (a) as the documented Phase-1 operating mode: staging is
 internal, access-gated, and the bucket holds only open-licensed scores.
-**Decision pending with Francisco.**
+
+> **Decision (2026-07-10, Francisco): option (b) adopted as the end state,**
+> implemented as one of the first Phase-2 tasks (prerequisite for ADR-009
+> enforcement and for any public URL); option (a) + cache-buster recorded as
+> the accepted Phase-1 operating mode. Recorded in `security-model.md` § 4.
+> **Step 31 is closed.**
 
 ---
 
@@ -133,4 +138,4 @@ internal, access-gated, and the bucket holds only open-licensed scores.
 | OpenAPI docs exposure | Recorded; Phase-2 decision |
 | RLS PostgREST probe | ✅ Verified 2026-07-10 — all tables `200 []` (default-deny enforced) |
 | fly secrets inventory | ✅ Verified 2026-07-10 — no `AUTH_MODE`; service-role key in secrets only; `ENVIRONMENT` in `fly.toml [env]` |
-| § 4 public-URL branch | **Decision pending (recommendation: (b) at Phase-2 start)** |
+| § 4 public-URL branch | ✅ **Decided 2026-07-10:** (b) at Phase-2 start; (a) accepted for Phase 1 |
