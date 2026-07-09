@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
         allow_origins=origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
     )
     return app
 ```
@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
 - **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. If a wildcard origin is ever needed (e.g. for a public read-only endpoint in Phase 2), that route must either disable credentials or be served from a separate API prefix.
 - The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. Adding a new environment (e.g. a preview deployment for a pull request) requires adding the origin to `_ALLOWED_ORIGINS` — not widening the pattern.
 - `allow_methods` covers the HTTP verbs actually used by the API. `PUT` is not listed because the API uses `PATCH` for partial updates; add it only when a `PUT` route is introduced.
-- `allow_headers` must include `Authorization` (the JWT bearer token) and `Content-Type` (JSON bodies). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
+- `allow_headers` must include `Authorization` (the JWT bearer token), `Content-Type` (JSON bodies), and `Accept-Language` (the ADR-006 language negotiation header, added in Component 9 Part 7). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
 
 ### R2 and CORS
 

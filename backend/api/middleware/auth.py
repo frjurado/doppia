@@ -128,8 +128,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 token,
                 verify_key,
                 algorithms=[algorithm],
-                # Supabase tokens carry audience "authenticated"; we skip
-                # audience verification here and rely on iss + exp instead.
+                # Supabase tokens carry audience "authenticated"; audience and
+                # issuer are not verified here — signature verification against
+                # this project's JWKS/secret already scopes accepted tokens to
+                # this Supabase project, and exp is verified by default.
+                # Adding issuer= verification is recorded as a Step 31
+                # hardening item (pre-Step-32 batch).
                 options={"verify_aud": False},
             )
         except ExpiredSignatureError:

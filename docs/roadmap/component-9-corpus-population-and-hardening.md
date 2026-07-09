@@ -252,6 +252,8 @@ Conventions sweep (type hints, docstrings, async rules, no magic relationship st
 
 Verify `security-model.md` against the deployed reality: CORS policy, rate limiting, signed-URL lifecycle and expiry, dev auth bypass demonstrably off in staging/production, JWT handling (ADR-016), RLS policies from migration 0005 actually enforced, role checks on every Component 7–9 endpoint (including that service-layer status filtering cannot be bypassed), and secrets hygiene (nothing committed, `.env.example` current). Findings are fixed in-component if small, or recorded with severity and a Phase-2 deadline if not.
 
+**Done pending two operator checks (2026-07-09):** `docs/reports/component-9-reports/step-31-security-review.md`. All code-side controls verified; live staging probes pass (no-auth 401, `dev-token` 401, hostile-origin CORS preflight rejected). Three low findings — JWT `iss` comment corrected (real `issuer=` verification queued for the pre-Step-32 batch), two doc nits fixed, OpenAPI docs exposure recorded for Phase 2. Outstanding: Francisco runs the PostgREST RLS probe and the `fly secrets` inventory (§4 of the report), and the § 4 public-URL open decision (recommendation: option (b) at Phase-2 start).
+
 ### Step 32 — Cleanup and close-out
 
 Repo cleanup (stale branches, spike outputs, unused fixtures); `CONTRIBUTING.md` and `CLAUDE.md` refreshed against actual practice; a short Phase-1 close-out section appended to `phase-1.md` recording what shipped, what is deferred (with pointers), and the Phase-2 entry state.
