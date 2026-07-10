@@ -232,7 +232,8 @@ async def validation_exception_handler(
         detail={"errors": serializable_errors},
     )
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        # Renamed in starlette 1.x (RFC 9110 wording); the old constant warns.
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=body.model_dump(),
     )
 
