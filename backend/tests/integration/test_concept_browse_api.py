@@ -368,6 +368,36 @@ async def _insert_fragment(
     return frag_id
 
 
+async def _browse_all_items(
+    client: AsyncClient,
+    query: str,
+    token: str = "dev-token",
+    page_size: int = 50,
+) -> list[dict[str, Any]]:
+    """Walk a fragment browse through all cursor pages and return every item.
+
+    ``query`` is the query string without page parameters, e.g.
+    ``concept_id=PerfectAuthenticCadence&status=approved``. The browse runs
+    against shared concept ids (PAC/AC/IAC), so a DB carrying real campaign
+    fragments has entries beyond what a test inserts — assertions must scope
+    to inserted ids over the full walk, never to a single page.
+    """
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _ in range(200):  # hard stop if a cursor ever loops
+        url = f"/api/v1/fragments?{query}&page_size={page_size}"
+        if cursor is not None:
+            url += f"&cursor={cursor}"
+        resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200, resp.text
+        page = resp.json()
+        items.extend(page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return items
+    raise AssertionError("Browse cursor did not terminate within 200 pages")
+
+
 # ---------------------------------------------------------------------------
 # TestBrowseByConceptSubtypes
 # ---------------------------------------------------------------------------
@@ -388,13 +418,10 @@ class TestBrowseByConceptSubtypes:
         pac_id = await _insert_fragment(db_session, movement_id=mid, concept_id=_PAC)
         iac_id = await _insert_fragment(db_session, movement_id=mid, concept_id=_IAC)
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_AC}&include_subtypes=true&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_AC}&include_subtypes=true&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        ids = {item["id"] for item in body["items"]}
+        ids = {item["id"] for item in items}
         assert pac_id in ids, "PAC fragment must appear under AuthenticCadence subtree"
         assert iac_id in ids, "IAC fragment must appear under AuthenticCadence subtree"
 
@@ -408,12 +435,10 @@ class TestBrowseByConceptSubtypes:
         mid = seeded_movement["movement_id"]
         pac_id = await _insert_fragment(db_session, movement_id=mid, concept_id=_PAC)
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_AC}&include_subtypes=false&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_AC}&include_subtypes=false&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        ids = {item["id"] for item in resp.json()["items"]}
+        ids = {item["id"] for item in items}
         # PAC fragment is NOT tagged with _AC directly, so it must be absent.
         assert pac_id not in ids
 
@@ -428,12 +453,11 @@ class TestBrowseByConceptSubtypes:
         pac_id = await _insert_fragment(db_session, movement_id=mid, concept_id=_PAC)
 
         for flag in ("true", "false"):
-            resp = await browse_client.get(
-                f"/api/v1/fragments?concept_id={_PAC}&include_subtypes={flag}&status=approved",
-                headers={"Authorization": "Bearer dev-token"},
+            items = await _browse_all_items(
+                browse_client,
+                f"concept_id={_PAC}&include_subtypes={flag}&status=approved",
             )
-            assert resp.status_code == 200
-            ids = {item["id"] for item in resp.json()["items"]}
+            ids = {item["id"] for item in items}
             assert pac_id in ids, f"Fragment must appear with include_subtypes={flag}"
 
     async def test_fragment_with_multiple_matching_tags_appears_once(
@@ -455,12 +479,9 @@ class TestBrowseByConceptSubtypes:
         )
         await db_session.commit()
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_AC}&include_subtypes=true&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_AC}&include_subtypes=true&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
         matching = [i for i in items if i["id"] == frag_id]
         assert (
             len(matching) == 1
@@ -497,12 +518,8 @@ class TestBrowseStatusVisibility:
         )
 
         # No status param — defaults to approved.
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}",
-            headers={"Authorization": "Bearer dev-token"},
-        )
-        assert resp.status_code == 200, resp.text
-        ids = {item["id"] for item in resp.json()["items"]}
+        items = await _browse_all_items(browse_client, f"concept_id={_PAC}")
+        ids = {item["id"] for item in items}
         assert approved_id in ids
         assert draft_id not in ids, "Draft must not appear in default approved browse"
 
@@ -535,12 +552,10 @@ class TestBrowseStatusVisibility:
             bar_end=12,
         )
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}&status=draft",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_PAC}&status=draft"
         )
-        assert resp.status_code == 200, resp.text
-        ids = {item["id"] for item in resp.json()["items"]}
+        ids = {item["id"] for item in items}
         assert own_draft_id in ids, "Editor must see their own draft"
         assert other_draft_id not in ids, "Editor must NOT see another user's draft"
 
@@ -560,12 +575,10 @@ class TestBrowseStatusVisibility:
             created_by=_DEV_USER_ID,
         )
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}&status=draft",
-            headers={"Authorization": "Bearer admin-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_PAC}&status=draft", token="admin-token"
         )
-        assert resp.status_code == 200, resp.text
-        ids = {item["id"] for item in resp.json()["items"]}
+        ids = {item["id"] for item in items}
         assert editor_draft_id in ids, "Admin must see editor's draft"
 
     async def test_requires_auth(
@@ -698,12 +711,9 @@ class TestBrowseListItemFields:
         mid = seeded_movement["movement_id"]
         frag_id = await _insert_fragment(db_session, movement_id=mid, concept_id=_PAC)
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_PAC}&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
         item = next((i for i in items if i["id"] == frag_id), None)
         assert item is not None
         assert item["preview_url"] is None
@@ -723,12 +733,9 @@ class TestBrowseListItemFields:
             data_licence="CC BY-SA 4.0",
         )
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_PAC}&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
         item = next((i for i in items if i["id"] == frag_id), None)
         assert item is not None
         assert "data_licence" in item
@@ -783,12 +790,9 @@ class TestBrowseListItemFields:
             bar_end=4,
         )
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_PAC}&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
         item = next((i for i in items if i["id"] == frag_id), None)
         assert item is not None
         assert item["data_licence"] == "CC BY-SA 4.0"
@@ -804,12 +808,9 @@ class TestBrowseListItemFields:
         mid = seeded_movement["movement_id"]
         frag_id = await _insert_fragment(db_session, movement_id=mid, concept_id=_PAC)
 
-        resp = await browse_client.get(
-            f"/api/v1/fragments?concept_id={_PAC}&status=approved",
-            headers={"Authorization": "Bearer dev-token"},
+        items = await _browse_all_items(
+            browse_client, f"concept_id={_PAC}&status=approved"
         )
-        assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
         item = next((i for i in items if i["id"] == frag_id), None)
         assert item is not None
         assert item["composer_name"] == "Wolfgang Amadeus Mozart"
