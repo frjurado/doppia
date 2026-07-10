@@ -13,19 +13,27 @@ roadmap itself (blog, collections, exercises, user infrastructure) lives in
 
 ---
 
-## 1. Pre-Step-32 batch (still Phase 1 — runs when the campaign closes)
+## 1. Pre-Step-32 batch — ✅ landed 2026-07-11 (campaign closed 2026-07-11)
 
-Agreed 2026-07-09/10 (Step 30 § 5.3, Step 31 § Findings). One batch, gated on
-the full unit + integration suites passing, landed before Step 32 close-out.
+Agreed 2026-07-09/10 (Step 30 § 5.3, Step 31 § Findings). Landed as one batch,
+gated on the full unit + integration suites passing, before Step 32 close-out.
 
-| # | Item | Source / pointer |
+**Gate results (2026-07-11, local):** unit 789/789; integration 141/141 —
+against a DB carrying real campaign data, the exact condition that motivated
+B5; graph 44/44; black/isort/ruff, crossref lint, `pip check` all clean.
+*Known local nit:* on Windows the integration run passes all tests, then hangs
+at exit in pytest-asyncio's session-loop close (`IocpProactor._poll`) — CI
+(Linux) is unaffected; if it recurs, try `WindowsSelectorEventLoopPolicy` in
+the integration conftest. Not bisected against the old pins.
+
+| # | Item | Outcome |
 |---|---|---|
-| B1 | **fastapi + starlette bump** — clears the 7 starlette advisories (fix versions ≥ 0.47.2); touches auth middleware, routing, TestClient behaviour | Step 30 report § 5.3.1 |
-| B2 | **lxml 5.3 → 6.1** (PYSEC-2026-87) — major bump of the normalizer/validator parser; the 797-test normalizer suite is the net | Step 30 report § 5.3.2 |
-| B3 | **pip-audit into `requirements-dev.txt` + `pip-audit`/`npm audit` in CI, report-only** — flip to blocking once B1/B2 land | Step 30 report § 5.4; `security-model.md` § "Could be done in Phase 1" |
-| B4 | **JWT `issuer=` verification** in `api/middleware/auth.py` — the code comment previously claimed iss verification that didn't exist (comment fixed in Step 31); adding the real check is a behaviour change needing a staging login test | Step 31 report § Findings 1 |
-| B5 | **Review-queue integration-test isolation** — pagination assertions assume an empty DB and break against any DB with real submitted fragments; scope assertions to inserted ids and sweep the other integration suites for the same assumption. *(Routed to Step 30 by the triage report; missed in the Step 30 sweep — picked up here.)* | `part-8-campaign-triage.md` § review-queue test isolation |
-| B6 | *(optional, ride-along)* black 24→26 (tree reformat — isolated `chore:` commit) and pytest 8→9 (dev-only advisory) | Step 30 report § 5.3.4 |
+| B1 | ~~**fastapi + starlette bump**~~ | ✅ fastapi 0.115.6 → 0.139.0, starlette 0.41.3 → 1.3.1; all 7 starlette advisories cleared; one starlette-1.x rename absorbed (`HTTP_422_UNPROCESSABLE_CONTENT` in `errors.py`) |
+| B2 | ~~**lxml 5.3 → 6.1**~~ | ✅ lxml 6.1.1; PYSEC-2026-87 cleared; normalizer suite green |
+| B3 | ~~**pip-audit + CI audits, report-only**~~ | ✅ `pip-audit==2.10.1` in `requirements-dev.txt`; report-only `audit` job in `ci.yml` (pip-audit + npm audit). Stays report-only until the PyJWT migration (§2) — python-jose's unfixable advisory set would keep a blocking audit permanently red |
+| B4 | ~~**JWT `issuer=` verification**~~ | ✅ `iss` verified against `SUPABASE_URL/auth/v1` whenever `SUPABASE_URL` is set; wrong/missing issuer → 401; unit-tested. **Staging login must be re-verified after the next deploy** |
+| B5 | ~~**Review-queue integration-test isolation**~~ | ✅ queue tests walk all cursor pages and scope to inserted ids; sweep found the same assumption in `test_concept_browse_api.py` (browses real PAC/AC concept ids) — fixed with the same full-walk helper. `test_fragment_read_api` / `test_browse_api` were already isolated (fresh movement / unique slug) |
+| B6 | *(optional ride-along — not taken)* | pytest 8→9 blocked: pytest-asyncio 0.24 pins `pytest<9`, so the bump requires the pytest-asyncio 1.x migration — moved to §2 alongside the PyJWT item. black 24→26 tree reformat not ridden (churn); land as an isolated `chore:` commit whenever wanted |
 
 ---
 
@@ -38,7 +46,8 @@ Items with a hard trigger: **all of §2 must land before any public
 |---|---|---|
 | **Signed-URL end state — option (b)** | Restrict R2 public access to a soundfonts-only public bucket; MEI/incipit/preview go back through presigned URLs. Decided 2026-07-10; **first Phase-2 task** — it is a prerequisite for ADR-009 enforcement (source MEI of an excluded corpus must not be publicly fetchable) and for any public launch. Known trade-off recorded: presigned URLs defeat browser caching of previews. | `security-model.md` § 4 (decision block); Step 31 report § 5 |
 | **Public endpoints + ADR-009 enforcement** | The unauthenticated `approved`-only browse path and the ABC-corpus exclusion. The per-fragment `data_licence`/`harmony_sources` serialiser is already built and wired (Component 8) — Phase 2 adds the public route and the exclusion check. Depends on option (b) above. | ADR-009; `phase-1.md` Component 8 § Phase 1 scope |
-| **PyJWT migration** | python-jose has an unfixable advisory (PYSEC-2025-185) and an unfixable transitive (`ecdsa`); upstream effectively unmaintained. Replace in `api/middleware/auth.py`. | Step 30 report § 5.3.3 |
+| **PyJWT migration** | python-jose has an unfixable advisory (PYSEC-2025-185) and two unfixable transitives (`ecdsa` PYSEC-2026-1325; `pyasn1` CVE-2026-30922 — python-jose pins `pyasn1<0.5.0`, blocking the fixed 0.6.3); upstream effectively unmaintained. Replace in `api/middleware/auth.py`, then flip the CI audit job from report-only to blocking. | Step 30 report § 5.3.3 |
+| **pytest 9 + pytest-asyncio 1.x migration** | pytest 8→9 (PYSEC-2026-1845, dev-only) is blocked by pytest-asyncio 0.24's `pytest<9` pin; bumping means migrating the async test configuration to pytest-asyncio 1.x. Deferred from the pre-Step-32 batch (B6). | Step 30 report § 5.3.4 |
 | **Token storage + full session UX** | ADR-016's localStorage exception is scoped to Phase 1's internal deployment and "must be revisited before Phase 2 public launch": evaluate HttpOnly cookie vs full Supabase JS client (which also brings token refresh — the triage's "full session UX" item: refresh, user dropdown; the minimal `exp` patch shipped in Component 9). | ADR-016 § Consequences; `part-8-campaign-triage.md` § full session UX |
 | **Rate limiting** | `slowapi` + Redis, per-user keys on expensive endpoints; starting limits already tabled. Implement before public traffic. | `security-model.md` § 2 |
 | **Security headers** | CSP (restrictive policy drafted, `worker-src blob:` for Verovio WASM), HSTS once the production domain exists, `X-Content-Type-Options: nosniff`. | `security-model.md` § 7 |

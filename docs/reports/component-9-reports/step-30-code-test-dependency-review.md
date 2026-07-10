@@ -145,8 +145,8 @@ verified event — no action, and no advisory pressure on 6.1.0.
 | 2 stale comments (`models/fragment.py`) | Fixed in this review |
 | 8 npm vulnerabilities | Fixed (`npm audit fix`, lockfile-only) |
 | 3 backend packages with safe fixes | Fixed (requirements + venv, test-verified) |
-| fastapi/starlette advisory set | **Decided 2026-07-09:** pre-Step-32 batch |
-| lxml major bump | **Decided 2026-07-09:** same batch |
-| python-jose/ecdsa unfixable | **Decided 2026-07-09:** Phase-2 — migrate to PyJWT |
-| black/pytest dev bumps | Optional; ride the batch or isolated chore |
-| pip-audit + audits in CI | **Decided 2026-07-09:** same pre-Step-32 batch (report-only first) |
+| fastapi/starlette advisory set | ✅ **Landed 2026-07-11** (pre-Step-32 batch): fastapi 0.139.0 / starlette 1.3.1 |
+| lxml major bump | ✅ **Landed 2026-07-11:** lxml 6.1.1 |
+| python-jose/ecdsa unfixable | Phase-2 — migrate to PyJWT (a third transitive advisory, pyasn1 CVE-2026-30922, joined the set during the batch) |
+| black/pytest dev bumps | Not ridden: pytest 9 blocked by pytest-asyncio's `pytest<9` pin (→ Phase-2 backlog §2); black reformat deferred as isolated chore |
+| pip-audit + audits in CI | ✅ **Landed 2026-07-11:** pip-audit 2.10.1 in requirements-dev; report-only CI audit job |

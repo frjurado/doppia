@@ -260,6 +260,13 @@ Repo cleanup (stale branches, spike outputs, unused fixtures); `CONTRIBUTING.md`
 
 **Gate (agreed 2026-07-09/10):** Step 32 runs only after the campaign closes **and** the pre-Step-32 batch lands — fastapi/starlette + lxml bumps, pip-audit/CI wiring, JWT `issuer=` verification, review-queue integration-test isolation. The batch and the full deferral register are in `docs/roadmap/phase-2-entry-backlog.md` § 1; the close-out section points there for "what is deferred".
 
+> **Gate satisfied (2026-07-11):** the campaign closed (remaining minor issues
+> routed to the Phase-2 backlog) and the batch landed the same day, gated on
+> the full unit + integration suites (item-by-item outcomes:
+> `phase-2-entry-backlog.md` § 1). One operator follow-up remains: a staging
+> login after the next deploy verifies the new JWT issuer verification against
+> real Supabase tokens. Step 32 is unblocked.
+
 ---
 
 ## Issue Traceability
