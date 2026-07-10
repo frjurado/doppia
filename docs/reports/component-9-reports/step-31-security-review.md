@@ -123,7 +123,8 @@ internal, access-gated, and the bucket holds only open-licensed scores.
 > implemented as one of the first Phase-2 tasks (prerequisite for ADR-009
 > enforcement and for any public URL); option (a) + cache-buster recorded as
 > the accepted Phase-1 operating mode. Recorded in `security-model.md` § 4.
-> **Step 31 is closed.**
+> **Step 31 is closed.** All Phase-2 items from this review are consolidated
+> in `docs/roadmap/phase-2-entry-backlog.md` § 2.
 
 ---
 

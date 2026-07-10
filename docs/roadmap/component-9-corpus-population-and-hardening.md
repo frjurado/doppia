@@ -258,6 +258,8 @@ Verify `security-model.md` against the deployed reality: CORS policy, rate limit
 
 Repo cleanup (stale branches, spike outputs, unused fixtures); `CONTRIBUTING.md` and `CLAUDE.md` refreshed against actual practice; a short Phase-1 close-out section appended to `phase-1.md` recording what shipped, what is deferred (with pointers), and the Phase-2 entry state.
 
+**Gate (agreed 2026-07-09/10):** Step 32 runs only after the campaign closes **and** the pre-Step-32 batch lands — fastapi/starlette + lxml bumps, pip-audit/CI wiring, JWT `issuer=` verification, review-queue integration-test isolation. The batch and the full deferral register are in `docs/roadmap/phase-2-entry-backlog.md` § 1; the close-out section points there for "what is deferred".
+
 ---
 
 ## Issue Traceability
@@ -315,6 +317,12 @@ Each follows the house rule: short options note, decide with Francisco, record (
 ---
 
 ## Deferred — Explicitly Out of Component 9
+
+> **Consolidated register (2026-07-10):** everything deferred to Phase 2 — the list
+> below plus the campaign/review deferrals and the agreed pre-Step-32 dependency
+> batch — is gathered with pointers in **`docs/roadmap/phase-2-entry-backlog.md`**.
+> That document is the Phase-2 planning input; this section remains as the
+> original in-plan scope statement.
 
 - **Component 6** (music21 auto-analysis, bass/soprano top-up). Still deferred; "not computed" remains the rendered state.
 - **Concept/definition/prose Spanish translation**, the translation editorial UI, the staleness job, and the translator permission (ADR-006 "before launching a second language" — except as already noted, UI strings don't need them).

@@ -97,6 +97,9 @@ react-router-dom → 6.30.4 stays on v6).
 > closes, gated on the full unit + integration suites. Item 3 (PyJWT migration)
 > is **Phase-2 backlog**. The black/pytest dev bumps ride the same batch only
 > if convenient; black's reformat lands as an isolated `chore:` commit if so.
+>
+> The batch and all Phase-2 deferrals are consolidated in
+> `docs/roadmap/phase-2-entry-backlog.md`.
 
 1. **starlette 0.41.3 (via fastapi 0.115.6) — 7 advisories** (multipart DoS
    family and related; fix versions 0.47.2–1.x). Fixing requires a coordinated
