@@ -134,7 +134,7 @@ internal, access-gated, and the bucket holds only open-licensed scores.
 |---|---|
 | All code-side controls | Verified, pass |
 | Staging probes (auth, dev bypass, CORS) | Verified live, pass |
-| JWT `iss` comment / verification | Comment fixed in-review; ✅ real `issuer=` check **landed 2026-07-11** (pre-Step-32 batch) — verify with a staging login after the next deploy |
+| JWT `iss` comment / verification | Comment fixed in-review; ✅ real `issuer=` check **landed 2026-07-11** (pre-Step-32 batch, commit `54953da`) and **verified on staging the same day** — Francisco logged in and browsed normally with real Supabase tokens after the deploy |
 | Doc/docstring nits | Fixed |
 | OpenAPI docs exposure | Recorded; Phase-2 decision |
 | RLS PostgREST probe | ✅ Verified 2026-07-10 — all tables `200 []` (default-deny enforced) |

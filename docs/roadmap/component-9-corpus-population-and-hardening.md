@@ -258,14 +258,16 @@ Verify `security-model.md` against the deployed reality: CORS policy, rate limit
 
 Repo cleanup (stale branches, spike outputs, unused fixtures); `CONTRIBUTING.md` and `CLAUDE.md` refreshed against actual practice; a short Phase-1 close-out section appended to `phase-1.md` recording what shipped, what is deferred (with pointers), and the Phase-2 entry state.
 
+**Done (2026-07-11):** cleanup survey — 16 fully-merged remote branches and one stale stash (the Prettier tree-wide churn) identified for deletion; spike scripts kept deliberately (they are the reproducibility record referenced from `mei-ingest-normalization.md`); no unused fixtures (all 68 referenced by name). `CONTRIBUTING.md`/`CLAUDE.md` corrected against practice: 10 (not 9) graph checks, `backend/tests/...` pytest paths, Prettier-not-in-CI reality + touched-files-only rule, `lint:css`, the full-walk rule for shared listing surfaces, `mei_object_key` column name, core pagination envelope; **new policy recorded: no direct commits to `main` — PR-only** (CONTRIBUTING § 7). Phase-1 close-out section appended to `phase-1.md`, pointing to `phase-2-entry-backlog.md`. Tag `phase1/complete` after the closing PR merges.
+
 **Gate (agreed 2026-07-09/10):** Step 32 runs only after the campaign closes **and** the pre-Step-32 batch lands — fastapi/starlette + lxml bumps, pip-audit/CI wiring, JWT `issuer=` verification, review-queue integration-test isolation. The batch and the full deferral register are in `docs/roadmap/phase-2-entry-backlog.md` § 1; the close-out section points there for "what is deferred".
 
 > **Gate satisfied (2026-07-11):** the campaign closed (remaining minor issues
 > routed to the Phase-2 backlog) and the batch landed the same day, gated on
 > the full unit + integration suites (item-by-item outcomes:
-> `phase-2-entry-backlog.md` § 1). One operator follow-up remains: a staging
-> login after the next deploy verifies the new JWT issuer verification against
-> real Supabase tokens. Step 32 is unblocked.
+> `phase-2-entry-backlog.md` § 1). The batch was deployed to staging (CI green
+> on GitHub first) and the JWT issuer verification confirmed with a real
+> Supabase login. Step 32 is unblocked.
 
 ---
 

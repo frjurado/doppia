@@ -758,3 +758,43 @@ These are things that cost little to do correctly now but would require expensiv
 **Fragment browsing as the precursor to AI retrieval.** The concept-tag browsing API built in Phase 1 (`GET /fragments?concept_id=...&include_subtypes=true`) is structurally identical to the graph traversal queries the AI reasoning layer will issue in Phase 3. Write this query as a reusable service function, not as inline route logic. Phase 3 will call the same function from within tool-calling context.
 
 **Real audio playback.** The `onPositionUpdate(bar, beat)` abstraction established in Phase 1's MIDI playback layer is the primary forward-compatibility mechanism for real audio. When a suitable open-licence recording exists for a work (Musopen, Open Goldberg Variations, etc.), the real audio path replaces the MIDI synthesis path while calling the same callback. No rendering layer changes are required. See `docs/architecture/real-audio-playback-research.md` for the full design: two new tables (`audio_recording`, `audio_score_alignment`), the parangonar alignment pipeline, and the assessment of open recording availability by repertoire.
+
+---
+
+## Phase-1 Close-out (2026-07-11)
+
+Phase 1 is complete. Component 9's Part 9 review (Steps 29–32) closed it out:
+documentation audited against shipped reality (Step 29), code/tests/dependencies
+reviewed with all invariants verified (Step 30), the security model verified
+against the deployed staging environment including live probes and operator
+checks (Step 31), and this close-out (Step 32).
+
+**What shipped** is recorded component-by-component above, each section carrying
+an as-built note where the outcome differs from the original plan. The headline
+end state:
+
+- The Mozart piano-sonata corpus (54 movements) is ingested, normalized
+  (ADR-021–033 family), and frozen; any future correction follows the
+  re-ingestion protocol with mc-stability verification.
+- The cadence domain is seeded, validated (10 structural checks in CI), and
+  populated with reviewed fragments by the Step 27 tagging campaign, which
+  closed 2026-07-11.
+- The tagging tool, corpus browser, fragment browser, review queue, and MIDI
+  playback run on staging (Fly.io + Supabase + AuraDB + R2 + Upstash), deployed
+  from a hardened dependency stack (pre-Step-32 batch: fastapi 0.139 /
+  starlette 1.3, lxml 6.1, JWT issuer verification, report-only dependency
+  audits in CI).
+- Component 6 (music21 auto-analysis) is the one component deferred whole —
+  DCML analysis covers the Phase-1 corpus; see the backlog.
+
+**What is deferred** — security/infra debt with hard triggers, product/UX debt,
+by-design deferrals, and corpus notes — lives in one place:
+**`docs/roadmap/phase-2-entry-backlog.md`**. That register is the first input
+to Phase-2 planning; §2 of it lists everything that must land before any
+public URL or user exists.
+
+**Process state at close:** `main` is deployable and PR-only (direct commits
+closed 2026-07-11 — CONTRIBUTING § 7); CI runs lint, unit, integration, graph
+validation, and report-only dependency audits; staging free-tier pauses are
+held off by the daily keep-alive workflow. Tag `phase1/complete` on `main`
+once the closing PR merges.
