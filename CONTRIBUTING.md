@@ -192,11 +192,12 @@ Before writing any UI code, read **[`docs/mockups/opus_urtext/DESIGN.md`](docs/m
 
 ### Formatting
 
-**Prettier** with the project configuration (`.prettierrc`) handles all formatting. **ESLint** handles linting. Both run in CI.
+**Prettier** with the project configuration (`.prettierrc`) is the formatting reference; **ESLint** and **stylelint** handle linting and are the checks CI enforces (Prettier itself does not run in CI). The committed tree is **not** Prettier-clean — `npm run format` rewrites dozens of unrelated files. Format only the files you touched (e.g. `npx prettier --write <files>`); never run a tree-wide format inside a feature commit.
 
 ```bash
-npm run format
+npx prettier --write <touched files>
 npm run lint
+npm run lint:css
 ```
 
 ### Component patterns
@@ -228,10 +229,10 @@ Verovio's `getElementsAtTime()` is the API for mapping a MIDI tick to SVG elemen
 Pure functions, Pydantic validators, service-layer logic that can be tested without a live database. Mock all database calls. These are fast and must pass without Docker running.
 
 ```bash
-pytest tests/unit/
+pytest backend/tests/unit/
 ```
 
-Running `pytest` without arguments collects only unit tests. Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set.
+Running `pytest` without arguments collects only unit tests (`testpaths` in `pyproject.toml` points at `backend/tests`, so this works from the repository root). Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set.
 
 ### Integration tests
 
@@ -241,10 +242,12 @@ Every integration test file is marked with `pytestmark = pytest.mark.integration
 
 ```bash
 docker compose up -d   # start postgres, minio, redis
-DOPPIA_RUN_INTEGRATION=1 pytest tests/integration/
+DOPPIA_RUN_INTEGRATION=1 pytest backend/tests/integration/
 ```
 
 Use test fixtures that set up and tear down their own data. Do not assume a clean database; do not leave test data behind. Every integration test should be runnable in any order and in parallel.
+
+**Shared listing surfaces need full-walk assertions.** Endpoints that list across the whole database (the review queue, browse-by-concept on real concept ids) will contain rows beyond what your test inserts — the local development database carries real campaign data. Never assert on the contents or size of a single page: walk the full cursor pagination (see `_collect_queue_items` / `_browse_all_items` in the existing suites) and scope membership assertions to the ids your test created. This bit twice before it became a rule (Part 8 triage; fixed in the pre-Step-32 batch, 2026-07-11).
 
 ### Graph integration tests
 
@@ -311,12 +314,11 @@ All list endpoints use **cursor-based pagination** from day one. Offset-based pa
 ```json
 {
   "items": [...],
-  "next_cursor": "eyJpZCI6ICIxMjMifQ==",
-  "has_more": true
+  "next_cursor": "eyJpZCI6ICIxMjMifQ=="
 }
 ```
 
-The cursor encodes the last item's stable identifier (typically `id` and `created_at`). The client passes `?cursor=<value>` on subsequent requests. The server decodes the cursor, uses it as a `WHERE` clause boundary, and returns the next page.
+The cursor encodes the last item's stable identifier (typically `id` and `created_at`). The client passes `?cursor=<value>` on subsequent requests; a `null` `next_cursor` marks the last page. The server decodes the cursor, uses it as a `WHERE` clause boundary, and returns the next page. (Some endpoints add surface-specific fields to the envelope — e.g. concept search includes `has_more` — but `items` + `next_cursor` is the core contract.)
 
 Do not add an offset-pagination endpoint for convenience. Migrate it later when you need it to be correct.
 
@@ -391,13 +393,15 @@ These are not style preferences. Violating them silently breaks data integrity a
 
 **The graph seed script uses `MERGE`, not `CREATE`.** This makes re-seeding safe. Any `CREATE` statement in a seed script is a bug.
 
-**MEI files are referenced by S3 object key, never by absolute path or URL.** The `mei_file` column stores an object key (e.g. `mozart-piano-sonatas/k331/movement-1.mei`). The application resolves keys to signed URLs at request time. Storing URLs directly creates environment-specific data.
+**MEI files are referenced by S3 object key, never by absolute path or URL.** The `movement.mei_object_key` column stores an object key (e.g. `mozart-piano-sonatas/k331/movement-1.mei`). The application resolves keys to signed URLs at request time. Storing URLs directly creates environment-specific data.
 
 ---
 
 ## 7. Branching policy
 
 **`main` is always deployable to staging.** Do not merge anything into `main` that is not passing CI (all tests, linting, graph validation).
+
+**Never commit directly to `main`.** All changes — including docs-only changes and single-commit fixes — land on a `feature/` or `fix/` branch and reach `main` through a pull request. This applies to solo work and to AI-assisted sessions alike; parts of the Phase-1 history were committed straight to `main`, and this rule (recorded 2026-07-11) closes that practice.
 
 **Feature branches** are named `feature/{short-description}`, e.g. `feature/cadence-domain-seed`, `feature/fragment-tagging-tool`. Keep branches short-lived. If a feature takes more than a week, it is probably too large — break it down.
 

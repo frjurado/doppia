@@ -25,6 +25,8 @@ from starlette.exceptions import HTTPException
 
 _TEST_SECRET = "test-jwt-secret-for-unit-tests"
 _ALGORITHM = "HS256"
+_TEST_SUPABASE_URL = "https://test-project.supabase.co"
+_TEST_ISSUER = f"{_TEST_SUPABASE_URL}/auth/v1"
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ def _make_token(
     *,
     secret: str = _TEST_SECRET,
     exp_offset: int = 3600,
+    iss: str | None = _TEST_ISSUER,
 ) -> str:
     """Mint a synthetic JWT signed with the test secret.
 
@@ -49,6 +52,8 @@ def _make_token(
         secret: Signing secret; override to produce a wrong-secret token.
         exp_offset: Seconds added to ``now()`` for the ``exp`` claim.
             Pass a negative value to produce an already-expired token.
+        iss: The ``iss`` claim (Supabase sets ``<SUPABASE_URL>/auth/v1``).
+            Pass ``None`` to omit the claim entirely.
 
     Returns:
         A signed JWT string.
@@ -59,6 +64,8 @@ def _make_token(
         "app_metadata": {"role": role},
         "exp": int(time.time()) + exp_offset,
     }
+    if iss is not None:
+        payload["iss"] = iss
     return jwt.encode(payload, secret, algorithm=_ALGORITHM)
 
 
@@ -90,6 +97,7 @@ async def supabase_client(
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv("AUTH_MODE", "supabase")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", _TEST_SECRET)
+    monkeypatch.setenv("SUPABASE_URL", _TEST_SUPABASE_URL)
 
     from api.dependencies import AppUser, require_role
     from api.middleware.auth import AuthMiddleware
@@ -204,6 +212,7 @@ async def test_missing_sub_claim_rejected(supabase_client: AsyncClient) -> None:
         "email": "nosub@test.com",
         "app_metadata": {"role": "editor"},
         "exp": int(time.time()) + 3600,
+        "iss": _TEST_ISSUER,
     }
     token = jwt.encode(payload, _TEST_SECRET, algorithm=_ALGORITHM)
     response = await supabase_client.get(
@@ -213,6 +222,42 @@ async def test_missing_sub_claim_rejected(supabase_client: AsyncClient) -> None:
     assert response.status_code == 401
     body = response.json()
     assert "sub" in body["error"]["message"].lower()
+
+
+async def test_wrong_issuer_rejected(supabase_client: AsyncClient) -> None:
+    """A JWT issued by a different Supabase project returns 401 (Step 31 B4)."""
+    token = _make_token(iss="https://other-project.supabase.co/auth/v1")
+    response = await supabase_client.get(
+        "/api/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+    body = response.json()
+    assert "issuer" in body["error"]["message"].lower()
+
+
+async def test_missing_issuer_rejected(supabase_client: AsyncClient) -> None:
+    """A JWT with no 'iss' claim returns 401 when SUPABASE_URL is configured."""
+    token = _make_token(iss=None)
+    response = await supabase_client.get(
+        "/api/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_issuer_not_verified_without_supabase_url(
+    supabase_client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without SUPABASE_URL (HS256-only deployment), iss is not required."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    token = _make_token(iss=None)
+    response = await supabase_client.get(
+        "/api/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
 
 
 async def test_malformed_token_rejected(supabase_client: AsyncClient) -> None:

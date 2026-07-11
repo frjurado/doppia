@@ -3,6 +3,11 @@
 **Status:** Accepted (amended 2026-04-28)
 **Date:** 2026-03-27
 
+> **Note (2026-07-07, ADR-034):** "enqueued as a Celery task" now reads as "dispatched
+> via `services/task_dispatch.dispatch_task()`" — in-process by default, Celery broker
+> dispatch only when `TASK_EXECUTION_MODE=celery`. The trigger timing and smart-merge
+> policy decided here are unaffected.
+
 ---
 
 ## Context

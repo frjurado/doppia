@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
         allow_origins=origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
     )
     return app
 ```
@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
 - **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. If a wildcard origin is ever needed (e.g. for a public read-only endpoint in Phase 2), that route must either disable credentials or be served from a separate API prefix.
 - The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. Adding a new environment (e.g. a preview deployment for a pull request) requires adding the origin to `_ALLOWED_ORIGINS` — not widening the pattern.
 - `allow_methods` covers the HTTP verbs actually used by the API. `PUT` is not listed because the API uses `PATCH` for partial updates; add it only when a `PUT` route is introduced.
-- `allow_headers` must include `Authorization` (the JWT bearer token) and `Content-Type` (JSON bodies). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
+- `allow_headers` must include `Authorization` (the JWT bearer token), `Content-Type` (JSON bodies), and `Accept-Language` (the ADR-006 language negotiation header, added in Component 9 Part 7). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
 
 ### R2 and CORS
 
@@ -351,7 +351,7 @@ Two consequences:
 1. **No expiry / no signature** on MEI and SVG artifact URLs in deployed environments. Acceptable at Phase 1 scope (staging is internal-only, access-gated by Supabase Auth; the bucket holds only public-domain/CC-licensed scores), but it is a real deviation from the signed-URL lifecycle above and must be resolved before any public launch.
 2. **The `r2.dev` edge cache is not purgeable on demand** (the managed subdomain is not a zone in the account). Because these artifacts are **mutable** — overwritten on re-ingest (MEI) or regeneration (incipit, preview) — a stable URL would let a stale cached copy shadow the corrected object indefinitely. Mitigation: `signed_url(..., version=<last-write timestamp>)` appends a `?v=<token>` cache-buster (`_cache_bust_token`, keyed on `movement.updated_at` / `incipit_generated_at` / `preview_generated_at`), so every regeneration yields a fresh cache key. Callers in `services/browse.py` and `services/fragments.py` pass the relevant timestamp.
 
-**Open decision (Step 31 review).** Either (a) keep the public-URL branch for these artifacts with the cache-buster as the permanent design, or (b) restrict the public branch to soundfonts and route MEI/incipit/preview back through true presigned URLs — which restores the TTL/signature lifecycle and makes the cache-buster unnecessary (presigned URLs are unique per request). Option (b) is the more security-aligned end state; it is recorded here rather than silently chosen.
+**Decision (2026-07-10, Step 31 review, with Francisco): option (b) is the end state.** The public branch will be restricted to soundfonts (a separate public bucket — R2 public access is bucket-scoped) and MEI/incipit/preview routed back through true presigned URLs, restoring the TTL/signature lifecycle above and making the cache-buster unnecessary (presigned URLs are unique per request). **Implementation is scheduled as one of the first Phase-2 tasks** — it is a hard prerequisite for ADR-009 enforcement (the ABC-corpus public-API exclusion is bypassable while source MEI is publicly fetchable) and must precede any public URL. Until then, the public-URL branch with the cache-buster is the **accepted Phase-1 operating mode**: staging is internal, access-gated, and the bucket holds only public-domain/CC-licensed scores. Known trade-off to revisit at implementation: presigned URLs defeat browser caching of fragment previews; if that matters at Phase-2 scale, previews/incipits (derived renders of open-licensed scores) may stay public while source MEI is signed.
 
 ### Share links in Phase 2
 
@@ -542,4 +542,4 @@ The following items are technically deferred but require no Phase 2 infrastructu
 
 **CORS: pull request preview environments.** If Fly.io preview deployments are introduced for pull requests (each PR gets its own preview URL), the CORS allowlist must accommodate dynamic origins. The recommended approach is a backend startup check that reads a comma-separated `ALLOWED_ORIGINS` environment variable, falling back to the static allowlist. This avoids hardcoding preview URLs in code. This is a 5-line change to `main.py` with no new dependencies.
 
-**Dependency scanning.** Add `pip-audit` (Python) and `npm audit` (JavaScript) to the CI pipeline. Both are low-noise, catch known CVEs in third-party packages before they reach production, and can be wired up against `requirements.txt` and `package.json` which already exist.
+**Dependency scanning.** ✅ **Done (2026-07-11, pre-Step-32 batch):** `pip-audit` is pinned in `requirements-dev.txt` and both `pip-audit` and `npm audit` run in CI as a report-only job (`continue-on-error`). The job stays non-blocking while python-jose carries advisories with no fix version (PYSEC-2025-185; transitive `ecdsa` PYSEC-2026-1325 and `pyasn1` CVE-2026-30922, both constrained by python-jose's own pins); flip it to blocking after the Phase-2 PyJWT migration (`phase-2-entry-backlog.md` §2).

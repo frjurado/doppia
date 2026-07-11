@@ -1,6 +1,11 @@
 # Prototype — Tagging Tool Analysis
 ## Reference Document for the Doppia Tagging Interface
 
+> **Status: historical (2026-07).** This analysis of the pre-Doppia prototype informed
+> the tagging tool's ghost-overlay architecture. The shipped design is specified in
+> [`tagging-tool-design.md`](tagging-tool-design.md) (interaction model in §6/§6A),
+> which supersedes anything here. Kept for provenance of the ghost/annotator split.
+
 ---
 
 ## Overview

@@ -1,7 +1,7 @@
 """Health check endpoints for liveness probes and keep-alive pings.
 
-``/health`` is the cheap liveness probe used by Fly.io — it touches nothing.
-``/health/deep`` additionally runs a trivial query against PostgreSQL
+``/api/v1/health`` is the cheap liveness probe used by Fly.io — it touches
+nothing. ``/api/v1/health/deep`` additionally runs a trivial query against PostgreSQL
 (Supabase) and Neo4j (AuraDB); the scheduled keep-alive workflow hits it so
 the free-tier stores register activity and never auto-pause (see
 ``docs/deployment.md`` § "Free-tier operations").

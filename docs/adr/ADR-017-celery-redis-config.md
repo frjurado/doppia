@@ -3,6 +3,12 @@
 **Status:** Accepted  
 **Date:** 2026-05-05
 
+> **Note (2026-07-07, ADR-034):** in-process (`inline`) execution is now the default
+> dispatch mode and no Celery worker runs in staging. The broker and result-backend
+> configuration below applies whenever `TASK_EXECUTION_MODE=celery` is deliberately
+> enabled — bulk ingest windows per `deployment.md`, or Phase-2 scale. The
+> fire-and-forget result policy (§1) holds in both modes.
+
 ## Context
 
 Doppia uses Celery for two fire-and-forget background tasks (`generate_incipit`, `ingest_analysis`). In staging, both `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` were pointing at the Upstash Redis instance. This caused the free-tier monthly quota (500 000 commands) to be exhausted within a single month of light manual testing, because:

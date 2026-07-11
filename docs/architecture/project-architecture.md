@@ -203,7 +203,7 @@ MEI Corpus (OpenScore / DCML / other open sources)
 
 The foundation. All later features depend on a populated, well-tagged fragment database.
 
-- Set up MEI corpus ingestion pipeline from OpenScore and similar sources.
+- Set up MEI corpus ingestion pipeline from open sources (Phase 1 as built: the DCML `mozart_piano_sonatas` corpus, `.mscx` → MEI — see [`corpus-and-analysis-sources.md`](corpus-and-analysis-sources.md)).
 - Build the Verovio-based tagging interface for expert annotators.
 - Define the knowledge graph schema and relationship vocabulary; implement the graph database. Seed the Cadence domain first — the seed domain whose modelling decisions established the three-layer architecture. The full planned domain scope is in [`knowledge-graph-domain-map.md`](knowledge-graph-domain-map.md).
 - Build the analysis ingestion pipeline. The primary Phase 1 source is DCML TSV (pre-computed harmonic analyses for DCML corpora), dispatched via `ingest_analysis.py`. When in Rome RomanText support is deferred to the first non-DCML corpus; music21 auto-analysis is deferred to Component 6. See [`corpus-and-analysis-sources.md`](corpus-and-analysis-sources.md) for the provenance taxonomy and [`fragment-schema.md`](fragment-schema.md) §"Harmonic analysis: movement-level single source of truth" for the storage pattern.

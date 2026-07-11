@@ -60,6 +60,44 @@ jobs:
         run: npm test
 
   # ---------------------------------------------------------------------------
+  # Job 1b — Dependency audit (report-only)
+  #
+  # continue-on-error keeps this job non-blocking: python-jose carries
+  # advisories with no fix version (PYSEC-2025-185; transitive ecdsa
+  # PYSEC-2026-1325 and pyasn1 CVE-2026-30922 pinned <0.5.0 by python-jose),
+  # so a blocking audit would start permanently red. Flip to blocking after
+  # the Phase-2 PyJWT migration (phase-2-entry-backlog.md §2).
+  # ---------------------------------------------------------------------------
+  audit:
+    name: Dependency audit (report-only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+
+      - name: pip-audit (backend requirements)
+        run: pip-audit -r backend/requirements.txt --no-deps
+
+      - name: Set up Node 20
+        if: ${{ !cancelled() }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm audit (frontend lockfile)
+        if: ${{ !cancelled() }}
+        working-directory: frontend
+        run: npm audit
+
+  # ---------------------------------------------------------------------------
   # Job 2 — Unit tests (fast, no Docker, parallel with lint)
   # ---------------------------------------------------------------------------
   unit:

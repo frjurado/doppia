@@ -29,6 +29,7 @@ from collections.abc import Awaitable, Callable
 from api.dependencies import AppUser
 from fastapi import Request, Response
 from jose import ExpiredSignatureError, JWTError, jwt
+from jose.exceptions import JWTClaimsError
 from models.errors import ErrorCode, ErrorResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -123,17 +124,30 @@ class AuthMiddleware(BaseHTTPMiddleware):
         else:
             return _make_401("Server JWT key is not configured.")
 
+        # Supabase issues tokens with iss = "<SUPABASE_URL>/auth/v1". Verified
+        # whenever SUPABASE_URL is configured (always true when the JWKS path
+        # is active — main.py fetches the JWKS from that same URL); an
+        # HS256-only deployment without SUPABASE_URL falls back to signature
+        # verification alone, which already scopes accepted tokens to this
+        # project.
+        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        issuer: str | None = f"{supabase_url}/auth/v1" if supabase_url else None
+
         try:
             payload: dict = jwt.decode(
                 token,
                 verify_key,
                 algorithms=[algorithm],
-                # Supabase tokens carry audience "authenticated"; we skip
-                # audience verification here and rely on iss + exp instead.
-                options={"verify_aud": False},
+                issuer=issuer,
+                # Supabase tokens carry audience "authenticated"; audience is
+                # not verified — signature verification already scopes accepted
+                # tokens to this Supabase project. exp is verified by default.
+                options={"verify_aud": False, "verify_iss": issuer is not None},
             )
         except ExpiredSignatureError:
             return _make_401("Token has expired.")
+        except JWTClaimsError:
+            return _make_401("Token issuer does not match this Supabase project.")
         except JWTError:
             return _make_401("Token is invalid or signature verification failed.")
 

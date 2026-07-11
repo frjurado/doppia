@@ -1,5 +1,11 @@
 # Login Page — Implementation Spec
 
+> **Status: implemented (2026-04); historical spec.** The `/login` route, direct
+> Supabase Auth REST integration, and `RequireAuth` guard shipped as specified. Session
+> expiry/401 handling was later hardened in Component 9 (any-401 translation + stale-JWT
+> session expiry, 2026-07). The nav-bar login entry point is from the Component 9
+> Step 12 redesign. Auth architecture: ADR-001; token storage: ADR-016.
+
 ## Scope
 
 A `/login` route with an email/password form connected to Supabase Auth. After successful login the access token is stored and the user is redirected to `/`. All existing routes become protected: unauthenticated users are redirected to `/login`. No registration, no forgot-password, no token refresh — accounts are managed via the Supabase dashboard (admin-only in Phase 1, per ADR-001).

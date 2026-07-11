@@ -38,7 +38,7 @@ pip install -r requirements-dev.txt   # local dev (includes all prod deps)
 ### Knowledge graph seeding and validation
 ```bash
 python scripts/seed.py --domain cadences           # seed a domain YAML into Neo4j
-python scripts/validate_graph.py                   # run 9 structural checks against live Neo4j
+python scripts/validate_graph.py                   # run 10 structural checks against live Neo4j
 python scripts/visualize_domain.py --domain <name> # export pyvis HTML for a seeded domain
 python scripts/visualize_domain.py --domain <name> --output /tmp/<name>.html
 ```
@@ -50,8 +50,9 @@ python scripts/visualize_domain.py --domain <name> --output /tmp/<name>.html
 cd frontend
 npm install
 npm run dev         # outside Docker
-npm run format      # Prettier
-npm run lint        # ESLint
+npm run format      # Prettier — the committed tree is NOT Prettier-clean; format only the files you touched, never tree-wide
+npm run lint        # ESLint (CI runs this)
+npm run lint:css    # stylelint (CI runs this)
 npm test            # Vitest unit tests (ghost geometry, state model, UI components)
 ```
 
@@ -60,17 +61,23 @@ npm test            # Vitest unit tests (ghost geometry, state model, UI compone
 black backend/
 isort backend/
 ruff check backend/
+pip-audit -r backend/requirements.txt --no-deps   # dependency advisories (also report-only in CI)
 ```
 
 ### Tests
 ```bash
+# From the repository root (testpaths is backend/tests, so bare pytest works anywhere):
 pytest                                          # unit tests only (no Docker required)
-pytest tests/unit/                              # same as above, explicit path
-DOPPIA_RUN_INTEGRATION=1 pytest tests/integration/  # requires docker compose up
+pytest backend/tests/unit/                      # same as above, explicit path
+DOPPIA_RUN_INTEGRATION=1 pytest backend/tests/integration/  # requires docker compose up
+DOPPIA_RUN_INTEGRATION=1 pytest backend/tests/graph/        # requires seeded Neo4j
 pytest --cov=backend --cov-report=term-missing  # with coverage (unit tests only)
 ```
 
 Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set.
+Integration tests must not assume an empty database — the local DB carries real
+campaign data. Assertions on shared listing surfaces (review queue, browse by
+concept) walk the full cursor pagination and scope to the ids the test inserted.
 Snapshot tests (`tests/snapshots/`) are deferred to Phase 2 (Verovio regression guards).
 Graph structure tests use `python scripts/validate_graph.py` directly (see below).
 
@@ -142,6 +149,7 @@ Conventional Commits with a project-specific `seed:` type for knowledge graph YA
 - **Do not commit without explicit human approval**, unless the change is a truly trivial fix (typo, import sort, whitespace). For any substantive code or doc change, stop and wait for the human to review before committing.
 
 ### Branching
+- **Never commit directly to `main`** — all work (code and docs alike) goes on a `feature/` or `fix/` branch and merges via pull request. If asked to commit while on `main`, create a branch first.
 - `main` is always deployable to staging and must pass CI (tests + linting + graph validation).
 - Feature branches: `feature/{short-description}`; fix branches: `fix/{short-description}`.
 
@@ -164,4 +172,6 @@ Before finishing any implementation task:
 | `docs/architecture/security-model.md` | CORS policy, rate limiting, signed URL lifecycle, dev auth bypass |
 | `docs/mockups/opus_urtext/DESIGN.md` | Authoritative design system for all frontend work |
 | `docs/adr/` | Architecture Decision Records for all non-obvious decisions |
+| `docs/roadmap/phase-2-entry-backlog.md` | Everything Phase 1 deliberately left open — first input to Phase-2 planning |
+| `docs/deployment.md` | Staging/production setup, deploy flow, re-ingestion protocol, free-tier operations |
 | `CONTRIBUTING.md` | Full coding conventions, testing strategy, and branching policy |

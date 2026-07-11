@@ -310,6 +310,34 @@ async def _insert_fragment(
     return fragment_id
 
 
+async def _collect_queue_items(
+    client: AsyncClient,
+    token: str,
+    page_size: int = 50,
+) -> list[dict[str, Any]]:
+    """Walk the review queue through all cursor pages and return every item.
+
+    The queue lists *all* submitted fragments in the database, so a DB that
+    carries real campaign data has entries beyond what a test inserts.
+    Membership assertions must therefore scope to inserted ids over the full
+    walk, never to the contents or size of a single page.
+    """
+    items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _ in range(200):  # hard stop if a cursor ever loops
+        url = f"/api/v1/reviews/queue?page_size={page_size}"
+        if cursor is not None:
+            url += f"&cursor={cursor}"
+        resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200, resp.text
+        page = resp.json()
+        items.extend(page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return items
+    raise AssertionError("Queue cursor did not terminate within 200 pages")
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -331,12 +359,7 @@ class TestReviewQueue:
             db_session, seeded_movement, "submitted", _ADMIN_USER_ID
         )
 
-        resp = await queue_client.get(
-            "/api/v1/reviews/queue",
-            headers={"Authorization": "Bearer dev-token"},
-        )
-        assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
+        items = await _collect_queue_items(queue_client, "dev-token")
         item = next((i for i in items if i["id"] == frag_id), None)
         assert (
             item is not None
@@ -368,12 +391,7 @@ class TestReviewQueue:
             db_session, seeded_movement, "submitted", _ADMIN_USER_ID, mc_start=5
         )
 
-        resp = await queue_client.get(
-            "/api/v1/reviews/queue",
-            headers={"Authorization": "Bearer dev-token"},
-        )
-        assert resp.status_code == 200, resp.text
-        ids = {i["id"] for i in resp.json()["items"]}
+        ids = {i["id"] for i in await _collect_queue_items(queue_client, "dev-token")}
 
         assert own_frag_id not in ids, "Creator must not see own submission in queue"
         assert other_frag_id in ids, "Other annotator's submission must be visible"
@@ -396,12 +414,7 @@ class TestReviewQueue:
             db_session, seeded_movement, "submitted", _ADMIN_USER_ID
         )
 
-        resp = await queue_client.get(
-            "/api/v1/reviews/queue",
-            headers={"Authorization": "Bearer admin-token"},
-        )
-        assert resp.status_code == 200, resp.text
-        ids = {i["id"] for i in resp.json()["items"]}
+        ids = {i["id"] for i in await _collect_queue_items(queue_client, "admin-token")}
         assert admin_frag_id in ids, "Admin must see their own submission in queue"
 
         await db_session.execute(
@@ -427,12 +440,7 @@ class TestReviewQueue:
             )
             inserted.append(fid)
 
-        resp = await queue_client.get(
-            "/api/v1/reviews/queue",
-            headers={"Authorization": "Bearer dev-token"},
-        )
-        assert resp.status_code == 200, resp.text
-        ids = {i["id"] for i in resp.json()["items"]}
+        ids = {i["id"] for i in await _collect_queue_items(queue_client, "dev-token")}
         for fid in inserted:
             assert (
                 fid not in ids
@@ -450,7 +458,12 @@ class TestReviewQueue:
         seeded_movement: str,
         db_session: AsyncSession,
     ) -> None:
-        """Cursor pagination returns a stable second page with no overlap."""
+        """Cursor pagination walks the full queue without loss or duplication.
+
+        Assertions are scoped to the inserted ids and to structural pagination
+        properties, never to absolute page contents: the DB may carry real
+        submitted fragments alongside what this test inserts.
+        """
         # Insert 3 submitted fragments owned by the admin user (visible to dev-token).
         inserted: list[str] = []
         for mc in (1, 5, 9):
@@ -459,7 +472,18 @@ class TestReviewQueue:
             )
             inserted.append(fid)
 
-        # First page: 2 items.
+        # Walk with page_size=2; with >= 3 items the walk spans >= 2 pages.
+        all_ids = [
+            i["id"]
+            for i in await _collect_queue_items(queue_client, "dev-token", page_size=2)
+        ]
+
+        # No id is lost or duplicated across page boundaries.
+        assert len(all_ids) == len(set(all_ids)), "Pages must not overlap"
+        for fid in inserted:
+            assert fid in all_ids, f"Inserted fragment missing from walk: {fid}"
+
+        # Every page before the last is full (page_size honoured).
         resp1 = await queue_client.get(
             "/api/v1/reviews/queue?page_size=2",
             headers={"Authorization": "Bearer dev-token"},
@@ -468,22 +492,6 @@ class TestReviewQueue:
         page1 = resp1.json()
         assert len(page1["items"]) == 2
         assert page1["next_cursor"] is not None
-
-        # Second page: remaining item, no further cursor.
-        resp2 = await queue_client.get(
-            f"/api/v1/reviews/queue?page_size=2&cursor={page1['next_cursor']}",
-            headers={"Authorization": "Bearer dev-token"},
-        )
-        assert resp2.status_code == 200, resp2.text
-        page2 = resp2.json()
-        assert len(page2["items"]) == 1
-        assert page2["next_cursor"] is None
-
-        # No overlap between pages.
-        ids_p1 = {i["id"] for i in page1["items"]}
-        ids_p2 = {i["id"] for i in page2["items"]}
-        assert len(ids_p1 & ids_p2) == 0
-        assert len(ids_p1 | ids_p2) == 3
 
         for fid in inserted:
             await db_session.execute(
