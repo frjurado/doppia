@@ -1,8 +1,11 @@
 # Phase 2 — Non-AI User Features: Design & Roadmap
 
-**Status:** planning draft, 2026-07-15. Component order, the cross-cutting
-decisions, and the exercise design (Component 15 →
-[`component-15-exercises.md`](component-15-exercises.md)) are agreed.
+**Status:** agreed 2026-07-15; adopted as the Phase 2 roadmap. Component
+order, the cross-cutting decisions, and the exercise design (Component 15 →
+[`component-15-exercises.md`](component-15-exercises.md)) are settled;
+per-component implementation plans (starting with
+[`component-10-foundations-public-read-path.md`](component-10-foundations-public-read-path.md))
+are drafted as each component begins.
 
 ## Purpose
 
