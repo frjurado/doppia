@@ -315,7 +315,7 @@ soundfonts/piano/{note}.mp3
 ```
 Example notes: `C4.mp3`, `Ds4.mp3` (D#4), `Fs4.mp3` (F#4), `A4.mp3`.
 
-The `soundfonts/piano/` prefix is a public-read path (no signed URL required). The frontend loads SoundFont files via `VITE_SOUNDFONT_BASE_URL` (set to the MinIO base URL in dev, the R2 public URL in production). Upload Salamander Grand Piano reduced samples (1–2 MB total) to this path before enabling MIDI playback.
+Soundfonts are the one public-read artifact class (no signed URL — Tone.js cannot carry signed query parameters). In deployed environments they live in the dedicated public `doppia-soundfonts` bucket, separate from the private artifact bucket (Component 10 Step 1; `security-model.md` § 4). The frontend loads them via `VITE_SOUNDFONT_BASE_URL` (the MinIO base URL in dev, the soundfonts bucket's public URL in staging/production); the backend never touches this bucket. Upload Salamander Grand Piano reduced samples (1–2 MB total) to this path before enabling MIDI playback.
 
 ---
 

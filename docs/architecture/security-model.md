@@ -76,7 +76,7 @@ def create_app() -> FastAPI:
 
 Cloudflare R2 is currently accessed server-side only: the API fetches MEI files for processing, or generates signed URLs that the frontend uses to fetch files directly. When the frontend uses a signed URL to fetch from R2 directly, that is a cross-origin request from the browser to `*.r2.cloudflarestorage.com`. R2 CORS rules must be configured at the bucket level for this to work.
 
-The current architecture serves MEI files to the frontend via R2 URLs minted by `signed_url()` (see [section 4](#4-signed-url-lifecycle-for-r2) — note the public-URL branch, which returns unsigned `r2.dev` URLs in deployed environments). Either way the browser fetches cross-origin, so the R2 bucket must carry a CORS rule allowing `GET` requests from the frontend origin:
+The current architecture serves MEI files to the frontend via presigned R2 URLs minted by `signed_url()` (see [section 4](#4-signed-url-lifecycle-for-r2)). A presigned URL is still a cross-origin fetch from the browser, so the artifact bucket must carry a CORS rule allowing `GET` requests from the frontend origin (the separate public soundfonts bucket carries its own equivalent rule — see `deployment.md` § "SoundFont setup"):
 
 ```json
 [
@@ -342,16 +342,18 @@ class StorageClient:
 
 A persistent connection pool can be added later if latency measurements warrant it; for now, short-lived clients are both simpler and safe.
 
-### Public-URL branch (R2.dev) — known deviation
+### The bucket split: soundfonts public, artifacts private (shipped)
 
-`signed_url()` has a second branch: when `R2_PUBLIC_URL` is configured, it returns a **plain, unsigned, non-expiring** `{public_url}/{key}` URL instead of a presigned one. This is active in staging and production, because piano soundfonts must be publicly fetchable by Tone.js (it constructs filenames internally and cannot carry signed query parameters), and R2 exposes public access at the **bucket** level — so enabling it for soundfonts also exposes MEI, incipit, and fragment-preview objects on the same bucket. Those three artifact types are therefore served to the browser **unsigned and without the TTL** described in this section's lifecycle table.
+**Decision (2026-07-10, Step 31 review, with Francisco): option (b). Implemented in Component 10 Steps 1–2 (2026-07-20).**
 
-Two consequences:
+Phase 1 operated with a single bucket made public for the piano soundfonts (Tone.js constructs sample filenames internally and cannot carry signed query parameters, and R2 exposes public access at the **bucket** level) — which also exposed MEI, incipit, and fragment-preview objects unsigned, a documented deviation from the lifecycle above, mitigated by a `?v=<last-write timestamp>` cache-buster against the unpurgeable `r2.dev` edge cache.
 
-1. **No expiry / no signature** on MEI and SVG artifact URLs in deployed environments. Acceptable at Phase 1 scope (staging is internal-only, access-gated by Supabase Auth; the bucket holds only public-domain/CC-licensed scores), but it is a real deviation from the signed-URL lifecycle above and must be resolved before any public launch.
-2. **The `r2.dev` edge cache is not purgeable on demand** (the managed subdomain is not a zone in the account). Because these artifacts are **mutable** — overwritten on re-ingest (MEI) or regeneration (incipit, preview) — a stable URL would let a stale cached copy shadow the corrected object indefinitely. Mitigation: `signed_url(..., version=<last-write timestamp>)` appends a `?v=<token>` cache-buster (`_cache_bust_token`, keyed on `movement.updated_at` / `incipit_generated_at` / `preview_generated_at`), so every regeneration yields a fresh cache key. Callers in `services/browse.py` and `services/fragments.py` pass the relevant timestamp.
+The end state is now in place:
 
-**Decision (2026-07-10, Step 31 review, with Francisco): option (b) is the end state.** The public branch will be restricted to soundfonts (a separate public bucket — R2 public access is bucket-scoped) and MEI/incipit/preview routed back through true presigned URLs, restoring the TTL/signature lifecycle above and making the cache-buster unnecessary (presigned URLs are unique per request). **Implementation is scheduled as one of the first Phase-2 tasks** — it is a hard prerequisite for ADR-009 enforcement (the ABC-corpus public-API exclusion is bypassable while source MEI is publicly fetchable) and must precede any public URL. Until then, the public-URL branch with the cache-buster is the **accepted Phase-1 operating mode**: staging is internal, access-gated, and the bucket holds only public-domain/CC-licensed scores. Known trade-off to revisit at implementation: presigned URLs defeat browser caching of fragment previews; if that matters at Phase-2 scale, previews/incipits (derived renders of open-licensed scores) may stay public while source MEI is signed.
+- **Soundfonts live in a dedicated public bucket** (`doppia-soundfonts`, shared across environments). The frontend addresses it directly via `VITE_SOUNDFONT_BASE_URL`; the backend never reads or writes it. Soundfont objects are immutable, so no cache-busting is needed on the public bucket.
+- **The artifact bucket (MEI, incipits, previews) is private** — no bucket-level public access. `signed_url()` always presigns, with the TTL table above (1 h client-facing, 15 m backend-to-backend). The public-URL branch, the `R2_PUBLIC_URL` variable, and the `_cache_bust_token` cache-buster are removed: presigned URLs are unique per request, so a stale edge-cached copy can never shadow a re-ingested or regenerated artifact.
+
+**Reserved option:** presigned URLs defeat browser caching of fragment previews. If a preview-caching regression matters at Phase-2 scale, previews/incipits (derived renders of open-licensed scores) may be made public again while source MEI stays signed. Not exercised unless a regression appears.
 
 ### Share links in Phase 2
 
