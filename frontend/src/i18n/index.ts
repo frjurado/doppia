@@ -27,6 +27,7 @@ import enFragments from './locales/en/fragments.json';
 import enReview from './locales/en/review.json';
 import enScore from './locales/en/score.json';
 import enErrors from './locales/en/errors.json';
+import enPublic from './locales/en/public.json';
 
 import esCommon from './locales/es/common.json';
 import esNav from './locales/es/nav.json';
@@ -36,6 +37,7 @@ import esFragments from './locales/es/fragments.json';
 import esReview from './locales/es/review.json';
 import esScore from './locales/es/score.json';
 import esErrors from './locales/es/errors.json';
+import esPublic from './locales/es/public.json';
 
 /** BCP 47 primary subtags the UI ships in. Mirrors backend SUPPORTED_LANGUAGES. */
 export const SUPPORTED_LANGUAGES = ['en', 'es'] as const;
@@ -57,6 +59,7 @@ export const NAMESPACES = [
   'review',
   'score',
   'errors',
+  'public',
 ] as const;
 
 const resources = {
@@ -69,6 +72,7 @@ const resources = {
     review: enReview,
     score: enScore,
     errors: enErrors,
+    public: enPublic,
   },
   es: {
     common: esCommon,
@@ -79,6 +83,7 @@ const resources = {
     review: esReview,
     score: esScore,
     errors: esErrors,
+    public: esPublic,
   },
 } as const;
 

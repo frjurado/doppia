@@ -124,7 +124,13 @@ interface FragmentCardProps {
   onOpen: (id: string) => void;
 }
 
-function FragmentCard({ item, onOpen }: FragmentCardProps) {
+/**
+ * Concept-browse preview card: hover-scrolling SVG preview + fragment metadata.
+ *
+ * Exported so the anonymous public browse (Component 10 Step 5) renders the
+ * exact same card as the editor browse, against the public API client.
+ */
+export function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const { t } = useTranslation(['fragments', 'common']);
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
   const barRange = t('common:barRangeMm', { start: item.bar_start, end: item.bar_end });
@@ -162,7 +168,10 @@ function FragmentCard({ item, onOpen }: FragmentCardProps) {
       onClick={() => onOpen(item.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label={t('fragments:browser.openFragmentAria', { concept: conceptLabel, range: barRange })}
+      aria-label={t('fragments:browser.openFragmentAria', {
+        concept: conceptLabel,
+        range: barRange,
+      })}
     >
       <div ref={wrapperRef} className={styles.previewArea}>
         {item.preview_url ? (
