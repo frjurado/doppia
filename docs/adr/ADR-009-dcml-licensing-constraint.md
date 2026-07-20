@@ -59,6 +59,8 @@ The CC BY-NC-SA 4.0 NonCommercial restriction on the ABC corpus is incompatible 
 
 If Beethoven string quartet coverage is needed in the public API, the path is to source equivalent scores and annotations from a CC0 or CC BY licence holder, not to include ABC-derived data under a NonCommercial flag.
 
+> **Implementation note (Component 10 Step 4, 2026-07-20).** The exclusion is *enforced* on the public read path (`/api/v1/public/`). Component 8 built the per-fragment `data_licence` derivation; Component 10 adds the exclusion. It is keyed on the fragment's **corpus licence**, not the harmony-event `source` — ABC annotations carry `source: "DCML"` exactly like the CC BY-SA corpora and are indistinguishable at the event level, so the corpus's NonCommercial licence is the only reliable signal. The check (`services.fragments._licence_excludes_public`) matches the `NC` licence token as a whole word, so it generalises to any future NonCommercial corpus rather than hardcoding ABC. Enforced structurally in the service for anonymous callers (`caller_id=None`): the browse query filters NonCommercial corpora out, and detail returns the same 404 as a nonexistent id (no existence leak). Authenticated editors are unaffected — internal tool use is not public distribution. Proven by an ABC-corpus fixture test (`test_public_read_api.py::TestAbcExclusion`) ahead of any ABC ingestion.
+
 **3. Surface attribution in the API documentation and terms of use.**
 
 The public API landing page and documentation must include:

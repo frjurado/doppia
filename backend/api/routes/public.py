@@ -18,6 +18,10 @@ The ``approved``-only guarantee is structural, not parametric:
 * The detail route returns 404 for any non-``approved`` fragment, with the
   same error body as a nonexistent id, so a fragment's existence or review
   status is never leaked through the public surface.
+* The ADR-009 § 2 exclusion of NonCommercial corpora (the ABC corpus) is
+  enforced in the service layer for anonymous callers (``caller_id=None``):
+  such fragments are absent from the browse and 404 on detail. See
+  ``services.fragments._licence_excludes_public``.
 
 The routers here reuse the Component 8 service methods — the cross-database
 join, cursor pagination, and ADR-009 licence serialisation are identical to
