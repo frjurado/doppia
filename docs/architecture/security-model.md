@@ -30,12 +30,12 @@ FastAPI does not add CORS headers by default. Without explicit middleware config
 
 ### Configuration
 
-CORS is configured via FastAPI's `CORSMiddleware` in the application factory. The allowed-origins list is driven by the `ENVIRONMENT` environment variable:
+CORS is configured in the application factory via `PathScopedCORSMiddleware` (`backend/api/middleware/cors.py`), a thin ASGI dispatcher that routes each request to exactly one of two `CORSMiddleware` policies by path. The allowed-origins list for the credentialed policy is driven by the `ENVIRONMENT` environment variable:
 
 ```python
 # backend/main.py
 
-from fastapi.middleware.cors import CORSMiddleware
+from api.middleware.cors import PathScopedCORSMiddleware
 import os
 
 _ALLOWED_ORIGINS: dict[str, list[str]] = {
@@ -55,19 +55,22 @@ def create_app() -> FastAPI:
     app = FastAPI(...)
     environment = os.environ["ENVIRONMENT"]
     origins = _ALLOWED_ORIGINS.get(environment, [])
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
-    )
+    app.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
     return app
 ```
 
+The two policies (Component 10 Step 3, shipped):
+
+| Prefix | Origins | Credentials | Methods | Headers |
+|---|---|---|---|---|
+| `/api/v1/public/` (anonymous read path) | `*` | disabled | `GET` | `Accept-Language` |
+| everything else (credentialed editor API) | per-environment allowlist | enabled | `GET, POST, PATCH, DELETE` | `Authorization, Content-Type, Accept-Language` |
+
+Exactly one policy touches any given response (preflights carry the target path, so they dispatch identically), which is what makes the wildcard safe: it can never combine with `allow_credentials=True`.
+
 **Rules:**
 
-- **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. If a wildcard origin is ever needed (e.g. for a public read-only endpoint in Phase 2), that route must either disable credentials or be served from a separate API prefix.
+- **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. A wildcard origin is only permitted on the anonymous `/api/v1/public/` prefix, whose policy disables credentials — the separate-prefix arrangement this section required is now implemented.
 - The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. Adding a new environment (e.g. a preview deployment for a pull request) requires adding the origin to `_ALLOWED_ORIGINS` — not widening the pattern.
 - `allow_methods` covers the HTTP verbs actually used by the API. `PUT` is not listed because the API uses `PATCH` for partial updates; add it only when a `PUT` route is introduced.
 - `allow_headers` must include `Authorization` (the JWT bearer token), `Content-Type` (JSON bodies), and `Accept-Language` (the ADR-006 language negotiation header, added in Component 9 Part 7). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.

@@ -24,6 +24,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 import httpx
 from api.middleware.auth import AuthMiddleware
+from api.middleware.cors import PathScopedCORSMiddleware
 from api.middleware.errors import (
     doppia_error_handler,
     http_exception_handler,
@@ -34,7 +35,6 @@ from api.router import router
 from errors import DoppiaError
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from models.base import close_db, init_db
@@ -205,18 +205,15 @@ def create_app() -> FastAPI:
     # Middleware — Starlette inserts each at the front of the stack, so
     # registration order is the reverse of execution order on ingress.
     # AuthMiddleware registered first → executes second (inner, closer to routes).
-    # CORSMiddleware registered second → executes first (outer, handles preflight).
+    # CORS registered second → executes first (outer, handles preflight).
+    # PathScopedCORSMiddleware applies the credentialed allowlist to the editor
+    # API and a wildcard no-credentials policy to /api/v1/public/ — the two
+    # postures must never combine (security-model.md § 1).
     application.add_middleware(AuthMiddleware)
 
     environment = os.environ.get("ENVIRONMENT", "production")
     origins = _ALLOWED_ORIGINS.get(environment, [])
-    application.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
-    )
+    application.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
 
     # Versioned API router — all endpoints live under /api/v1/.
     application.include_router(router)

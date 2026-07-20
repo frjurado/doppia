@@ -705,7 +705,7 @@ class FragmentService:
     async def get(
         self,
         fragment_id: uuid.UUID,
-        caller_id: str,
+        caller_id: str | None,
         caller_role: str,
     ) -> FragmentDetailResponse:
         """Return the full fragment record with hydrated concept tags, harmony
@@ -714,12 +714,16 @@ class FragmentService:
         Visibility rule: draft fragments are visible only to their creator or
         an admin. All other statuses are visible to any editor.  A draft owned
         by another annotator is returned as a 404 to avoid leaking its
-        existence.
+        existence.  An anonymous caller (``caller_id=None``, public read path)
+        can never be a draft's creator, so drafts are always 404 for it; the
+        public route additionally restricts to ``approved`` at the route layer.
 
         Args:
             fragment_id: UUID of the fragment to read.
-            caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_id: String UUID of the authenticated caller, or ``None``
+                for the anonymous public read path.
+            caller_role: Role of the authenticated caller (``"anonymous"``
+                when unauthenticated).
 
         Returns:
             :class:`~models.fragment.FragmentDetailResponse` with concept tags
@@ -744,9 +748,11 @@ class FragmentService:
             )
 
         # Draft visibility: only the creator or an admin may read a draft.
+        # Anonymous callers (caller_id=None) are never the creator.
         if fragment.status == "draft" and caller_role != "admin":
             is_creator = (
-                fragment.created_by is not None
+                caller_id is not None
+                and fragment.created_by is not None
                 and str(fragment.created_by) == caller_id
             )
             if not is_creator:
@@ -1275,7 +1281,7 @@ class FragmentService:
         concept_id: str,
         include_subtypes: bool,
         status_filter: str,
-        caller_id: str,
+        caller_id: str | None,
         caller_role: str,
         cursor: str | None = None,
         page_size: int = 50,
@@ -1302,6 +1308,10 @@ class FragmentService:
         - Admins see all fragments matching the requested ``status_filter``.
         - Editors see their own drafts plus all submitted/approved/rejected, then
           additionally filtered to the requested ``status_filter``.
+        - Anonymous callers (``caller_id=None``, the public read path) see only
+          ``approved`` fragments regardless of ``status_filter`` — the public
+          route already pins the filter, but the restriction is enforced here
+          too so no future public caller can widen it.
 
         Results are ordered ``(updated_at DESC, id ASC)`` so the most recently
         edited fragment appears first across all movements in the result set.
@@ -1313,8 +1323,10 @@ class FragmentService:
             status_filter: Limit results to this fragment status.  One of
                 ``draft``, ``submitted``, ``approved``, ``rejected``.  Defaults
                 to ``approved`` when an invalid value is supplied.
-            caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_id: String UUID of the authenticated caller, or ``None``
+                for the anonymous public read path (``approved``-only).
+            caller_role: Role of the authenticated caller (``"anonymous"``
+                when unauthenticated).
             cursor: Opaque time-ordered pagination cursor from a prior response.
             page_size: Maximum items per page (1–200).
 
@@ -1357,7 +1369,12 @@ class FragmentService:
             status_filter if status_filter in valid_statuses else "approved"
         )
 
-        if caller_role != "admin":
+        if caller_id is None:
+            # Anonymous (public read path): approved only, regardless of the
+            # requested filter — the guarantee is structural at the service
+            # layer, not just in the public route's pinned parameter.
+            effective_status = "approved"
+        elif caller_role != "admin":
             caller_uuid = uuid.UUID(caller_id)
             # Base visibility: own drafts + all non-draft.
             stmt = stmt.where(
