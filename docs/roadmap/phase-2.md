@@ -104,7 +104,8 @@ In dependency order:
 
 1. **Signed-URL end state — option (b).** Soundfonts-only public bucket;
    MEI/incipit/preview via presigned URLs. First task; prerequisite for
-   ADR-009 enforcement. (`security-model.md` § 4)
+   ADR-009 enforcement. (`security-model.md` § 4) — ✅ landed `ff5e1f1`
+   (2026-07-20)
 2. **Public endpoints + ADR-009 enforcement.** Unauthenticated
    `approved`-only browse and fragment detail; ABC-corpus exclusion check.
    The licence serialiser already exists (Component 8).
