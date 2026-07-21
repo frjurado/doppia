@@ -114,6 +114,7 @@ In dependency order:
 4. **Token storage + full session UX.** Revisit ADR-016's localStorage
    exception: HttpOnly cookie vs full Supabase JS client (brings token
    refresh). Must land before public registration (Component 12).
+   — ✅ landed `f40fba5` (2026-07-21; HttpOnly cookie, ADR-035)
 5. **Rate limiting.** `slowapi` + Redis; starting limits already tabled in
    `security-model.md` § 2.
 6. **Security headers.** CSP (drafted; `worker-src blob:` for Verovio WASM),
