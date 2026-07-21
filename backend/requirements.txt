@@ -37,7 +37,11 @@ pyyaml==6.0.2
 verovio==6.1.0
 
 # Auth / JWT (Supabase JWT validation)
-python-jose[cryptography]==3.4.0
+# PyJWT replaced python-jose in Phase 2 (Component 10 Step 6): python-jose
+# carried an unfixable advisory set (PYSEC-2025-185 + transitive ecdsa/pyasn1)
+# and is effectively unmaintained. The [crypto] extra pulls cryptography for
+# ES256 JWKS verification.
+PyJWT[crypto]==2.13.0
 httpx==0.28.1
 
 # Environment variable loading (.env files in dev; no-op in production)

@@ -12,13 +12,14 @@ A development bypass is available when both ``ENVIRONMENT=local`` and
 ``AUTH_MODE=local`` are set: the literal token ``dev-token`` is accepted
 without JWT validation.
 
-Supabase uses ES256 (asymmetric) JWT signing on new projects. Set
-``SUPABASE_JWKS`` to the raw JSON string from the JWKS endpoint:
+Supabase uses ES256 (asymmetric) JWT signing on new projects. The JWKS is
+fetched at startup (``main.py``) from the JWKS endpoint:
     https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json
-python-jose matches the token's ``kid`` header to the correct key automatically.
+and stored on ``app.state.jwks``; this middleware matches the token's ``kid``
+header to the correct key in that set (PyJWT's ``PyJWKSet``).
 
 Legacy projects using HS256 symmetric signing: set ``SUPABASE_JWT_SECRET``
-instead. Only one variable is needed; ``SUPABASE_JWKS`` takes precedence.
+instead. Only one variable is needed; the ES256 JWKS path takes precedence.
 """
 
 from __future__ import annotations
@@ -26,10 +27,17 @@ from __future__ import annotations
 import os
 from collections.abc import Awaitable, Callable
 
+import jwt
 from api.dependencies import AppUser
 from fastapi import Request, Response
-from jose import ExpiredSignatureError, JWTError, jwt
-from jose.exceptions import JWTClaimsError
+from jwt import PyJWKSet
+from jwt.exceptions import (
+    ExpiredSignatureError,
+    InvalidIssuerError,
+    InvalidTokenError,
+    MissingRequiredClaimError,
+    PyJWTError,
+)
 from models.errors import ErrorCode, ErrorResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -116,10 +124,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         jwks: dict | None = getattr(request.app.state, "jwks", None)
         secret = os.environ.get("SUPABASE_JWT_SECRET", "")
         if jwks:
-            verify_key: object = jwks
             algorithm = "ES256"
         elif secret:
-            verify_key = secret
             algorithm = "HS256"
         else:
             return _make_401("Server JWT key is not configured.")
@@ -134,6 +140,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         issuer: str | None = f"{supabase_url}/auth/v1" if supabase_url else None
 
         try:
+            verify_key: object = (
+                _resolve_jwk(jwks, token) if algorithm == "ES256" else secret
+            )
             payload: dict = jwt.decode(
                 token,
                 verify_key,
@@ -146,9 +155,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
         except ExpiredSignatureError:
             return _make_401("Token has expired.")
-        except JWTClaimsError:
+        except (InvalidIssuerError, MissingRequiredClaimError):
             return _make_401("Token issuer does not match this Supabase project.")
-        except JWTError:
+        except (InvalidTokenError, PyJWTError):
             return _make_401("Token is invalid or signature verification failed.")
 
         sub: str = payload.get("sub", "")
@@ -160,6 +169,33 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.user = AppUser(id=sub, role=role, email=email)
         return await call_next(request)
+
+
+def _resolve_jwk(jwks: dict, token: str) -> object:
+    """Select the ES256 verification key whose ``kid`` matches the token header.
+
+    python-jose accepted a raw JWKS dict directly in ``jwt.decode`` and matched
+    the ``kid`` internally; PyJWT requires an explicit key, so we parse the JWKS
+    into a ``PyJWKSet`` and pick the entry matching the token's ``kid``.
+
+    Args:
+        jwks: The raw JWKS JSON (as fetched at startup and stored on app state).
+        token: The encoded JWT whose header carries the ``kid`` to match.
+
+    Returns:
+        The cryptographic key object for the matching JWK.
+
+    Raises:
+        InvalidTokenError: If the token header is malformed or no JWK matches
+            the token's ``kid`` — surfaced to the caller as a 401.
+    """
+    header = jwt.get_unverified_header(token)
+    kid = header.get("kid")
+    key_set = PyJWKSet.from_dict(jwks)
+    for key in key_set.keys:
+        if key.key_id == kid:
+            return key.key
+    raise InvalidTokenError("No matching JWK for the token's key id.")
 
 
 def _make_401(message: str) -> JSONResponse:
