@@ -6,8 +6,6 @@ primary_region = "lhr"
   context = "."
 
   [build.args]
-    VITE_SUPABASE_URL = "https://vywprfptbicpvuygksad.supabase.co"
-    VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5d3ByZnB0YmljcHZ1eWdrc2FkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzQ1ODEsImV4cCI6MjA5MjExMDU4MX0.yakwqnLrfFk-mljsVaMrXjAF1YLdrln61MWSoWZvD4o"
     # Public URL for piano soundfont MP3s served directly to the browser.
     # Points at the dedicated public doppia-soundfonts bucket (Component 10
     # Step 1); see docs/deployment.md §"SoundFont setup".
