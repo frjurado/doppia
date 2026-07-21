@@ -5,6 +5,16 @@
 > expiry/401 handling was later hardened in Component 9 (any-401 translation + stale-JWT
 > session expiry, 2026-07). The nav-bar login entry point is from the Component 9
 > Step 12 redesign. Auth architecture: ADR-001; token storage: ADR-016.
+>
+> **Phase-2 supersession (2026-07-21, Component 10 Step 7 / ADR-035).** The
+> browser-direct Supabase call described below (`src/services/supabaseAuth.ts`)
+> has been **removed**. Login now posts to the backend `/api/v1/auth` router; the
+> access token lives in memory and the refresh token in an HttpOnly cookie, with
+> silent refresh via `AuthProvider`. `RequireAuth` reads auth status from
+> `AuthContext` (with a `loading` state during the bootstrap refresh) rather than
+> reading `localStorage` synchronously. The code blocks below are the Phase-1
+> record; see [ADR-035](../adr/ADR-035-httponly-refresh-token-session.md) for the
+> current design.
 
 ## Scope
 
@@ -16,7 +26,7 @@ A `/login` route with an email/password form connected to Supabase Auth. After s
 
 | File | Action |
 |---|---|
-| `frontend/src/services/supabaseAuth.ts` | Create |
+| `src/services/supabaseAuth.ts` | Create (Phase-1; **removed in Phase 2** — ADR-035) |
 | `frontend/src/routes/Login.tsx` | Create |
 | `frontend/src/routes/Login.module.css` | Create |
 | `frontend/src/components/auth/RequireAuth.tsx` | Create |

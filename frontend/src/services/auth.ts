@@ -1,21 +1,30 @@
 /**
- * Authentication service.
+ * In-memory access-token store (Component 10 Step 7 — the ADR-016 revisit).
  *
- * In Phase 1, tokens are stored in localStorage under the key
- * "doppia_access_token". In local dev, set this to "dev-token" to use the
- * backend's AUTH_MODE=local bypass.
+ * Phase 1 kept the Supabase access token in `localStorage` (ADR-016, an
+ * explicit Phase-1 exception "to be revisited before Phase 2 public launch").
+ * This is that revisit: the access token now lives in a module-level variable —
+ * memory only, gone on reload — and the long-lived refresh token lives in an
+ * HttpOnly cookie the browser's JavaScript cannot read. The session is restored
+ * after a reload by `AuthProvider` calling the backend refresh endpoint, not by
+ * reading persisted storage.
  *
- * This module is intentionally interface-compatible with the Supabase session
- * shape so that swapping the implementation for a proper Supabase client in
- * Phase 2 requires no changes in apiFetch or any consumer. However, the
- * current Session interface is a strict subset of the full Supabase shape.
- * Phase 1 consumers must access only `access_token`. Accessing other Supabase
- * session fields requires expanding this interface to the full Supabase
- * `Session` shape — do that in Phase 2 when the real Supabase client is
- * wired in.
+ * `getSession` / `setToken` / `clearToken` keep their Phase-1 names so
+ * `apiFetch` and other consumers are unchanged; only the backing store moved
+ * from `localStorage` to memory. `subscribe` lets `AuthProvider` react when a
+ * forced clear happens outside React (e.g. `apiFetch` clearing on a 401).
+ *
+ * Local-dev bypass: `AuthProvider` still seeds this store from a `dev-token`
+ * placed in `localStorage[DEV_TOKEN_KEY]` **in dev builds only** (see
+ * `AuthContext`). That is a local-only convenience, not a production storage of
+ * a real JWT, so it does not reopen the ADR-016 concern.
  */
 
-const TOKEN_KEY = 'doppia_access_token';
+/** localStorage key read only in dev builds to seed the local `dev-token`. */
+export const DEV_TOKEN_KEY = 'doppia_access_token';
+
+let accessToken: string | null = null;
+const listeners = new Set<() => void>();
 
 export interface Session {
   access_token: string;
@@ -31,7 +40,6 @@ function jwtExpiryMs(token: string): number | null {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   try {
-    // Base64URL → base64, then decode the payload segment.
     const payload = JSON.parse(atob(parts[1]!.replace(/-/g, '+').replace(/_/g, '/')));
     return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
   } catch {
@@ -39,38 +47,51 @@ function jwtExpiryMs(token: string): number | null {
   }
 }
 
+function notify(): void {
+  for (const listener of listeners) listener();
+}
+
 /**
- * Return the current session, or null if no valid token is stored.
+ * Subscribe to token changes (set or clear). Returns an unsubscribe function.
+ * Used by AuthProvider to reflect a clear triggered outside React (a 401 in
+ * apiFetch) into the auth status.
+ */
+export function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Return the current session, or null if no valid token is held.
  *
- * Reads from localStorage. A stored JWT whose `exp` has passed is treated as
- * no session at all — and cleared — so the UI (e.g. the NavBar login link vs.
- * account badge) reflects the real auth state before any request round-trips
- * a 401 (Component 9 I1). Non-JWT dev tokens have no `exp` and never expire.
- *
- * In local dev, seed with:
- *   localStorage.setItem('doppia_access_token', 'dev-token')
+ * A held JWT whose `exp` has passed is treated as no session — and cleared — so
+ * an expired access token is never attached to a request and the UI reflects
+ * the real auth state (Component 9 I1). Non-JWT dev tokens never expire.
  */
 export function getSession(): Session | null {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) return null;
-  const expiryMs = jwtExpiryMs(token);
+  if (!accessToken) return null;
+  const expiryMs = jwtExpiryMs(accessToken);
   if (expiryMs !== null && expiryMs <= Date.now()) {
-    localStorage.removeItem(TOKEN_KEY);
+    clearToken();
     return null;
   }
-  return { access_token: token };
+  return { access_token: accessToken };
 }
 
-/**
- * Store an access token for subsequent requests.
- */
+/** The raw access token, or null. */
+export function getAccessToken(): string | null {
+  return getSession()?.access_token ?? null;
+}
+
+/** Store an access token in memory for subsequent requests. */
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+  accessToken = token;
+  notify();
 }
 
-/**
- * Clear the stored token (sign out).
- */
+/** Clear the in-memory access token (sign out / forced 401 clear). */
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  if (accessToken === null) return;
+  accessToken = null;
+  notify();
 }

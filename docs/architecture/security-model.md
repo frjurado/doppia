@@ -75,6 +75,37 @@ Exactly one policy touches any given response (preflights carry the target path,
 - `allow_methods` covers the HTTP verbs actually used by the API. `PUT` is not listed because the API uses `PATCH` for partial updates; add it only when a `PUT` route is introduced.
 - `allow_headers` must include `Authorization` (the JWT bearer token), `Content-Type` (JSON bodies), and `Accept-Language` (the ADR-006 language negotiation header, added in Component 9 Part 7). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
 
+### Session cookie (refresh token)
+
+Authentication uses two credentials with different storage (ADR-035, the
+Phase-2 revisit of ADR-016's `localStorage` exception, shipped in Component 10
+Step 7):
+
+- **Access token — in memory.** Held in a module variable in the SPA, attached
+  as `Authorization: Bearer` on API calls, gone on reload. ~1h lifetime.
+- **Refresh token — HttpOnly cookie.** Set by the backend `/api/v1/auth` router;
+  invisible to JavaScript, so an XSS foothold cannot read the long-lived
+  credential.
+
+The credential exchange is proxied server-side (`services/supabase_auth.py`);
+the browser never calls Supabase Auth directly. The cookie attributes:
+
+| Attribute | Value | Reason |
+|---|---|---|
+| `HttpOnly` | on | The refresh token must be unreachable from JavaScript. |
+| `Secure` | on (off only when `ENVIRONMENT=local`) | HTTPS-only in staging/prod; local dev is plain HTTP. |
+| `SameSite` | `Lax` | Not sent on cross-site POST → CSRF guard for the refresh endpoint. |
+| `Path` | `/api/v1/auth` | Sent only to login/refresh/logout; no other endpoint sees it. |
+| `Max-Age` | 30 days | Session length; the refresh grant 401s earlier if Supabase invalidates it. |
+
+**CSRF.** The `SameSite=Lax` + path-scoped cookie is never sent on a cross-site
+POST, and every non-auth endpoint authenticates with the bearer access token (a
+cross-origin page cannot read it), not the cookie — so there is no cookie-driven
+state change to forge. No separate CSRF token is used; one must be added if a
+future endpoint ever authenticates a state change via the cookie. This relies on
+the same-origin deployment (the SPA and API are one Fly app — see
+`deployment.md`), which makes the cookie same-site on every API call.
+
 ### R2 and CORS
 
 Cloudflare R2 is currently accessed server-side only: the API fetches MEI files for processing, or generates signed URLs that the frontend uses to fetch files directly. When the frontend uses a signed URL to fetch from R2 directly, that is a cross-origin request from the browser to `*.r2.cloudflarestorage.com`. R2 CORS rules must be configured at the bucket level for this to work.

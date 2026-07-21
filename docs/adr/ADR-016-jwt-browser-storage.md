@@ -1,7 +1,16 @@
 # ADR-016 — JWT Browser Storage
 
-**Status:** Accepted
+**Status:** Superseded for Phase 2 by [ADR-035](ADR-035-httponly-refresh-token-session.md)
+(the `localStorage` exception below is closed)
 **Date:** 2026-05-04
+
+---
+
+> **Phase-2 update (2026-07-21).** The Phase-1 `localStorage` exception recorded
+> here has been closed. Component 10 Step 7 moved the access token into memory
+> and the refresh token into an HttpOnly cookie, with the credential exchange
+> proxied server-side. See [ADR-035 — HttpOnly Refresh-Token Session](ADR-035-httponly-refresh-token-session.md).
+> The decision below stands as the record of the Phase-1 arrangement.
 
 ---
 

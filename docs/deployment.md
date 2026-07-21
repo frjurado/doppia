@@ -155,13 +155,15 @@ $TOKEN = $response.access_token
 
 The response contains `access_token`. Tokens expire after one hour; repeat this call to refresh. Pass the token as `Authorization: Bearer <token>` on all authenticated API requests.
 
-**Seeding the browser with a token (Phase 1 only).** Until a login page is built, paste the token into the browser console on the staging URL:
-
-```javascript
-localStorage.setItem('doppia_access_token', 'paste-access-token-here')
-```
-
-Then reload the page. The corpus browser and tagging tool will use this token until it expires or is cleared.
+**Signing in on staging.** Use the login page (`/login`) with an editor/admin
+account's email and password. The frontend posts to the backend `/api/v1/auth`
+router, which performs the Supabase grant, stores the refresh token in an
+HttpOnly cookie, and hands the SPA a short-lived access token in memory (ADR-035,
+Component 10 Step 7). The session survives reloads via silent refresh; the
+`localStorage['doppia_access_token']` seeding used in Phase 1 no longer applies
+to a production build (that key is read only in local dev builds, for the
+`dev-token` bypass). The `curl` token above remains the way to get a bearer for
+direct API calls (corpus upload, admin scripts).
 
 ### 3. Cloudflare R2
 
