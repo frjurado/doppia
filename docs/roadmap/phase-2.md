@@ -110,7 +110,7 @@ In dependency order:
    `approved`-only browse and fragment detail; ABC-corpus exclusion check.
    The licence serialiser already exists (Component 8).
 3. **PyJWT migration** (replace python-jose), then flip the CI audit job
-   from report-only to blocking.
+   from report-only to blocking. — ✅ landed `7080ee4` (2026-07-21)
 4. **Token storage + full session UX.** Revisit ADR-016's localStorage
    exception: HttpOnly cookie vs full Supabase JS client (brings token
    refresh). Must land before public registration (Component 12).
