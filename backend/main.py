@@ -31,6 +31,7 @@ from api.middleware.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from api.middleware.security_headers import SecurityHeadersMiddleware
 from api.rate_limiting import limiter, rate_limit_exceeded_handler
 from api.router import router
 from errors import DoppiaError
@@ -226,6 +227,18 @@ def create_app() -> FastAPI:
     environment = os.environ.get("ENVIRONMENT", "production")
     origins = _ALLOWED_ORIGINS.get(environment, [])
     application.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
+
+    # Security headers (CSP, nosniff, X-Frame-Options, HSTS-in-prod). Registered
+    # last → outermost → runs first on ingress and stamps every outgoing
+    # response, including CORS preflights and static SPA assets. CSP_REPORT_ONLY=1
+    # downgrades the CSP to observe-only without a code change (safety valve).
+    # See docs/architecture/security-model.md § 7.
+    report_only = os.environ.get("CSP_REPORT_ONLY", "").lower() in ("1", "true", "yes")
+    application.add_middleware(
+        SecurityHeadersMiddleware,
+        environment=environment,
+        report_only=report_only,
+    )
 
     # Versioned API router — all endpoints live under /api/v1/.
     application.include_router(router)

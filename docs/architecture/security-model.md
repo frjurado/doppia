@@ -152,7 +152,9 @@ limiter = Limiter(
 )
 ```
 
-**Storage.** `RATELIMIT_STORAGE_URI` selects the backend. Deployed environments point it at the Upstash Redis URL so counters survive a restart and are shared across machines (the verification criterion); it defaults to `memory://` for local dev and tests, which need no Redis. See `deployment.md` § Upstash Redis. The limiter is configured to **fail open** (`swallow_errors=True`): if the Redis store is momentarily unreachable, the request is allowed rather than 500'd — a rate limiter must never be a single point of failure for the endpoints it guards.
+**Storage.** `RATELIMIT_STORAGE_URI` selects the backend. Deployed environments point it at the Upstash Redis URL so counters survive a restart and are shared across machines (the verification criterion); it defaults to `memory://` for local dev and tests, which need no Redis. See `deployment.md` § Upstash Redis.
+
+**Fail-open (`in_memory_fallback_enabled=True`).** If the configured Redis store is unreachable or otherwise unusable, slowapi transparently falls back to an in-process in-memory limiter and periodically retries the primary — limits stay enforced (per process) and a store outage never takes down the routes it guards. This is the mechanism that actually fails open: `swallow_errors` alone is **not** sufficient, because slowapi still reads `request.state.view_rate_limit` after swallowing a storage error, and that attribute is unset on the error path (`AttributeError` → 500). Bounded socket timeouts (`storage_options`) make the fail-over fast rather than a hang on the synchronous Redis client. (Fixed after a staging incident where setting the Redis URL 500'd every rate-limited route.)
 
 **Applied surfaces.** A route opts in with `@limiter.limit(<CONST>)` and a `request: Request` parameter; the per-category constants live in `rate_limiting.py`. The anonymous **public router** (`/api/v1/public/`) is fully covered first — it is the exposed surface — and each editor category (read, write, graph, upload) is applied at its representative entrypoint (fragment browse/detail, create/patch, concept search/tree, corpus upload). Extending coverage to a further route is a one-line decorator, not a config change.
 
@@ -557,24 +559,33 @@ The following controls are out of scope for Phase 1 (internal tool, no public tr
 
 **Rate limiting.** ✅ **Done (Component 10 Step 8, 2026-07-22).** `slowapi` with per-user limits on expensive endpoints and per-IP limits on the anonymous public path, Redis (Upstash) as the state store — see [section 2](#2-rate-limiting). Starting limits are in the § 2 table; tune after load testing.
 
-**Content Security Policy.** Add a `Content-Security-Policy` response header to the FastAPI application. In Phase 1 the tagging tool is internal and CSP is belt-and-suspenders; in Phase 2, with public users and author-uploaded HTML content, it is a meaningful control. A restrictive starting policy:
+**Content Security Policy.** ✅ **Done (Component 10 Step 9, 2026-07-22).** `SecurityHeadersMiddleware` (`backend/api/middleware/security_headers.py`, registered outermost in `main.py`) stamps a restrictive CSP on every response. The policy was derived from what the SPA actually loads (verified against the tree), which differs from the Phase-1 draft in three ways: `'wasm-unsafe-eval'` is required to instantiate the Verovio WASM toolkit; the R2 hosts (`*.r2.cloudflarestorage.com` for presigned MEI/preview/incipit, `*.r2.dev` for public soundfonts) are added to `connect-src`/`img-src`/`media-src`; and **`*.supabase.co` is dropped** — the browser no longer calls Supabase directly (ADR-035 proxies the grant through `/api/v1/auth`).
+
+The shipped policy:
 
 ```
 Content-Security-Policy:
   default-src 'self';
-  script-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  script-src 'self' 'wasm-unsafe-eval' blob:;
   style-src 'self' 'unsafe-inline';
-  img-src 'self' data: blob:;
-  connect-src 'self' https://*.supabase.co https://*.r2.cloudflarestorage.com;
-  worker-src blob:;
-  frame-ancestors 'none'
+  img-src 'self' data: blob: https://*.r2.cloudflarestorage.com;
+  font-src 'self';
+  connect-src 'self' https://*.r2.cloudflarestorage.com https://*.r2.dev;
+  media-src 'self' blob: https://*.r2.dev;
+  worker-src 'self' blob:;
+  frame-ancestors 'none';
+  form-action 'self'
 ```
 
-The `worker-src blob:` entry is required for Verovio's WASM module. Adjust `connect-src` to include any third-party endpoints actually contacted from the frontend.
+`'wasm-unsafe-eval'` (not `'unsafe-eval'`) is the tighter grant that still permits `WebAssembly.instantiate`; `blob:` in `script-src`/`worker-src`/`media-src` covers any blob-URL worker/worklet the renderer or Tone.js audio graph creates. `style-src 'unsafe-inline'` is required by Verovio's inline `<style>` SVG output. Fonts are bundled (`@fontsource`), so `font-src 'self'` suffices. These are starting values; tighten `script-src`/`worker-src` if the post-deploy browser check shows the `blob:` grants are unused.
 
-**`Strict-Transport-Security`.** Set `Strict-Transport-Security: max-age=63072000; includeSubDomains` once the production domain is confirmed. Fly.io serves HTTPS by default; this header is a belt-and-suspenders control to prevent HTTP downgrade attacks.
+**Safety valve.** `CSP_REPORT_ONLY=1` emits `Content-Security-Policy-Report-Only` instead of the enforcing header, so a violation on a live environment can be diagnosed from the browser console without shipping code. Unset (the default) = enforcing.
 
-**`X-Content-Type-Options`.** Set `X-Content-Type-Options: nosniff` on all responses. This prevents browsers from MIME-sniffing response content (relevant if MEI or SVG files are ever served with an ambiguous content type).
+**`Strict-Transport-Security`.** ✅ Set to `max-age=63072000; includeSubDomains` **only when `ENVIRONMENT=production`** (the production domain is confirmed there). On staging (`*.fly.dev`) it is intentionally omitted — Fly serves HTTPS regardless, and pinning HSTS on a shared `fly.dev` subdomain is undesirable. Revisit when the production domain is stood up.
+
+**`X-Content-Type-Options`.** ✅ `nosniff` on all responses. Also `X-Frame-Options: DENY` (belt-and-suspenders for pre-CSP browsers alongside `frame-ancestors 'none'`).
 
 ---
 

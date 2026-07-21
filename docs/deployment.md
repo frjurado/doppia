@@ -31,6 +31,10 @@ The full set of required variables is in `.env.example` at the repository root. 
 # Application
 ENVIRONMENT=staging         # local | staging | production
 AUTH_MODE=supabase          # local | supabase  (local only valid when ENVIRONMENT=local)
+# CSP_REPORT_ONLY=1         # optional (Component 10 Step 9): emit the CSP as
+                            # Content-Security-Policy-Report-Only instead of
+                            # enforcing it — a diagnostics valve, normally unset.
+                            # See security-model.md § 7.
 
 # Neo4j AuraDB
 NEO4J_URI=neo4j+s://<instance-id>.databases.neo4j.io
