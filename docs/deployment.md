@@ -56,14 +56,18 @@ R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 REDIS_URL=redis://default:<password>@<host>:<port>
 CELERY_BROKER_URL=redis://default:<password>@<host>:<port>
 CELERY_RESULT_BACKEND=redis://default:<password>@<host>:<port>
+# Rate-limit state store (Component 10 Step 8). Point at the same Upstash Redis
+# so limit counters survive restarts and are shared across machines. Defaults to
+# in-process memory:// when unset (local dev / tests). See security-model.md § 2.
+RATELIMIT_STORAGE_URI=redis://default:<password>@<host>:<port>
 
 # OpenAI (Phase 3; wire in now)
 OPENAI_API_KEY=<key>
 
-# Frontend build-time variables (passed as Docker build args, not runtime secrets)
-# These are baked into the JS bundle at build time — changing them requires a redeploy.
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-key>
+# Frontend build-time variable (passed as a Docker build arg, not a runtime secret)
+# Baked into the JS bundle at build time — changing it requires a redeploy.
+# The Supabase URL/anon key are NOT build args: the browser never calls Supabase
+# Auth directly (ADR-035); the backend /api/v1/auth router proxies the grant.
 VITE_SOUNDFONT_BASE_URL=https://pub-<hash>.r2.dev   # public URL of the doppia-soundfonts bucket
 ```
 
@@ -280,10 +284,11 @@ fly secrets set \
   REDIS_URL="rediss://default:<password>@<host>:<port>" \
   CELERY_BROKER_URL="rediss://default:<password>@<host>:<port>" \
   CELERY_RESULT_BACKEND="cache+memory://" \
+  RATELIMIT_STORAGE_URI="rediss://default:<password>@<host>:<port>" \
   --app doppia-staging
 ```
 
-`REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` is the Celery task broker. `CELERY_RESULT_BACKEND` must be `cache+memory://` and not a `rediss://` URL: all tasks are fire-and-forget (`task_ignore_result = True` in `celery_app.py`), and pointing the result backend at a `rediss://` URL causes the worker to crash on startup with a missing `ssl_cert_reqs` parameter error.
+`REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` is the Celery task broker. `CELERY_RESULT_BACKEND` must be `cache+memory://` and not a `rediss://` URL: all tasks are fire-and-forget (`task_ignore_result = True` in `celery_app.py`), and pointing the result backend at a `rediss://` URL causes the worker to crash on startup with a missing `ssl_cert_reqs` parameter error. `RATELIMIT_STORAGE_URI` is the rate-limiter's state store (Component 10 Step 8); point it at the same Upstash URL. Unlike the Celery result backend, the `limits` Redis storage handles the `rediss://` TLS scheme without extra parameters. Leave it unset and the limiter falls back to in-process `memory://` — fine for a single machine, but counters then reset on restart and are not shared across machines.
 
 Redis is wired in from day one but is not load-bearing in Phase 1. If the Upstash connection is unavailable in `celery` dispatch mode, the task dispatch logs a warning and the upload continues — the core ingestion (MEI validation, R2 storage, PostgreSQL records) is unaffected. Cache misses are acceptable in Phase 1; Redis is required for correctness only from Phase 2 onward.
 

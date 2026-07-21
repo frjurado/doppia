@@ -37,9 +37,10 @@ from __future__ import annotations
 
 import uuid
 
+from api.rate_limiting import READ_ANONYMOUS, limiter
 from api.routes.fragments import get_fragment_service
 from errors import FragmentNotFoundError
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from models.fragment import ConceptBrowseResponse, FragmentDetailResponse
 from services.fragments import FragmentService
 
@@ -57,7 +58,9 @@ router = APIRouter(prefix="/public", tags=["Public"])
         "but only ``approved`` fragments are ever returned."
     ),
 )
+@limiter.limit(READ_ANONYMOUS)
 async def public_list_fragments_by_concept(
+    request: Request,
     concept_id: str = Query(
         ...,
         description=(
@@ -93,6 +96,7 @@ async def public_list_fragments_by_concept(
     anonymous callers inside the service layer.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         concept_id: Neo4j Concept id (e.g. ``"AuthenticCadence"``).
         include_subtypes: Include subtype fragments in the result.
         cursor: Opaque cursor from a prior response for pagination.
@@ -127,7 +131,9 @@ async def public_list_fragments_by_concept(
         "licence provenance, signed MEI/preview URLs, and nested sub-parts."
     ),
 )
+@limiter.limit(READ_ANONYMOUS)
 async def public_get_fragment(
+    request: Request,
     fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to read"),
     service: FragmentService = Depends(get_fragment_service),
 ) -> FragmentDetailResponse:
@@ -138,6 +144,7 @@ async def public_get_fragment(
     leaks the existence or review status of unpublished work.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         fragment_id: UUID of the fragment to read.
         service: Fragment service (injected).
 

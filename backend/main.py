@@ -31,6 +31,7 @@ from api.middleware.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from api.rate_limiting import limiter, rate_limit_exceeded_handler
 from api.router import router
 from errors import DoppiaError
 from fastapi import FastAPI
@@ -40,6 +41,7 @@ from fastapi.staticfiles import StaticFiles
 from models.base import close_db, init_db
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from redis.asyncio import Redis
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -192,10 +194,20 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Rate limiting (slowapi). The limiter must live on app.state for the
+    # @limiter.limit decorators to resolve it at request time; a route opts in
+    # per-category (see api/rate_limiting.py). RateLimitExceeded is registered
+    # with its own handler so the 429 carries the Doppia envelope + Retry-After
+    # rather than slowapi's bare string.
+    application.state.limiter = limiter
+
     # Exception handlers — registered before middleware so they apply globally.
     # DoppiaError is registered first: typed domain exceptions take priority
-    # over the bare HTTPException fallback.
+    # over the bare HTTPException fallback. RateLimitExceeded is a subclass of
+    # HTTPException, so its specific handler must be registered to win over the
+    # generic HTTPException handler.
     application.add_exception_handler(DoppiaError, doppia_error_handler)
+    application.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
     application.add_exception_handler(HTTPException, http_exception_handler)
     application.add_exception_handler(
         RequestValidationError, validation_exception_handler

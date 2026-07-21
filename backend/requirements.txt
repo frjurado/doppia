@@ -25,6 +25,11 @@ neomodel==5.4.1
 celery[redis]==5.4.0
 redis==5.2.1
 
+# Rate limiting (Component 10 Step 8). slowapi wraps the `limits` library;
+# the sync `redis://` storage reuses the `redis` client above — no new service
+# dependency. See docs/architecture/security-model.md § 2.
+slowapi==0.1.9
+
 # Object storage (S3-compatible: MinIO locally, Cloudflare R2 in production)
 aioboto3==13.2.0
 

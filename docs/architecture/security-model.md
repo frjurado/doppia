@@ -135,20 +135,26 @@ Phase 1 is an internal tool with a small, fixed team of annotators and administr
 
 **Phase 1 decision: no programmatic rate limiting is enforced.** Fly.io applies basic DDoS protection at the infrastructure layer by default. The staging URL is not published; it is shared directly with team members. This is sufficient for Phase 1.
 
-### Phase 2 design (implement before public launch)
+### Phase 2 design — implemented (Component 10 Step 8, 2026-07-22)
 
-Phase 2 introduces public users and anonymous visitors. Rate limiting becomes necessary to protect expensive endpoints — primarily those that trigger knowledge graph traversal and those that accept writes. The following plan should be implemented before Phase 2 traffic arrives.
+Phase 2 introduces public users and anonymous visitors. Rate limiting protects expensive endpoints — primarily those that trigger knowledge graph traversal and those that accept writes — and, above all, the anonymous public read path, the one surface that actually sees untrusted traffic.
 
-**Tool:** `slowapi` — the standard rate-limiting library for FastAPI, backed by Redis. It integrates with the Redis instance already in the stack (Upstash in production) and adds no new service dependency.
+**Tool:** `slowapi` (wrapping the `limits` library) — the standard rate-limiting library for FastAPI. It is backed by the Redis already in the stack (Upstash in production) via the **sync `redis://` storage**, which reuses the `redis` client already pinned — no new service dependency and no `coredis`. The limiter lives in `backend/api/rate_limiting.py` and is registered on `app.state.limiter` in `main.py`.
 
 ```python
-# backend/api/rate_limiting.py
+# backend/api/rate_limiting.py (abridged)
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_user_or_ip,
+    default_limits=[],            # no implicit global cap; routes opt in explicitly
+    storage_uri=_storage_uri(),   # RATELIMIT_STORAGE_URI, default memory://
+    headers_enabled=False,        # Retry-After set by our envelope handler
+)
 ```
+
+**Storage.** `RATELIMIT_STORAGE_URI` selects the backend. Deployed environments point it at the Upstash Redis URL so counters survive a restart and are shared across machines (the verification criterion); it defaults to `memory://` for local dev and tests, which need no Redis. See `deployment.md` § Upstash Redis. The limiter is configured to **fail open** (`swallow_errors=True`): if the Redis store is momentarily unreachable, the request is allowed rather than 500'd — a rate limiter must never be a single point of failure for the endpoints it guards.
+
+**Applied surfaces.** A route opts in with `@limiter.limit(<CONST>)` and a `request: Request` parameter; the per-category constants live in `rate_limiting.py`. The anonymous **public router** (`/api/v1/public/`) is fully covered first — it is the exposed surface — and each editor category (read, write, graph, upload) is applied at its representative entrypoint (fragment browse/detail, create/patch, concept search/tree, corpus upload). Extending coverage to a further route is a one-line decorator, not a config change.
 
 **Proposed limits by endpoint category (Phase 2 starting values — tune with observed traffic):**
 
@@ -160,14 +166,14 @@ limiter = Limiter(key_func=get_remote_address)
 | Exercise generation | 120 / minute | 30 / minute | Hits graph + PostgreSQL |
 | File upload (MEI) | 20 / minute | — (admin only) | Rare; prevent runaway ingestion |
 
-**Key identification:** In Phase 2, prefer per-user rate limiting (keyed on the JWT `sub` claim) over per-IP limiting for authenticated endpoints. Per-IP is used for anonymous routes where no user identity is available. This prevents a single bad actor from affecting other users behind the same NAT.
+**Key identification:** authenticated endpoints are keyed per-user (on the JWT `sub` claim), not per-IP, so a single bad actor cannot throttle every other user behind the same NAT. Anonymous routes key on the client IP. Behind the Fly.io proxy, `request.client.host` is the *proxy's* address — every anonymous caller would share one bucket — so the key function prefers Fly's `Fly-Client-IP` header (the edge sets it and a client cannot forge it), then `X-Forwarded-For`, then the remote address.
 
 ```python
 def get_user_or_ip(request: Request) -> str:
     user = getattr(request.state, "user", None)
-    if user:
+    if user is not None:
         return f"user:{user.id}"
-    return get_remote_address(request)
+    return _client_ip(request)   # Fly-Client-IP → X-Forwarded-For → remote addr
 ```
 
 **Rate limit responses** return `429 Too Many Requests` with a `Retry-After` header. The error response follows the standard error envelope:
@@ -549,7 +555,7 @@ This is a Phase 1 task. Although Doppia is currently an internal tool with no pu
 
 The following controls are out of scope for Phase 1 (internal tool, no public traffic) but should be implemented before Phase 2 launches.
 
-**Rate limiting.** Implement `slowapi` with per-user limits on expensive endpoints, as described in [section 2](#2-rate-limiting). Wire Redis (Upstash) as the rate-limit state store. Define the starting limits before load testing and tune after.
+**Rate limiting.** ✅ **Done (Component 10 Step 8, 2026-07-22).** `slowapi` with per-user limits on expensive endpoints and per-IP limits on the anonymous public path, Redis (Upstash) as the state store — see [section 2](#2-rate-limiting). Starting limits are in the § 2 table; tune after load testing.
 
 **Content Security Policy.** Add a `Content-Security-Policy` response header to the FastAPI application. In Phase 1 the tagging tool is internal and CSP is belt-and-suspenders; in Phase 2, with public users and author-uploaded HTML content, it is a meaningful control. A restrictive starting policy:
 

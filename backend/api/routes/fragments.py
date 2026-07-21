@@ -32,7 +32,8 @@ from api.dependencies import (
     get_storage,
     require_role,
 )
-from fastapi import APIRouter, Depends, Path, Query
+from api.rate_limiting import READ_AUTHENTICATED, WRITE, limiter
+from fastapi import APIRouter, Depends, Path, Query, Request
 from models.base import get_db
 from models.fragment import (
     ConceptBrowseResponse,
@@ -90,7 +91,9 @@ def get_fragment_service(
         "the SVG)."
     ),
 )
+@limiter.limit(READ_AUTHENTICATED)
 async def list_fragments_by_concept(
+    request: Request,
     concept_id: str = Query(
         ...,
         description=(
@@ -151,6 +154,7 @@ async def list_fragments_by_concept(
     concept and invalidated when the knowledge graph is re-seeded.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         concept_id: Neo4j Concept id (e.g. ``"AuthenticCadence"``).
         include_subtypes: Include subtype fragments in the result.
         status: Fragment status filter (default ``approved``).
@@ -188,7 +192,9 @@ async def list_fragments_by_concept(
         "and nested sub-parts one level deep."
     ),
 )
+@limiter.limit(READ_AUTHENTICATED)
 async def get_fragment(
+    request: Request,
     fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to read"),
     context_mode: Literal[
         "none", "bars", "enclosing_fragment", "previous_same_domain"
@@ -243,6 +249,7 @@ async def get_fragment(
     orientation) without a breaking parameter change.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         fragment_id: UUID of the fragment to read.
         context_mode: Rendering-context mode (see above; Phase 1: only ``none``
             has effect).
@@ -280,7 +287,9 @@ async def get_fragment(
         "The newly created fragment in ``draft`` status, with its assigned UUID."
     ),
 )
+@limiter.limit(WRITE)
 async def create_fragment(
+    request: Request,
     payload: FragmentCreate,
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
@@ -296,6 +305,7 @@ async def create_fragment(
     If any part of the write fails, no rows are persisted.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         payload: Full annotation payload including coordinates, concept tags,
             summary, prose, and optional sub-parts.
         service: Fragment service (injected).
@@ -320,7 +330,9 @@ async def create_fragment(
         "status before the edit so the UI can surface 'this edit re-opened review'."
     ),
 )
+@limiter.limit(WRITE)
 async def update_fragment(
+    request: Request,
     payload: FragmentUpdate,
     fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to update"),
     service: FragmentService = Depends(get_fragment_service),
@@ -350,6 +362,7 @@ async def update_fragment(
     sub-parts in the payload replace any previously stored values atomically.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         payload: Replacement payload (all mutable fields; no ``movement_id``).
         fragment_id: UUID of the fragment to update.
         service: Fragment service (injected).
