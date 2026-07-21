@@ -69,8 +69,9 @@ def test_csp_allows_what_the_spa_actually_loads() -> None:
         "connect-src 'self' https://*.r2.cloudflarestorage.com https://*.r2.dev" in csp
     )
     assert "https://*.r2.cloudflarestorage.com" in csp  # img-src previews/incipits
-    # Verovio SVG inline <style> blocks.
+    # Verovio SVG inline <style> blocks and its base64 data: music font.
     assert "style-src 'self' 'unsafe-inline'" in csp
+    assert "font-src 'self' data:" in csp
     # Clickjacking + base-tag hardening.
     assert "frame-ancestors 'none'" in csp
     assert "object-src 'none'" in csp

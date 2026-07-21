@@ -17,7 +17,9 @@ Component 10 Step 9):
 * ``connect-src … https://*.r2.cloudflarestorage.com https://*.r2.dev`` — MEI is
   fetched as text from presigned R2 URLs; Tone.js fetches piano soundfonts from
   the public ``r2.dev`` bucket.
-* ``font-src 'self'`` — fonts are bundled (``@fontsource``), served same-origin.
+* ``font-src 'self' data:`` — app fonts are bundled (``@fontsource``,
+  same-origin); ``data:`` is required because Verovio embeds its SMuFL music
+  font in the rendered SVG's ``@font-face`` as a base64 ``data:`` URI.
 * No ``*.supabase.co`` origin: the browser never calls Supabase directly — the
   ``/api/v1/auth`` router proxies the grant (ADR-035).
 
@@ -42,7 +44,7 @@ _CSP_DIRECTIVES: list[str] = [
     "script-src 'self' 'wasm-unsafe-eval' blob:",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com",
-    "font-src 'self'",
+    "font-src 'self' data:",
     "connect-src 'self' https://*.r2.cloudflarestorage.com https://*.r2.dev",
     "media-src 'self' blob: https://*.r2.dev",
     "worker-src 'self' blob:",

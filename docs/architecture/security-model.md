@@ -571,7 +571,7 @@ Content-Security-Policy:
   script-src 'self' 'wasm-unsafe-eval' blob:;
   style-src 'self' 'unsafe-inline';
   img-src 'self' data: blob: https://*.r2.cloudflarestorage.com;
-  font-src 'self';
+  font-src 'self' data:;
   connect-src 'self' https://*.r2.cloudflarestorage.com https://*.r2.dev;
   media-src 'self' blob: https://*.r2.dev;
   worker-src 'self' blob:;
@@ -579,7 +579,7 @@ Content-Security-Policy:
   form-action 'self'
 ```
 
-`'wasm-unsafe-eval'` (not `'unsafe-eval'`) is the tighter grant that still permits `WebAssembly.instantiate`; `blob:` in `script-src`/`worker-src`/`media-src` covers any blob-URL worker/worklet the renderer or Tone.js audio graph creates. `style-src 'unsafe-inline'` is required by Verovio's inline `<style>` SVG output. Fonts are bundled (`@fontsource`), so `font-src 'self'` suffices. These are starting values; tighten `script-src`/`worker-src` if the post-deploy browser check shows the `blob:` grants are unused.
+`'wasm-unsafe-eval'` (not `'unsafe-eval'`) is the tighter grant that still permits `WebAssembly.instantiate`; `blob:` in `script-src`/`worker-src`/`media-src` covers any blob-URL worker/worklet the renderer or Tone.js audio graph creates. `style-src 'unsafe-inline'` is required by Verovio's inline `<style>` SVG output, and `font-src … data:` because Verovio embeds its SMuFL music font in that SVG as a base64 `data:` URI (caught by the post-deploy browser check — a `font-src 'self'`-only policy blocks the music glyphs). App fonts themselves are bundled (`@fontsource`, same-origin). These are starting values; tighten `script-src`/`worker-src` if the browser check shows the `blob:` grants are unused.
 
 **Safety valve.** `CSP_REPORT_ONLY=1` emits `Content-Security-Policy-Report-Only` instead of the enforcing header, so a violation on a live environment can be diagnosed from the browser console without shipping code. Unset (the default) = enforcing.
 
