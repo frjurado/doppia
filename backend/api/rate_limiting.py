@@ -117,18 +117,38 @@ def _storage_uri() -> str:
     return os.environ.get("RATELIMIT_STORAGE_URI") or "memory://"
 
 
+_STORAGE_URI = _storage_uri()
+
+# Redis client options apply only when the store is Redis (a ``memory://`` store
+# rejects them). Bound the socket timeouts so an unreachable or slow Redis fails
+# over to the in-memory fallback fast instead of hanging the event loop on the
+# synchronous client.
+_STORAGE_OPTIONS: dict[str, int] = (
+    {"socket_connect_timeout": 2, "socket_timeout": 2}
+    if _STORAGE_URI.startswith(("redis://", "rediss://"))
+    else {}
+)
+
+
 # The application-wide limiter. ``default_limits=[]`` means no global cap is
 # applied implicitly — a route is limited only when it opts in with a
 # ``@limiter.limit(...)`` decorator, so every limited surface is explicit.
 limiter = Limiter(
     key_func=get_user_or_ip,
     default_limits=[],
-    storage_uri=_storage_uri(),
+    storage_uri=_STORAGE_URI,
+    storage_options=_STORAGE_OPTIONS,
     headers_enabled=False,  # Retry-After is set by our handler below.
-    # Fail open: if the Redis store is momentarily unreachable, allow the
-    # request rather than returning 500. A rate limiter must never be a single
-    # point of failure for the endpoints it guards.
-    swallow_errors=True,
+    # Fail open, correctly. If the configured store (Redis) is unreachable or
+    # otherwise unusable, slowapi transparently falls back to an in-process
+    # in-memory limiter: limits stay enforced (per process) and a store outage
+    # never 500s the routes it guards. ``swallow_errors`` alone is NOT enough —
+    # slowapi still reads ``request.state.view_rate_limit`` after swallowing a
+    # storage error, and that attribute is unset on the error path, raising
+    # ``AttributeError`` → 500. ``in_memory_fallback_enabled`` handles the error
+    # by actually limiting via memory, so ``view_rate_limit`` is set. slowapi
+    # periodically retries the primary store and switches back when it recovers.
+    in_memory_fallback_enabled=True,
 )
 
 

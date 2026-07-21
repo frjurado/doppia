@@ -167,3 +167,37 @@ async def test_anonymous_callers_share_by_ip(client_factory) -> None:
     assert (await client.get("/ping")).status_code == 200
     assert (await client.get("/ping")).status_code == 200
     assert (await client.get("/ping")).status_code == 429
+
+
+async def test_unreachable_store_fails_over_to_memory_not_500() -> None:
+    """A configured-but-unreachable store must degrade to in-memory limiting.
+
+    Regression guard for the staging incident: with only ``swallow_errors=True``,
+    slowapi swallows the storage error but then reads the unset
+    ``request.state.view_rate_limit`` → ``AttributeError`` → 500 on every guarded
+    route. ``in_memory_fallback_enabled=True`` (the module limiter's config)
+    limits via memory on a store outage instead, so the route stays up and the
+    limit is still enforced.
+    """
+    app = FastAPI()
+    limiter = Limiter(
+        key_func=get_user_or_ip,
+        default_limits=[],
+        storage_uri="rediss://default:pw@10.255.255.1:6379",  # unroutable
+        storage_options={"socket_connect_timeout": 1, "socket_timeout": 1},
+        in_memory_fallback_enabled=True,
+    )
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+    @app.get("/probe")
+    @limiter.limit("2/minute")
+    async def _probe(request: Request) -> dict[str, bool]:
+        return {"ok": True}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.get("/probe")).status_code == 200  # not 500
+        assert (await client.get("/probe")).status_code == 200
+        assert (await client.get("/probe")).status_code == 429  # memory enforces
