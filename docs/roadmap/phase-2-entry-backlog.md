@@ -42,6 +42,14 @@ the integration conftest. Not bisected against the old pins.
 Items with a hard trigger: **all of §2 must land before any public
 (unauthenticated) URL or user exists**, unless noted.
 
+✅ **Public-launch exit gate met (Component 10, 2026-07-22).** Every §2 item
+that gates a public URL is live and deployed to staging: storage boundary,
+public read path + ADR-009 enforcement, PyJWT + HttpOnly session, rate limiting,
+security headers, OpenAPI production gate, and the `ALLOWED_ORIGINS` CORS
+fallback (plan Steps 1–11). The one remaining §2 row — the **pytest 9 +
+pytest-asyncio 1.x migration** — is dev-only (plan Step 15, Part 6) and does not
+gate public launch.
+
 | Item | What & why | Pointer |
 |---|---|---|
 | ~~**Signed-URL end state — option (b)**~~ | ✅ Landed `ff5e1f1` (Component 10 Steps 1–2, 2026-07-20): soundfonts moved to the dedicated public `doppia-soundfonts` bucket (frontend-only via `VITE_SOUNDFONT_BASE_URL`); artifact bucket private, `signed_url()` always presigns (1 h / 15 m TTLs); `R2_PUBLIC_URL` and the `?v=` cache-buster removed. Preview-caching trade-off held in reserve per `security-model.md` § 4. | `security-model.md` § 4 (shipped); Step 31 report § 5 |
@@ -52,7 +60,7 @@ Items with a hard trigger: **all of §2 must land before any public
 | ~~**Rate limiting**~~ | ✅ Landed `26daa4a` (Component 10 Step 8, 2026-07-22): `slowapi` in `api/rate_limiting.py`, registered on `app.state.limiter`. Sync `redis://` storage reuses the pinned `redis` client (no `coredis`, no new service), selected by `RATELIMIT_STORAGE_URI` (default `memory://` for local/tests), fails open on a store blip. Keyed per-user (`user:{sub}`) for authenticated calls and per-IP (Fly-Client-IP → X-Forwarded-For → remote) for anonymous. The anonymous public router is covered first (60/min); each editor category is applied at its representative entrypoint (read 300/min, write 60/min, graph 60/min, upload 20/min). 429s carry the standard envelope + `Retry-After`. | `security-model.md` § 2 (shipped) |
 | ~~**Security headers**~~ | ✅ Landed `78cd7f2` (Component 10 Step 9, 2026-07-22): `SecurityHeadersMiddleware` stamps a restrictive CSP, `X-Content-Type-Options: nosniff`, and `X-Frame-Options: DENY` on every response; HSTS only when `ENVIRONMENT=production`. The CSP is derived from what the SPA actually loads — `'wasm-unsafe-eval'` for the Verovio WASM toolkit, the R2 hosts for MEI/preview/soundfonts, and no `*.supabase.co` (the browser no longer calls Supabase directly, ADR-035). `CSP_REPORT_ONLY=1` is a diagnostics valve. Post-deploy browser validation (Verovio/MIDI/no console violations) pending. | `security-model.md` § 7 (shipped) |
 | ~~**OpenAPI docs exposure**~~ | ✅ Landed `0fcde03` (Component 10 Step 10, 2026-07-22): `create_app()` disables `/api/docs`, `/api/redoc`, `/api/openapi.json` in production (`docs_url`/`redoc_url`/`openapi_url=None` when `ENVIRONMENT=production` → routes unregistered, schema never served); reachable in local/staging for development. | `security-model.md` § 7 (shipped) |
-| **CORS for PR preview environments** | `ALLOWED_ORIGINS` env-var fallback so preview deploys don't require code changes. Cheap; do whenever previews appear. | `security-model.md` § "Could be done in Phase 1" |
+| ~~**CORS for PR preview environments**~~ | ✅ Landed `d6f04da` (Component 10 Step 11, 2026-07-22): `_resolve_origins()` unions a comma-separated `ALLOWED_ORIGINS` env var with the static per-environment allowlist so Fly PR-preview deploys need no code change. Explicit origins only — normalised, de-duped, and a literal `*` dropped (the credentialed policy never goes wildcard). | `security-model.md` § 1 (shipped) |
 
 ---
 
