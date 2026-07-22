@@ -26,6 +26,11 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Playwright e2e (Component 10 Step 14)
+frontend/playwright-report/
+frontend/test-results/
+frontend/playwright/.cache/
+
 # Editor
 .vscode/
 .idea/

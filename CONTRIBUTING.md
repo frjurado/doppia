@@ -273,7 +273,11 @@ Run this after every change to YAML seed files in `backend/seed/`. CI runs it au
 
 ### Verovio snapshot tests
 
-Snapshot tests (`tests/snapshots/`) are scaffolded but not yet populated — they are planned for Phase 2 once the Verovio rendering pipeline is stable. Do not add tests to this directory without first reading the snapshot test strategy in the Phase 2 roadmap.
+`backend/tests/snapshots/` holds Verovio render regression guards (Component 10 Step 13). `test_verovio_snapshots.py` pins the current 6.1.0 SVG output for a representative set (full movements, a mid-movement `select`, a first/second-ending volta) so the deliberate 6.2.0 upgrade (ADR-013) surfaces its rendering deltas for review rather than shipping silently. Determinism comes from a fixed `xmlIdSeed` + a version-string strip — byte-stable across runs and across Windows/Linux. They run in CI as their own step in the unit job. When a Verovio change is intentional, regenerate and review the diff:
+
+```bash
+UPDATE_VEROVIO_SNAPSHOTS=1 pytest backend/tests/snapshots
+```
 
 ### Frontend tests
 
@@ -294,6 +298,19 @@ The highest-priority tests are in `frontend/src/components/score/__tests__/`:
 - **`PropertyForm.test.tsx`**, **`ConceptPicker.test.tsx`**, **`TypeRefinement.test.tsx`** — UI component rendering from schema fixtures.
 
 CI runs `npm test` in the lint job on every push.
+
+### Frontend e2e (Playwright)
+
+Browser-level coverage of the **anonymous public read journey** (Component 10 Step 14): browse a concept → open a fragment detail → the Verovio render and MIDI controls appear, with no editor affordance reachable. The suite runs against a `vite preview` of the production build with the backend stubbed per-test (`page.route`), so **no live backend, database, or seeded data is needed** — it is fast and deterministic.
+
+```bash
+cd frontend
+npm run e2e:install   # one-time: download the Chromium browser
+npm run build         # the e2e serves the production build
+npm run e2e           # run the journey headless
+```
+
+Specs live in `frontend/e2e/`. The scaffold is deliberately minimal and public-path-focused; editor/authoring flows get e2e coverage when their components stabilise (Component 12+). CI runs it as the **E2E (Playwright)** job. (The fragment's MEI is served from `e2e/fixtures/sample.mei`, a comment-stripped MEI — Verovio's `loadData` rejects XML comments before the root, exactly as production-normalised MEI has none.)
 
 ### What is not tested in Phase 1
 
