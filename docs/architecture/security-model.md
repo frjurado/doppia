@@ -30,12 +30,12 @@ FastAPI does not add CORS headers by default. Without explicit middleware config
 
 ### Configuration
 
-CORS is configured via FastAPI's `CORSMiddleware` in the application factory. The allowed-origins list is driven by the `ENVIRONMENT` environment variable:
+CORS is configured in the application factory via `PathScopedCORSMiddleware` (`backend/api/middleware/cors.py`), a thin ASGI dispatcher that routes each request to exactly one of two `CORSMiddleware` policies by path. The allowed-origins list for the credentialed policy is driven by the `ENVIRONMENT` environment variable:
 
 ```python
 # backend/main.py
 
-from fastapi.middleware.cors import CORSMiddleware
+from api.middleware.cors import PathScopedCORSMiddleware
 import os
 
 _ALLOWED_ORIGINS: dict[str, list[str]] = {
@@ -55,28 +55,62 @@ def create_app() -> FastAPI:
     app = FastAPI(...)
     environment = os.environ["ENVIRONMENT"]
     origins = _ALLOWED_ORIGINS.get(environment, [])
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
-    )
+    app.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
     return app
 ```
 
+The two policies (Component 10 Step 3, shipped):
+
+| Prefix | Origins | Credentials | Methods | Headers |
+|---|---|---|---|---|
+| `/api/v1/public/` (anonymous read path) | `*` | disabled | `GET` | `Accept-Language` |
+| everything else (credentialed editor API) | per-environment allowlist | enabled | `GET, POST, PATCH, DELETE` | `Authorization, Content-Type, Accept-Language` |
+
+Exactly one policy touches any given response (preflights carry the target path, so they dispatch identically), which is what makes the wildcard safe: it can never combine with `allow_credentials=True`.
+
 **Rules:**
 
-- **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. If a wildcard origin is ever needed (e.g. for a public read-only endpoint in Phase 2), that route must either disable credentials or be served from a separate API prefix.
-- The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. Adding a new environment (e.g. a preview deployment for a pull request) requires adding the origin to `_ALLOWED_ORIGINS` — not widening the pattern.
+- **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. A wildcard origin is only permitted on the anonymous `/api/v1/public/` prefix, whose policy disables credentials — the separate-prefix arrangement this section required is now implemented.
+- The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. The static per-environment `_ALLOWED_ORIGINS` is unioned at startup with a comma-separated **`ALLOWED_ORIGINS`** env var (Component 10 Step 11, `_resolve_origins()`), so a Fly.io PR-preview deployment — which gets a fresh URL — is admitted by setting that variable rather than editing code. It stays an explicit allowlist: entries are exact origins (blanks/trailing slashes normalised, duplicates dropped), and a literal `*` is discarded because this list drives the *credentialed* policy, which must never combine with a wildcard.
 - `allow_methods` covers the HTTP verbs actually used by the API. `PUT` is not listed because the API uses `PATCH` for partial updates; add it only when a `PUT` route is introduced.
 - `allow_headers` must include `Authorization` (the JWT bearer token), `Content-Type` (JSON bodies), and `Accept-Language` (the ADR-006 language negotiation header, added in Component 9 Part 7). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
+
+### Session cookie (refresh token)
+
+Authentication uses two credentials with different storage (ADR-035, the
+Phase-2 revisit of ADR-016's `localStorage` exception, shipped in Component 10
+Step 7):
+
+- **Access token — in memory.** Held in a module variable in the SPA, attached
+  as `Authorization: Bearer` on API calls, gone on reload. ~1h lifetime.
+- **Refresh token — HttpOnly cookie.** Set by the backend `/api/v1/auth` router;
+  invisible to JavaScript, so an XSS foothold cannot read the long-lived
+  credential.
+
+The credential exchange is proxied server-side (`services/supabase_auth.py`);
+the browser never calls Supabase Auth directly. The cookie attributes:
+
+| Attribute | Value | Reason |
+|---|---|---|
+| `HttpOnly` | on | The refresh token must be unreachable from JavaScript. |
+| `Secure` | on (off only when `ENVIRONMENT=local`) | HTTPS-only in staging/prod; local dev is plain HTTP. |
+| `SameSite` | `Lax` | Not sent on cross-site POST → CSRF guard for the refresh endpoint. |
+| `Path` | `/api/v1/auth` | Sent only to login/refresh/logout; no other endpoint sees it. |
+| `Max-Age` | 30 days | Session length; the refresh grant 401s earlier if Supabase invalidates it. |
+
+**CSRF.** The `SameSite=Lax` + path-scoped cookie is never sent on a cross-site
+POST, and every non-auth endpoint authenticates with the bearer access token (a
+cross-origin page cannot read it), not the cookie — so there is no cookie-driven
+state change to forge. No separate CSRF token is used; one must be added if a
+future endpoint ever authenticates a state change via the cookie. This relies on
+the same-origin deployment (the SPA and API are one Fly app — see
+`deployment.md`), which makes the cookie same-site on every API call.
 
 ### R2 and CORS
 
 Cloudflare R2 is currently accessed server-side only: the API fetches MEI files for processing, or generates signed URLs that the frontend uses to fetch files directly. When the frontend uses a signed URL to fetch from R2 directly, that is a cross-origin request from the browser to `*.r2.cloudflarestorage.com`. R2 CORS rules must be configured at the bucket level for this to work.
 
-The current architecture serves MEI files to the frontend via R2 URLs minted by `signed_url()` (see [section 4](#4-signed-url-lifecycle-for-r2) — note the public-URL branch, which returns unsigned `r2.dev` URLs in deployed environments). Either way the browser fetches cross-origin, so the R2 bucket must carry a CORS rule allowing `GET` requests from the frontend origin:
+The current architecture serves MEI files to the frontend via presigned R2 URLs minted by `signed_url()` (see [section 4](#4-signed-url-lifecycle-for-r2)). A presigned URL is still a cross-origin fetch from the browser, so the artifact bucket must carry a CORS rule allowing `GET` requests from the frontend origin (the separate public soundfonts bucket carries its own equivalent rule — see `deployment.md` § "SoundFont setup"):
 
 ```json
 [
@@ -101,20 +135,28 @@ Phase 1 is an internal tool with a small, fixed team of annotators and administr
 
 **Phase 1 decision: no programmatic rate limiting is enforced.** Fly.io applies basic DDoS protection at the infrastructure layer by default. The staging URL is not published; it is shared directly with team members. This is sufficient for Phase 1.
 
-### Phase 2 design (implement before public launch)
+### Phase 2 design — implemented (Component 10 Step 8, 2026-07-22)
 
-Phase 2 introduces public users and anonymous visitors. Rate limiting becomes necessary to protect expensive endpoints — primarily those that trigger knowledge graph traversal and those that accept writes. The following plan should be implemented before Phase 2 traffic arrives.
+Phase 2 introduces public users and anonymous visitors. Rate limiting protects expensive endpoints — primarily those that trigger knowledge graph traversal and those that accept writes — and, above all, the anonymous public read path, the one surface that actually sees untrusted traffic.
 
-**Tool:** `slowapi` — the standard rate-limiting library for FastAPI, backed by Redis. It integrates with the Redis instance already in the stack (Upstash in production) and adds no new service dependency.
+**Tool:** `slowapi` (wrapping the `limits` library) — the standard rate-limiting library for FastAPI. It is backed by the Redis already in the stack (Upstash in production) via the **sync `redis://` storage**, which reuses the `redis` client already pinned — no new service dependency and no `coredis`. The limiter lives in `backend/api/rate_limiting.py` and is registered on `app.state.limiter` in `main.py`.
 
 ```python
-# backend/api/rate_limiting.py
+# backend/api/rate_limiting.py (abridged)
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_user_or_ip,
+    default_limits=[],            # no implicit global cap; routes opt in explicitly
+    storage_uri=_storage_uri(),   # RATELIMIT_STORAGE_URI, default memory://
+    headers_enabled=False,        # Retry-After set by our envelope handler
+)
 ```
+
+**Storage.** `RATELIMIT_STORAGE_URI` selects the backend. Deployed environments point it at the Upstash Redis URL so counters survive a restart and are shared across machines (the verification criterion); it defaults to `memory://` for local dev and tests, which need no Redis. See `deployment.md` § Upstash Redis.
+
+**Fail-open (`in_memory_fallback_enabled=True`).** If the configured Redis store is unreachable or otherwise unusable, slowapi transparently falls back to an in-process in-memory limiter and periodically retries the primary — limits stay enforced (per process) and a store outage never takes down the routes it guards. This is the mechanism that actually fails open: `swallow_errors` alone is **not** sufficient, because slowapi still reads `request.state.view_rate_limit` after swallowing a storage error, and that attribute is unset on the error path (`AttributeError` → 500). Bounded socket timeouts (`storage_options`) make the fail-over fast rather than a hang on the synchronous Redis client. (Fixed after a staging incident where setting the Redis URL 500'd every rate-limited route.)
+
+**Applied surfaces.** A route opts in with `@limiter.limit(<CONST>)` and a `request: Request` parameter; the per-category constants live in `rate_limiting.py`. The anonymous **public router** (`/api/v1/public/`) is fully covered first — it is the exposed surface — and each editor category (read, write, graph, upload) is applied at its representative entrypoint (fragment browse/detail, create/patch, concept search/tree, corpus upload). Extending coverage to a further route is a one-line decorator, not a config change.
 
 **Proposed limits by endpoint category (Phase 2 starting values — tune with observed traffic):**
 
@@ -126,14 +168,14 @@ limiter = Limiter(key_func=get_remote_address)
 | Exercise generation | 120 / minute | 30 / minute | Hits graph + PostgreSQL |
 | File upload (MEI) | 20 / minute | — (admin only) | Rare; prevent runaway ingestion |
 
-**Key identification:** In Phase 2, prefer per-user rate limiting (keyed on the JWT `sub` claim) over per-IP limiting for authenticated endpoints. Per-IP is used for anonymous routes where no user identity is available. This prevents a single bad actor from affecting other users behind the same NAT.
+**Key identification:** authenticated endpoints are keyed per-user (on the JWT `sub` claim), not per-IP, so a single bad actor cannot throttle every other user behind the same NAT. Anonymous routes key on the client IP. Behind the Fly.io proxy, `request.client.host` is the *proxy's* address — every anonymous caller would share one bucket — so the key function prefers Fly's `Fly-Client-IP` header (the edge sets it and a client cannot forge it), then `X-Forwarded-For`, then the remote address.
 
 ```python
 def get_user_or_ip(request: Request) -> str:
     user = getattr(request.state, "user", None)
-    if user:
+    if user is not None:
         return f"user:{user.id}"
-    return get_remote_address(request)
+    return _client_ip(request)   # Fly-Client-IP → X-Forwarded-For → remote addr
 ```
 
 **Rate limit responses** return `429 Too Many Requests` with a `Retry-After` header. The error response follows the standard error envelope:
@@ -342,16 +384,18 @@ class StorageClient:
 
 A persistent connection pool can be added later if latency measurements warrant it; for now, short-lived clients are both simpler and safe.
 
-### Public-URL branch (R2.dev) — known deviation
+### The bucket split: soundfonts public, artifacts private (shipped)
 
-`signed_url()` has a second branch: when `R2_PUBLIC_URL` is configured, it returns a **plain, unsigned, non-expiring** `{public_url}/{key}` URL instead of a presigned one. This is active in staging and production, because piano soundfonts must be publicly fetchable by Tone.js (it constructs filenames internally and cannot carry signed query parameters), and R2 exposes public access at the **bucket** level — so enabling it for soundfonts also exposes MEI, incipit, and fragment-preview objects on the same bucket. Those three artifact types are therefore served to the browser **unsigned and without the TTL** described in this section's lifecycle table.
+**Decision (2026-07-10, Step 31 review, with Francisco): option (b). Implemented in Component 10 Steps 1–2 (2026-07-20).**
 
-Two consequences:
+Phase 1 operated with a single bucket made public for the piano soundfonts (Tone.js constructs sample filenames internally and cannot carry signed query parameters, and R2 exposes public access at the **bucket** level) — which also exposed MEI, incipit, and fragment-preview objects unsigned, a documented deviation from the lifecycle above, mitigated by a `?v=<last-write timestamp>` cache-buster against the unpurgeable `r2.dev` edge cache.
 
-1. **No expiry / no signature** on MEI and SVG artifact URLs in deployed environments. Acceptable at Phase 1 scope (staging is internal-only, access-gated by Supabase Auth; the bucket holds only public-domain/CC-licensed scores), but it is a real deviation from the signed-URL lifecycle above and must be resolved before any public launch.
-2. **The `r2.dev` edge cache is not purgeable on demand** (the managed subdomain is not a zone in the account). Because these artifacts are **mutable** — overwritten on re-ingest (MEI) or regeneration (incipit, preview) — a stable URL would let a stale cached copy shadow the corrected object indefinitely. Mitigation: `signed_url(..., version=<last-write timestamp>)` appends a `?v=<token>` cache-buster (`_cache_bust_token`, keyed on `movement.updated_at` / `incipit_generated_at` / `preview_generated_at`), so every regeneration yields a fresh cache key. Callers in `services/browse.py` and `services/fragments.py` pass the relevant timestamp.
+The end state is now in place:
 
-**Decision (2026-07-10, Step 31 review, with Francisco): option (b) is the end state.** The public branch will be restricted to soundfonts (a separate public bucket — R2 public access is bucket-scoped) and MEI/incipit/preview routed back through true presigned URLs, restoring the TTL/signature lifecycle above and making the cache-buster unnecessary (presigned URLs are unique per request). **Implementation is scheduled as one of the first Phase-2 tasks** — it is a hard prerequisite for ADR-009 enforcement (the ABC-corpus public-API exclusion is bypassable while source MEI is publicly fetchable) and must precede any public URL. Until then, the public-URL branch with the cache-buster is the **accepted Phase-1 operating mode**: staging is internal, access-gated, and the bucket holds only public-domain/CC-licensed scores. Known trade-off to revisit at implementation: presigned URLs defeat browser caching of fragment previews; if that matters at Phase-2 scale, previews/incipits (derived renders of open-licensed scores) may stay public while source MEI is signed.
+- **Soundfonts live in a dedicated public bucket** (`doppia-soundfonts`, shared across environments). The frontend addresses it directly via `VITE_SOUNDFONT_BASE_URL`; the backend never reads or writes it. Soundfont objects are immutable, so no cache-busting is needed on the public bucket.
+- **The artifact bucket (MEI, incipits, previews) is private** — no bucket-level public access. `signed_url()` always presigns, with the TTL table above (1 h client-facing, 15 m backend-to-backend). The public-URL branch, the `R2_PUBLIC_URL` variable, and the `_cache_bust_token` cache-buster are removed: presigned URLs are unique per request, so a stale edge-cached copy can never shadow a re-ingested or regenerated artifact.
+
+**Reserved option:** presigned URLs defeat browser caching of fragment previews. If a preview-caching regression matters at Phase-2 scale, previews/incipits (derived renders of open-licensed scores) may be made public again while source MEI stays signed. Not exercised unless a regression appears.
 
 ### Share links in Phase 2
 
@@ -513,26 +557,37 @@ This is a Phase 1 task. Although Doppia is currently an internal tool with no pu
 
 The following controls are out of scope for Phase 1 (internal tool, no public traffic) but should be implemented before Phase 2 launches.
 
-**Rate limiting.** Implement `slowapi` with per-user limits on expensive endpoints, as described in [section 2](#2-rate-limiting). Wire Redis (Upstash) as the rate-limit state store. Define the starting limits before load testing and tune after.
+**Rate limiting.** ✅ **Done (Component 10 Step 8, 2026-07-22).** `slowapi` with per-user limits on expensive endpoints and per-IP limits on the anonymous public path, Redis (Upstash) as the state store — see [section 2](#2-rate-limiting). Starting limits are in the § 2 table; tune after load testing.
 
-**Content Security Policy.** Add a `Content-Security-Policy` response header to the FastAPI application. In Phase 1 the tagging tool is internal and CSP is belt-and-suspenders; in Phase 2, with public users and author-uploaded HTML content, it is a meaningful control. A restrictive starting policy:
+**Content Security Policy.** ✅ **Done (Component 10 Step 9, 2026-07-22).** `SecurityHeadersMiddleware` (`backend/api/middleware/security_headers.py`, registered outermost in `main.py`) stamps a restrictive CSP on every response. The policy was derived from what the SPA actually loads (verified against the tree), which differs from the Phase-1 draft in three ways: `'wasm-unsafe-eval'` is required to instantiate the Verovio WASM toolkit; the R2 hosts (`*.r2.cloudflarestorage.com` for presigned MEI/preview/incipit, `*.r2.dev` for public soundfonts) are added to `connect-src`/`img-src`/`media-src`; and **`*.supabase.co` is dropped** — the browser no longer calls Supabase directly (ADR-035 proxies the grant through `/api/v1/auth`).
+
+The shipped policy:
 
 ```
 Content-Security-Policy:
   default-src 'self';
-  script-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  script-src 'self' 'wasm-unsafe-eval' blob:;
   style-src 'self' 'unsafe-inline';
-  img-src 'self' data: blob:;
-  connect-src 'self' https://*.supabase.co https://*.r2.cloudflarestorage.com;
-  worker-src blob:;
-  frame-ancestors 'none'
+  img-src 'self' data: blob: https://*.r2.cloudflarestorage.com;
+  font-src 'self' data:;
+  connect-src 'self' https://*.r2.cloudflarestorage.com https://*.r2.dev;
+  media-src 'self' blob: https://*.r2.dev;
+  worker-src 'self' blob:;
+  frame-ancestors 'none';
+  form-action 'self'
 ```
 
-The `worker-src blob:` entry is required for Verovio's WASM module. Adjust `connect-src` to include any third-party endpoints actually contacted from the frontend.
+`'wasm-unsafe-eval'` (not `'unsafe-eval'`) is the tighter grant that still permits `WebAssembly.instantiate`; `blob:` in `script-src`/`worker-src`/`media-src` covers any blob-URL worker/worklet the renderer or Tone.js audio graph creates. `style-src 'unsafe-inline'` is required by Verovio's inline `<style>` SVG output, and `font-src … data:` because Verovio embeds its SMuFL music font in that SVG as a base64 `data:` URI (caught by the post-deploy browser check — a `font-src 'self'`-only policy blocks the music glyphs). App fonts themselves are bundled (`@fontsource`, same-origin). These are starting values; tighten `script-src`/`worker-src` if the browser check shows the `blob:` grants are unused.
 
-**`Strict-Transport-Security`.** Set `Strict-Transport-Security: max-age=63072000; includeSubDomains` once the production domain is confirmed. Fly.io serves HTTPS by default; this header is a belt-and-suspenders control to prevent HTTP downgrade attacks.
+**Safety valve.** `CSP_REPORT_ONLY=1` emits `Content-Security-Policy-Report-Only` instead of the enforcing header, so a violation on a live environment can be diagnosed from the browser console without shipping code. Unset (the default) = enforcing.
 
-**`X-Content-Type-Options`.** Set `X-Content-Type-Options: nosniff` on all responses. This prevents browsers from MIME-sniffing response content (relevant if MEI or SVG files are ever served with an ambiguous content type).
+**`Strict-Transport-Security`.** ✅ Set to `max-age=63072000; includeSubDomains` **only when `ENVIRONMENT=production`** (the production domain is confirmed there). On staging (`*.fly.dev`) it is intentionally omitted — Fly serves HTTPS regardless, and pinning HSTS on a shared `fly.dev` subdomain is undesirable. Revisit when the production domain is stood up.
+
+**`X-Content-Type-Options`.** ✅ `nosniff` on all responses. Also `X-Frame-Options: DENY` (belt-and-suspenders for pre-CSP browsers alongside `frame-ancestors 'none'`).
+
+**OpenAPI docs.** ✅ **Done (Component 10 Step 10, 2026-07-22).** `/api/docs`, `/api/redoc`, and `/api/openapi.json` are **disabled in production** — `create_app()` passes `docs_url`/`redoc_url`/`openapi_url` as `None` when `ENVIRONMENT=production`, so FastAPI stops registering the routes and the schema is never served. They stay reachable in local and staging for development. They leak no data, but there is no reason to publish the full API map to anonymous production traffic. (With the routes unregistered, the paths fall through to the SPA catch-all rather than returning a literal 404 — the same behaviour as any other unmatched `/api/*` path; the schema is simply gone. A clean JSON 404 for unmatched `/api/*` paths is a possible later refinement, not required here.)
 
 ---
 
@@ -540,6 +595,6 @@ The `worker-src blob:` entry is required for Verovio's WASM module. Adjust `conn
 
 The following items are technically deferred but require no Phase 2 infrastructure — they are cheap to land now and save a future ADR.
 
-**CORS: pull request preview environments.** If Fly.io preview deployments are introduced for pull requests (each PR gets its own preview URL), the CORS allowlist must accommodate dynamic origins. The recommended approach is a backend startup check that reads a comma-separated `ALLOWED_ORIGINS` environment variable, falling back to the static allowlist. This avoids hardcoding preview URLs in code. This is a 5-line change to `main.py` with no new dependencies.
+**CORS: pull request preview environments.** ✅ **Done (Component 10 Step 11, 2026-07-22).** `_resolve_origins()` in `main.py` reads a comma-separated `ALLOWED_ORIGINS` env var and unions it with the static per-environment allowlist, so Fly.io PR-preview deployments (each with its own URL) are admitted without a code change. It remains an explicit allowlist — no wildcard/regex, and a literal `*` is dropped (see § 1).
 
 **Dependency scanning.** ✅ **Done (2026-07-11, pre-Step-32 batch):** `pip-audit` is pinned in `requirements-dev.txt` and both `pip-audit` and `npm audit` run in CI as a report-only job (`continue-on-error`). The job stays non-blocking while python-jose carries advisories with no fix version (PYSEC-2025-185; transitive `ecdsa` PYSEC-2026-1325 and `pyasn1` CVE-2026-30922, both constrained by python-jose's own pins); flip it to blocking after the Phase-2 PyJWT migration (`phase-2-entry-backlog.md` §2).

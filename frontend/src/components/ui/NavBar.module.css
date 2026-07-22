@@ -75,8 +75,16 @@
   opacity: 0.88;
 }
 
-/* User badge — non-interactive Phase-1 stub; becomes a dropdown in Phase 2 */
-.userBadge {
+/* User dropdown (Component 10 Step 7) — replaces the Phase-1 non-interactive
+   badge. Depth from tonal layering; 0px radius; no 1px borders. */
+.userMenu {
+  position: relative;
+}
+
+.userButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
   font-family: var(--font-sans);
   font-size: 0.75rem;
   font-weight: 500;
@@ -85,6 +93,67 @@
   color: var(--color-on-surface-variant);
   background: var(--color-surface-container);
   padding: var(--spacing-1) var(--spacing-4);
-  cursor: default;
+  border: none;
+  cursor: pointer;
   user-select: none;
+}
+
+.userButton:hover {
+  color: var(--color-on-background);
+  background: var(--color-surface-container-high);
+}
+
+.caret {
+  font-size: 0.7em;
+  line-height: 1;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + var(--spacing-2));
+  right: 0;
+  min-width: 180px;
+  background: var(--color-surface-container-high);
+  padding: var(--spacing-2) 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.menuInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--spacing-2) var(--spacing-4) var(--spacing-3);
+}
+
+.menuEmail {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--color-on-background);
+  overflow-wrap: anywhere;
+}
+
+.menuRole {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-on-surface-variant);
+}
+
+.menuItem {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
+  color: var(--color-on-background);
+  background: transparent;
+  border: none;
+  padding: var(--spacing-2) var(--spacing-4);
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--color-surface-container-highest);
 }

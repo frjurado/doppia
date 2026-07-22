@@ -60,18 +60,20 @@ jobs:
         run: npm test
 
   # ---------------------------------------------------------------------------
-  # Job 1b — Dependency audit (report-only)
+  # Job 1b — Dependency audit
   #
-  # continue-on-error keeps this job non-blocking: python-jose carries
-  # advisories with no fix version (PYSEC-2025-185; transitive ecdsa
-  # PYSEC-2026-1325 and pyasn1 CVE-2026-30922 pinned <0.5.0 by python-jose),
-  # so a blocking audit would start permanently red. Flip to blocking after
-  # the Phase-2 PyJWT migration (phase-2-entry-backlog.md §2).
+  # pip-audit (backend) is BLOCKING as of the Phase-2 PyJWT migration
+  # (Component 10 Step 6): python-jose — whose unfixable advisory set
+  # (PYSEC-2025-185 + transitive ecdsa/pyasn1) forced report-only since
+  # Phase 1 — is gone, so the backend requirements audit is clean and can gate.
+  #
+  # npm audit (frontend) stays report-only (continue-on-error on the step):
+  # it only sees ESLint's dev-tooling transitives, which never ship to a user
+  # and churn constantly, so gating main on them would block unrelated PRs.
   # ---------------------------------------------------------------------------
   audit:
-    name: Dependency audit (report-only)
+    name: Dependency audit
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -83,6 +85,7 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit==2.10.1
 
+      # Blocking: fails the job (and CI) on any backend advisory.
       - name: pip-audit (backend requirements)
         run: pip-audit -r backend/requirements.txt --no-deps
 
@@ -92,8 +95,10 @@ jobs:
         with:
           node-version: "20"
 
+      # Report-only: surfaced in logs but never blocks (dev-tooling transitives).
       - name: npm audit (frontend lockfile)
         if: ${{ !cancelled() }}
+        continue-on-error: true
         working-directory: frontend
         run: npm audit
 

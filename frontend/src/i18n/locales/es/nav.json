@@ -5,7 +5,8 @@
   "fragments": "Fragmentos",
   "review": "Revisión",
   "ariaUserMenu": "Menú de usuario",
-  "account": "Cuenta ▾",
+  "account": "Cuenta",
+  "logout": "Cerrar sesión",
   "login": "Iniciar sesión",
   "language": "Idioma",
   "languageNames": {

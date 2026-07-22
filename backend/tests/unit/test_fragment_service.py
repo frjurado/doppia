@@ -431,6 +431,58 @@ class TestDeriveDatalicence:
 
 
 # ---------------------------------------------------------------------------
+# TestLicenceExcludesPublic
+# ---------------------------------------------------------------------------
+
+
+class TestLicenceExcludesPublic:
+    """_licence_excludes_public — ADR-009 § 2 NonCommercial corpus exclusion."""
+
+    @pytest.mark.parametrize(
+        "licence",
+        [
+            "CC-BY-NC-SA-4.0",  # ABC corpus, hyphen form
+            "CC BY-NC-SA 4.0",  # space form
+            "cc-by-nc-sa-4.0",  # lowercase
+            "CC BY-NC 4.0",  # NonCommercial without ShareAlike
+        ],
+    )
+    def test_noncommercial_licences_are_excluded(self, licence: str) -> None:
+        from services.fragments import _licence_excludes_public
+
+        assert _licence_excludes_public(licence) is True
+
+    @pytest.mark.parametrize(
+        "licence",
+        [
+            "CC-BY-SA-4.0",  # Mozart / most DCML corpora
+            "CC BY-SA 4.0",
+            "CC0-1.0",  # OpenScore public domain
+            "CC BY 4.0",
+            "Public Domain",
+            "",  # empty
+        ],
+    )
+    def test_commercial_ok_licences_are_not_excluded(self, licence: str) -> None:
+        from services.fragments import _licence_excludes_public
+
+        assert _licence_excludes_public(licence) is False
+
+    def test_none_licence_is_not_excluded(self) -> None:
+        from services.fragments import _licence_excludes_public
+
+        assert _licence_excludes_public(None) is False
+
+    def test_nc_must_be_a_whole_token_not_substring(self) -> None:
+        """A licence containing 'nc' inside a larger word (e.g. 'Licence') must
+        not be treated as NonCommercial."""
+        from services.fragments import _licence_excludes_public
+
+        assert _licence_excludes_public("Some Licence 1.0") is False
+        assert _licence_excludes_public("Incidental Attribution") is False
+
+
+# ---------------------------------------------------------------------------
 # TestRunApprovalGate
 # ---------------------------------------------------------------------------
 

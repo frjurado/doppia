@@ -62,30 +62,40 @@ function usePanelResize() {
   const [width, setWidth] = useState<number>(readStoredWidth);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragState.current = { startX: e.clientX, startWidth: width };
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragState.current = { startX: e.clientX, startWidth: width };
 
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragState.current) return;
-      const delta = dragState.current.startX - ev.clientX;
-      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
-      setWidth(next);
-    };
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!dragState.current) return;
+        const delta = dragState.current.startX - ev.clientX;
+        const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
+        setWidth(next);
+      };
 
-    const onMouseUp = (ev: MouseEvent) => {
-      if (!dragState.current) return;
-      const delta = dragState.current.startX - ev.clientX;
-      const final = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
-      dragState.current = null;
-      try { localStorage.setItem(STORAGE_KEY, String(final)); } catch { /* ignore */ }
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
+      const onMouseUp = (ev: MouseEvent) => {
+        if (!dragState.current) return;
+        const delta = dragState.current.startX - ev.clientX;
+        const final = Math.min(
+          MAX_WIDTH,
+          Math.max(MIN_WIDTH, dragState.current.startWidth + delta)
+        );
+        dragState.current = null;
+        try {
+          localStorage.setItem(STORAGE_KEY, String(final));
+        } catch {
+          /* ignore */
+        }
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  }, [width]);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    },
+    [width]
+  );
 
   return { width, onMouseDown };
 }
@@ -133,15 +143,15 @@ interface HarmonyRow {
 
 function toHarmonyRow(e: Record<string, unknown>): HarmonyRow {
   return {
-    mn:            typeof e.mn            === 'number'  ? e.mn            : 0,
-    beat:          typeof e.beat          === 'number'  ? e.beat          : 0,
-    volta:         typeof e.volta         === 'number'  ? e.volta         : null,
-    numeral:       typeof e.numeral       === 'string'  ? e.numeral       : null,
-    applied_to:    typeof e.applied_to    === 'string'  ? e.applied_to    : null,
-    local_key:     typeof e.local_key     === 'string'  ? e.local_key     : null,
-    reviewed:      typeof e.reviewed      === 'boolean' ? e.reviewed      : null,
-    bass_pitch:    typeof e.bass_pitch    === 'string'  ? e.bass_pitch    : null,
-    soprano_pitch: typeof e.soprano_pitch === 'string'  ? e.soprano_pitch : null,
+    mn: typeof e.mn === 'number' ? e.mn : 0,
+    beat: typeof e.beat === 'number' ? e.beat : 0,
+    volta: typeof e.volta === 'number' ? e.volta : null,
+    numeral: typeof e.numeral === 'string' ? e.numeral : null,
+    applied_to: typeof e.applied_to === 'string' ? e.applied_to : null,
+    local_key: typeof e.local_key === 'string' ? e.local_key : null,
+    reviewed: typeof e.reviewed === 'boolean' ? e.reviewed : null,
+    bass_pitch: typeof e.bass_pitch === 'string' ? e.bass_pitch : null,
+    soprano_pitch: typeof e.soprano_pitch === 'string' ? e.soprano_pitch : null,
   };
 }
 
@@ -164,10 +174,14 @@ function harmonyPositionLabel(e: HarmonyRow): string {
 
 function statusClass(status: FragmentDetailResponse['status']): string {
   switch (status) {
-    case 'draft':     return styles.statusDraft;
-    case 'submitted': return styles.statusSubmitted;
-    case 'approved':  return styles.statusApproved;
-    case 'rejected':  return styles.statusRejected;
+    case 'draft':
+      return styles.statusDraft;
+    case 'submitted':
+      return styles.statusSubmitted;
+    case 'approved':
+      return styles.statusApproved;
+    case 'rejected':
+      return styles.statusRejected;
   }
 }
 
@@ -222,6 +236,14 @@ export interface FragmentDetailPanelProps {
    * is fetched to resolve property schema names for display.
    */
   initialFragment?: FragmentDetailResponse;
+  /**
+   * Skip the ``getConceptSchemas`` fetch. Set on the anonymous public path
+   * (Component 10 Step 5): the concept-schemas endpoint is editor-only, so
+   * requesting it would 401. Property rows then display their raw schema ids
+   * instead of resolved names — an acceptable degradation on the public
+   * surface until a public concept endpoint exists.
+   */
+  disableSchemaFetch?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,11 +257,11 @@ type DeleteState = 'idle' | 'confirming' | 'deleting';
 // ---------------------------------------------------------------------------
 
 type ReviewPhase =
-  | 'idle'              // Approve + Reject buttons visible
-  | 'rejecting'         // Reject comment textarea visible
-  | 'approving'         // Approve API call in flight
+  | 'idle' // Approve + Reject buttons visible
+  | 'rejecting' // Reject comment textarea visible
+  | 'approving' // Approve API call in flight
   | 'rejecting-sending' // Reject API call in flight
-  | 'gate-failed';      // 422 HARMONY_NOT_REVIEWED received; gate detail shown
+  | 'gate-failed'; // 422 HARMONY_NOT_REVIEWED received; gate detail shown
 
 // ---------------------------------------------------------------------------
 // Component
@@ -255,6 +277,7 @@ export default function FragmentDetailPanel({
   'data-testid': testId,
   standalone = false,
   initialFragment,
+  disableSchemaFetch = false,
 }: FragmentDetailPanelProps) {
   const { t } = useTranslation(['score', 'common']);
   const { width: panelWidth, onMouseDown: onHandleMouseDown } = usePanelResize();
@@ -263,7 +286,7 @@ export default function FragmentDetailPanel({
   // Pre-seed from initialFragment when in standalone mode to avoid a duplicate
   // getFragment fetch (the detail page already has the data).
   const [fragment, setFragment] = useState<FragmentDetailResponse | null>(
-    standalone && initialFragment ? initialFragment : null,
+    standalone && initialFragment ? initialFragment : null
   );
   const [schemas, setSchemas] = useState<PropertySchema[] | null>(null);
   const [loading, setLoading] = useState(!(standalone && initialFragment));
@@ -291,17 +314,30 @@ export default function FragmentDetailPanel({
       setSchemas(null);
       setLoading(true);
 
-      const primary = initialFragment.concept_tags.find(tag => tag.is_primary);
+      // On the public path the concept-schemas endpoint is editor-only, so the
+      // fetch is skipped entirely (it would 401). Property rows fall back to
+      // raw schema ids for their labels.
+      const primary = disableSchemaFetch
+        ? undefined
+        : initialFragment.concept_tags.find((tag) => tag.is_primary);
       if (primary) {
         getConceptSchemas(primary.concept_id)
-          .then(tree => { if (!cancelled) setSchemas(tree.schemas); })
-          .catch(() => { /* fall back to raw schema IDs */ })
-          .finally(() => { if (!cancelled) setLoading(false); });
+          .then((tree) => {
+            if (!cancelled) setSchemas(tree.schemas);
+          })
+          .catch(() => {
+            /* fall back to raw schema IDs */
+          })
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          });
       } else {
         setLoading(false);
       }
 
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
 
     // Panel mode: full fetch.
@@ -323,7 +359,7 @@ export default function FragmentDetailPanel({
         setFragment(frag);
 
         // Fetch schema for property label resolution — non-fatal if it fails.
-        const primary = frag.concept_tags.find(tag => tag.is_primary);
+        const primary = frag.concept_tags.find((tag) => tag.is_primary);
         if (primary) {
           try {
             const tree = await getConceptSchemas(primary.concept_id);
@@ -341,10 +377,12 @@ export default function FragmentDetailPanel({
       }
     })();
 
-    return () => { cancelled = true; };
-  // standalone and initialFragment are intentionally excluded from deps:
-  // we only re-run when fragmentId changes (standalone props don't change).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
+    // standalone and initialFragment are intentionally excluded from deps:
+    // we only re-run when fragmentId changes (standalone props don't change).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragmentId]);
 
   // ── Delete handlers ────────────────────────────────────────────────────────
@@ -383,8 +421,8 @@ export default function FragmentDetailPanel({
     setReviewPhase('approving');
     try {
       const result = await approveFragment(fragment.id);
-      setFragment(prev =>
-        prev ? { ...prev, status: result.status as FragmentDetailResponse['status'] } : prev,
+      setFragment((prev) =>
+        prev ? { ...prev, status: result.status as FragmentDetailResponse['status'] } : prev
       );
       setReviewPhase('idle');
       onReviewDone?.(fragment.id);
@@ -398,7 +436,7 @@ export default function FragmentDetailPanel({
         harmonySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } else {
         setReviewError(
-          err instanceof ApiError ? err.message : t('score:detailPanel.approvalError'),
+          err instanceof ApiError ? err.message : t('score:detailPanel.approvalError')
         );
         setReviewPhase('idle');
       }
@@ -416,15 +454,13 @@ export default function FragmentDetailPanel({
     setReviewPhase('rejecting-sending');
     try {
       const result = await rejectFragment(fragment.id, rejectComment || undefined);
-      setFragment(prev =>
-        prev ? { ...prev, status: result.status as FragmentDetailResponse['status'] } : prev,
+      setFragment((prev) =>
+        prev ? { ...prev, status: result.status as FragmentDetailResponse['status'] } : prev
       );
       setReviewPhase('idle');
       onReviewDone?.(fragment.id);
     } catch (err) {
-      setReviewError(
-        err instanceof ApiError ? err.message : t('score:detailPanel.rejectionError'),
-      );
+      setReviewError(err instanceof ApiError ? err.message : t('score:detailPanel.rejectionError'));
       setReviewPhase('rejecting');
     }
   }, [fragment, rejectComment, onReviewDone, t]);
@@ -442,14 +478,14 @@ export default function FragmentDetailPanel({
 
   // ── Derived display values ─────────────────────────────────────────────────
 
-  const primaryTag = fragment?.concept_tags.find(tag => tag.is_primary);
+  const primaryTag = fragment?.concept_tags.find((tag) => tag.is_primary);
   const summary = fragment && isSummaryV1(fragment.summary) ? fragment.summary : null;
 
   // Map schema id → human name; falls back to the raw id when schemas unavailable.
-  const schemaMap = new Map(schemas?.map(s => [s.id, s.name]) ?? []);
+  const schemaMap = new Map(schemas?.map((s) => [s.id, s.name]) ?? []);
 
-  const harmonyRows = (fragment?.harmony_events ?? []).map(
-    e => toHarmonyRow(e as Record<string, unknown>),
+  const harmonyRows = (fragment?.harmony_events ?? []).map((e) =>
+    toHarmonyRow(e as Record<string, unknown>)
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -465,27 +501,29 @@ export default function FragmentDetailPanel({
     >
       {/* Resize handle — panel mode only */}
       {!standalone && (
-        <div
-          className={styles.resizeHandle}
-          onMouseDown={onHandleMouseDown}
-          aria-hidden="true"
-        />
+        <div className={styles.resizeHandle} onMouseDown={onHandleMouseDown} aria-hidden="true" />
       )}
 
       {/* ── Loading ──────────────────────────────────────────────────────── */}
       {loading && (
         <div className={styles.stateContainer}>
-          <Type variant="label-md" as="p" className={styles.stateText}>{t('common:loading')}</Type>
+          <Type variant="label-md" as="p" className={styles.stateText}>
+            {t('common:loading')}
+          </Type>
         </div>
       )}
 
       {/* ── Load error ───────────────────────────────────────────────────── */}
       {!loading && loadError && (
         <div className={styles.stateContainer}>
-          <Type variant="body-sm" as="p" className={styles.errorText}>{loadError}</Type>
+          <Type variant="body-sm" as="p" className={styles.errorText}>
+            {loadError}
+          </Type>
           {onClose && (
             <button type="button" className={styles.closeInlineButton} onClick={onClose}>
-              <Type variant="label-sm" as="span">{t('common:close')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('common:close')}
+              </Type>
             </button>
           )}
         </div>
@@ -499,7 +537,9 @@ export default function FragmentDetailPanel({
             <header className={styles.header}>
               <div className={styles.headerMeta}>
                 <span className={`${styles.statusBadge} ${statusClass(fragment.status)}`}>
-                  <Type variant="label-sm" as="span">{t(`score:detailPanel.status.${fragment.status}`)}</Type>
+                  <Type variant="label-sm" as="span">
+                    {t(`score:detailPanel.status.${fragment.status}`)}
+                  </Type>
                 </span>
                 {primaryTag && (
                   <Type variant="title" as="h2" className={styles.conceptName}>
@@ -526,14 +566,18 @@ export default function FragmentDetailPanel({
           {/* ── Range (panel mode only — already shown in detail page header) */}
           {!standalone && (
             <section className={styles.section}>
-              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>{t('score:detailPanel.sectionRange')}</Type>
+              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
+                {t('score:detailPanel.sectionRange')}
+              </Type>
               {/* Measure/beat display rule (Component 9 Step 15): beats render
                   only within their measure's context, and not at all when the
                   fragment spans complete measures. */}
               <Type variant="body-sm" as="p" className={styles.rangeText}>
                 {formatFragmentRange(
-                  fragment.bar_start, fragment.bar_end,
-                  fragment.beat_start, fragment.beat_end,
+                  fragment.bar_start,
+                  fragment.bar_end,
+                  fragment.beat_start,
+                  fragment.beat_end
                 )}
               </Type>
               {fragment.repeat_context && (
@@ -547,25 +591,61 @@ export default function FragmentDetailPanel({
           {/* ── Summary ────────────────────────────────────────────────── */}
           {summary && (
             <section className={styles.section}>
-              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>{t('score:detailPanel.sectionSummary')}</Type>
+              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
+                {t('score:detailPanel.sectionSummary')}
+              </Type>
               <dl className={styles.dataList}>
                 <div className={styles.dataRow}>
-                  <dt><Type variant="label-sm" as="span">{t('score:detailPanel.key')}</Type></dt>
-                  <dd><Type variant="body-sm" as="span">{summary.key}</Type></dd>
+                  <dt>
+                    <Type variant="label-sm" as="span">
+                      {t('score:detailPanel.key')}
+                    </Type>
+                  </dt>
+                  <dd>
+                    <Type variant="body-sm" as="span">
+                      {summary.key}
+                    </Type>
+                  </dd>
                 </div>
                 <div className={styles.dataRow}>
-                  <dt><Type variant="label-sm" as="span">{t('score:detailPanel.meter')}</Type></dt>
-                  <dd><Type variant="body-sm" as="span">{summary.meter}</Type></dd>
+                  <dt>
+                    <Type variant="label-sm" as="span">
+                      {t('score:detailPanel.meter')}
+                    </Type>
+                  </dt>
+                  <dd>
+                    <Type variant="body-sm" as="span">
+                      {summary.meter}
+                    </Type>
+                  </dd>
                 </div>
                 {summary.actual_key != null && (
                   <div className={styles.dataRow}>
-                    <dt><Type variant="label-sm" as="span">{t('score:detailPanel.actualKey')}</Type></dt>
+                    <dt>
+                      <Type variant="label-sm" as="span">
+                        {t('score:detailPanel.actualKey')}
+                      </Type>
+                    </dt>
                     <dd>
-                      <Type variant="body-sm" as="span">{summary.actual_key.value}</Type>
-                      {summary.actual_key.reviewed
-                        ? <span className={styles.reviewedMark} aria-label={t('score:detailPanel.reviewedAria')}> ✓</span>
-                        : <span className={styles.unreviewedMark} aria-label={t('score:detailPanel.unreviewedAria')}>{t('score:detailPanel.unreviewedMark')}</span>
-                      }
+                      <Type variant="body-sm" as="span">
+                        {summary.actual_key.value}
+                      </Type>
+                      {summary.actual_key.reviewed ? (
+                        <span
+                          className={styles.reviewedMark}
+                          aria-label={t('score:detailPanel.reviewedAria')}
+                        >
+                          {' '}
+                          ✓
+                        </span>
+                      ) : (
+                        <span
+                          className={styles.unreviewedMark}
+                          aria-label={t('score:detailPanel.unreviewedAria')}
+                        >
+                          {t('score:detailPanel.unreviewedMark')}
+                        </span>
+                      )}
                     </dd>
                   </div>
                 )}
@@ -576,7 +656,9 @@ export default function FragmentDetailPanel({
           {/* ── Properties ─────────────────────────────────────────────── */}
           {summary?.properties && Object.keys(summary.properties).length > 0 && (
             <section className={styles.section}>
-              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>{t('score:detailPanel.sectionProperties')}</Type>
+              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
+                {t('score:detailPanel.sectionProperties')}
+              </Type>
               <dl className={styles.dataList}>
                 {Object.entries(summary.properties).map(([id, val]) => (
                   <div key={id} className={styles.dataRow}>
@@ -589,8 +671,11 @@ export default function FragmentDetailPanel({
                       <Type variant="body-sm" as="span">
                         {Array.isArray(val)
                           ? val.join(', ')
-                          : val === 'true' ? t('common:yes') : val === 'false' ? t('common:no') : val
-                        }
+                          : val === 'true'
+                            ? t('common:yes')
+                            : val === 'false'
+                              ? t('common:no')
+                              : val}
                       </Type>
                     </dd>
                   </div>
@@ -612,15 +697,23 @@ export default function FragmentDetailPanel({
                 {harmonyRows.map((row, i) => (
                   <li key={i} className={styles.harmonyEvent}>
                     <span className={styles.harmonyPosition}>
-                      <Type variant="label-sm" as="span">{harmonyPositionLabel(row)}</Type>
+                      <Type variant="label-sm" as="span">
+                        {harmonyPositionLabel(row)}
+                      </Type>
                     </span>
                     <span className={styles.harmonyChord}>
-                      <Type variant="body-sm" as="span">{harmonyChordLabel(row)}</Type>
+                      <Type variant="body-sm" as="span">
+                        {harmonyChordLabel(row)}
+                      </Type>
                     </span>
                     {row.reviewed !== null && (
                       <span
                         className={row.reviewed ? styles.reviewedMark : styles.unreviewedMark}
-                        aria-label={row.reviewed ? t('score:detailPanel.reviewedAria') : t('score:detailPanel.unreviewedAria')}
+                        aria-label={
+                          row.reviewed
+                            ? t('score:detailPanel.reviewedAria')
+                            : t('score:detailPanel.unreviewedAria')
+                        }
                       >
                         <Type variant="label-sm" as="span">
                           {row.reviewed ? '✓' : '○'}
@@ -643,7 +736,9 @@ export default function FragmentDetailPanel({
           {/* ── Prose annotation ───────────────────────────────────────── */}
           {fragment.prose_annotation && (
             <section className={styles.section}>
-              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>{t('score:detailPanel.sectionCommentary')}</Type>
+              <Type variant="label-sm" as="h3" className={styles.sectionHeading}>
+                {t('score:detailPanel.sectionCommentary')}
+              </Type>
               <Type variant="body-sm" as="p" className={styles.proseText}>
                 {fragment.prose_annotation}
               </Type>
@@ -657,8 +752,8 @@ export default function FragmentDetailPanel({
                 {t('score:detailPanel.subPartsCount', { count: fragment.sub_parts.length })}
               </Type>
               <ol className={styles.subPartsList}>
-                {fragment.sub_parts.map(sp => {
-                  const spPrimary = sp.concept_tags.find(tag => tag.is_primary);
+                {fragment.sub_parts.map((sp) => {
+                  const spPrimary = sp.concept_tags.find((tag) => tag.is_primary);
                   return (
                     <li key={sp.id} className={styles.subPartItem}>
                       <Type variant="label-sm" as="span" className={styles.subPartName}>
@@ -666,10 +761,7 @@ export default function FragmentDetailPanel({
                       </Type>
                       <Type variant="body-sm" as="span" className={styles.subPartRange}>
                         {' '}
-                        {formatFragmentRange(
-                          sp.bar_start, sp.bar_end,
-                          sp.beat_start, sp.beat_end,
-                        )}
+                        {formatFragmentRange(sp.bar_start, sp.bar_end, sp.beat_start, sp.beat_end)}
                       </Type>
                     </li>
                   );
@@ -699,9 +791,11 @@ export default function FragmentDetailPanel({
               )}
               {fragment.harmony_sources.length > 0 && (
                 <ul className={styles.sourcesList}>
-                  {fragment.harmony_sources.map(src => (
+                  {fragment.harmony_sources.map((src) => (
                     <li key={src} className={styles.sourceChip}>
-                      <Type variant="label-sm" as="span">{src}</Type>
+                      <Type variant="label-sm" as="span">
+                        {src}
+                      </Type>
                     </li>
                   ))}
                 </ul>
@@ -727,7 +821,9 @@ export default function FragmentDetailPanel({
                       disabled={reviewPhase === 'approving'}
                     >
                       <Type variant="label-sm" as="span">
-                        {reviewPhase === 'approving' ? t('score:detailPanel.approving') : t('score:detailPanel.approve')}
+                        {reviewPhase === 'approving'
+                          ? t('score:detailPanel.approving')
+                          : t('score:detailPanel.approve')}
                       </Type>
                     </button>
                     <button
@@ -736,7 +832,9 @@ export default function FragmentDetailPanel({
                       onClick={handleRejectClick}
                       disabled={reviewPhase === 'approving'}
                     >
-                      <Type variant="label-sm" as="span">{t('score:detailPanel.reject')}</Type>
+                      <Type variant="label-sm" as="span">
+                        {t('score:detailPanel.reject')}
+                      </Type>
                     </button>
                   </div>
                   {reviewError && (
@@ -753,7 +851,7 @@ export default function FragmentDetailPanel({
                   <textarea
                     className={styles.rejectTextarea}
                     value={rejectComment}
-                    onChange={e => setRejectComment(e.target.value)}
+                    onChange={(e) => setRejectComment(e.target.value)}
                     placeholder={t('score:detailPanel.rejectPlaceholder')}
                     rows={3}
                     disabled={reviewPhase === 'rejecting-sending'}
@@ -772,7 +870,9 @@ export default function FragmentDetailPanel({
                       disabled={reviewPhase === 'rejecting-sending'}
                     >
                       <Type variant="label-sm" as="span">
-                        {reviewPhase === 'rejecting-sending' ? t('score:detailPanel.sending') : t('score:detailPanel.sendRejection')}
+                        {reviewPhase === 'rejecting-sending'
+                          ? t('score:detailPanel.sending')
+                          : t('score:detailPanel.sendRejection')}
                       </Type>
                     </button>
                     <button
@@ -781,7 +881,9 @@ export default function FragmentDetailPanel({
                       onClick={handleRejectCancel}
                       disabled={reviewPhase === 'rejecting-sending'}
                     >
-                      <Type variant="label-sm" as="span">{t('common:cancel')}</Type>
+                      <Type variant="label-sm" as="span">
+                        {t('common:cancel')}
+                      </Type>
                     </button>
                   </div>
                 </>
@@ -790,70 +892,69 @@ export default function FragmentDetailPanel({
           )}
 
           {/* ── Approval gate failure (Step 14, panel only) ───────────────── */}
-          {!standalone && fragment.status === 'submitted' && reviewPhase === 'gate-failed' && gateDetail && (
-            <div className={styles.gateFailed}>
-              <Type variant="label-sm" as="p" className={styles.gateFailedIntro}>
-                {t('score:detailPanel.gateIntro')}
-              </Type>
+          {!standalone &&
+            fragment.status === 'submitted' &&
+            reviewPhase === 'gate-failed' &&
+            gateDetail && (
+              <div className={styles.gateFailed}>
+                <Type variant="label-sm" as="p" className={styles.gateFailedIntro}>
+                  {t('score:detailPanel.gateIntro')}
+                </Type>
 
-              {gateDetail.unreviewed_actual_key && (
-                <div className={styles.gateItem}>
-                  <Type variant="label-sm" as="span" className={styles.gateItemLabel}>
-                    {t('score:detailPanel.gateActualKey')}
-                  </Type>
-                  <Type variant="body-sm" as="span">
-                    {t('score:detailPanel.gateActualKeyDetail', {
-                      value: gateDetail.unreviewed_actual_key.value,
-                    })}
-                  </Type>
-                </div>
-              )}
-
-              {gateDetail.unreviewed_harmony_events &&
-                gateDetail.unreviewed_harmony_events.length > 0 && (
-                  <>
-                    <Type variant="label-sm" as="p" className={styles.gateItemLabel}>
-                      {t('score:detailPanel.gateUnconfirmedEvents')}
+                {gateDetail.unreviewed_actual_key && (
+                  <div className={styles.gateItem}>
+                    <Type variant="label-sm" as="span" className={styles.gateItemLabel}>
+                      {t('score:detailPanel.gateActualKey')}
                     </Type>
-                    <ol className={styles.gateEventList}>
-                      {gateDetail.unreviewed_harmony_events.map((ev, i) => {
-                        const row = toHarmonyRow(ev as Record<string, unknown>);
-                        return (
-                          <li key={i} className={styles.gateEventItem}>
-                            <Type variant="label-sm" as="span" className={styles.harmonyPosition}>
-                              {harmonyPositionLabel(row)}
-                            </Type>
-                            <Type variant="body-sm" as="span">
-                              {harmonyChordLabel(row)}
-                            </Type>
-                          </li>
-                        );
+                    <Type variant="body-sm" as="span">
+                      {t('score:detailPanel.gateActualKeyDetail', {
+                        value: gateDetail.unreviewed_actual_key.value,
                       })}
-                    </ol>
-                    <Type variant="label-sm" as="p" className={styles.gateNote}>
-                      {t('score:detailPanel.gateNote')}
                     </Type>
-                  </>
+                  </div>
                 )}
 
-              <div className={styles.reviewActions}>
-                <button
-                  type="button"
-                  className={styles.approveButton}
-                  onClick={runApprove}
-                >
-                  <Type variant="label-sm" as="span">{t('score:detailPanel.tryAgain')}</Type>
-                </button>
-                <button
-                  type="button"
-                  className={styles.cancelButton}
-                  onClick={handleGateBack}
-                >
-                  <Type variant="label-sm" as="span">{t('common:back')}</Type>
-                </button>
+                {gateDetail.unreviewed_harmony_events &&
+                  gateDetail.unreviewed_harmony_events.length > 0 && (
+                    <>
+                      <Type variant="label-sm" as="p" className={styles.gateItemLabel}>
+                        {t('score:detailPanel.gateUnconfirmedEvents')}
+                      </Type>
+                      <ol className={styles.gateEventList}>
+                        {gateDetail.unreviewed_harmony_events.map((ev, i) => {
+                          const row = toHarmonyRow(ev as Record<string, unknown>);
+                          return (
+                            <li key={i} className={styles.gateEventItem}>
+                              <Type variant="label-sm" as="span" className={styles.harmonyPosition}>
+                                {harmonyPositionLabel(row)}
+                              </Type>
+                              <Type variant="body-sm" as="span">
+                                {harmonyChordLabel(row)}
+                              </Type>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                      <Type variant="label-sm" as="p" className={styles.gateNote}>
+                        {t('score:detailPanel.gateNote')}
+                      </Type>
+                    </>
+                  )}
+
+                <div className={styles.reviewActions}>
+                  <button type="button" className={styles.approveButton} onClick={runApprove}>
+                    <Type variant="label-sm" as="span">
+                      {t('score:detailPanel.tryAgain')}
+                    </Type>
+                  </button>
+                  <button type="button" className={styles.cancelButton} onClick={handleGateBack}>
+                    <Type variant="label-sm" as="span">
+                      {t('common:back')}
+                    </Type>
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* ── Delete confirmation (panel only) ──────────────────────────── */}
           {!standalone && deleteState === 'confirming' && (
@@ -876,14 +977,14 @@ export default function FragmentDetailPanel({
                   className={styles.confirmDeleteButton}
                   onClick={handleDeleteConfirm}
                 >
-                  <Type variant="label-sm" as="span">{t('score:detailPanel.confirmDelete')}</Type>
+                  <Type variant="label-sm" as="span">
+                    {t('score:detailPanel.confirmDelete')}
+                  </Type>
                 </button>
-                <button
-                  type="button"
-                  className={styles.cancelButton}
-                  onClick={handleDeleteCancel}
-                >
-                  <Type variant="label-sm" as="span">{t('common:cancel')}</Type>
+                <button type="button" className={styles.cancelButton} onClick={handleDeleteCancel}>
+                  <Type variant="label-sm" as="span">
+                    {t('common:cancel')}
+                  </Type>
                 </button>
               </div>
             </div>
@@ -891,7 +992,9 @@ export default function FragmentDetailPanel({
 
           {!standalone && deleteState === 'deleting' && (
             <div className={styles.deleteConfirm}>
-              <Type variant="label-sm" as="p" className={styles.stateText}>{t('score:detailPanel.deleting')}</Type>
+              <Type variant="label-sm" as="p" className={styles.stateText}>
+                {t('score:detailPanel.deleting')}
+              </Type>
             </div>
           )}
 
@@ -903,14 +1006,14 @@ export default function FragmentDetailPanel({
                 className={styles.editButton}
                 onClick={() => onEdit?.(fragment)}
               >
-                <Type variant="label-sm" as="span">{t('common:edit')}</Type>
+                <Type variant="label-sm" as="span">
+                  {t('common:edit')}
+                </Type>
               </button>
-              <button
-                type="button"
-                className={styles.deleteButton}
-                onClick={handleDeleteClick}
-              >
-                <Type variant="label-sm" as="span">{t('common:delete')}</Type>
+              <button type="button" className={styles.deleteButton} onClick={handleDeleteClick}>
+                <Type variant="label-sm" as="span">
+                  {t('common:delete')}
+                </Type>
               </button>
             </footer>
           )}

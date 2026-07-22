@@ -30,6 +30,7 @@ import { ApiError } from '../../services/api';
 import * as conceptApi from '../../services/conceptApi';
 import * as fragmentApi from '../../services/fragmentApi';
 import type { FragmentDetailResponse } from '../../services/fragmentApi';
+import * as publicApi from '../../services/publicApi';
 import * as verovioService from '../../services/verovio';
 import * as Tone from 'tone';
 import FragmentDetail from '../FragmentDetail';
@@ -40,6 +41,7 @@ import FragmentDetail from '../FragmentDetail';
 
 vi.mock('../../services/fragmentApi');
 vi.mock('../../services/conceptApi');
+vi.mock('../../services/publicApi');
 
 vi.mock('../../services/verovio', () => ({
   getVerovioToolkit: vi.fn(),
@@ -167,6 +169,25 @@ function renderDetail(fragmentId = 'frag-001') {
     <MemoryRouter initialEntries={[`/fragments/${fragmentId}`]}>
       <Routes>
         <Route path="/fragments/:fragmentId" element={<FragmentDetail />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+/**
+ * Render the same view on the anonymous public route: `loadFragment` injected
+ * with the public API client and `publicMode` set (Component 10 Step 5).
+ */
+function renderPublicDetail(fragmentId = 'frag-001') {
+  return render(
+    <MemoryRouter initialEntries={[`/public/fragments/${fragmentId}`]}>
+      <Routes>
+        <Route
+          path="/public/fragments/:fragmentId"
+          element={
+            <FragmentDetail loadFragment={publicApi.getPublicFragment} publicMode />
+          }
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -678,5 +699,74 @@ describe('FragmentDetail — sub-part bracket overlay', () => {
     expect(
       document.querySelector('[aria-hidden="true"]:not([data-testid="playback-caret"])'),
     ).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Public mode (Component 10 Step 5) — anonymous /public/fragments/:id
+// ---------------------------------------------------------------------------
+
+describe('FragmentDetail — public mode', () => {
+  it('fetches through the injected public loader, not the editor getFragment', async () => {
+    const fragment = makeFragmentDetail();
+    vi.mocked(publicApi.getPublicFragment).mockResolvedValue(fragment);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<mei>test</mei>'),
+    } as Response);
+    vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+    );
+    vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    renderPublicDetail('frag-public-1');
+
+    await waitFor(() => {
+      expect(vi.mocked(publicApi.getPublicFragment)).toHaveBeenCalledWith('frag-public-1');
+    });
+    expect(vi.mocked(fragmentApi.getFragment)).not.toHaveBeenCalled();
+  });
+
+  it('hides the status badge on the public path', async () => {
+    const fragment = makeFragmentDetail({ status: 'approved' });
+    vi.mocked(publicApi.getPublicFragment).mockResolvedValue(fragment);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<mei>test</mei>'),
+    } as Response);
+    vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+    );
+    vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    renderPublicDetail();
+
+    // Concept identity still renders…
+    await screen.findByText('PAC');
+    // …but the (always-approved) status badge is not shown on the public path.
+    expect(
+      document.querySelector('[data-status="approved"]'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not fetch concept schemas on the public path (editor-only endpoint)', async () => {
+    const fragment = makeFragmentDetail();
+    vi.mocked(publicApi.getPublicFragment).mockResolvedValue(fragment);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('<mei>test</mei>'),
+    } as Response);
+    vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+    );
+    vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
+    vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
+
+    renderPublicDetail();
+
+    await screen.findByTestId('fragment-detail-panel');
+    expect(vi.mocked(conceptApi.getConceptSchemas)).not.toHaveBeenCalled();
   });
 });

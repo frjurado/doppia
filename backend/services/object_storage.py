@@ -7,6 +7,14 @@ The client is environment-agnostic: the same code runs against MinIO locally
 and Cloudflare R2 in staging/production.  All configuration is supplied via
 environment variables (ADR-002).  No application code branches on environment.
 
+The client targets the **private artifact bucket** only (MEI, incipit SVGs,
+fragment-preview SVGs) and always returns presigned URLs (security-model.md
+§ 4).  Piano soundfonts — the one artifact class that must be publicly
+fetchable, because Tone.js constructs sample filenames internally and cannot
+carry signed query parameters — live in a separate public bucket that the
+frontend addresses directly via ``VITE_SOUNDFONT_BASE_URL``; the backend never
+reads or writes it (see deployment.md § "Cloudflare R2").
+
 Key convention (ADR-002, ADR-008):
 
 - Normalized MEI:  ``{composer_slug}/{corpus_slug}/{work_slug}/{movement_slug}.mei``
@@ -30,7 +38,6 @@ Example usage::
 from __future__ import annotations
 
 import os
-from datetime import datetime
 
 import aioboto3
 from botocore.config import Config as BotocoreConfig
@@ -43,29 +50,6 @@ CLIENT_FACING_URL_TTL: int = 3600  # 1 hour
 # Backend-to-backend URLs (music21 processing, Verovio server-side rendering)
 # use 15 minutes — consumed immediately in a background task.
 BACKEND_PROCESSING_TTL: int = 900  # 15 minutes
-
-
-def _cache_bust_token(version: datetime) -> str:
-    """Return a compact, monotonic cache-busting token for *version*.
-
-    Public R2 object URLs (the ``public_url`` branch of
-    :meth:`StorageClient.signed_url`) are stable per object key and are served
-    through Cloudflare's edge cache on the ``r2.dev`` subdomain, which is not
-    purgeable on demand.  Overwriting an object (re-ingest, incipit/preview
-    regeneration) therefore leaves the old bytes cached under the same URL.
-    Appending ``?v=<token>`` derived from the artifact's last-write timestamp
-    yields a fresh cache key whenever the artifact changes, so a stale copy can
-    never shadow a newer one.
-
-    Args:
-        version: The artifact's last-write timestamp (e.g. ``movement.updated_at``
-            for MEI, ``incipit_generated_at`` / ``preview_generated_at`` for
-            generated SVGs).  Microsecond resolution avoids same-second collisions.
-
-    Returns:
-        A URL-safe integer string (epoch microseconds).
-    """
-    return str(int(version.timestamp() * 1_000_000))
 
 
 class StorageClient:
@@ -83,12 +67,6 @@ class StorageClient:
         bucket_name: Name of the target S3 bucket.
         access_key_id: AWS-style access key ID.
         secret_access_key: AWS-style secret access key.
-        public_url: Optional base URL for public bucket access
-            (e.g. ``https://pub-<hash>.r2.dev`` for Cloudflare R2 public
-            buckets).  When set, :meth:`signed_url` returns a plain public
-            URL instead of a presigned one — no credentials in the URL and
-            no expiry.  Leave ``None`` for local MinIO where no public
-            endpoint exists.
     """
 
     def __init__(
@@ -97,13 +75,11 @@ class StorageClient:
         bucket_name: str,
         access_key_id: str,
         secret_access_key: str,
-        public_url: str | None = None,
     ) -> None:
         self._endpoint_url = endpoint_url
         self._bucket_name = bucket_name
         self._access_key_id = access_key_id
         self._secret_access_key = secret_access_key
-        self._public_url = public_url
         self._session = aioboto3.Session()
 
     # ------------------------------------------------------------------
@@ -201,42 +177,24 @@ class StorageClient:
         self,
         key: str,
         expires_in: int = CLIENT_FACING_URL_TTL,
-        version: datetime | None = None,
     ) -> str:
-        """Return a URL for reading a stored file.
+        """Return a presigned GET URL for reading a stored file.
 
-        When the client is configured with a ``public_url`` (Cloudflare R2
-        public bucket), returns a plain public URL — no credentials, no expiry.
-        The ``expires_in`` argument is ignored in that case.  For mutable
-        artifacts (overwritten on re-ingest or regeneration), pass *version* so
-        a cache-busting ``?v=<token>`` is appended: the ``r2.dev`` edge cache
-        keys on the full URL including query string, so a changed token defeats
-        a stale cached copy (see :func:`_cache_bust_token`).
-
-        Without a ``public_url`` (local MinIO), generates a pre-signed GET
-        URL valid for *expires_in* seconds.  *version* is ignored in that case:
-        a presigned URL is already unique per call, and an unsigned extra query
-        parameter would invalidate the signature.  Nothing persistent should
-        store the returned URL; store the object key and call this method at
-        request time (ADR-002).
+        The URL is valid for *expires_in* seconds and unique per call (the
+        signature covers the request time), so no cache-busting parameter is
+        needed for mutable artifacts.  Nothing persistent should store the
+        returned URL; store the object key and call this method at request
+        time (ADR-002).
 
         Args:
             key: S3 object key of the file to expose.
             expires_in: Presigned URL lifetime in seconds (default:
-                ``CLIENT_FACING_URL_TTL``, 1 hour).  Ignored when
-                ``public_url`` is configured.
-            version: Optional last-write timestamp of the artifact, used to
-                derive a cache-busting query parameter on the public-URL branch.
-                Ignored on the presigned branch.
+                ``CLIENT_FACING_URL_TTL``, 1 hour; use
+                ``BACKEND_PROCESSING_TTL`` for backend-to-backend access).
 
         Returns:
             A URL string suitable for direct browser access.
         """
-        if self._public_url is not None:
-            url = f"{self._public_url}/{key}"
-            if version is not None:
-                url = f"{url}?v={_cache_bust_token(version)}"
-            return url
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             return await s3.generate_presigned_url(
                 "get_object",
@@ -316,5 +274,4 @@ def make_storage_client() -> StorageClient:
         bucket_name=os.environ["R2_BUCKET_NAME"],
         access_key_id=os.environ["R2_ACCESS_KEY_ID"],
         secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
-        public_url=os.environ.get("R2_PUBLIC_URL"),
     )

@@ -1,8 +1,11 @@
 # Phase 2 — Non-AI User Features: Design & Roadmap
 
-**Status:** planning draft, 2026-07-15. Component order, the cross-cutting
-decisions, and the exercise design (Component 15 →
-[`component-15-exercises.md`](component-15-exercises.md)) are agreed.
+**Status:** agreed 2026-07-15; adopted as the Phase 2 roadmap. Component
+order, the cross-cutting decisions, and the exercise design (Component 15 →
+[`component-15-exercises.md`](component-15-exercises.md)) are settled;
+per-component implementation plans (starting with
+[`component-10-foundations-public-read-path.md`](component-10-foundations-public-read-path.md))
+are drafted as each component begins.
 
 ## Purpose
 
@@ -101,15 +104,17 @@ In dependency order:
 
 1. **Signed-URL end state — option (b).** Soundfonts-only public bucket;
    MEI/incipit/preview via presigned URLs. First task; prerequisite for
-   ADR-009 enforcement. (`security-model.md` § 4)
+   ADR-009 enforcement. (`security-model.md` § 4) — ✅ landed `ff5e1f1`
+   (2026-07-20)
 2. **Public endpoints + ADR-009 enforcement.** Unauthenticated
    `approved`-only browse and fragment detail; ABC-corpus exclusion check.
    The licence serialiser already exists (Component 8).
 3. **PyJWT migration** (replace python-jose), then flip the CI audit job
-   from report-only to blocking.
+   from report-only to blocking. — ✅ landed `7080ee4` (2026-07-21)
 4. **Token storage + full session UX.** Revisit ADR-016's localStorage
    exception: HttpOnly cookie vs full Supabase JS client (brings token
    refresh). Must land before public registration (Component 12).
+   — ✅ landed `f40fba5` (2026-07-21; HttpOnly cookie, ADR-035)
 5. **Rate limiting.** `slowapi` + Redis; starting limits already tabled in
    `security-model.md` § 2.
 6. **Security headers.** CSP (drafted; `worker-src blob:` for Verovio WASM),

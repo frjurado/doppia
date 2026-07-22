@@ -14,7 +14,8 @@ See docs/roadmap/component-1-mei-corpus-ingestion.md §Step 7.
 from __future__ import annotations
 
 from api.dependencies import get_storage, require_role
-from fastapi import APIRouter, Depends, File, UploadFile
+from api.rate_limiting import UPLOAD, limiter
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from models.base import get_db
 from models.ingestion import IngestionReport
 from services.ingestion import ingest_corpus
@@ -32,7 +33,9 @@ router = APIRouter(prefix="/composers", tags=["Corpora"])
     summary="Upload a corpus ZIP",
     response_description="Ingestion report listing accepted and rejected movements.",
 )
+@limiter.limit(UPLOAD)
 async def upload_corpus(
+    request: Request,
     composer_slug: str,
     corpus_slug: str,
     archive: UploadFile = File(
@@ -50,6 +53,7 @@ async def upload_corpus(
     coherence fails, or every movement is invalid.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         composer_slug: Composer identifier from the URL path.
         corpus_slug: Corpus identifier from the URL path.
         archive: Multipart file field containing the corpus ZIP.

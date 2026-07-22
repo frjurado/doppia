@@ -47,7 +47,13 @@ import PlaybackCaret from '../components/score/PlaybackCaret';
 import { buildGhosts } from '../components/score/ghosts';
 import type { GhostLayer } from '../components/score/ghosts';
 import { HarmonyOverlay } from '../components/score/harmonyOverlay';
-import { applyCaretPlacement, buildCaretTrack, CARET_INTERPOLATE, hideCaretEl, resolveCaret } from '../components/score/caret';
+import {
+  applyCaretPlacement,
+  buildCaretTrack,
+  CARET_INTERPOLATE,
+  hideCaretEl,
+  resolveCaret,
+} from '../components/score/caret';
 import type { CaretTrack } from '../components/score/caret';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
@@ -141,22 +147,20 @@ const EMPTY_GEOMETRY: FragmentGeometry = { measures: new Map(), notes: [] };
  * tagging tool's overlay (analysisApi.getHarmonyEvents), so reusing the
  * already-fetched slice avoids a second round-trip in the read-only viewer.
  */
-function toOverlayHarmonyEvents(
-  raw: Record<string, unknown>[],
-): HarmonyEventOut[] {
+function toOverlayHarmonyEvents(raw: Record<string, unknown>[]): HarmonyEventOut[] {
   return raw.map((e) => ({
-    mn:         typeof e['mn']         === 'number'  ? (e['mn'] as number)         : 0,
-    beat:       typeof e['beat']       === 'number'  ? (e['beat'] as number)       : 0,
-    volta:      typeof e['volta']      === 'number'  ? (e['volta'] as number)      : null,
-    numeral:    typeof e['numeral']    === 'string'  ? (e['numeral'] as string)    : null,
-    applied_to: typeof e['applied_to'] === 'string'  ? (e['applied_to'] as string) : null,
-    local_key:  typeof e['local_key']  === 'string'  ? (e['local_key'] as string)  : null,
+    mn: typeof e['mn'] === 'number' ? (e['mn'] as number) : 0,
+    beat: typeof e['beat'] === 'number' ? (e['beat'] as number) : 0,
+    volta: typeof e['volta'] === 'number' ? (e['volta'] as number) : null,
+    numeral: typeof e['numeral'] === 'string' ? (e['numeral'] as string) : null,
+    applied_to: typeof e['applied_to'] === 'string' ? (e['applied_to'] as string) : null,
+    local_key: typeof e['local_key'] === 'string' ? (e['local_key'] as string) : null,
     extensions: Array.isArray(e['extensions'])
       ? (e['extensions'] as unknown[]).filter((x): x is string => typeof x === 'string')
       : [],
-    source:     typeof e['source']     === 'string'  ? (e['source'] as string)     : '',
-    auto:       typeof e['auto']       === 'boolean' ? (e['auto'] as boolean)      : false,
-    reviewed:   typeof e['reviewed']   === 'boolean' ? (e['reviewed'] as boolean)  : false,
+    source: typeof e['source'] === 'string' ? (e['source'] as string) : '',
+    auto: typeof e['auto'] === 'boolean' ? (e['auto'] as boolean) : false,
+    reviewed: typeof e['reviewed'] === 'boolean' ? (e['reviewed'] as boolean) : false,
   }));
 }
 
@@ -182,7 +186,7 @@ function toOverlayHarmonyEvents(
 function readFragmentGeometry(
   container: HTMLElement,
   meiText: string,
-  layer: GhostLayer,
+  layer: GhostLayer
 ): FragmentGeometry {
   const measures = new Map<number, MeasureRect>();
   const notes: NoteEdge[] = [];
@@ -192,8 +196,7 @@ function readFragmentGeometry(
 
     // xml:id may be namespace-qualified in some encodings.
     const getId = (el: Element): string | null =>
-      el.getAttribute('xml:id') ??
-      el.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
+      el.getAttribute('xml:id') ?? el.getAttributeNS('http://www.w3.org/XML/1998/namespace', 'id');
 
     const meiMeasures = meiDoc.getElementsByTagName('measure');
     for (let mi = 0; mi < meiMeasures.length; mi++) {
@@ -215,11 +218,11 @@ function readFragmentGeometry(
       const sysEl = svgEl.closest('g.system') ?? svgEl;
       const sr = sysEl.getBoundingClientRect();
       measures.set(barN, {
-        left:         r.left   - cr.left,
-        right:        r.right  - cr.left,
-        top:          r.top    - cr.top,
-        bottom:       r.bottom - cr.top,
-        systemTop:    sr.top    - cr.top,
+        left: r.left - cr.left,
+        right: r.right - cr.left,
+        top: r.top - cr.top,
+        bottom: r.bottom - cr.top,
+        systemTop: sr.top - cr.top,
         systemBottom: sr.bottom - cr.top,
       });
     }
@@ -269,7 +272,7 @@ function computeBracketSegments(
   barStart: number,
   barEnd: number,
   beatStart: number | null,
-  beatEnd: number | null,
+  beatEnd: number | null
 ): BracketSegment[] {
   const EPS = 1e-6;
 
@@ -286,8 +289,8 @@ function computeBracketSegments(
         systemBottom: r.systemBottom,
       });
     } else {
-      seg.left         = Math.min(seg.left, r.left);
-      seg.right        = Math.max(seg.right, r.right);
+      seg.left = Math.min(seg.left, r.left);
+      seg.right = Math.max(seg.right, r.right);
       seg.systemBottom = Math.max(seg.systemBottom, r.systemBottom);
     }
   }
@@ -339,8 +342,27 @@ function computeBracketSegments(
  * runs after the score container commits) and re-measured by a debounced
  * ResizeObserver, which triggers a re-render at the new width — the same
  * approach as ScoreViewer's container-width measurement.
+ *
+ * Public mode (Component 10 Step 5): the same view serves the anonymous
+ * `/public/fragments/:id` route. `loadFragment` is injected with the public
+ * API client and `publicMode` hides the (always-`approved`) status badge and
+ * skips the editor-only concept-schema fetch in the embedded record panel.
  */
-export default function FragmentDetail() {
+export interface FragmentDetailProps {
+  /**
+   * Fragment fetch function. Defaults to the editor `getFragment`; the public
+   * route injects `getPublicFragment` so the anonymous surface hits
+   * `/api/v1/public/fragments/{id}`.
+   */
+  loadFragment?: (id: string) => Promise<FragmentDetailResponse>;
+  /** When true, render for the anonymous public path (no editor affordances). */
+  publicMode?: boolean;
+}
+
+export default function FragmentDetail({
+  loadFragment = getFragment,
+  publicMode = false,
+}: FragmentDetailProps = {}) {
   const { t } = useTranslation(['fragments', 'common']);
   usePageTitle(t('fragments:detail.pageTitle'));
   const { fragmentId } = useParams<{ fragmentId: string }>();
@@ -354,10 +376,15 @@ export default function FragmentDetail() {
   useEffect(() => {
     if (!fragmentId) return;
     setIsLoading(true);
-    getFragment(fragmentId)
+    loadFragment(fragmentId)
       .then(setFragment)
-      .catch((err) => { if (err instanceof ApiError) setError(err); })
+      .catch((err) => {
+        if (err instanceof ApiError) setError(err);
+      })
       .finally(() => setIsLoading(false));
+    // loadFragment is stable (module function or route-level constant); only the
+    // fragmentId drives a refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragmentId]);
 
   // ── Render state ────────────────────────────────────────────────────────
@@ -381,32 +408,34 @@ export default function FragmentDetail() {
   const [widthEpoch, setWidthEpoch] = useState(0);
 
   // ── Stable refs ─────────────────────────────────────────────────────────
-  const tkRef        = useRef<Awaited<ReturnType<typeof getVerovioToolkit>> | null>(null);
-  const meiTextRef   = useRef<string | null>(null);
+  const tkRef = useRef<Awaited<ReturnType<typeof getVerovioToolkit>> | null>(null);
+  const meiTextRef = useRef<string | null>(null);
   // Tracks which fragment's MEI is currently cached, so scale changes skip
   // the fetch and re-render from meiTextRef.current instead.
-  const lastFragIdRef          = useRef<string | null>(null);
-  const highlightScheduleRef   = useRef<Array<{ timeMs: number; ids: string[] }>>([]);
+  const lastFragIdRef = useRef<string | null>(null);
+  const highlightScheduleRef = useRef<Array<{ timeMs: number; ids: string[] }>>([]);
   // Playback caret (Step 19): overlay element + caret track, driven imperatively.
-  const caretElRef             = useRef<HTMLDivElement | null>(null);
-  const caretTrackRef          = useRef<CaretTrack | null>(null);
-  const noteInfoMapRef         = useRef<Map<string, NoteInfo>>(new Map());
+  const caretElRef = useRef<HTMLDivElement | null>(null);
+  const caretTrackRef = useRef<CaretTrack | null>(null);
+  const noteInfoMapRef = useRef<Map<string, NoteInfo>>(new Map());
   // Grace-note xml:ids (Component 9 E2) — excluded from the caret track so an
   // ornament's onset doesn't make the caret jump ahead and back.
-  const graceIdsRef            = useRef<Set<string>>(new Set());
+  const graceIdsRef = useRef<Set<string>>(new Set());
   // Ghost layer + harmony overlay (Step 23): the layer is built once per render
   // (shared with bracket geometry); the overlay is mounted/torn down by the
   // harmony-label effect below.
-  const ghostLayerRef          = useRef<GhostLayer | null>(null);
-  const harmonyOverlayRef      = useRef<HarmonyOverlay | null>(null);
-  const scoreContainerRef      = useRef<HTMLDivElement | null>(null);
-  const currentBarRef          = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
-  const beatDurationMsRef      = useRef<number>(500);
-  const pageWidthRef           = useRef<number>(FALLBACK_PAGE_WIDTH);
+  const ghostLayerRef = useRef<GhostLayer | null>(null);
+  const harmonyOverlayRef = useRef<HarmonyOverlay | null>(null);
+  const scoreContainerRef = useRef<HTMLDivElement | null>(null);
+  const currentBarRef = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
+  const beatDurationMsRef = useRef<number>(500);
+  const pageWidthRef = useRef<number>(FALLBACK_PAGE_WIDTH);
   // Mirror scale into a ref so the async render function always sees the
   // value that was current when the effect triggered (no stale closure).
   const scaleRef = useRef<ScalePreset>(DEFAULT_SCALE);
-  useEffect(() => { scaleRef.current = scale; }, [scale]);
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
 
   // ── MEI fetch + Verovio render ──────────────────────────────────────────
   useEffect(() => {
@@ -437,7 +466,7 @@ export default function FragmentDetail() {
         ]);
         if (cancelled) return;
         meiTextRef.current = meiText;
-        tkRef.current      = tk;
+        tkRef.current = tk;
         lastFragIdRef.current = fragment!.id;
         noteInfoMapRef.current = buildNoteInfoMap(meiText);
         graceIdsRef.current = collectGraceNoteIds(meiText);
@@ -445,17 +474,13 @@ export default function FragmentDetail() {
 
       // breaks:'smart' at the measured container width — system breaks are
       // preferable to horizontal scrolling in the detail view (Step 15).
-      const svg = await renderFragment(
-        tk, meiText,
-        fragment!.mc_start, fragment!.mc_end,
-        {
-          scale: scaleRef.current,
-          transpose: '',
-          font: 'Bravura',
-          pageWidth: pageWidthRef.current,
-          breaks: 'smart',
-        },
-      );
+      const svg = await renderFragment(tk, meiText, fragment!.mc_start, fragment!.mc_end, {
+        scale: scaleRef.current,
+        transpose: '',
+        font: 'Bravura',
+        pageWidth: pageWidthRef.current,
+        breaks: 'smart',
+      });
       if (cancelled) return;
       setSvgString(svg);
 
@@ -468,7 +493,7 @@ export default function FragmentDetail() {
       // returns a fragment-relative highlight schedule plus the time window.
       const playback = buildFragmentPlayback(tk, meiText!, fragment!.mc_start, fragment!.mc_end);
       highlightScheduleRef.current = playback.schedule;
-      const tempo     = getTimemapTempo(tk);
+      const tempo = getTimemapTempo(tk);
       const meterUnit = parseMeiMeterUnit(meiText!);
       beatDurationMsRef.current = (60_000 / tempo) * (4 / meterUnit);
 
@@ -488,11 +513,13 @@ export default function FragmentDetail() {
       }
     });
 
-    return () => { cancelled = true; };
-  // fragment is accessed inside run() via the closure, but we only want to
-  // re-run when these specific fields change — using optional chaining on
-  // individual fields rather than fragment object identity is intentional.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
+    // fragment is accessed inside run() via the closure, but we only want to
+    // re-run when these specific fields change — using optional chaining on
+    // individual fields rather than fragment object identity is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragment?.id, fragment?.mei_url, fragment?.mc_start, fragment?.mc_end, scale, widthEpoch]);
 
   // ── Container resize → re-render (debounced, >4px threshold) ───────────
@@ -515,8 +542,8 @@ export default function FragmentDetail() {
       if (resizeTimer) clearTimeout(resizeTimer);
       observer.disconnect();
     };
-  // Re-attach when a fragment (and therefore the container) appears.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Re-attach when a fragment (and therefore the container) appears.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragment?.id]);
 
   // ── Bracket geometry + ghost layer ──────────────────────────────────────
@@ -534,7 +561,7 @@ export default function FragmentDetail() {
       return;
     }
     const container = scoreContainerRef.current;
-    const meiText   = meiTextRef.current;
+    const meiText = meiTextRef.current;
     const raf = requestAnimationFrame(() => {
       ghostLayerRef.current?.destroy();
       const layer = buildGhosts(container, meiText);
@@ -608,11 +635,15 @@ export default function FragmentDetail() {
 
     // Update transport bar display from MEI @n / @tstamp (not Tone.js linear bar).
     if (schedule.length > 0) {
-      let lo = 0, hi = schedule.length - 1, idx = -1;
+      let lo = 0,
+        hi = schedule.length - 1,
+        idx = -1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
-        if (schedule[mid].timeMs <= timeMs) { idx = mid; lo = mid + 1; }
-        else hi = mid - 1;
+        if (schedule[mid].timeMs <= timeMs) {
+          idx = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
       }
       const firstId = idx >= 0 ? schedule[idx].ids[0] : undefined;
       const info = firstId ? noteInfoMapRef.current.get(firstId) : undefined;
@@ -624,9 +655,10 @@ export default function FragmentDetail() {
             currentBarRef.current = { barN: info.barN, startMs: timeMs };
           }
           const elapsed = timeMs - currentBarRef.current.startMs;
-          const beat = beatDurationMsRef.current > 0
-            ? Math.max(1, Math.floor(elapsed / beatDurationMsRef.current) + 1)
-            : 1;
+          const beat =
+            beatDurationMsRef.current > 0
+              ? Math.max(1, Math.floor(elapsed / beatDurationMsRef.current) + 1)
+              : 1;
           setDisplayPosition({ bar: info.barN, beat });
         }
       }
@@ -640,9 +672,11 @@ export default function FragmentDetail() {
   }, []);
 
   const {
-    status:   playbackStatus,
+    status: playbackStatus,
     position: playbackPosition,
-    play, pause, stop,
+    play,
+    pause,
+    stop,
   } = useMidiPlayback(midiBase64, handlePositionUpdate, {
     window: fragmentWindow,
     onEnded: hideCaret,
@@ -667,8 +701,8 @@ export default function FragmentDetail() {
   }, [playbackPosition]);
 
   // ── Derived ─────────────────────────────────────────────────────────────
-  const primaryTag    = fragment?.concept_tags.find((tag) => tag.is_primary) ?? null;
-  const conceptLabel  = primaryTag?.alias ?? primaryTag?.name ?? '—';
+  const primaryTag = fragment?.concept_tags.find((tag) => tag.is_primary) ?? null;
+  const conceptLabel = primaryTag?.alias ?? primaryTag?.name ?? '—';
   const secondaryTags = fragment?.concept_tags.filter((tag) => !tag.is_primary) ?? [];
 
   // Header groups (Step 15): work/composer and movement as separate lines.
@@ -681,8 +715,12 @@ export default function FragmentDetail() {
           // once, not twice (Component 9 J2).
           stripEmbeddedCatalogue(fragment.work_title, fragment.work_catalogue_number),
           fragment.work_catalogue_number ? `(${fragment.work_catalogue_number})` : null,
-        ].filter(Boolean).join(' '),
-      ].filter(Boolean).join(' — ') || null
+        ]
+          .filter(Boolean)
+          .join(' '),
+      ]
+        .filter(Boolean)
+        .join(' — ') || null
     : null;
 
   const movementLine = fragment
@@ -691,37 +729,40 @@ export default function FragmentDetail() {
           ? t('fragments:movementShort', { number: fragment.movement_number })
           : null,
         fragment.movement_title,
-      ].filter(Boolean).join(' — ') || null
+      ]
+        .filter(Boolean)
+        .join(' — ') || null
     : null;
 
   // Main fragment bracket — always shown above the score (Step 15): the
   // rendered excerpt (whole measures) is not necessarily the significant
   // fragment (which may be beat-precise).
-  const mainSegments = fragment && geometry.measures.size > 0
-    ? computeBracketSegments(
-        geometry,
-        fragment.bar_start, fragment.bar_end,
-        fragment.beat_start, fragment.beat_end,
-      )
-    : [];
+  const mainSegments =
+    fragment && geometry.measures.size > 0
+      ? computeBracketSegments(
+          geometry,
+          fragment.bar_start,
+          fragment.bar_end,
+          fragment.beat_start,
+          fragment.beat_end
+        )
+      : [];
 
   // ── JSX ─────────────────────────────────────────────────────────────────
   return (
     <Surface layer="base" className={styles.page}>
       {/* Nav strip */}
       <Surface layer="container-lowest" className={styles.pageNav}>
-        <button
-          type="button"
-          className={styles.navBack}
-          onClick={() => navigate(-1)}
-        >
+        <button type="button" className={styles.navBack} onClick={() => navigate(-1)}>
           <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
             {t('fragments:detail.backToBrowser')}
           </Type>
         </button>
-        {fragment && (
+        {fragment && !publicMode && (
           <span className={styles.statusBadge} data-status={fragment.status}>
-            <Type variant="label-sm" as="span">{t(`common:status.${fragment.status}`)}</Type>
+            <Type variant="label-sm" as="span">
+              {t(`common:status.${fragment.status}`)}
+            </Type>
           </span>
         )}
       </Surface>
@@ -745,7 +786,6 @@ export default function FragmentDetail() {
       {fragment && (
         <div className={styles.body}>
           <div className={styles.bodyInner}>
-
             {/* ── Header: concept identity / work / location / source+licence ─ */}
             <Surface layer="container-lowest" className={styles.headerSection}>
               <div className={styles.headerIdentity}>
@@ -771,8 +811,10 @@ export default function FragmentDetail() {
               <div className={styles.headerMeta}>
                 <Type variant="label-md" as="p" className={styles.locationLine}>
                   {formatFragmentRange(
-                    fragment.bar_start, fragment.bar_end,
-                    fragment.beat_start, fragment.beat_end,
+                    fragment.bar_start,
+                    fragment.bar_end,
+                    fragment.beat_start,
+                    fragment.beat_end
                   )}
                 </Type>
                 {(fragment.data_licence || fragment.harmony_sources.length > 0) && (
@@ -795,7 +837,9 @@ export default function FragmentDetail() {
                     )}
                     {fragment.harmony_sources.length > 0 && (
                       <Type variant="label-sm" as="p" className={styles.sourceLine}>
-                        {t('fragments:detail.sources', { list: fragment.harmony_sources.join(', ') })}
+                        {t('fragments:detail.sources', {
+                          list: fragment.harmony_sources.join(', '),
+                        })}
                       </Type>
                     )}
                   </div>
@@ -805,20 +849,23 @@ export default function FragmentDetail() {
 
             {/* ── Notation area ───────────────────────────────────────────── */}
             <Surface layer="container-low" className={styles.notationSection}>
-
               {/* Controls: harmony-label toggle (left) + staff-size (right) */}
               <div className={styles.scoreControls}>
                 {fragment.harmony_events.length > 0 && (
                   <div className={styles.harmonyToggleGroup}>
                     <button
                       type="button"
-                      className={showHarmony
-                        ? `${styles.scaleBtn} ${styles.scaleBtnActive}`
-                        : styles.scaleBtn}
+                      className={
+                        showHarmony
+                          ? `${styles.scaleBtn} ${styles.scaleBtnActive}`
+                          : styles.scaleBtn
+                      }
                       aria-pressed={showHarmony}
                       onClick={() => setShowHarmony((v) => !v)}
                     >
-                      <Type variant="label-sm" as="span">{t('fragments:detail.harmonyToggle')}</Type>
+                      <Type variant="label-sm" as="span">
+                        {t('fragments:detail.harmonyToggle')}
+                      </Type>
                     </button>
                   </div>
                 )}
@@ -827,13 +874,17 @@ export default function FragmentDetail() {
                     <button
                       key={s}
                       type="button"
-                      className={scale === s
-                        ? `${styles.scaleBtn} ${styles.scaleBtnActive}`
-                        : styles.scaleBtn}
+                      className={
+                        scale === s
+                          ? `${styles.scaleBtn} ${styles.scaleBtnActive}`
+                          : styles.scaleBtn
+                      }
                       aria-pressed={scale === s}
                       onClick={() => setScale(s)}
                     >
-                      <Type variant="label-sm" as="span">{SCALE_LABELS[s]}</Type>
+                      <Type variant="label-sm" as="span">
+                        {SCALE_LABELS[s]}
+                      </Type>
                     </button>
                   ))}
                 </div>
@@ -843,14 +894,20 @@ export default function FragmentDetail() {
                   padding reserves space so brackets are never clipped — no
                   scrolling required to discover them (Step 15). */}
               <div
-                className={fragment.sub_parts.length > 0
-                  ? `${styles.scoreContent} ${styles.scoreContentWithSubParts}`
-                  : styles.scoreContent}
+                className={
+                  fragment.sub_parts.length > 0
+                    ? `${styles.scoreContent} ${styles.scoreContentWithSubParts}`
+                    : styles.scoreContent
+                }
                 ref={scoreContainerRef}
               >
                 {renderStatus === 'loading' && (
                   <div className={styles.renderState}>
-                    <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                    <Type
+                      variant="label-sm"
+                      as="span"
+                      style={{ color: 'var(--color-on-surface-variant)' }}
+                    >
                       {t('fragments:detail.loadingNotation')}
                     </Type>
                   </div>
@@ -863,10 +920,7 @@ export default function FragmentDetail() {
                   </div>
                 )}
                 {svgString && (
-                  <div
-                    className={styles.svgPage}
-                    dangerouslySetInnerHTML={{ __html: svgString }}
-                  />
+                  <div className={styles.svgPage} dangerouslySetInnerHTML={{ __html: svgString }} />
                 )}
 
                 {/* Main fragment bracket — one segment per system row, above
@@ -879,9 +933,9 @@ export default function FragmentDetail() {
                         className={styles.mainBracket}
                         data-testid={i === 0 ? 'fragment-bracket' : `fragment-bracket-${i}`}
                         style={{
-                          left:   seg.left,
-                          width:  seg.right - seg.left,
-                          top:    seg.systemTop - MAIN_BRACKET_ABOVE_SYSTEM_PX,
+                          left: seg.left,
+                          width: seg.right - seg.left,
+                          top: seg.systemTop - MAIN_BRACKET_ABOVE_SYSTEM_PX,
                           height: BRACKET_H,
                         }}
                       />
@@ -901,8 +955,10 @@ export default function FragmentDetail() {
                         t('fragments:detail.partLabel', { number: idx + 1 });
                       const segs = computeBracketSegments(
                         geometry,
-                        sp.bar_start, sp.bar_end,
-                        sp.beat_start, sp.beat_end,
+                        sp.bar_start,
+                        sp.bar_end,
+                        sp.beat_start,
+                        sp.beat_end
                       );
                       return segs.map((seg, i) => (
                         <div
@@ -910,9 +966,9 @@ export default function FragmentDetail() {
                           className={styles.subPartBracket}
                           data-status={sp.status}
                           style={{
-                            left:  seg.left,
+                            left: seg.left,
                             width: seg.right - seg.left,
-                            top:   seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP,
+                            top: seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP,
                           }}
                         >
                           {i === 0 && <span className={styles.subPartLabel}>{label}</span>}
@@ -957,7 +1013,11 @@ export default function FragmentDetail() {
                   </Type>
                 )}
                 {playbackStatus === 'loading-instrument' && (
-                  <Type variant="label-sm" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
+                  <Type
+                    variant="label-sm"
+                    as="span"
+                    style={{ color: 'var(--color-on-surface-variant)' }}
+                  >
                     {t('common:loadingInstrument')}
                   </Type>
                 )}
@@ -982,7 +1042,9 @@ export default function FragmentDetail() {
                 <div className={styles.tagList}>
                   {secondaryTags.map((tag) => (
                     <span key={tag.concept_id} className={styles.tagChip}>
-                      <Type variant="label-sm" as="span">{tag.alias ?? tag.name}</Type>
+                      <Type variant="label-sm" as="span">
+                        {tag.alias ?? tag.name}
+                      </Type>
                     </span>
                   ))}
                 </div>
@@ -999,8 +1061,8 @@ export default function FragmentDetail() {
               initialFragment={fragment}
               tagMode="view"
               standalone
+              disableSchemaFetch={publicMode}
             />
-
           </div>
         </div>
       )}

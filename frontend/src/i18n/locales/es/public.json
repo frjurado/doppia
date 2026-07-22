@@ -1,0 +1,17 @@
+{
+  "wordmark": "Doppia",
+  "tagline": "Análisis musical abierto",
+  "browse": {
+    "pageTitle": "Explorar fragmentos — Doppia",
+    "heading": "Fragmentos etiquetados con {{concept}}",
+    "selectConcept": "Elige un concepto para explorar sus fragmentos aprobados.",
+    "loading": "Cargando fragmentos…",
+    "noFragments": "No se encontraron fragmentos para este concepto.",
+    "includeSubtypes": "Incluir subtipos",
+    "loadMore": "Cargar más"
+  },
+  "detail": {
+    "pageTitle": "Fragmento — Doppia",
+    "back": "← Volver a fragmentos"
+  }
+}

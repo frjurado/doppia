@@ -361,9 +361,7 @@ class TestListMovements:
         assert result is not None
         assert result[0].incipit_url == signed
         assert result[0].incipit_ready is True
-        storage.signed_url.assert_awaited_once_with(
-            key, expires_in=3600, version=movement.incipit_generated_at
-        )
+        storage.signed_url.assert_awaited_once_with(key, expires_in=3600)
 
     async def test_movement_fields(self) -> None:
         work = _make_work()
@@ -463,6 +461,4 @@ class TestGetMovementMeiUrl:
         assert result.composer_name == "Wolfgang Amadeus Mozart"
         assert result.movement_number == 1
         assert result.movement_title == "Allegro"
-        storage.signed_url.assert_awaited_once_with(
-            key, expires_in=3600, version=movement.updated_at
-        )
+        storage.signed_url.assert_awaited_once_with(key, expires_in=3600)

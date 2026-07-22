@@ -14,7 +14,8 @@ docs/roadmap/component-8-fragment-browsing.md § Step 7.
 from __future__ import annotations
 
 from api.dependencies import get_language, get_neo4j, get_redis, require_role
-from fastapi import APIRouter, Depends, Path, Query
+from api.rate_limiting import GRAPH_AUTHENTICATED, limiter
+from fastapi import APIRouter, Depends, Path, Query, Request
 from models.base import get_db
 from models.concepts import (
     ConceptRootsResponse,
@@ -82,7 +83,9 @@ def get_concept_tree_service(
         "and an optional cursor for the next page."
     ),
 )
+@limiter.limit(GRAPH_AUTHENTICATED)
 async def search_concepts(
+    request: Request,
     q: str = Query(..., min_length=1, description="Full-text search query"),
     domain: str | None = Query(None, description="Filter by domain name"),
     cursor: str | None = Query(
@@ -103,6 +106,7 @@ async def search_concepts(
     through results when ``next_cursor`` is present in the response.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         q: Lucene full-text query (e.g. ``"perfect authentic"`` or ``"PAC"``).
         domain: Restrict results to a single domain (e.g. ``"cadences"``).
         cursor: Opaque cursor from a previous response's ``next_cursor`` field.
@@ -126,7 +130,9 @@ async def search_concepts(
         "Cached in Redis with a 1-hour TTL; invalidated on re-seed."
     ),
 )
+@limiter.limit(GRAPH_AUTHENTICATED)
 async def get_concept_tree(
+    request: Request,
     root: str = Query(
         ...,
         description=(
@@ -151,6 +157,7 @@ async def get_concept_tree(
     Returns HTTP 404 when ``root`` is unknown or refers to a stub concept.
 
     Args:
+        request: The incoming request (used by the rate limiter).
         root: Immutable concept identifier for the tree root.
         service: Concept tree service (injected).
 

@@ -24,22 +24,25 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 import httpx
 from api.middleware.auth import AuthMiddleware
+from api.middleware.cors import PathScopedCORSMiddleware
 from api.middleware.errors import (
     doppia_error_handler,
     http_exception_handler,
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from api.middleware.security_headers import SecurityHeadersMiddleware
+from api.rate_limiting import limiter, rate_limit_exceeded_handler
 from api.router import router
 from errors import DoppiaError
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from models.base import close_db, init_db
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from redis.asyncio import Redis
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -69,6 +72,36 @@ _ALLOWED_ORIGINS: dict[str, list[str]] = {
         "https://doppia.app",
     ],
 }
+
+
+def _resolve_origins(environment: str) -> list[str]:
+    """Return the CORS allowlist for the credentialed editor API.
+
+    The static per-environment allowlist unioned with any comma-separated
+    ``ALLOWED_ORIGINS`` env var, so Fly.io PR-preview deployments — each of which
+    gets a fresh URL — can be admitted without a code change (Component 10 Step
+    11; ``security-model.md`` § 1). This stays an **explicit allowlist**: entries
+    are exact origins, never a wildcard or regex. A literal ``*`` is dropped
+    because this list drives the *credentialed* policy, which must never combine
+    with a wildcard origin (``security-model.md`` § 1); the anonymous
+    ``/api/v1/public/`` prefix keeps its own separate wildcard/no-credentials
+    policy.
+
+    Args:
+        environment: The ``ENVIRONMENT`` value keying the static allowlist.
+
+    Returns:
+        The de-duplicated origin list (static entries first, env additions
+        after), with blanks, trailing slashes, and any ``*`` removed.
+    """
+    origins = list(_ALLOWED_ORIGINS.get(environment, []))
+    for candidate in os.environ.get("ALLOWED_ORIGINS", "").split(","):
+        origin = candidate.strip().rstrip("/")
+        if not origin or origin == "*":
+            continue
+        if origin not in origins:
+            origins.append(origin)
+    return origins
 
 
 @asynccontextmanager
@@ -182,20 +215,38 @@ def create_app() -> FastAPI:
     Returns:
         A fully configured ``FastAPI`` instance ready for use with uvicorn.
     """
+    environment = os.environ.get("ENVIRONMENT", "production")
+
+    # OpenAPI docs (/api/docs, /api/redoc, /api/openapi.json) enumerate the whole
+    # API surface. They leak no data, but there is no reason to publish the map
+    # in production — disable them there (docs_url=None etc. removes the routes),
+    # while keeping them reachable in local/staging for development. Component 10
+    # Step 10; security-model.md § 7.
+    _docs_enabled = environment != "production"
     application = FastAPI(
         title="Doppia API",
         description="Open music analysis repository — notation infrastructure and editorial tools.",  # noqa: E501
         version="0.1.0",
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if _docs_enabled else None,
+        redoc_url="/api/redoc" if _docs_enabled else None,
+        openapi_url="/api/openapi.json" if _docs_enabled else None,
         lifespan=lifespan,
     )
 
+    # Rate limiting (slowapi). The limiter must live on app.state for the
+    # @limiter.limit decorators to resolve it at request time; a route opts in
+    # per-category (see api/rate_limiting.py). RateLimitExceeded is registered
+    # with its own handler so the 429 carries the Doppia envelope + Retry-After
+    # rather than slowapi's bare string.
+    application.state.limiter = limiter
+
     # Exception handlers — registered before middleware so they apply globally.
     # DoppiaError is registered first: typed domain exceptions take priority
-    # over the bare HTTPException fallback.
+    # over the bare HTTPException fallback. RateLimitExceeded is a subclass of
+    # HTTPException, so its specific handler must be registered to win over the
+    # generic HTTPException handler.
     application.add_exception_handler(DoppiaError, doppia_error_handler)
+    application.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
     application.add_exception_handler(HTTPException, http_exception_handler)
     application.add_exception_handler(
         RequestValidationError, validation_exception_handler
@@ -205,17 +256,25 @@ def create_app() -> FastAPI:
     # Middleware — Starlette inserts each at the front of the stack, so
     # registration order is the reverse of execution order on ingress.
     # AuthMiddleware registered first → executes second (inner, closer to routes).
-    # CORSMiddleware registered second → executes first (outer, handles preflight).
+    # CORS registered second → executes first (outer, handles preflight).
+    # PathScopedCORSMiddleware applies the credentialed allowlist to the editor
+    # API and a wildcard no-credentials policy to /api/v1/public/ — the two
+    # postures must never combine (security-model.md § 1).
     application.add_middleware(AuthMiddleware)
 
-    environment = os.environ.get("ENVIRONMENT", "production")
-    origins = _ALLOWED_ORIGINS.get(environment, [])
+    origins = _resolve_origins(environment)
+    application.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
+
+    # Security headers (CSP, nosniff, X-Frame-Options, HSTS-in-prod). Registered
+    # last → outermost → runs first on ingress and stamps every outgoing
+    # response, including CORS preflights and static SPA assets. CSP_REPORT_ONLY=1
+    # downgrades the CSP to observe-only without a code change (safety valve).
+    # See docs/architecture/security-model.md § 7.
+    report_only = os.environ.get("CSP_REPORT_ONLY", "").lower() in ("1", "true", "yes")
     application.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Accept-Language"],
+        SecurityHeadersMiddleware,
+        environment=environment,
+        report_only=report_only,
     )
 
     # Versioned API router — all endpoints live under /api/v1/.

@@ -21,6 +21,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -138,6 +139,37 @@ _REPEAT_CONTEXT_TO_VOLTA: dict[str, int] = {
 _LICENCE_URL_MAP: dict[str, str] = {
     "CC BY-SA 4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
 }
+
+# ADR-009 § 2: a corpus carrying a NonCommercial restriction (the ABC corpus —
+# Beethoven string quartets, CC BY-NC-SA 4.0) must never appear on the public
+# API. The exclusion is keyed on the corpus licence rather than the harmony
+# event source, because ABC annotations carry source="DCML" exactly like the
+# CC BY-SA corpora and are indistinguishable at the event level. Matching the
+# "NC" licence token (rather than hardcoding the ABC corpus) generalises the
+# guard to any future NonCommercial corpus. The SQL form ``\ync\y`` (Postgres
+# case-insensitive word-boundary regex) mirrors this token test for the browse
+# query. See _licence_excludes_public and its use in list_by_concept / get.
+_NC_LICENCE_REGEX = r"\ync\y"
+
+
+def _licence_excludes_public(licence: str | None) -> bool:
+    """Return True when a corpus licence bars the corpus from the public API.
+
+    ADR-009 § 2: a NonCommercial licence (the ABC corpus, CC BY-NC-SA 4.0) is
+    incompatible with an unrestricted public API and must be excluded. The test
+    matches the ``NC`` licence token as a whole word, case-insensitively, so
+    ``"CC-BY-NC-SA-4.0"`` and ``"CC BY-NC-SA 4.0"`` are excluded while
+    ``"CC-BY-SA-4.0"`` is not.
+
+    Args:
+        licence: The corpus ``licence`` string, or ``None``.
+
+    Returns:
+        True if the licence carries a NonCommercial restriction.
+    """
+    if not licence:
+        return False
+    return "nc" in re.split(r"[^a-z0-9]+", licence.lower())
 
 
 def _sources_in_range(
@@ -705,7 +737,7 @@ class FragmentService:
     async def get(
         self,
         fragment_id: uuid.UUID,
-        caller_id: str,
+        caller_id: str | None,
         caller_role: str,
     ) -> FragmentDetailResponse:
         """Return the full fragment record with hydrated concept tags, harmony
@@ -714,12 +746,17 @@ class FragmentService:
         Visibility rule: draft fragments are visible only to their creator or
         an admin. All other statuses are visible to any editor.  A draft owned
         by another annotator is returned as a 404 to avoid leaking its
-        existence.
+        existence.  An anonymous caller (``caller_id=None``, public read path)
+        can never be a draft's creator, so drafts are always 404 for it; the
+        public route additionally restricts to ``approved`` at the route layer,
+        and a NonCommercial corpus (ABC) is 404 here per ADR-009 § 2.
 
         Args:
             fragment_id: UUID of the fragment to read.
-            caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_id: String UUID of the authenticated caller, or ``None``
+                for the anonymous public read path.
+            caller_role: Role of the authenticated caller (``"anonymous"``
+                when unauthenticated).
 
         Returns:
             :class:`~models.fragment.FragmentDetailResponse` with concept tags
@@ -744,12 +781,27 @@ class FragmentService:
             )
 
         # Draft visibility: only the creator or an admin may read a draft.
+        # Anonymous callers (caller_id=None) are never the creator.
         if fragment.status == "draft" and caller_role != "admin":
             is_creator = (
-                fragment.created_by is not None
+                caller_id is not None
+                and fragment.created_by is not None
                 and str(fragment.created_by) == caller_id
             )
             if not is_creator:
+                raise FragmentNotFoundError(
+                    f"No fragment with id '{fragment_id}' exists.",
+                    detail={"fragment_id": str(fragment_id)},
+                )
+
+        # ADR-009 § 2: anonymous (public read path) callers never see a
+        # NonCommercial corpus (ABC). Enforced structurally in the service, and
+        # surfaced as the same 404 as a nonexistent id so the fragment's
+        # existence is not leaked. Keyed on the corpus licence — see
+        # _licence_excludes_public.
+        if caller_id is None:
+            licence = await self._corpus_licence_for_movement(fragment.movement_id)
+            if _licence_excludes_public(licence):
                 raise FragmentNotFoundError(
                     f"No fragment with id '{fragment_id}' exists.",
                     detail={"fragment_id": str(fragment_id)},
@@ -840,7 +892,6 @@ class FragmentService:
                 Movement.movement_number,
                 Movement.title.label("movement_title"),
                 Movement.mei_object_key,
-                Movement.updated_at.label("movement_updated_at"),
                 Work.title.label("work_title"),
                 Work.catalogue_number.label("work_catalogue_number"),
                 Composer.name.label("composer_name"),
@@ -854,15 +905,11 @@ class FragmentService:
 
         mei_url: str | None = None
         if self._storage is not None and ctx.get("mei_object_key"):
-            mei_url = await self._storage.signed_url(
-                ctx["mei_object_key"], version=ctx.get("movement_updated_at")
-            )
+            mei_url = await self._storage.signed_url(ctx["mei_object_key"])
 
         preview_url: str | None = None
         if self._storage is not None and fragment.preview_object_key:
-            preview_url = await self._storage.signed_url(
-                fragment.preview_object_key, version=fragment.preview_generated_at
-            )
+            preview_url = await self._storage.signed_url(fragment.preview_object_key)
 
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
@@ -1280,7 +1327,7 @@ class FragmentService:
         concept_id: str,
         include_subtypes: bool,
         status_filter: str,
-        caller_id: str,
+        caller_id: str | None,
         caller_role: str,
         cursor: str | None = None,
         page_size: int = 50,
@@ -1307,6 +1354,11 @@ class FragmentService:
         - Admins see all fragments matching the requested ``status_filter``.
         - Editors see their own drafts plus all submitted/approved/rejected, then
           additionally filtered to the requested ``status_filter``.
+        - Anonymous callers (``caller_id=None``, the public read path) see only
+          ``approved`` fragments regardless of ``status_filter`` — the public
+          route already pins the filter, but the restriction is enforced here
+          too so no future public caller can widen it. They additionally never
+          see fragments from a NonCommercial corpus (ABC), per ADR-009 § 2.
 
         Results are ordered ``(updated_at DESC, id ASC)`` so the most recently
         edited fragment appears first across all movements in the result set.
@@ -1318,8 +1370,10 @@ class FragmentService:
             status_filter: Limit results to this fragment status.  One of
                 ``draft``, ``submitted``, ``approved``, ``rejected``.  Defaults
                 to ``approved`` when an invalid value is supplied.
-            caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_id: String UUID of the authenticated caller, or ``None``
+                for the anonymous public read path (``approved``-only).
+            caller_role: Role of the authenticated caller (``"anonymous"``
+                when unauthenticated).
             cursor: Opaque time-ordered pagination cursor from a prior response.
             page_size: Maximum items per page (1–200).
 
@@ -1362,7 +1416,22 @@ class FragmentService:
             status_filter if status_filter in valid_statuses else "approved"
         )
 
-        if caller_role != "admin":
+        if caller_id is None:
+            # Anonymous (public read path): approved only, regardless of the
+            # requested filter — the guarantee is structural at the service
+            # layer, not just in the public route's pinned parameter.
+            effective_status = "approved"
+            # ADR-009 § 2: exclude NonCommercial corpora (ABC) from the public
+            # surface. Keyed on the corpus licence via a movement subquery, so
+            # an ABC-sourced fragment is never returned to an anonymous caller.
+            nc_movements = (
+                select(Movement.id)
+                .join(Work, Movement.work_id == Work.id)
+                .join(Corpus, Work.corpus_id == Corpus.id)
+                .where(Corpus.licence.op("~*")(_NC_LICENCE_REGEX))
+            )
+            stmt = stmt.where(Fragment.movement_id.not_in(nc_movements))
+        elif caller_role != "admin":
             caller_uuid = uuid.UUID(caller_id)
             # Base visibility: own drafts + all non-draft.
             stmt = stmt.where(
@@ -1462,18 +1531,15 @@ class FragmentService:
         # Resolve preview signed URLs concurrently for all fragments that have
         # a stored preview_object_key (ADR-008: null until Celery task completes).
         async def _resolve_preview(
-            frag_id: uuid.UUID, key: str | None, version: datetime | None
+            frag_id: uuid.UUID, key: str | None
         ) -> tuple[uuid.UUID, str | None]:
             if self._storage is None or key is None:
                 return frag_id, None
-            return frag_id, await self._storage.signed_url(key, version=version)
+            return frag_id, await self._storage.signed_url(key)
 
         preview_url_map: dict[uuid.UUID, str | None] = dict(
             await asyncio.gather(
-                *[
-                    _resolve_preview(f.id, f.preview_object_key, f.preview_generated_at)
-                    for f in page
-                ]
+                *[_resolve_preview(f.id, f.preview_object_key) for f in page]
             )
         )
 
@@ -2233,6 +2299,28 @@ class FragmentService:
     # ------------------------------------------------------------------
     # Internal helpers — data derivation and ORM construction
     # ------------------------------------------------------------------
+
+    async def _corpus_licence_for_movement(self, movement_id: uuid.UUID) -> str | None:
+        """Return the corpus ``licence`` string for a movement's corpus.
+
+        Resolves ``movement → work → corpus`` and returns the corpus's stored
+        ``licence``. Used by the public read path to enforce the ADR-009 § 2
+        NonCommercial exclusion (see :func:`_licence_excludes_public`).
+
+        Args:
+            movement_id: The movement whose corpus licence to resolve.
+
+        Returns:
+            The corpus ``licence`` string, or ``None`` if the movement (or its
+            corpus) cannot be resolved.
+        """
+        result = await self._db.execute(
+            select(Corpus.licence)
+            .join(Work, Work.corpus_id == Corpus.id)
+            .join(Movement, Movement.work_id == Work.id)
+            .where(Movement.id == movement_id)
+        )
+        return result.scalar_one_or_none()
 
     async def _derive_data_licence(
         self,

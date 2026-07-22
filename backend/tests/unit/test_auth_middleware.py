@@ -1,25 +1,27 @@
 """Unit tests for JWT authentication middleware and require_role dependency.
 
-Verifies that ``AuthMiddleware`` correctly validates Supabase JWTs using a
-synthetic secret — no live Supabase instance required.
+Verifies that ``AuthMiddleware`` correctly validates Supabase JWTs on both
+signing paths — HS256 via a synthetic ``SUPABASE_JWT_SECRET`` and ES256 via a
+synthetic JWKS on ``app.state.jwks`` — with no live Supabase instance required.
 
 All tests run without Docker.
 """
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import jwt
 import pytest
 import pytest_asyncio
 from fastapi import APIRouter, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException
 
@@ -69,6 +71,62 @@ def _make_token(
     return jwt.encode(payload, secret, algorithm=_ALGORITHM)
 
 
+def _make_es256_jwks(kid: str = "test-es256-kid") -> tuple[object, dict, str]:
+    """Generate an EC P-256 keypair and the single-key JWKS for its public key.
+
+    Mirrors the shape of a real Supabase JWKS so the middleware's ``kid``
+    matching (``_resolve_jwk`` → ``PyJWKSet``) is exercised end to end.
+
+    Args:
+        kid: The key id stamped on the JWK (and required on the token header).
+
+    Returns:
+        A tuple of ``(private_key, jwks_dict, kid)``.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from jwt.algorithms import ECAlgorithm
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    jwk = json.loads(ECAlgorithm.to_jwk(private_key.public_key()))
+    jwk.update({"kid": kid, "use": "sig", "alg": "ES256"})
+    return private_key, {"keys": [jwk]}, kid
+
+
+def _make_es256_token(
+    private_key: object,
+    kid: str,
+    *,
+    sub: str = "user-uuid-es256",
+    role: str = "editor",
+    email: str = "editor-es256@test.com",
+    exp_offset: int = 3600,
+    iss: str | None = _TEST_ISSUER,
+) -> str:
+    """Mint an ES256 JWT signed with ``private_key`` and carrying ``kid``.
+
+    Args:
+        private_key: The EC private key from :func:`_make_es256_jwks`.
+        kid: The key id to place in the JWT header (must match the JWKS entry).
+        sub: The ``sub`` claim.
+        role: Placed in ``app_metadata.role`` as Supabase does.
+        email: The ``email`` claim.
+        exp_offset: Seconds added to ``now()`` for the ``exp`` claim.
+        iss: The ``iss`` claim; pass ``None`` to omit.
+
+    Returns:
+        A signed ES256 JWT string.
+    """
+    payload: dict = {
+        "sub": sub,
+        "email": email,
+        "app_metadata": {"role": role},
+        "exp": int(time.time()) + exp_offset,
+    }
+    if iss is not None:
+        payload["iss"] = iss
+    return jwt.encode(payload, private_key, algorithm="ES256", headers={"kid": kid})
+
+
 # ---------------------------------------------------------------------------
 # Fixture — app with Supabase JWT validation enabled
 # ---------------------------------------------------------------------------
@@ -79,26 +137,17 @@ async def _noop_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
 
-@pytest_asyncio.fixture
-async def supabase_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> AsyncGenerator[AsyncClient, None]:
-    """Async HTTP client with Supabase JWT validation active.
+def _build_app() -> FastAPI:
+    """Build the test FastAPI app: AuthMiddleware, the API router, and a
+    test-only editor-protected route, with ``get_db`` overridden to a no-op.
 
-    Sets ``AUTH_MODE=supabase`` and ``SUPABASE_JWT_SECRET=<test-secret>``
-    so the full validation path runs without a live Supabase project.
+    Shared by the HS256 (``supabase_client``) and ES256 (``es256_client``)
+    fixtures; the only difference between them is how the verification key is
+    supplied (``SUPABASE_JWT_SECRET`` env var vs. ``app.state.jwks``).
 
-    Includes a ``GET /api/v1/protected`` route (editor-only) to exercise
-    ``require_role``.
-
-    Yields:
-        An ``httpx.AsyncClient`` pointed at ``http://test``.
+    Returns:
+        The configured ``FastAPI`` application (not yet wrapped in a client).
     """
-    monkeypatch.setenv("ENVIRONMENT", "staging")
-    monkeypatch.setenv("AUTH_MODE", "supabase")
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", _TEST_SECRET)
-    monkeypatch.setenv("SUPABASE_URL", _TEST_SUPABASE_URL)
-
     from api.dependencies import AppUser, require_role
     from api.middleware.auth import AuthMiddleware
     from api.middleware.errors import (
@@ -143,11 +192,71 @@ async def supabase_client(
         yield mock_session
 
     app.dependency_overrides[get_db] = _mock_db
+    return app
+
+
+@pytest_asyncio.fixture
+async def supabase_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[AsyncClient, None]:
+    """Async HTTP client with Supabase JWT validation active.
+
+    Sets ``AUTH_MODE=supabase`` and ``SUPABASE_JWT_SECRET=<test-secret>``
+    so the full HS256 validation path runs without a live Supabase project.
+
+    Includes a ``GET /api/v1/protected`` route (editor-only) to exercise
+    ``require_role``.
+
+    Yields:
+        An ``httpx.AsyncClient`` pointed at ``http://test``.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("AUTH_MODE", "supabase")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", _TEST_SECRET)
+    monkeypatch.setenv("SUPABASE_URL", _TEST_SUPABASE_URL)
+
+    app = _build_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def es256_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[AsyncClient, None]:
+    """Async HTTP client exercising the ES256 JWKS validation path.
+
+    Unlike ``supabase_client`` (HS256 via ``SUPABASE_JWT_SECRET``), this sets
+    ``app.state.jwks`` to a synthetic single-key JWKS so the middleware takes
+    the ES256 branch — the ``kid``-matching that PyJWT does explicitly via
+    ``PyJWKSet`` (python-jose did it implicitly). No ``SUPABASE_JWT_SECRET`` is
+    set, so only the JWKS path can satisfy a token.
+
+    The matching private key is exposed on ``client._es256_private_key`` so a
+    test can mint a valid ES256 token; ``client._es256_kid`` carries the kid.
+
+    Yields:
+        An ``httpx.AsyncClient`` with the EC private key/kid attached.
+    """
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("AUTH_MODE", "supabase")
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.setenv("SUPABASE_URL", _TEST_SUPABASE_URL)
+
+    private_key, jwks, kid = _make_es256_jwks()
+
+    app = _build_app()
+    app.state.jwks = jwks
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
+        client._es256_private_key = private_key
+        client._es256_kid = kid
         yield client
 
 
@@ -267,6 +376,62 @@ async def test_malformed_token_rejected(supabase_client: AsyncClient) -> None:
         headers={"Authorization": "Bearer this.is.not.a.jwt"},
     )
     assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# ES256 / JWKS path — the kid-matching PyJWT does explicitly (was implicit
+# in python-jose). No SUPABASE_JWT_SECRET is set in this fixture, so only the
+# JWKS branch can satisfy a token.
+# ---------------------------------------------------------------------------
+
+
+async def test_es256_valid_token_accepted(es256_client: AsyncClient) -> None:
+    """A valid ES256 token whose kid matches the JWKS passes through."""
+    token = _make_es256_token(es256_client._es256_private_key, es256_client._es256_kid)
+    response = await es256_client.get(
+        "/api/v1/protected",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["role"] == "editor"
+
+
+async def test_es256_unknown_kid_rejected(es256_client: AsyncClient) -> None:
+    """An ES256 token whose kid is absent from the JWKS returns 401."""
+    token = _make_es256_token(es256_client._es256_private_key, kid="no-such-kid")
+    response = await es256_client.get(
+        "/api/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_es256_wrong_key_rejected(es256_client: AsyncClient) -> None:
+    """An ES256 token signed by a different key (same kid) fails verification."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    other_key = ec.generate_private_key(ec.SECP256R1())
+    token = _make_es256_token(other_key, es256_client._es256_kid)
+    response = await es256_client.get(
+        "/api/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_es256_expired_token_rejected(es256_client: AsyncClient) -> None:
+    """An expired ES256 token returns 401 with the expired-token message."""
+    token = _make_es256_token(
+        es256_client._es256_private_key,
+        es256_client._es256_kid,
+        exp_offset=-3600,
+    )
+    response = await es256_client.get(
+        "/api/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 401
+    assert "expired" in response.json()["error"]["message"].lower()
 
 
 # ---------------------------------------------------------------------------

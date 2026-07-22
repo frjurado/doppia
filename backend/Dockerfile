@@ -8,11 +8,10 @@ RUN npm install
 
 COPY frontend/ ./
 
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_ANON_KEY
+# Supabase credentials are no longer baked into the SPA: the browser never calls
+# Supabase Auth directly (ADR-035 — the /api/v1/auth router proxies the grant
+# server-side). Only the public soundfont base URL remains a build-time var.
 ARG VITE_SOUNDFONT_BASE_URL
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
-ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 ENV VITE_SOUNDFONT_BASE_URL=$VITE_SOUNDFONT_BASE_URL
 
 RUN npm run build

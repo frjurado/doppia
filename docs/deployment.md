@@ -31,6 +31,16 @@ The full set of required variables is in `.env.example` at the repository root. 
 # Application
 ENVIRONMENT=staging         # local | staging | production
 AUTH_MODE=supabase          # local | supabase  (local only valid when ENVIRONMENT=local)
+# CSP_REPORT_ONLY=1         # optional (Component 10 Step 9): emit the CSP as
+                            # Content-Security-Policy-Report-Only instead of
+                            # enforcing it — a diagnostics valve, normally unset.
+                            # See security-model.md § 7.
+# ALLOWED_ORIGINS=https://doppia-pr-42.fly.dev,https://…
+                            # optional (Component 10 Step 11): comma-separated
+                            # extra CORS origins, unioned with the static
+                            # per-environment allowlist — for Fly PR-preview
+                            # deploys. Explicit origins only (no wildcard).
+                            # See security-model.md § 1.
 
 # Neo4j AuraDB
 NEO4J_URI=neo4j+s://<instance-id>.databases.neo4j.io
@@ -56,15 +66,19 @@ R2_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com
 REDIS_URL=redis://default:<password>@<host>:<port>
 CELERY_BROKER_URL=redis://default:<password>@<host>:<port>
 CELERY_RESULT_BACKEND=redis://default:<password>@<host>:<port>
+# Rate-limit state store (Component 10 Step 8). Point at the same Upstash Redis
+# so limit counters survive restarts and are shared across machines. Defaults to
+# in-process memory:// when unset (local dev / tests). See security-model.md § 2.
+RATELIMIT_STORAGE_URI=redis://default:<password>@<host>:<port>
 
 # OpenAI (Phase 3; wire in now)
 OPENAI_API_KEY=<key>
 
-# Frontend build-time variables (passed as Docker build args, not runtime secrets)
-# These are baked into the JS bundle at build time — changing them requires a redeploy.
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-key>
-VITE_SOUNDFONT_BASE_URL=https://pub-<hash>.r2.dev   # R2.dev public URL for piano MP3s
+# Frontend build-time variable (passed as a Docker build arg, not a runtime secret)
+# Baked into the JS bundle at build time — changing it requires a redeploy.
+# The Supabase URL/anon key are NOT build args: the browser never calls Supabase
+# Auth directly (ADR-035); the backend /api/v1/auth router proxies the grant.
+VITE_SOUNDFONT_BASE_URL=https://pub-<hash>.r2.dev   # public URL of the doppia-soundfonts bucket
 ```
 
 Secrets are stored in Fly.io's secret store (`fly secrets set KEY=value`) and are never written to files in the deployment environment. For local development, they live in a `.env` file that is gitignored.
@@ -155,21 +169,34 @@ $TOKEN = $response.access_token
 
 The response contains `access_token`. Tokens expire after one hour; repeat this call to refresh. Pass the token as `Authorization: Bearer <token>` on all authenticated API requests.
 
-**Seeding the browser with a token (Phase 1 only).** Until a login page is built, paste the token into the browser console on the staging URL:
-
-```javascript
-localStorage.setItem('doppia_access_token', 'paste-access-token-here')
-```
-
-Then reload the page. The corpus browser and tagging tool will use this token until it expires or is cleared.
+**Signing in on staging.** Use the login page (`/login`) with an editor/admin
+account's email and password. The frontend posts to the backend `/api/v1/auth`
+router, which performs the Supabase grant, stores the refresh token in an
+HttpOnly cookie, and hands the SPA a short-lived access token in memory (ADR-035,
+Component 10 Step 7). The session survives reloads via silent refresh; the
+`localStorage['doppia_access_token']` seeding used in Phase 1 no longer applies
+to a production build (that key is read only in local dev builds, for the
+`dev-token` bypass). The `curl` token above remains the way to get a bearer for
+direct API calls (corpus upload, admin scripts).
 
 ### 3. Cloudflare R2
 
-1. In the Cloudflare dashboard → R2 → Create bucket. Name it `doppia-staging`.
+Storage uses **two buckets** with different access postures (Component 10 Step 1; `security-model.md` § 4, decision of 2026-07-10):
+
+| Bucket | Contents | Access |
+|---|---|---|
+| `doppia-staging` / `doppia-production` | Normalized + original MEI, incipit SVGs, fragment-preview SVGs | **Private.** No public access; objects are served only via presigned URLs with the `security-model.md` § 4 TTLs |
+| `doppia-soundfonts` | Tone.js piano soundfont MP3s under `soundfonts/piano/` | **Public** (R2.dev subdomain; custom domain in production). Shared by staging and production — the samples are identical, immutable assets |
+
+Soundfonts are the only artifact class that must be public: Tone.js constructs sample filenames internally and cannot carry signed query parameters. Everything else is presigned. R2 exposes public access at the bucket level, which is why the soundfonts live in their own bucket rather than a public prefix.
+
+Setup for the **artifact bucket**:
+
+1. In the Cloudflare dashboard → R2 → Create bucket. Name it `doppia-staging`. Leave **Public Access disabled** (no R2.dev subdomain).
 2. Under Manage R2 API Tokens, create a token with "Object Read & Write" permission scoped to the bucket.
 3. Note the Account ID from the R2 overview page.
 4. Set all four R2 variables in Fly.io secrets.
-5. Configure the bucket's CORS policy (R2 → bucket → Settings → CORS Policy). The frontend fetches MEI files (and incipit/preview SVGs) directly from R2 — via the public `r2.dev` URL when `R2_PUBLIC_URL` is set, otherwise via signed URLs — so the bucket must allow `GET` requests from the frontend origin:
+5. Configure the bucket's CORS policy (R2 → bucket → Settings → CORS Policy). The frontend fetches MEI files (and incipit/preview SVGs) directly from R2 via presigned URLs, which are still cross-origin requests — so the bucket must allow `GET` from the frontend origin:
 
 ```json
 [
@@ -183,6 +210,8 @@ Then reload the page. The corpus browser and tagging tool will use this token un
 ```
 
 Update `AllowedOrigins` for each environment. See `docs/architecture/security-model.md` § "R2 and CORS" for the full rationale.
+
+The **soundfonts bucket** is set up once in § 4 below and reused by every environment; the backend never reads or writes it (uploads are manual via Wrangler), so no API token covers it.
 
 ### 4. SoundFont setup
 
@@ -204,27 +233,41 @@ Sharp notes use `s` instead of `#` (URL-safe). Tone.js pitch-shifts between prov
 
 **Source.** Use a compact piano soundfont set — total upload size should stay under 2 MB. The [Tonejs/midi piano samples](https://github.com/gleitz/midi-js-soundfonts) (acoustic_grand_piano, mp3 format) or similar reduced Salamander Grand Piano sets work well. Whatever source you choose, rename the files to match the convention above before uploading.
 
-**1 — Upload the MP3s to R2 at the `soundfonts/piano/` prefix:**
+**1 — Create the dedicated public soundfonts bucket** (once, shared by all environments):
+
+1. Cloudflare dashboard → R2 → Create bucket. Name it `doppia-soundfonts`.
+2. Settings → **Public Access** → enable the **R2.dev subdomain**. Note the URL displayed (format: `https://pub-<hash>.r2.dev`).
+3. Settings → **CORS Policy** — Tone.js fetches the samples cross-origin:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://doppia-staging.fly.dev", "http://localhost:5173"],
+    "AllowedMethods": ["GET"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+The R2.dev subdomain is rate-limited and intended for staging/development. For production, attach a custom subdomain (e.g. `assets.doppia.app`) instead via Settings → Custom Domains, and add the production origin to `AllowedOrigins`.
+
+**2 — Upload the MP3s at the `soundfonts/piano/` prefix:**
 
 ```bash
 # Using the Cloudflare Wrangler CLI (npm install -g wrangler):
-wrangler r2 object put doppia-staging/soundfonts/piano/C1.mp3  --file C1.mp3
-wrangler r2 object put doppia-staging/soundfonts/piano/Ds1.mp3 --file Ds1.mp3
+wrangler r2 object put doppia-soundfonts/soundfonts/piano/C1.mp3  --file C1.mp3 --remote
 # ... repeat for all 28 files
 
 # Or in bulk if your files are in a local soundfonts/ directory:
 for f in soundfonts/*.mp3; do
-  wrangler r2 object put "doppia-staging/soundfonts/piano/$(basename $f)" --file "$f"
+  wrangler r2 object put "doppia-soundfonts/soundfonts/piano/$(basename $f)" --file "$f" --remote
 done
 ```
 
-**2 — Enable public access on the R2 bucket.** The private bucket used for signed MEI URLs is the same bucket. R2 allows enabling a public R2.dev subdomain alongside the private access:
+(`--remote` targets the real R2 bucket; recent Wrangler versions default `r2 object` commands to a local simulation without it.)
 
-Cloudflare dashboard → R2 → `doppia-staging` → **Settings** → **Public Access** → enable **R2.dev subdomain**. Note the URL displayed (format: `https://pub-<hash>.r2.dev`).
-
-The R2.dev subdomain is rate-limited and intended for staging/development. For production, attach a custom subdomain (e.g. `assets.doppia.app`) instead via Settings → Custom Domains.
-
-**3 — Set `VITE_SOUNDFONT_BASE_URL` in `fly.toml`:**
+**3 — Set `VITE_SOUNDFONT_BASE_URL` in `fly.toml`** to the soundfonts bucket's public URL:
 
 ```toml
 [build.args]
@@ -251,10 +294,11 @@ fly secrets set \
   REDIS_URL="rediss://default:<password>@<host>:<port>" \
   CELERY_BROKER_URL="rediss://default:<password>@<host>:<port>" \
   CELERY_RESULT_BACKEND="cache+memory://" \
+  RATELIMIT_STORAGE_URI="rediss://default:<password>@<host>:<port>" \
   --app doppia-staging
 ```
 
-`REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` is the Celery task broker. `CELERY_RESULT_BACKEND` must be `cache+memory://` and not a `rediss://` URL: all tasks are fire-and-forget (`task_ignore_result = True` in `celery_app.py`), and pointing the result backend at a `rediss://` URL causes the worker to crash on startup with a missing `ssl_cert_reqs` parameter error.
+`REDIS_URL` is used by the application for caching. `CELERY_BROKER_URL` is the Celery task broker. `CELERY_RESULT_BACKEND` must be `cache+memory://` and not a `rediss://` URL: all tasks are fire-and-forget (`task_ignore_result = True` in `celery_app.py`), and pointing the result backend at a `rediss://` URL causes the worker to crash on startup with a missing `ssl_cert_reqs` parameter error. `RATELIMIT_STORAGE_URI` is the rate-limiter's state store (Component 10 Step 8); point it at the same Upstash URL. Unlike the Celery result backend, the `limits` Redis storage handles the `rediss://` TLS scheme without extra parameters. Leave it unset and the limiter falls back to in-process `memory://` — fine for a single machine, but counters then reset on restart and are not shared across machines.
 
 Redis is wired in from day one but is not load-bearing in Phase 1. If the Upstash connection is unavailable in `celery` dispatch mode, the task dispatch logs a warning and the upload continues — the core ingestion (MEI validation, R2 storage, PostgreSQL records) is unaffected. Cache misses are acceptable in Phase 1; Redis is required for correctness only from Phase 2 onward.
 
@@ -403,7 +447,7 @@ Revert `fly.toml` to the single `app` process (remove the `worker` line from `[p
 fly deploy --app doppia-staging
 ```
 
-**Verifying the re-ingested artifacts actually show.** MEI, incipit, and preview objects are served from the public `r2.dev` URL (`R2_PUBLIC_URL`), which Cloudflare edge-caches and which **cannot be purged on demand** (the managed subdomain is not a zone in the account). Overwriting an object therefore does *not* invalidate the cached copy. The application defeats this by appending a `?v=<last-write timestamp>` cache-buster to each artifact URL (`object_storage._cache_bust_token`, keyed on `movement.updated_at` / `incipit_generated_at` / `preview_generated_at`), so a re-ingested movement gets a fresh URL and the corrected clefs/ties/title-stripped incipit appear immediately on the next page load — no purge needed. If you ever see a *stale* artifact after re-ingestion, confirm the URL in the network tab carries a `?v=` token that matches the new write; a missing or unchanged token is the bug, not the cache. See `security-model.md` §4 "Public-URL branch (R2.dev)".
+**Verifying the re-ingested artifacts actually show.** MEI, incipit, and preview objects are served via presigned URLs (Component 10 Step 2; `security-model.md` § 4). A presigned URL is unique per request — the signature covers the request time — so there is no edge-cache staleness problem: a re-ingested movement's corrected artifacts appear on the next page load, no purge or cache-buster needed. If a stale artifact ever appears, suspect browser caching of the page/API response, not R2.
 
 ## Uploading a corpus
 
@@ -518,7 +562,8 @@ Staging runs entirely on free tiers, and two of them **auto-pause on idleness** 
 Production setup is identical to staging. The differences:
 
 - App name: `doppia-production`
-- Bucket name: `doppia-production`
+- Artifact bucket name: `doppia-production` (private, like staging's)
+- Soundfonts bucket: **reuse `doppia-soundfonts`** — the samples are shared, immutable public assets; add the production origin to its CORS `AllowedOrigins` and prefer a custom subdomain over `r2.dev` (see § 4)
 - AuraDB: upgrade to Professional tier when free tier limits are reached
 - Fly.io: configure autoscaling and at least two instances for availability
 - `ENVIRONMENT=production` disables the local auth bypass unconditionally
