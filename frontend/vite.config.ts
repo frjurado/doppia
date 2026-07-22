@@ -21,5 +21,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // Vitest owns the unit tests under src/. The Playwright e2e specs live in
+    // e2e/ and run via `npm run e2e` — scope the include so vitest's default
+    // `**/*.spec.ts` glob doesn't try to execute them (they import
+    // @playwright/test, which errors under the vitest runner).
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });
