@@ -185,13 +185,21 @@ def create_app() -> FastAPI:
     Returns:
         A fully configured ``FastAPI`` instance ready for use with uvicorn.
     """
+    environment = os.environ.get("ENVIRONMENT", "production")
+
+    # OpenAPI docs (/api/docs, /api/redoc, /api/openapi.json) enumerate the whole
+    # API surface. They leak no data, but there is no reason to publish the map
+    # in production — disable them there (docs_url=None etc. removes the routes),
+    # while keeping them reachable in local/staging for development. Component 10
+    # Step 10; security-model.md § 7.
+    _docs_enabled = environment != "production"
     application = FastAPI(
         title="Doppia API",
         description="Open music analysis repository — notation infrastructure and editorial tools.",  # noqa: E501
         version="0.1.0",
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if _docs_enabled else None,
+        redoc_url="/api/redoc" if _docs_enabled else None,
+        openapi_url="/api/openapi.json" if _docs_enabled else None,
         lifespan=lifespan,
     )
 
@@ -224,7 +232,6 @@ def create_app() -> FastAPI:
     # postures must never combine (security-model.md § 1).
     application.add_middleware(AuthMiddleware)
 
-    environment = os.environ.get("ENVIRONMENT", "production")
     origins = _ALLOWED_ORIGINS.get(environment, [])
     application.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
 

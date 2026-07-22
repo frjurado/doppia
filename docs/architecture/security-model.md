@@ -587,6 +587,8 @@ Content-Security-Policy:
 
 **`X-Content-Type-Options`.** ✅ `nosniff` on all responses. Also `X-Frame-Options: DENY` (belt-and-suspenders for pre-CSP browsers alongside `frame-ancestors 'none'`).
 
+**OpenAPI docs.** ✅ **Done (Component 10 Step 10, 2026-07-22).** `/api/docs`, `/api/redoc`, and `/api/openapi.json` are **disabled in production** — `create_app()` passes `docs_url`/`redoc_url`/`openapi_url` as `None` when `ENVIRONMENT=production`, which drops the routes entirely (they 404). They stay reachable in local and staging for development. They leak no data, but there is no reason to publish the full API map to anonymous production traffic.
+
 ---
 
 ### Could be done in Phase 1
