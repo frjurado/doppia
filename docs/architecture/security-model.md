@@ -587,7 +587,7 @@ Content-Security-Policy:
 
 **`X-Content-Type-Options`.** ✅ `nosniff` on all responses. Also `X-Frame-Options: DENY` (belt-and-suspenders for pre-CSP browsers alongside `frame-ancestors 'none'`).
 
-**OpenAPI docs.** ✅ **Done (Component 10 Step 10, 2026-07-22).** `/api/docs`, `/api/redoc`, and `/api/openapi.json` are **disabled in production** — `create_app()` passes `docs_url`/`redoc_url`/`openapi_url` as `None` when `ENVIRONMENT=production`, which drops the routes entirely (they 404). They stay reachable in local and staging for development. They leak no data, but there is no reason to publish the full API map to anonymous production traffic.
+**OpenAPI docs.** ✅ **Done (Component 10 Step 10, 2026-07-22).** `/api/docs`, `/api/redoc`, and `/api/openapi.json` are **disabled in production** — `create_app()` passes `docs_url`/`redoc_url`/`openapi_url` as `None` when `ENVIRONMENT=production`, so FastAPI stops registering the routes and the schema is never served. They stay reachable in local and staging for development. They leak no data, but there is no reason to publish the full API map to anonymous production traffic. (With the routes unregistered, the paths fall through to the SPA catch-all rather than returning a literal 404 — the same behaviour as any other unmatched `/api/*` path; the schema is simply gone. A clean JSON 404 for unmatched `/api/*` paths is a possible later refinement, not required here.)
 
 ---
 
