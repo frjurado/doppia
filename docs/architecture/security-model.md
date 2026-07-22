@@ -71,7 +71,7 @@ Exactly one policy touches any given response (preflights carry the target path,
 **Rules:**
 
 - **Never use `allow_origins=["*"]` with `allow_credentials=True`**. This combination is rejected by all browsers and would silently break authentication. A wildcard origin is only permitted on the anonymous `/api/v1/public/` prefix, whose policy disables credentials — the separate-prefix arrangement this section required is now implemented.
-- The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. Adding a new environment (e.g. a preview deployment for a pull request) requires adding the origin to `_ALLOWED_ORIGINS` — not widening the pattern.
+- The allowed-origins list is an explicit allowlist, not a regex or wildcard pattern. The static per-environment `_ALLOWED_ORIGINS` is unioned at startup with a comma-separated **`ALLOWED_ORIGINS`** env var (Component 10 Step 11, `_resolve_origins()`), so a Fly.io PR-preview deployment — which gets a fresh URL — is admitted by setting that variable rather than editing code. It stays an explicit allowlist: entries are exact origins (blanks/trailing slashes normalised, duplicates dropped), and a literal `*` is discarded because this list drives the *credentialed* policy, which must never combine with a wildcard.
 - `allow_methods` covers the HTTP verbs actually used by the API. `PUT` is not listed because the API uses `PATCH` for partial updates; add it only when a `PUT` route is introduced.
 - `allow_headers` must include `Authorization` (the JWT bearer token), `Content-Type` (JSON bodies), and `Accept-Language` (the ADR-006 language negotiation header, added in Component 9 Part 7). Any custom headers added later (e.g. `X-Request-ID` for tracing) must be added here.
 
@@ -595,6 +595,6 @@ Content-Security-Policy:
 
 The following items are technically deferred but require no Phase 2 infrastructure — they are cheap to land now and save a future ADR.
 
-**CORS: pull request preview environments.** If Fly.io preview deployments are introduced for pull requests (each PR gets its own preview URL), the CORS allowlist must accommodate dynamic origins. The recommended approach is a backend startup check that reads a comma-separated `ALLOWED_ORIGINS` environment variable, falling back to the static allowlist. This avoids hardcoding preview URLs in code. This is a 5-line change to `main.py` with no new dependencies.
+**CORS: pull request preview environments.** ✅ **Done (Component 10 Step 11, 2026-07-22).** `_resolve_origins()` in `main.py` reads a comma-separated `ALLOWED_ORIGINS` env var and unions it with the static per-environment allowlist, so Fly.io PR-preview deployments (each with its own URL) are admitted without a code change. It remains an explicit allowlist — no wildcard/regex, and a literal `*` is dropped (see § 1).
 
 **Dependency scanning.** ✅ **Done (2026-07-11, pre-Step-32 batch):** `pip-audit` is pinned in `requirements-dev.txt` and both `pip-audit` and `npm audit` run in CI as a report-only job (`continue-on-error`). The job stays non-blocking while python-jose carries advisories with no fix version (PYSEC-2025-185; transitive `ecdsa` PYSEC-2026-1325 and `pyasn1` CVE-2026-30922, both constrained by python-jose's own pins); flip it to blocking after the Phase-2 PyJWT migration (`phase-2-entry-backlog.md` §2).

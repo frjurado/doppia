@@ -74,6 +74,36 @@ _ALLOWED_ORIGINS: dict[str, list[str]] = {
 }
 
 
+def _resolve_origins(environment: str) -> list[str]:
+    """Return the CORS allowlist for the credentialed editor API.
+
+    The static per-environment allowlist unioned with any comma-separated
+    ``ALLOWED_ORIGINS`` env var, so Fly.io PR-preview deployments — each of which
+    gets a fresh URL — can be admitted without a code change (Component 10 Step
+    11; ``security-model.md`` § 1). This stays an **explicit allowlist**: entries
+    are exact origins, never a wildcard or regex. A literal ``*`` is dropped
+    because this list drives the *credentialed* policy, which must never combine
+    with a wildcard origin (``security-model.md`` § 1); the anonymous
+    ``/api/v1/public/`` prefix keeps its own separate wildcard/no-credentials
+    policy.
+
+    Args:
+        environment: The ``ENVIRONMENT`` value keying the static allowlist.
+
+    Returns:
+        The de-duplicated origin list (static entries first, env additions
+        after), with blanks, trailing slashes, and any ``*`` removed.
+    """
+    origins = list(_ALLOWED_ORIGINS.get(environment, []))
+    for candidate in os.environ.get("ALLOWED_ORIGINS", "").split(","):
+        origin = candidate.strip().rstrip("/")
+        if not origin or origin == "*":
+            continue
+        if origin not in origins:
+            origins.append(origin)
+    return origins
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan: open DB connections on startup, close on shutdown.
@@ -232,7 +262,7 @@ def create_app() -> FastAPI:
     # postures must never combine (security-model.md § 1).
     application.add_middleware(AuthMiddleware)
 
-    origins = _ALLOWED_ORIGINS.get(environment, [])
+    origins = _resolve_origins(environment)
     application.add_middleware(PathScopedCORSMiddleware, allowed_origins=origins)
 
     # Security headers (CSP, nosniff, X-Frame-Options, HSTS-in-prod). Registered

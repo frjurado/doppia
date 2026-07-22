@@ -35,6 +35,12 @@ AUTH_MODE=supabase          # local | supabase  (local only valid when ENVIRONME
                             # Content-Security-Policy-Report-Only instead of
                             # enforcing it — a diagnostics valve, normally unset.
                             # See security-model.md § 7.
+# ALLOWED_ORIGINS=https://doppia-pr-42.fly.dev,https://…
+                            # optional (Component 10 Step 11): comma-separated
+                            # extra CORS origins, unioned with the static
+                            # per-environment allowlist — for Fly PR-preview
+                            # deploys. Explicit origins only (no wildcard).
+                            # See security-model.md § 1.
 
 # Neo4j AuraDB
 NEO4J_URI=neo4j+s://<instance-id>.databases.neo4j.io
