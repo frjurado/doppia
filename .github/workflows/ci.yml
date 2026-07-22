@@ -131,6 +131,13 @@ jobs:
           --cov-report=term-missing
           --cov-fail-under=60
 
+      # Verovio render regression guards (Component 10 Step 13). Informational
+      # per ADR-013: a Verovio version bump that changes rendering fails these,
+      # surfacing the deltas for review before the M14 upgrade ships. Regenerate
+      # with UPDATE_VEROVIO_SNAPSHOTS=1 when the change is intentional.
+      - name: Run Verovio snapshot guards
+        run: pytest backend/tests/snapshots/ -v
+
   # ---------------------------------------------------------------------------
   # Job 3 — Integration tests (slow, requires services, blocked on unit)
   # ---------------------------------------------------------------------------
