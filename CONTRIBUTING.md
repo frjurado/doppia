@@ -232,7 +232,7 @@ Pure functions, Pydantic validators, service-layer logic that can be tested with
 pytest backend/tests/unit/
 ```
 
-Running `pytest` without arguments collects only unit tests (`testpaths` in `pyproject.toml` points at `backend/tests`, so this works from the repository root). Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set.
+Running `pytest` without arguments collects the unit tests and the Verovio snapshot guards (`testpaths` in `pyproject.toml` points at `backend/tests`; the snapshots are fast and Docker-free). Integration tests are skipped by default unless `DOPPIA_RUN_INTEGRATION=1` is set. The suite runs on **pytest 9 / pytest-asyncio 1.x** (Component 10 Step 15) in `asyncio_mode = "auto"` — `async def test_*` needs no `@pytest.mark.asyncio` marker; tests that share a session-scoped async fixture opt in with `@pytest.mark.asyncio(loop_scope="session")`.
 
 ### Integration tests
 
