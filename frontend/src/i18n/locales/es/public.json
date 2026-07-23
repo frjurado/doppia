@@ -29,6 +29,17 @@
     "stubTag": "aún sin cubrir",
     "childrenHeading": "Tipos más específicos",
     "relationshipsHeading": "Conceptos relacionados",
+    "examples": {
+      "heading": "Ejemplos",
+      "loading": "Extrayendo ejemplos…",
+      "loadError": "No se pudieron cargar los ejemplos.",
+      "empty": "Todavía no hay ejemplos aprobados: los fragmentos de este concepto aún se están etiquetando.",
+      "shuffle": "Barajar ↺",
+      "expand": "Abrir partitura",
+      "collapse": "Cerrar partitura",
+      "expandLoading": "Cargando partitura…",
+      "expandError": "No se pudo cargar este ejemplo."
+    },
     "browseFragments": "Explorar fragmentos etiquetados con {{concept}} →",
     "domains": {
       "cadences": "Cadencias",

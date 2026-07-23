@@ -6,8 +6,7 @@
  *   GET /api/v1/public/concepts/{id}/examples   — example draw (Step 3, Step 6)
  *   GET /api/v1/public/concepts                 — browse index (Step 4, Step 7)
  *
- * Only the concept-detail wrapper exists so far; the examples and index
- * wrappers land with the frontend steps that consume them.
+ * The index wrapper lands with Step 7 (it consumes the § Step 4b shape).
  *
  * Sibling to `publicApi.ts`: same anonymous posture (the shared `apiFetch`
  * attaches a Bearer token only when a session exists, so an anonymous reader
@@ -15,13 +14,15 @@
  * boundary, as `conceptApi.ts` does for the editor concept surface.
  *
  * References:
- *   docs/roadmap/component-11-concept-glossary.md § Steps 1, 5
+ *   docs/roadmap/component-11-concept-glossary.md § Steps 1, 5, 6
  *   backend/api/routes/public_concepts.py
  *   backend/models/concepts.py (ConceptDetailResponse)
+ *   backend/models/fragment.py (ConceptExamplesResponse)
  */
 
 import { z } from 'zod';
 import { apiFetch } from './api';
+import type { ConceptBrowseItem } from './fragmentApi';
 
 const BASE = '/api/v1/public/concepts';
 
@@ -83,6 +84,23 @@ export type ConceptRef = z.infer<typeof ConceptRefSchema>;
 export type ConceptRelationship = z.infer<typeof ConceptRelationshipSchema>;
 export type ConceptDetail = z.infer<typeof ConceptDetailSchema>;
 
+/**
+ * A random draw of approved example fragments for one concept (Step 3).
+ *
+ * Maps to Python `ConceptExamplesResponse` in backend/models/fragment.py. Not
+ * paginated — a fixed-size sample re-drawn on each call, which is what the
+ * shuffle control re-requests. The items are `ConceptBrowseItem`s, identical to
+ * the anonymous browse's, so the same preview card renders both; they are
+ * passed through with that type rather than re-declared as a Zod schema, so the
+ * card's contract has exactly one definition (as `publicApi.ts` does for the
+ * browse itself).
+ */
+export interface ConceptExamplesResponse {
+  examples: ConceptBrowseItem[];
+  concept_id: string;
+  include_subtypes: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
@@ -98,4 +116,32 @@ export type ConceptDetail = z.infer<typeof ConceptDetailSchema>;
  */
 export async function getPublicConcept(conceptId: string): Promise<ConceptDetail> {
   return apiFetch(`${BASE}/${encodeURIComponent(conceptId)}`, undefined, ConceptDetailSchema);
+}
+
+/**
+ * Draw random approved example fragments for a concept, anonymously.
+ *
+ * Each call re-draws server-side (`ORDER BY random()`), so the glossary's
+ * shuffle control is simply another call. An unknown concept id is not an error
+ * — it resolves to an empty pool and returns no examples.
+ *
+ * @param conceptId Immutable Concept id whose examples to draw.
+ * @param options.limit           Maximum examples to draw (1–12, default 3).
+ * @param options.includeSubtypes Include subtype fragments (default true).
+ * @param options.seed            Integer for a reproducible draw; omit to shuffle.
+ * @throws ApiError on network failure.
+ */
+export async function getPublicConceptExamples(
+  conceptId: string,
+  options: { limit?: number; includeSubtypes?: boolean; seed?: number } = {}
+): Promise<ConceptExamplesResponse> {
+  const { limit, includeSubtypes, seed } = options;
+  const params = new URLSearchParams();
+  if (limit !== undefined) params.set('limit', String(limit));
+  if (includeSubtypes !== undefined) params.set('include_subtypes', String(includeSubtypes));
+  if (seed !== undefined) params.set('seed', String(seed));
+  const query = params.toString();
+  return apiFetch<ConceptExamplesResponse>(
+    `${BASE}/${encodeURIComponent(conceptId)}/examples${query ? `?${query}` : ''}`
+  );
 }

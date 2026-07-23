@@ -29,6 +29,17 @@
     "stubTag": "not yet covered",
     "childrenHeading": "More specific types",
     "relationshipsHeading": "Related concepts",
+    "examples": {
+      "heading": "Examples",
+      "loading": "Drawing examples…",
+      "loadError": "Examples could not be loaded.",
+      "empty": "No approved examples yet — this concept's fragments are still being tagged.",
+      "shuffle": "Shuffle ↺",
+      "expand": "Open score",
+      "collapse": "Close score",
+      "expandLoading": "Loading score…",
+      "expandError": "This example could not be loaded."
+    },
     "browseFragments": "Browse fragments tagged {{concept}} →",
     "domains": {
       "cadences": "Cadences",

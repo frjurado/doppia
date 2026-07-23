@@ -204,14 +204,14 @@ The timemap (used for the highlight schedule) is also regenerated after each re-
 
 ## Fragment-scoped playback
 
-Implemented in Component 9 Step 18 for the fragment detail view (`FragmentDetail.tsx`).
+Implemented in Component 9 Step 18 for the fragment detail view, in `FragmentNotation.tsx` (the notation surface extracted from `FragmentDetail.tsx` in Component 11 Step 6 and shared with the glossary example expand).
 
 `renderToMIDI()` and `renderToTimemap()` ignore the fragment `select()` and always emit the whole movement (see §"Coordinate chain"). So fragment playback keeps the whole-movement MIDI/timemap — which preserves Verovio's running clef/key/meter/tempo context at `mc_start` that an MEI slice would lose — and **windows** it to the rendered measure range:
 
 1. `buildFragmentPlayback(tk, meiText, mc_start, mc_end)` (`services/verovio.ts`) reads the whole-movement timemap with `includeMeasures: true`. The `measureOn` field carries each `<measure>`'s xml:id at its onset, so the timemap yields the *expanded* playback measure-onset sequence (repeats unrolled — a measure played twice appears twice, and on the second pass Verovio suffixes the id with `-rendN`, stripped here before mapping back to `mc`). The window is selected on that sequence (ADR-025 final-pass semantics): **`startMs`** = the last onset of `mc_start` entered from *outside* `[mc_start, mc_end]` (preceding measure `< mc_start` or `> mc_end`, or the very first onset); **`endMs`** = the first onset thereafter whose measure leaves the range, or `+∞` when the fragment runs to the movement end. A wholly-contained repeat keeps both passes (its internal backward jump stays in range, so the second `mc_start` onset is *not* chosen and the window spans both passes); a truncated repeat-end resolves to the final pass. It also returns the highlight schedule clipped to `[startMs, endMs)` and shifted so the fragment starts at 0 ms.
 2. `useMidiPlayback(midi, onUpdate, { window, onEnded })` schedules only the notes inside the window, shifted by `-startMs`, and registers a `Transport.scheduleOnce` auto-stop at the window length so audio never spills past the fragment. With no window (the full score viewer) playback is unchanged.
 
-The window is keyed on the **rendered** measure range (`mc_start`/`mc_end`), not the beat-precise tagged range — playback follows what the viewer renders (whole measures). This is deliberate: the rendered excerpt and the significant (possibly beat-precise) fragment are not the same thing (see the fragment-bracket note in `FragmentDetail.tsx`).
+The window is keyed on the **rendered** measure range (`mc_start`/`mc_end`), not the beat-precise tagged range — playback follows what the viewer renders (whole measures). This is deliberate: the rendered excerpt and the significant (possibly beat-precise) fragment are not the same thing (see the fragment-bracket note in `FragmentNotation.tsx`).
 
 ### Forward-compatibility hooks
 
@@ -225,7 +225,7 @@ The following items remain deferred:
 
 ## Playback caret
 
-Implemented in Component 9 Step 19 for both the full-score viewer (`ScoreViewer.tsx`) and the fragment detail view (`FragmentDetail.tsx`). It replaces the former `.is-playing` note highlight.
+Implemented in Component 9 Step 19 for both the full-score viewer (`ScoreViewer.tsx`) and the fragment detail view (`FragmentNotation.tsx` since the Component 11 Step 6 extraction). It replaces the former `.is-playing` note highlight.
 
 The playback indicator is a moving **caret**: a thin, absolutely-positioned overlay `<div>` layered over `.scoreContent` at z-index 27 (between the harmony overlay at 25 and the fragment/stage brackets at 30), `pointer-events: none`. Per the CLAUDE.md overlay rule it is **never** injected into Verovio's SVG; it is an HTML element whose `transform` and `height` are mutated imperatively each frame — no React state update on the 60 fps path, matching the previous highlight's performance profile. The caret is driven by the existing `onPositionUpdate(timeMs)` signal and the same timemap-derived schedule (`buildHighlightSchedule` for the whole movement; the windowed `buildFragmentPlayback` schedule for a fragment). `getElementsAtTime()` is **not** used (it is not on the production path — see §"Forward-compatibility hooks").
 

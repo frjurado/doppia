@@ -13,14 +13,15 @@
  *     exists and its links stay stable, only the prose is withheld.
  *  3. Structure — the direct IS_SUBTYPE_OF children ("more specific types")
  *     and the typed relationships grouped by edge type and direction.
- *  4. A link into the anonymous fragment browse for this concept
+ *  4. Inline example fragments (Step 6, ConceptExamples) — a shuffleable draw
+ *     of approved fragments, each expandable to a full render.
+ *  5. A link into the anonymous fragment browse for this concept
  *     (`/public/concepts?concept=<id>`).
  *
  * Two states diverge from that shape:
  *  - **Stub concept** — leads with the honest "domain not yet modelled" banner,
- *    withholds the definition block, and omits the browse link (a stub carries
- *    no approved fragments). The inline example section (Step 6) is likewise
- *    omitted for stubs.
+ *    withholds the definition block, and omits both the example section and the
+ *    browse link (a stub carries no approved fragments).
  *  - **Unknown id** — the backend 404 (`CONCEPT_NOT_FOUND`) renders as a plain
  *    not-found message rather than a raw API error.
  *
@@ -36,6 +37,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import ConceptExamples from '../components/score/ConceptExamples';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
@@ -303,7 +305,9 @@ export default function ConceptPage() {
           </section>
         )}
 
-        {/* Example fragments (Step 6) mount here for non-stub concepts. */}
+        {/* Inline example fragments (Step 6) — non-stub concepts only; a stub
+          carries no approved fragments. Draws, previews, and expands its own. */}
+        {!concept.stub && <ConceptExamples conceptId={concept.id} />}
 
         {!concept.stub && (
           <div className={styles.browse}>

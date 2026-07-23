@@ -25,6 +25,15 @@ import ConceptPage from '../ConceptPage';
 
 vi.mock('../../services/glossaryApi');
 
+// The inline example section is covered by its own suite (ConceptExamples.test)
+// and pulls in the Verovio/MIDI renderer; stub it here so the concept-page
+// tests stay focused on the Step 5 payload and avoid the heavy import chain.
+vi.mock('../../components/score/ConceptExamples', () => ({
+  default: ({ conceptId }: { conceptId: string }) => (
+    <div data-testid="concept-examples">{conceptId}</div>
+  ),
+}));
+
 function makeConcept(overrides: Partial<ConceptDetail> = {}): ConceptDetail {
   return {
     id: 'PerfectAuthenticCadence',
@@ -197,6 +206,17 @@ describe('ConceptPage — stub concept', () => {
     expect(screen.queryByText(/^Definition$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /browse fragments/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    // A stub carries no approved fragments — the example section is omitted too.
+    expect(screen.queryByTestId('concept-examples')).not.toBeInTheDocument();
+  });
+});
+
+describe('ConceptPage — example fragments (Step 6)', () => {
+  it('mounts the example section for a non-stub concept, keyed on its id', async () => {
+    renderConceptPage();
+
+    const examples = await screen.findByTestId('concept-examples');
+    expect(examples).toHaveTextContent('PerfectAuthenticCadence');
   });
 });
 

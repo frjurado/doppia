@@ -20,13 +20,13 @@ The overlay surfaces on **two surfaces, gated differently** (Step 23 decision, c
 | Surface | Gate | Rationale |
 |---|---|---|
 | **Score viewer** (`ScoreViewer.tsx`) | Tag mode only | The score viewer is a reading/annotation surface; in-score labels are an annotator aid. View mode stays clean (score + MIDI only). |
-| **Fragment viewer** (`FragmentDetail.tsx`) | On by default, user toggle | A fragment *is* a study object — the tagged harmony is part of what it teaches. Labels render on load; a "Harmony" toggle in the score controls lets the reader hide them. |
+| **Fragment viewer** (`FragmentNotation.tsx`) | On by default, user toggle | A fragment *is* a study object — the tagged harmony is part of what it teaches. Labels render on load; a "Harmony" toggle in the score controls lets the reader hide them. |
 
 This resolves the Step 23 asymmetry deliberately as **option (b)**: show labels in the fragment viewer (with a toggle defaulting to on), keep the score-viewer tag-mode gate. The roadmap's two other options — keep the asymmetry, or add a toggle to *both* surfaces — were not taken: the score viewer's view mode has no fragment-study purpose to justify the labels.
 
 **Score viewer.** The tag-mode gate is checked in `ScoreViewer.tsx` before mounting `harmonyOverlay.ts`; the module itself has no knowledge of view mode.
 
-**Fragment viewer.** `FragmentDetail.tsx` mounts the same `HarmonyOverlay` in a `showHarmony`-gated effect. Differences from the score-viewer mount:
+**Fragment viewer.** `FragmentNotation.tsx` — the notation surface extracted from `FragmentDetail.tsx` (Component 11 Step 6) and shared with the glossary's inline example expand — mounts the same `HarmonyOverlay` in a `showHarmony`-gated effect. Differences from the score-viewer mount:
 - **Data**: reuses the `harmony_events` already sliced into the fragment detail response over the rendered bar range (`toOverlayHarmonyEvents()` coerces the loosely-typed records into `HarmonyEventOut`), so there is no second analysis request.
 - **Ghost layer**: reuses the layer built once per render for bracket geometry (`readFragmentGeometry()` takes it as a parameter), so the bracket and label surfaces share one coordinate origin.
 - **Non-interactive**: no `onLabelClick` is passed — the viewer is read-only, so labels stay `pointer-events: none` (there is no `HarmonyPanel` to focus).
