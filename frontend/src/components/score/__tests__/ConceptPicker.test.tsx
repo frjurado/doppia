@@ -55,7 +55,7 @@ function setup(props: Partial<React.ComponentProps<typeof ConceptPicker>> = {}) 
     <ConceptPicker
       selectedConceptId={props.selectedConceptId ?? null}
       onSelect={props.onSelect ?? onSelect}
-    />,
+    />
   );
   return { ...result, onSelect };
 }
@@ -84,7 +84,7 @@ describe('ConceptPicker', () => {
   it('does not call searchConcepts when the query is empty', async () => {
     setup();
     // Wait longer than the debounce to confirm no call is made.
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 400));
     expect(conceptApi.searchConcepts).not.toHaveBeenCalled();
   });
 
@@ -96,7 +96,7 @@ describe('ConceptPicker', () => {
     fireEvent.change(input, { target: { value: 'perfect' } });
     await waitFor(
       () => expect(conceptApi.searchConcepts).toHaveBeenCalledWith('perfect', null),
-      WAIT_OPTS,
+      WAIT_OPTS
     );
   });
 
@@ -106,10 +106,7 @@ describe('ConceptPicker', () => {
     const input = screen.getByTestId('concept-search-input');
 
     fireEvent.change(input, { target: { value: 'perfect authentic' } });
-    await waitFor(
-      () => screen.getByTestId('concept-card-PerfectAuthenticCadence'),
-      WAIT_OPTS,
-    );
+    await waitFor(() => screen.getByTestId('concept-card-PerfectAuthenticCadence'), WAIT_OPTS);
 
     // Hierarchy path breadcrumbs should be visible.
     expect(screen.getByText(/Cadence › Authentic Cadence/)).toBeInTheDocument();
@@ -154,7 +151,7 @@ describe('ConceptPicker', () => {
 
     await waitFor(
       () => expect(conceptApi.searchConcepts).toHaveBeenCalledWith('cadence', 'cadences'),
-      WAIT_OPTS,
+      WAIT_OPTS
     );
   });
 
@@ -170,7 +167,7 @@ describe('ConceptPicker', () => {
     fireEvent.change(input, { target: { value: 'cadence' } });
     await waitFor(
       () => expect(conceptApi.searchConcepts).toHaveBeenCalledWith('cadence', null),
-      WAIT_OPTS,
+      WAIT_OPTS
     );
   });
 
@@ -180,10 +177,7 @@ describe('ConceptPicker', () => {
     const input = screen.getByTestId('concept-search-input');
 
     fireEvent.change(input, { target: { value: 'xyzzy' } });
-    await waitFor(
-      () => screen.getByText(/No concepts found/i),
-      WAIT_OPTS,
-    );
+    await waitFor(() => screen.getByText(/No concepts found/i), WAIT_OPTS);
   });
 
   it('shows an error message when searchConcepts rejects', async () => {
@@ -195,19 +189,39 @@ describe('ConceptPicker', () => {
     await waitFor(() => screen.getByRole('alert'), WAIT_OPTS);
   });
 
+  it('shows the selected concept as a persistent card when no search is active', async () => {
+    // Edit-flow prefill: a concept is selected but nothing has been searched, so
+    // it is not in `results`. The picker must still surface it so the box is not
+    // read as empty (fragment editor repair — Component 10 Step 16).
+    const pac = makePAC();
+    render(<ConceptPicker selectedConceptId={pac.id} selectedConcept={pac} onSelect={vi.fn()} />);
+    expect(screen.getByTestId('concept-card-PerfectAuthenticCadence')).toBeInTheDocument();
+    // The "type to search" placeholder must not show while a concept is selected.
+    expect(screen.queryByText(/type/i)).not.toBeInTheDocument();
+  });
+
+  it('does not duplicate the selected concept when it is also in the results', async () => {
+    const pac = makePAC();
+    vi.mocked(conceptApi.searchConcepts).mockResolvedValue(makePage([pac]));
+    render(<ConceptPicker selectedConceptId={pac.id} selectedConcept={pac} onSelect={vi.fn()} />);
+    const input = screen.getByTestId('concept-search-input');
+    fireEvent.change(input, { target: { value: 'perfect' } });
+    await waitFor(
+      () => expect(screen.getAllByTestId('concept-card-PerfectAuthenticCadence')).toHaveLength(1),
+      WAIT_OPTS
+    );
+  });
+
   it('renders multiple results, each with its hierarchy path', async () => {
     vi.mocked(conceptApi.searchConcepts).mockResolvedValue(makePage([makePAC(), makeIAC()]));
     setup();
     const input = screen.getByTestId('concept-search-input');
 
     fireEvent.change(input, { target: { value: 'authentic' } });
-    await waitFor(
-      () => {
-        screen.getByTestId('concept-card-PerfectAuthenticCadence');
-        screen.getByTestId('concept-card-ImperfectAuthenticCadence');
-      },
-      WAIT_OPTS,
-    );
+    await waitFor(() => {
+      screen.getByTestId('concept-card-PerfectAuthenticCadence');
+      screen.getByTestId('concept-card-ImperfectAuthenticCadence');
+    }, WAIT_OPTS);
 
     // Both cards share the same hierarchy path — both occurrences should appear.
     const paths = screen.getAllByText(/Cadence › Authentic Cadence/);

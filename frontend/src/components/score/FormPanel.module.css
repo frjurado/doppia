@@ -130,6 +130,73 @@
   background-color: var(--color-error-container);
 }
 
+.deleteButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Edit-session header actions: Cancel (neutral) + Delete (error). */
+.fragmentHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.cancelButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-1) var(--spacing-2);
+  color: var(--color-on-surface-variant);
+}
+
+.cancelButton:hover {
+  color: var(--color-on-surface);
+}
+
+.cancelButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Inline delete confirmation (edit mode) ──────────────────────────────────
+   Mirrors the fragment detail panel's confirm block so the two delete surfaces
+   read identically (error-container tonal fill, 0px radius per DESIGN.md). */
+.deleteConfirm {
+  padding: var(--spacing-3) var(--spacing-4);
+  background-color: var(--color-error-container);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.deleteConfirmText {
+  margin: 0;
+  color: var(--color-on-error-container);
+}
+
+.deleteConfirmActions {
+  display: flex;
+  gap: var(--spacing-2);
+}
+
+.confirmDeleteButton {
+  background-color: var(--color-error);
+  color: var(--color-on-error);
+  border: none;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+.confirmDeleteButton:hover {
+  opacity: 0.9;
+}
+
+.confirmDeleteButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ── No-selection hint ────────────────────────────────────────────────────── */
 
 .noSelectionHint {

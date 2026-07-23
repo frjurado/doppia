@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
@@ -79,7 +79,12 @@ import type {
   TypeRefinementChild,
 } from '../services/conceptApi';
 import { getConceptSchemas } from '../services/conceptApi';
-import { createFragment, updateFragment, submitFragment } from '../services/fragmentApi';
+import {
+  createFragment,
+  updateFragment,
+  submitFragment,
+  deleteFragment,
+} from '../services/fragmentApi';
 import { getHarmonyEvents } from '../services/analysisApi';
 import type { HarmonyEventOut } from '../services/analysisApi';
 import { HarmonyOverlay } from '../components/score/harmonyOverlay';
@@ -258,7 +263,11 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
         )}
       </button>
       {open && (
-        <ul role="listbox" aria-label={t('viewer.transpositionAria')} className={styles.transposeDropdown}>
+        <ul
+          role="listbox"
+          aria-label={t('viewer.transpositionAria')}
+          className={styles.transposeDropdown}
+        >
           {options.map((opt) => {
             const resultKey = sourceKey && opt.value ? transposeKey(sourceKey, opt.value) : null;
             return (
@@ -412,6 +421,50 @@ function buildStageAssignmentsFromSubParts(
       error: false,
     } satisfies StageAssignment;
   });
+}
+
+/**
+ * Parse a stored `summary.properties` map into PropertyForm values, converting
+ * the serialised "true"/"false" strings back to booleans (mirrors the create
+ * flow's serialisation in buildPayload). String and string[] values pass
+ * through unchanged; nulls/other types are dropped.
+ */
+function parseStoredProperties(raw: unknown): PropertyFormValues {
+  const values: PropertyFormValues = {};
+  if (raw && typeof raw === 'object') {
+    for (const [schemaId, val] of Object.entries(raw as Record<string, unknown>)) {
+      if (val === 'true') values[schemaId] = true;
+      else if (val === 'false') values[schemaId] = false;
+      else if (typeof val === 'string' || Array.isArray(val)) {
+        values[schemaId] = val as string | string[];
+      }
+    }
+  }
+  return values;
+}
+
+/**
+ * Rebuild the per-stage sub-part tag map from a fragment's stored sub-parts
+ * (edit flow). Keyed by stageId = the sub-part's primary concept_id, which is
+ * the CONTAINS-edge target_id the stage list keys on. The schema tree is left
+ * null so each SubPartForm fetches it on mount and merges these restored
+ * property values — without this the stage cards render with empty forms even
+ * though the geometry (brackets) restores correctly.
+ */
+function buildSubPartTagsFromSubParts(
+  subParts: FragmentDetailResponse['sub_parts']
+): Record<string, SubPartTag> {
+  const tags: Record<string, SubPartTag> = {};
+  for (const sp of subParts) {
+    const primary = sp.concept_tags.find((t) => t.is_primary);
+    if (!primary) continue;
+    const properties = (sp.summary as Record<string, unknown>)?.properties;
+    tags[primary.concept_id] = {
+      schemaTree: null,
+      propertyValues: parseStoredProperties(properties),
+    };
+  }
+  return tags;
 }
 
 /**
@@ -640,6 +693,19 @@ export default function ScoreViewer() {
   // fragmentDraftId: UUID of the in-progress draft, set after the first
   // successful create. Subsequent saves use PATCH; null = not yet saved.
   const [fragmentDraftId, setFragmentDraftId] = useState<string | null>(null);
+  // ── Edit session (Component 10 Step 16 — editing a stored fragment) ───────
+  // Non-null only while editing an existing stored fragment (not a fresh
+  // create). Carries the status so the submission controls can be status-aware
+  // (draft/rejected → Save draft + Submit; submitted/approved → single Save
+  // changes via PATCH, since POST /submit rejects non-drafts), and the sub-part
+  // count so the delete confirmation can name the cascade. Cleared by
+  // resetAnnotation (cancel, delete, or a completed save).
+  const [editSession, setEditSession] = useState<{
+    id: string;
+    status: FragmentDetailResponse['status'];
+    subPartCount: number;
+  } | null>(null);
+  const [isSavingChanges, setIsSavingChanges] = useState(false);
   // ── Harmony click-to-focus (Step 16 / G6.3) ──────────────────────────────
   // Set when the annotator clicks an in-score chord label; forwarded to
   // FormPanel → HarmonyPanel to scroll/focus the matching event card.
@@ -652,6 +718,9 @@ export default function ScoreViewer() {
   // dismisses after a generous delay and is cleared as soon as the annotator
   // starts a new fragment; the banner is also manually dismissible.
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  // i18n key for the confirmation banner text — differs for a submit vs a
+  // status-aware "Save changes" revision (Step 16).
+  const [submitSuccessKey, setSubmitSuccessKey] = useState('score:viewer.submitSuccess');
   const submitSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Stored-fragment overlay (Component 7 Step 10) ─────────────────────────
@@ -660,6 +729,16 @@ export default function ScoreViewer() {
   // so the newly submitted fragment appears immediately.
   const { fragments: storedFragments, refresh: refreshStoredFragments } =
     useStoredFragments(movementId);
+
+  // While a stored fragment is being edited (fragmentDraftId is its id, set by
+  // the session-build effect), hide its stored bracket so it does not render
+  // twice — once as the live editing MainBracket and once as the stored overlay
+  // bracket, which sat at a slightly different height and duplicated the label.
+  const overlayFragments = useMemo(
+    () =>
+      fragmentDraftId ? storedFragments.filter((f) => f.id !== fragmentDraftId) : storedFragments,
+    [storedFragments, fragmentDraftId]
+  );
 
   // ── Fragment detail panel (Component 7 Step 12) ──────────────────────────
   // selectedFragmentId: UUID of the stored fragment whose detail panel is open.
@@ -1071,19 +1150,20 @@ export default function ScoreViewer() {
   }, [stageAssignments]);
 
   // Show a brief inline note when pre-population auto-drops the resolution.
-  const showGridNote = useCallback((grid: ResolutionMode, stageCount: number) => {
-    if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
-    const label =
-      grid === 'beat'
-        ? t('score:viewer.resolutionLabel.beat')
-        : grid === 'subbeat'
-          ? t('score:viewer.resolutionLabel.subbeat')
-          : t('score:viewer.resolutionLabel.measure');
-    setGridAutoSwitchNote(
-      t('score:viewer.gridAutoSwitch', { label, count: stageCount })
-    );
-    gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
-  }, [t]);
+  const showGridNote = useCallback(
+    (grid: ResolutionMode, stageCount: number) => {
+      if (gridNoteTimerRef.current) clearTimeout(gridNoteTimerRef.current);
+      const label =
+        grid === 'beat'
+          ? t('score:viewer.resolutionLabel.beat')
+          : grid === 'subbeat'
+            ? t('score:viewer.resolutionLabel.subbeat')
+            : t('score:viewer.resolutionLabel.measure');
+      setGridAutoSwitchNote(t('score:viewer.gridAutoSwitch', { label, count: stageCount }));
+      gridNoteTimerRef.current = setTimeout(() => setGridAutoSwitchNote(null), 4000);
+    },
+    [t]
+  );
   // Clear the timer on unmount.
   useEffect(
     () => () => {
@@ -1123,6 +1203,10 @@ export default function ScoreViewer() {
         setStageAssignments(
           buildStageAssignmentsFromSubParts(editSubParts, schemaTree.stages, mcIndexRef.current)
         );
+        // Restore each stage's stored sub-part property values (setSubPartTags({})
+        // above cleared them) so the sidebar stage forms are prefilled, not just
+        // the geometry. Keyed by stageId; SubPartForm fetches the schema on mount.
+        setSubPartTags(buildSubPartTagsFromSubParts(editSubParts));
         setStageGridBlocked(false);
         // Raise the active resolution to the finest grid the restored fragment
         // needs, so beat/sub-beat stage bounds render at their own precision.
@@ -1290,6 +1374,15 @@ export default function ScoreViewer() {
     setProseAnnotation('');
     setFragmentDraftId(null);
     activeSchemaTreeRef.current = null;
+    // Clear any pending edit prefill and its refs. Without this, the
+    // fragmentResetKey bump below remounts FormPanel which re-consumes the stale
+    // editPrefillFormData — re-populating the concept (but not the stages, whose
+    // ref was already consumed) instead of resetting to a blank form.
+    setEditPrefillFormData(null);
+    editPrefillRef.current = null;
+    editSubPartsRef.current = null;
+    setEditSession(null);
+    setSubmitError(null);
     setFragmentResetKey((k) => k + 1);
   }, []);
 
@@ -1298,9 +1391,13 @@ export default function ScoreViewer() {
   }, [resetAnnotation]);
 
   // ── Post-submit confirmation (Step 5) ──────────────────────────────────────
-  /** Raise the success banner and arm its auto-dismiss timer. */
-  const showSubmitSuccess = useCallback(() => {
+  /**
+   * Raise the success banner and arm its auto-dismiss timer. The i18n key
+   * varies so a "Save changes" revision reads differently from a fresh submit.
+   */
+  const showSubmitSuccess = useCallback((messageKey = 'score:viewer.submitSuccess') => {
     if (submitSuccessTimerRef.current) clearTimeout(submitSuccessTimerRef.current);
+    setSubmitSuccessKey(messageKey);
     setSubmitSuccess(true);
     submitSuccessTimerRef.current = setTimeout(() => setSubmitSuccess(false), 6000);
   }, []);
@@ -1350,17 +1447,17 @@ export default function ScoreViewer() {
       };
 
       // Build property values: convert stored "true"/"false" strings to booleans.
-      const rawProperties = (fragment.summary as Record<string, unknown>)?.properties;
-      const propertyValues: PropertyFormValues = {};
-      if (rawProperties && typeof rawProperties === 'object') {
-        for (const [schemaId, val] of Object.entries(rawProperties)) {
-          if (val === 'true') propertyValues[schemaId] = true;
-          else if (val === 'false') propertyValues[schemaId] = false;
-          else if (typeof val === 'string' || Array.isArray(val)) {
-            propertyValues[schemaId] = val as string | string[];
-          }
-        }
-      }
+      const propertyValues = parseStoredProperties(
+        (fragment.summary as Record<string, unknown>)?.properties
+      );
+
+      // Record the edit session so the submission controls become status-aware
+      // and Cancel/Delete know the target (Step 16).
+      setEditSession({
+        id: fragment.id,
+        status: fragment.status,
+        subPartCount: fragment.sub_parts.length,
+      });
 
       // Set prefill data (passed to FormPanel on remount) and restore prose.
       setEditPrefillFormData({ concept, propertyValues });
@@ -1618,6 +1715,68 @@ export default function ScoreViewer() {
     ]
   );
 
+  /**
+   * Save an analytic edit of an already-reviewed fragment (submitted/approved).
+   *
+   * These statuses cannot go through POST /submit (that only accepts drafts).
+   * A PATCH applies the backend's revision semantics: an analytic edit clears
+   * prior reviews and re-opens review (approved → submitted). This is the whole
+   * save — there is no separate submit step — so on success the surface resets
+   * and a "changes saved / review re-opened" banner confirms it.
+   */
+  const handleSaveChanges = useCallback(
+    async (formData: FormSubmitData) => {
+      const mei = meiTextRef.current;
+      if (!mei || !committedSelection || !editSession) return;
+
+      setIsSavingChanges(true);
+      setSubmitError(null);
+      try {
+        const fields = buildPayload(formData, mei);
+        if (!fields) throw new Error(t('score:viewer.incompleteSubmit'));
+        await updateFragment(editSession.id, fields);
+        refreshStoredFragments();
+        resetAnnotation();
+        showSubmitSuccess('score:viewer.saveChangesSuccess');
+      } catch (err) {
+        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
+      } finally {
+        setIsSavingChanges(false);
+      }
+    },
+    [
+      committedSelection,
+      editSession,
+      buildPayload,
+      refreshStoredFragments,
+      resetAnnotation,
+      showSubmitSuccess,
+      t,
+    ]
+  );
+
+  /**
+   * Cancel an edit session: discard the in-progress changes and return to
+   * viewing the stored fragment (its detail panel), leaving the DB untouched.
+   */
+  const handleCancelEdit = useCallback(() => {
+    const id = editSession?.id ?? null;
+    resetAnnotation();
+    if (id) setSelectedFragmentId(id);
+  }, [editSession, resetAnnotation]);
+
+  /**
+   * Delete the fragment currently being edited (real DB delete with cascade to
+   * its sub-parts), then clear the surface. The inline confirmation lives in
+   * FormPanel; this runs only after the annotator confirms.
+   */
+  const handleDeleteEditingFragment = useCallback(async () => {
+    if (!editSession) return;
+    await deleteFragment(editSession.id, editSession.subPartCount > 0);
+    refreshStoredFragments();
+    resetAnnotation();
+  }, [editSession, refreshStoredFragments, resetAnnotation]);
+
   // Mirror stageAssignments into a ref so callbacks can read .length without
   // Keep stagesComplete in sync with assignments and session.
   // Blocked state overrides: if the selection cannot fit the concept's stages,
@@ -1731,6 +1890,20 @@ export default function ScoreViewer() {
     // stored fragment's selection rather than the current FormPanel selection.
     const editFragment = editPrefillRef.current;
     if (editFragment !== null) editPrefillRef.current = null;
+
+    // Edit flow: raise the active resolution to the finest grid the stored
+    // fragment (and its stage sub-parts) needs, so the restored selection and
+    // stage bounds project at their own precision from the first paint. Done
+    // here — not only in handleConceptChange — because the session reads
+    // resolutionRef at construction, before the async concept restore runs, and
+    // because the fragment's own off-beat start may be finer than any sub-part.
+    if (editFragment !== null) {
+      const grid = finestBeatResolution([editFragment, ...editFragment.sub_parts]);
+      if ((GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+        resolutionRef.current = grid;
+        setResolution(grid);
+      }
+    }
 
     // Read committed selection state from the React state closure.
     // We deliberately do NOT snapshot from annotationSessionRef.current here
@@ -1871,6 +2044,19 @@ export default function ScoreViewer() {
       session.onFlagsChange((flags) => {
         setAnnotationFlags({ ...flags });
       });
+
+      // Edit flow: _restoreSelection set the session's internal selection and
+      // fragmentSet but deliberately fired no callbacks (its contract is the
+      // G1.3 reproject path, where React state already holds them). The full
+      // reset above cleared the React mirrors, so push the restored selection
+      // and fragmentSet back into React state now — otherwise the editing
+      // bracket never draws, "Fragment drawn" reads off and cannot be toggled,
+      // and the fragmentSet-gated Harmony and Commentary panels stay hidden.
+      if (editFragment !== null && session.selection) {
+        setSelectionRange(session.selection);
+        setCommittedSelection(commitSelection(session.selection, mcIdx));
+        setAnnotationFlags((f) => ({ ...f, fragmentSet: true }));
+      }
 
       // Restore the active resolution so the correct ghost layer accepts
       // pointer events (resolutionRef mirrors the resolution state without
@@ -2093,9 +2279,9 @@ export default function ScoreViewer() {
     return () => {
       cancelled = true;
     };
-  // Re-run only when the movement changes; `t` is read for loading/error labels
-  // but a language switch should not reload the score.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Re-run only when the movement changes; `t` is read for loading/error labels
+    // but a language switch should not reload the score.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movementId]);
 
   // ── Control handlers ─────────────────────────────────────────────────────
@@ -2339,7 +2525,7 @@ export default function ScoreViewer() {
                 Step 14: StageBrackets (Layer 4) renders once conceptSet is true
                          and the concept has CONTAINS edges. */}
             <FragmentOverlay
-              fragments={storedFragments}
+              fragments={overlayFragments}
               ghostLayer={ghostLayer}
               onBracketClick={setSelectedFragmentId}
             >
@@ -2414,6 +2600,12 @@ export default function ScoreViewer() {
             submitError={submitError}
             draftId={fragmentDraftId}
             editPrefill={editPrefillFormData}
+            editStatus={editSession?.status ?? null}
+            editSubPartCount={editSession?.subPartCount ?? 0}
+            onCancelEdit={handleCancelEdit}
+            onDeleteEditingFragment={handleDeleteEditingFragment}
+            onSaveChanges={handleSaveChanges}
+            isSavingChanges={isSavingChanges}
             onHarmonyUpdated={handleHarmonyUpdated}
             harmonyFocusKey={harmonyFocusKey}
           />
@@ -2435,7 +2627,7 @@ export default function ScoreViewer() {
         {submitSuccess && (
           <div className={styles.submitSuccessBanner} role="status" aria-live="assertive">
             <Type variant="label-md" as="span" className={styles.submitSuccessText}>
-              {t('score:viewer.submitSuccess')}
+              {t(submitSuccessKey)}
             </Type>
             <button
               type="button"

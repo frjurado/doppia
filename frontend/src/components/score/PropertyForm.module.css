@@ -47,6 +47,13 @@
   position: relative;
 }
 
+/* Stage sub-part form (hideFieldLabels): the stage card already names the
+   field, so the single redundant schema label ("Stage 1 Components", …) is
+   suppressed while the control keeps its placeholder and aria-label. */
+.form[data-hide-labels='true'] .fieldMeta {
+  display: none;
+}
+
 /* Schema name line — bold label with optional required marker and inline ⓘ.
    Inline (not flex) so the ⓘ trails after the last word when the name wraps. */
 .fieldLabel {

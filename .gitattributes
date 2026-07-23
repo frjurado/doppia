@@ -1,0 +1,4 @@
+# Verovio snapshot guards (Component 10 Step 13): store as LF regardless of
+# core.autocrlf so the byte-for-byte comparison against the LF render is stable
+# across platforms.
+backend/tests/snapshots/__snapshots__/*.svg text eol=lf

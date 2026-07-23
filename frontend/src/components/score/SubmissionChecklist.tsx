@@ -68,8 +68,19 @@ export interface SubmissionChecklistProps {
    * indicator. Null = annotation has not been saved yet.
    */
   draftId: string | null;
+  /**
+   * True when editing an already-reviewed fragment (submitted/approved). The
+   * two draft actions are replaced by a single "Save changes" that PATCHes the
+   * fragment — POST /submit only accepts drafts, so re-submitting is neither
+   * possible nor needed (the PATCH re-opens review on its own). Step 16.
+   */
+  reviewedEdit?: boolean;
+  /** True while a Save changes request is in flight. */
+  isSavingChanges?: boolean;
   onSaveDraft: () => void;
   onSubmit: () => void;
+  /** Save an analytic edit of a submitted/approved fragment (reviewedEdit). */
+  onSaveChanges?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,10 +95,7 @@ interface CheckRowProps {
 function CheckRow({ label, done }: CheckRowProps) {
   return (
     <li className={`${styles.checkRow} ${done ? styles.checkRowDone : styles.checkRowPending}`}>
-      <span
-        className={styles.checkIndicator}
-        aria-hidden="true"
-      >
+      <span className={styles.checkIndicator} aria-hidden="true">
         {done ? '✓' : '○'}
       </span>
       <Type variant="label-sm" as="span" className={styles.checkLabel}>
@@ -110,8 +118,11 @@ export default function SubmissionChecklist({
   isSubmitting,
   submitError,
   draftId,
+  reviewedEdit = false,
+  isSavingChanges = false,
   onSaveDraft,
   onSubmit,
+  onSaveChanges,
 }: SubmissionChecklistProps) {
   const { t } = useTranslation('score');
   const refinementOk = !typeRefinementRequired || typeRefinementSet;
@@ -125,7 +136,7 @@ export default function SubmissionChecklist({
 
   const canSaveDraft = flags.fragmentSet && !isSavingDraft && !isSubmitting;
 
-  const busy = isSavingDraft || isSubmitting;
+  const busy = isSavingDraft || isSubmitting || isSavingChanges;
 
   return (
     <div className={styles.checklist}>
@@ -166,31 +177,50 @@ export default function SubmissionChecklist({
       )}
 
       {/* ── Actions ─────────────────────────────────────────────────── */}
-      <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.saveDraftButton}
-          onClick={onSaveDraft}
-          disabled={!canSaveDraft}
-          aria-busy={isSavingDraft}
-        >
-          <Type variant="label-sm" as="span">
-            {isSavingDraft ? t('checklist.saving') : t('checklist.saveDraft')}
-          </Type>
-        </button>
+      {/* Reviewed edit (submitted/approved): a single Save changes (PATCH). It
+          re-opens review on the server, so there is no separate submit. Draft
+          and fresh creates keep Save draft + Submit for review. */}
+      {reviewedEdit ? (
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={`${styles.submitButton} ${canSubmit && !busy ? styles.submitButtonReady : ''}`}
+            onClick={onSaveChanges}
+            disabled={!canSubmit || busy}
+            aria-busy={isSavingChanges}
+          >
+            <Type variant="label-sm" as="span">
+              {isSavingChanges ? t('checklist.saving') : t('checklist.saveChanges')}
+            </Type>
+          </button>
+        </div>
+      ) : (
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.saveDraftButton}
+            onClick={onSaveDraft}
+            disabled={!canSaveDraft}
+            aria-busy={isSavingDraft}
+          >
+            <Type variant="label-sm" as="span">
+              {isSavingDraft ? t('checklist.saving') : t('checklist.saveDraft')}
+            </Type>
+          </button>
 
-        <button
-          type="button"
-          className={`${styles.submitButton} ${canSubmit && !busy ? styles.submitButtonReady : ''}`}
-          onClick={onSubmit}
-          disabled={!canSubmit || busy}
-          aria-busy={isSubmitting}
-        >
-          <Type variant="label-sm" as="span">
-            {isSubmitting ? t('checklist.submitting') : t('checklist.submitForReview')}
-          </Type>
-        </button>
-      </div>
+          <button
+            type="button"
+            className={`${styles.submitButton} ${canSubmit && !busy ? styles.submitButtonReady : ''}`}
+            onClick={onSubmit}
+            disabled={!canSubmit || busy}
+            aria-busy={isSubmitting}
+          >
+            <Type variant="label-sm" as="span">
+              {isSubmitting ? t('checklist.submitting') : t('checklist.submitForReview')}
+            </Type>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

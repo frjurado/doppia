@@ -49,6 +49,13 @@ export interface PropertyFormProps {
   values: PropertyFormValues;
   /** Called with the full updated values map whenever any field changes. */
   onChange: (values: PropertyFormValues) => void;
+  /**
+   * Suppress the per-field name/description row. Used by the stage sub-part
+   * form, where the stage card already names the field and its single schema
+   * label (e.g. "Stage 1 Components") is redundant. The control itself, its
+   * placeholder, and the popover's aria-label still carry the schema name.
+   */
+  hideFieldLabels?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,9 +70,13 @@ function FieldMeta({ schema }: { schema: PropertySchema }) {
   return (
     <div className={styles.fieldMeta}>
       <span className={styles.fieldLabel}>
-        <Type variant="label-sm" as="span">{schema.name}</Type>
+        <Type variant="label-sm" as="span">
+          {schema.name}
+        </Type>
         {schema.required && (
-          <span className={styles.required} aria-label={t('requiredAria')}>*</span>
+          <span className={styles.required} aria-label={t('requiredAria')}>
+            *
+          </span>
         )}
         {schema.description && (
           <button
@@ -75,7 +86,7 @@ function FieldMeta({ schema }: { schema: PropertySchema }) {
             aria-expanded={descOpen}
             onMouseEnter={() => setDescOpen(true)}
             onMouseLeave={() => setDescOpen(false)}
-            onClick={() => setDescOpen(o => !o)}
+            onClick={() => setDescOpen((o) => !o)}
             data-testid={`desc-btn-${schema.id}`}
           >
             ⓘ
@@ -83,11 +94,7 @@ function FieldMeta({ schema }: { schema: PropertySchema }) {
         )}
       </span>
       {schema.description && descOpen && (
-        <div
-          className={styles.descFloating}
-          role="tooltip"
-          data-testid={`desc-panel-${schema.id}`}
-        >
+        <div className={styles.descFloating} role="tooltip" data-testid={`desc-panel-${schema.id}`}>
           <Type variant="label-sm" as="span">
             {schema.description}
           </Type>
@@ -129,8 +136,12 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const selectedIds: string[] = multiple
-    ? (Array.isArray(value) ? value : [])
-    : (typeof value === 'string' ? [value] : []);
+    ? Array.isArray(value)
+      ? value
+      : []
+    : typeof value === 'string'
+      ? [value]
+      : [];
 
   // Close on click outside.
   useEffect(() => {
@@ -147,7 +158,9 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
   // Close on Escape.
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [open]);
@@ -158,11 +171,11 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
     triggerLabel = t('propertyForm.selectPlaceholder');
   } else if (!multiple) {
     triggerLabel =
-      schema.values.find(pv => pv.id === selectedIds[0])?.name ??
+      schema.values.find((pv) => pv.id === selectedIds[0])?.name ??
       t('propertyForm.selectPlaceholder');
   } else if (selectedIds.length <= 2) {
     triggerLabel = selectedIds
-      .map(id => schema.values.find(pv => pv.id === id)?.name ?? id)
+      .map((id) => schema.values.find((pv) => pv.id === id)?.name ?? id)
       .join(', ');
   } else {
     triggerLabel = t('propertyForm.countSelected', { count: selectedIds.length });
@@ -176,7 +189,7 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
     } else {
       // MANY_OF: toggle; keep popover open.
       const next = selectedIds.includes(pvId)
-        ? selectedIds.filter(id => id !== pvId)
+        ? selectedIds.filter((id) => id !== pvId)
         : [...selectedIds, pvId];
       onChange(schema.id, next.length > 0 ? next : null);
     }
@@ -189,13 +202,15 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
         <button
           type="button"
           className={styles.optionDropdownTrigger}
-          onClick={() => setOpen(o => !o)}
+          onClick={() => setOpen((o) => !o)}
           aria-haspopup="listbox"
           aria-expanded={open}
           data-testid={`dropdown-trigger-${schema.id}`}
         >
           <span>{triggerLabel}</span>
-          <span className={styles.optionDropdownChevron} aria-hidden="true">▾</span>
+          <span className={styles.optionDropdownChevron} aria-hidden="true">
+            ▾
+          </span>
         </button>
         {open && (
           <div
@@ -204,17 +219,16 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
             aria-label={schema.name}
             data-testid={`dropdown-popover-${schema.id}`}
           >
-            {schema.values.map(pv => {
+            {schema.values.map((pv) => {
               const isSelected = selectedIds.includes(pv.id);
               const isInfoOpen = infoOpenId === pv.id;
               const hasRef = !!pv.referenced_concept;
               return (
                 <div key={pv.id}>
                   <div
-                    className={[
-                      styles.optionLabel,
-                      isSelected ? styles.optionLabelSelected : '',
-                    ].filter(Boolean).join(' ')}
+                    className={[styles.optionLabel, isSelected ? styles.optionLabelSelected : '']
+                      .filter(Boolean)
+                      .join(' ')}
                     role={multiple ? 'checkbox' : 'option'}
                     aria-selected={isSelected}
                     aria-checked={multiple ? isSelected : undefined}
@@ -232,9 +246,11 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
                       <button
                         type="button"
                         className={styles.infoButton}
-                        aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
+                        aria-label={t('propertyForm.infoAria', {
+                          name: pv.referenced_concept!.name,
+                        })}
                         aria-expanded={isInfoOpen}
-                        onClick={e => {
+                        onClick={(e) => {
                           e.stopPropagation();
                           setInfoOpenId(isInfoOpen ? null : pv.id);
                         }}
@@ -245,10 +261,7 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
                     )}
                   </div>
                   {hasRef && isInfoOpen && (
-                    <div
-                      className={styles.infoPanel}
-                      data-testid={`info-panel-${pv.id}`}
-                    >
+                    <div className={styles.infoPanel} data-testid={`info-panel-${pv.id}`}>
                       <Type variant="label-md" as="span" className={styles.infoTitle}>
                         {pv.referenced_concept!.name}
                       </Type>
@@ -284,17 +297,16 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
     <div className={styles.field} data-testid={`field-${schema.id}`}>
       <FieldMeta schema={schema} />
       <div className={styles.optionGroup} role="radiogroup" aria-label={schema.name}>
-        {schema.values.map(pv => {
+        {schema.values.map((pv) => {
           const isChecked = selected === pv.id;
           const isInfoOpen = infoOpenId === pv.id;
           const hasRef = !!pv.referenced_concept;
           return (
             <div key={pv.id}>
               <label
-                className={[
-                  styles.optionLabel,
-                  isChecked ? styles.optionLabelSelected : '',
-                ].filter(Boolean).join(' ')}
+                className={[styles.optionLabel, isChecked ? styles.optionLabelSelected : '']
+                  .filter(Boolean)
+                  .join(' ')}
                 data-testid={`radio-${schema.id}-${pv.id}`}
               >
                 <input
@@ -320,7 +332,7 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
                     className={styles.infoButton}
                     aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
                     aria-expanded={isInfoOpen}
-                    onClick={e => {
+                    onClick={(e) => {
                       e.stopPropagation();
                       setInfoOpenId(isInfoOpen ? null : pv.id);
                     }}
@@ -331,10 +343,7 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
                 )}
               </label>
               {hasRef && isInfoOpen && (
-                <div
-                  className={styles.infoPanel}
-                  data-testid={`info-panel-${pv.id}`}
-                >
+                <div className={styles.infoPanel} data-testid={`info-panel-${pv.id}`}>
                   <Type variant="label-md" as="span" className={styles.infoTitle}>
                     {pv.referenced_concept!.name}
                   </Type>
@@ -365,7 +374,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
 
   const toggle = (pvId: string) => {
     const next = selected.includes(pvId)
-      ? selected.filter(id => id !== pvId)
+      ? selected.filter((id) => id !== pvId)
       : [...selected, pvId];
     onChange(schema.id, next.length > 0 ? next : null);
   };
@@ -374,17 +383,16 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
     <div className={styles.field} data-testid={`field-${schema.id}`}>
       <FieldMeta schema={schema} />
       <div className={styles.optionGroup} role="group" aria-label={schema.name}>
-        {schema.values.map(pv => {
+        {schema.values.map((pv) => {
           const isChecked = selected.includes(pv.id);
           const isInfoOpen = infoOpenId === pv.id;
           const hasRef = !!pv.referenced_concept;
           return (
             <div key={pv.id}>
               <label
-                className={[
-                  styles.optionLabel,
-                  isChecked ? styles.optionLabelSelected : '',
-                ].filter(Boolean).join(' ')}
+                className={[styles.optionLabel, isChecked ? styles.optionLabelSelected : '']
+                  .filter(Boolean)
+                  .join(' ')}
                 data-testid={`checkbox-${schema.id}-${pv.id}`}
               >
                 <input
@@ -407,7 +415,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
                     className={styles.infoButton}
                     aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
                     aria-expanded={isInfoOpen}
-                    onClick={e => {
+                    onClick={(e) => {
                       e.stopPropagation();
                       setInfoOpenId(isInfoOpen ? null : pv.id);
                     }}
@@ -418,10 +426,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
                 )}
               </label>
               {hasRef && isInfoOpen && (
-                <div
-                  className={styles.infoPanel}
-                  data-testid={`info-panel-${pv.id}`}
-                >
+                <div className={styles.infoPanel} data-testid={`info-panel-${pv.id}`}>
                   <Type variant="label-md" as="span" className={styles.infoTitle}>
                     {pv.referenced_concept!.name}
                   </Type>
@@ -455,8 +460,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
 function BoolField({ schema, value, onChange }: FieldProps) {
   const { t } = useTranslation('score');
   const current = typeof value === 'boolean' ? value : null;
-  const nextValue: boolean | null =
-    current === null ? true : current === true ? false : true;
+  const nextValue: boolean | null = current === null ? true : current === true ? false : true;
   const indicator = current === true ? '✓' : '✗';
 
   return (
@@ -523,7 +527,12 @@ function groupSchemas(schemas: PropertySchema[]): SchemaSection[] {
   return sections;
 }
 
-export default function PropertyForm({ schemas, values, onChange }: PropertyFormProps) {
+export default function PropertyForm({
+  schemas,
+  values,
+  onChange,
+  hideFieldLabels = false,
+}: PropertyFormProps) {
   if (schemas.length === 0) return null;
 
   const sections = groupSchemas(schemas);
@@ -533,8 +542,12 @@ export default function PropertyForm({ schemas, values, onChange }: PropertyForm
   };
 
   return (
-    <div className={styles.form} data-testid="property-form">
-      {sections.map(section => (
+    <div
+      className={styles.form}
+      data-testid="property-form"
+      data-hide-labels={hideFieldLabels ? 'true' : undefined}
+    >
+      {sections.map((section) => (
         <div
           key={section.group ?? '__ungrouped'}
           className={section.group ? styles.group : styles.ungrouped}
@@ -545,7 +558,7 @@ export default function PropertyForm({ schemas, values, onChange }: PropertyForm
               {section.group}
             </Type>
           )}
-          {section.schemas.map(schema => (
+          {section.schemas.map((schema) => (
             <SchemaField
               key={schema.id}
               schema={schema}

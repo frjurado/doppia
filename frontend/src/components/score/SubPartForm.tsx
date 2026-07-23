@@ -75,10 +75,10 @@ export default function SubPartForm({
 }: SubPartFormProps) {
   const { t } = useTranslation('score');
   const [schemaTree, setSchemaTree] = useState<ConceptSchemaTree | null>(
-    initialTag?.schemaTree ?? null,
+    initialTag?.schemaTree ?? null
   );
   const [propertyValues, setPropertyValues] = useState<PropertyFormValues>(
-    initialTag?.propertyValues ?? {},
+    initialTag?.propertyValues ?? {}
   );
   const [isLoading, setIsLoading] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -97,7 +97,7 @@ export default function SubPartForm({
     setSchemaError(null);
 
     getConceptSchemas(stageConceptId)
-      .then(tree => {
+      .then((tree) => {
         if (fetchId !== fetchIdRef.current) return; // stale
         setSchemaTree(tree);
         // Notify parent with the loaded schema; property values stay as-is.
@@ -163,13 +163,16 @@ export default function SubPartForm({
       data-testid={`sub-part-form-${stageId}`}
       aria-label={t('subPartForm.propertiesForAria', { name: stageName })}
     >
-      <Type variant="label-sm" as="span" className={styles.heading}>
-        {t('subPartForm.propertiesHeading')}
-      </Type>
+      {/* No visible "Stage properties" heading — it is redundant inside a stage
+          card (issues register § Tagging sidebar). The accessible name is kept
+          on the container's aria-label above. When a stage has a single schema
+          (e.g. "Stage 1 Components"), that per-field label is redundant too, so
+          it is hidden; multi-schema stages keep their labels to stay legible. */}
       <PropertyForm
         schemas={schemaTree.schemas}
         values={propertyValues}
         onChange={handlePropertyChange}
+        hideFieldLabels={schemaTree.schemas.length === 1}
       />
     </div>
   );

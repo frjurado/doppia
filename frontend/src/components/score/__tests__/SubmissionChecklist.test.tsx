@@ -87,7 +87,12 @@ describe('SubmissionChecklist — stages row conditionality', () => {
 
   it('shows an unchecked "Stages complete" row when the concept has stages and a stage has an error', () => {
     renderChecklist({
-      flags: { fragmentSet: true, conceptSet: true, stagesComplete: false, propertiesComplete: false },
+      flags: {
+        fragmentSet: true,
+        conceptSet: true,
+        stagesComplete: false,
+        propertiesComplete: false,
+      },
       conceptHasStages: true,
     });
     expect(screen.getByText('Stages complete')).toBeInTheDocument();
@@ -183,6 +188,40 @@ describe('SubmissionChecklist — Save Draft button', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests — reviewed edit (submitted/approved) — Save Changes replaces the pair
+// ---------------------------------------------------------------------------
+
+describe('SubmissionChecklist — reviewed edit (Save Changes)', () => {
+  it('replaces Save Draft + Submit with a single Save Changes when reviewedEdit is true', () => {
+    renderChecklist({ flags: allTrue, conceptHasStages: false, reviewedEdit: true });
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Draft' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Submit for Review' })).not.toBeInTheDocument();
+  });
+
+  it('Save Changes is gated on the same completeness as Submit (disabled while incomplete)', () => {
+    renderChecklist({
+      flags: { ...allTrue, propertiesComplete: false },
+      conceptHasStages: false,
+      reviewedEdit: true,
+    });
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+  });
+
+  it('calls onSaveChanges when Save Changes is clicked and the edit is complete', () => {
+    const onSaveChanges = vi.fn();
+    renderChecklist({
+      flags: allTrue,
+      conceptHasStages: false,
+      reviewedEdit: true,
+      onSaveChanges,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(onSaveChanges).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests — Draft saved indicator (Step 5)
 // ---------------------------------------------------------------------------
 
@@ -200,7 +239,11 @@ describe('SubmissionChecklist — Draft saved indicator', () => {
   });
 
   it('suppresses "Draft saved" when an error is present', () => {
-    renderChecklist({ flags: fragmentOnly, draftId: 'draft-1', submitError: 'Failed to save draft.' });
+    renderChecklist({
+      flags: fragmentOnly,
+      draftId: 'draft-1',
+      submitError: 'Failed to save draft.',
+    });
     expect(screen.queryByText('Draft saved')).not.toBeInTheDocument();
   });
 });

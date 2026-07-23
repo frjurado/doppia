@@ -46,6 +46,7 @@
     "draftSaved": "Borrador guardado",
     "saving": "Guardando…",
     "saveDraft": "Guardar borrador",
+    "saveChanges": "Guardar cambios",
     "submitting": "Enviando…",
     "submitForReview": "Enviar a revisión"
   },
@@ -68,6 +69,7 @@
     "annotationFormAria": "Formulario de anotación",
     "fragmentLabel": "Fragmento",
     "deleteAria": "Eliminar fragmento y empezar de nuevo",
+    "cancelEdit": "Cancelar",
     "sectionConcept": "Concepto",
     "loadingSchema": "Cargando esquema…",
     "conceptSchemaError": "No se pudo cargar el esquema del concepto. Inténtalo de nuevo.",
@@ -253,6 +255,7 @@
     "failedLoadScore": "No se pudo cargar la partitura",
     "rerendering": "Volviendo a renderizar…",
     "submitSuccess": "Fragmento enviado a revisión.",
+    "saveChangesSuccess": "Cambios guardados — revisión reabierta.",
     "dismissConfirmationAria": "Descartar confirmación",
     "dismiss": "Descartar",
     "audioUnavailablePre": "Audio no disponible — define ",

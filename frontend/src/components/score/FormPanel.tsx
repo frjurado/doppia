@@ -94,7 +94,7 @@ export interface FormPanelProps {
    */
   onConceptChange?: (
     concept: ConceptSearchHit | null,
-    schemaTree: ConceptSchemaTree | null,
+    schemaTree: ConceptSchemaTree | null
   ) => void;
   /**
    * Called when the annotator selects or clears a Type Refinement option.
@@ -188,6 +188,26 @@ export interface FormPanelProps {
     concept: ConceptSearchHit;
     propertyValues: PropertyFormValues;
   } | null;
+
+  // ── Component 10 Step 16: edit-session lifecycle ──────────────────────────
+
+  /**
+   * Status of the stored fragment being edited, or null when this is a fresh
+   * create. Drives the status-aware submission controls: draft/rejected keep
+   * Save draft + Submit for review; submitted/approved show a single Save
+   * changes (a PATCH — POST /submit rejects non-drafts).
+   */
+  editStatus?: 'draft' | 'submitted' | 'approved' | 'rejected' | null;
+  /** Sub-part count of the fragment being edited; named in the delete confirm. */
+  editSubPartCount?: number;
+  /** Discard the edit and return to viewing the stored fragment (no DB write). */
+  onCancelEdit?: () => void;
+  /** Real DB delete of the fragment being edited; called only after confirmation. */
+  onDeleteEditingFragment?: () => Promise<void>;
+  /** Save an analytic edit of a submitted/approved fragment via PATCH. */
+  onSaveChanges?: (data: FormSubmitData) => void;
+  /** True while a Save changes request is in flight. */
+  isSavingChanges?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,30 +234,40 @@ function usePanelResize() {
   const [width, setWidth] = useState<number>(readStoredWidth);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
 
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragState.current = { startX: e.clientX, startWidth: width };
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragState.current = { startX: e.clientX, startWidth: width };
 
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!dragState.current) return;
-      const delta = dragState.current.startX - ev.clientX;
-      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
-      setWidth(next);
-    };
+      const onMouseMove = (ev: MouseEvent) => {
+        if (!dragState.current) return;
+        const delta = dragState.current.startX - ev.clientX;
+        const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
+        setWidth(next);
+      };
 
-    const onMouseUp = (ev: MouseEvent) => {
-      if (!dragState.current) return;
-      const delta = dragState.current.startX - ev.clientX;
-      const final = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragState.current.startWidth + delta));
-      dragState.current = null;
-      try { localStorage.setItem(STORAGE_KEY, String(final)); } catch { /* ignore */ }
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
+      const onMouseUp = (ev: MouseEvent) => {
+        if (!dragState.current) return;
+        const delta = dragState.current.startX - ev.clientX;
+        const final = Math.min(
+          MAX_WIDTH,
+          Math.max(MIN_WIDTH, dragState.current.startWidth + delta)
+        );
+        dragState.current = null;
+        try {
+          localStorage.setItem(STORAGE_KEY, String(final));
+        } catch {
+          /* ignore */
+        }
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  }, [width]);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    },
+    [width]
+  );
 
   return { width, onMouseDown };
 }
@@ -271,6 +301,12 @@ export default function FormPanel({
   draftId = null,
   onDeleteFragment,
   editPrefill = null,
+  editStatus = null,
+  editSubPartCount = 0,
+  onCancelEdit,
+  onDeleteEditingFragment,
+  onSaveChanges,
+  isSavingChanges = false,
   onHarmonyUpdated,
   harmonyFocusKey,
 }: FormPanelProps) {
@@ -282,6 +318,28 @@ export default function FormPanel({
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [selectedRefinement, setSelectedRefinement] = useState<TypeRefinementChild | null>(null);
   const [propertyValues, setPropertyValues] = useState<PropertyFormValues>({});
+
+  // ── Edit-session lifecycle (Step 16) ──────────────────────────────────────
+  // editMode = editing a stored fragment (vs a fresh create). reviewedEdit =
+  // that fragment is already submitted/approved, so the save is a PATCH-only
+  // revision (Submit for review is not applicable). deleteConfirming gates the
+  // inline delete confirmation; isDeleting covers the request in flight.
+  const editMode = editStatus !== null;
+  const reviewedEdit = editStatus === 'submitted' || editStatus === 'approved';
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!onDeleteEditingFragment) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteEditingFragment();
+    } finally {
+      // The parent unmounts/remounts this panel on success; guard anyway.
+      setIsDeleting(false);
+      setDeleteConfirming(false);
+    }
+  }, [onDeleteEditingFragment]);
 
   // ── Edit prefill (Component 7 Step 12) ────────────────────────────────────
   // When this FormPanel is remounted with an editPrefill (fragment edit flow),
@@ -298,7 +356,7 @@ export default function FormPanel({
     prefillConsumedRef.current = true;
     prefillPropertyValuesRef.current = editPrefill.propertyValues;
     handleConceptSelect(editPrefill.concept);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally mount-only; editPrefill is stable at mount time
 
   // When the session rebuilds (ghost layer re-render), re-apply conceptSet so
@@ -312,16 +370,14 @@ export default function FormPanel({
   // Trivially true when schemaTree has no required schemas (§8 stageless concepts).
   useEffect(() => {
     if (!session) return;
-    const isComplete = schemaTree
-      ? computeIsComplete(schemaTree.schemas, propertyValues)
-      : false;
+    const isComplete = schemaTree ? computeIsComplete(schemaTree.schemas, propertyValues) : false;
     session.setPropertiesComplete(isComplete);
   }, [session, schemaTree, propertyValues]);
 
   const handleConceptSelect = useCallback(
     async (concept: ConceptSearchHit | null) => {
       setSelectedConcept(concept);
-      setSelectedRefinement(null);  // refinement resets whenever concept changes
+      setSelectedRefinement(null); // refinement resets whenever concept changes
       onRefinementChange?.(null);
 
       if (!concept) {
@@ -348,7 +404,7 @@ export default function FormPanel({
           prefillPropertyValuesRef.current = null; // consumed
           setPropertyValues(prefillVals);
         } else {
-          setPropertyValues(prev => carryOverValues(prev, tree.schemas));
+          setPropertyValues((prev) => carryOverValues(prev, tree.schemas));
         }
         onConceptChange?.(concept, tree);
       } catch {
@@ -360,7 +416,7 @@ export default function FormPanel({
         setIsLoadingSchema(false);
       }
     },
-    [session, onConceptChange, onRefinementChange, t],
+    [session, onConceptChange, onRefinementChange, t]
   );
 
   const handleRefinementChange = useCallback(
@@ -368,36 +424,101 @@ export default function FormPanel({
       setSelectedRefinement(option);
       onRefinementChange?.(option);
     },
-    [onRefinementChange],
+    [onRefinementChange]
   );
 
   const typeRefinements = schemaTree?.type_refinement.children ?? [];
 
   return (
-    <aside className={styles.panel} style={{ width: panelWidth }} aria-label={t('score:formPanel.annotationFormAria')}>
+    <aside
+      className={styles.panel}
+      style={{ width: panelWidth }}
+      aria-label={t('score:formPanel.annotationFormAria')}
+    >
       {/* ── Resize handle (G6.1) ─────────────────────────────────────── */}
-      <div
-        className={styles.resizeHandle}
-        onMouseDown={onHandleMouseDown}
-        aria-hidden="true"
-      />
-      {/* ── Fragment header: Delete control (G1.2) ───────────────────── */}
-      {/* Once a fragment is committed, the only reset path is Delete —
-          which clears selection, concept, stages, and properties together.
-          tagging-tool-design.md §6. */}
+      <div className={styles.resizeHandle} onMouseDown={onHandleMouseDown} aria-hidden="true" />
+      {/* ── Fragment header: reset / lifecycle controls ──────────────── */}
+      {/* Create (G1.2): a single Delete clears selection, concept, stages, and
+          properties together. Edit (Step 16): Cancel discards the edit and
+          returns to viewing the stored fragment, while Delete removes it from
+          the database (real delete, behind an inline confirmation). */}
       {flags.fragmentSet && (
         <div className={styles.fragmentHeader}>
           <Type variant="label-sm" as="span" className={styles.fragmentHeaderLabel}>
             {t('score:formPanel.fragmentLabel')}
           </Type>
-          <button
-            type="button"
-            className={styles.deleteButton}
-            onClick={onDeleteFragment}
-            aria-label={t('score:formPanel.deleteAria')}
-          >
-            <Type variant="label-sm" as="span">{t('common:delete')}</Type>
-          </button>
+          {editMode ? (
+            <div className={styles.fragmentHeaderActions}>
+              <button
+                type="button"
+                className={styles.cancelButton}
+                onClick={onCancelEdit}
+                disabled={isDeleting}
+              >
+                <Type variant="label-sm" as="span">
+                  {t('score:formPanel.cancelEdit')}
+                </Type>
+              </button>
+              <button
+                type="button"
+                className={styles.deleteButton}
+                onClick={() => setDeleteConfirming(true)}
+                disabled={isDeleting}
+                aria-label={t('score:formPanel.deleteAria')}
+              >
+                <Type variant="label-sm" as="span">
+                  {t('common:delete')}
+                </Type>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={styles.deleteButton}
+              onClick={onDeleteFragment}
+              aria-label={t('score:formPanel.deleteAria')}
+            >
+              <Type variant="label-sm" as="span">
+                {t('common:delete')}
+              </Type>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Inline delete confirmation (edit mode) ───────────────────── */}
+      {editMode && deleteConfirming && (
+        <div className={styles.deleteConfirm} role="alertdialog" aria-live="assertive">
+          <Type variant="body-sm" as="p" className={styles.deleteConfirmText}>
+            {editSubPartCount > 0
+              ? t('score:detailPanel.deleteConfirmWithSubparts', { count: editSubPartCount })
+              : t('score:detailPanel.deleteConfirm')}
+          </Type>
+          <div className={styles.deleteConfirmActions}>
+            <button
+              type="button"
+              className={styles.confirmDeleteButton}
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              aria-busy={isDeleting}
+            >
+              <Type variant="label-sm" as="span">
+                {isDeleting
+                  ? t('score:detailPanel.deleting')
+                  : t('score:detailPanel.confirmDelete')}
+              </Type>
+            </button>
+            <button
+              type="button"
+              className={styles.cancelButton}
+              onClick={() => setDeleteConfirming(false)}
+              disabled={isDeleting}
+            >
+              <Type variant="label-sm" as="span">
+                {t('common:cancel')}
+              </Type>
+            </button>
+          </div>
         </div>
       )}
 
@@ -408,6 +529,7 @@ export default function FormPanel({
         </Type>
         <ConceptPicker
           selectedConceptId={selectedConcept?.id ?? null}
+          selectedConcept={selectedConcept}
           onSelect={handleConceptSelect}
         />
         {isLoadingSchema && (
@@ -523,7 +645,7 @@ export default function FormPanel({
             id="prose-annotation"
             className={styles.proseTextarea}
             value={proseAnnotation}
-            onChange={e => onProseChange?.(e.target.value)}
+            onChange={(e) => onProseChange?.(e.target.value)}
             placeholder={t('score:formPanel.commentaryPlaceholder')}
             rows={5}
             aria-label={t('score:formPanel.proseAria')}
@@ -545,6 +667,8 @@ export default function FormPanel({
           isSubmitting={isSubmitting}
           submitError={submitError}
           draftId={draftId}
+          reviewedEdit={reviewedEdit}
+          isSavingChanges={isSavingChanges}
           onSaveDraft={() => {
             if (!selectedConcept) return;
             onSaveDraft?.({
@@ -556,6 +680,14 @@ export default function FormPanel({
           onSubmit={() => {
             if (!selectedConcept) return;
             onSubmitFragment?.({
+              conceptId: selectedConcept.id,
+              refinementId: selectedRefinement?.id ?? null,
+              propertyValues,
+            });
+          }}
+          onSaveChanges={() => {
+            if (!selectedConcept) return;
+            onSaveChanges?.({
               conceptId: selectedConcept.id,
               refinementId: selectedRefinement?.id ?? null,
               propertyValues,

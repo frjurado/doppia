@@ -11,6 +11,7 @@ import FragmentDetail from './routes/FragmentDetail';
 import PublicFragmentBrowser from './routes/PublicFragmentBrowser';
 import ReviewQueue from './routes/ReviewQueue';
 import ScoreViewer from './routes/ScoreViewer';
+import HorizontalRenderSpike from './routes/spike/HorizontalRenderSpike';
 import { getPublicFragment } from './services/publicApi';
 
 /**
@@ -100,6 +101,13 @@ export default function App() {
               </RequireAuth>
             }
           />
+
+          {/* Throwaway rendering spike (Component 10 Step 12) — dev builds only,
+            never shipped to production. Findings report:
+            docs/reports/component-10-horizontal-rendering-spike.md */}
+          {import.meta.env.DEV && (
+            <Route path="/spike/horizontal" element={<HorizontalRenderSpike />} />
+          )}
         </Routes>
       </AuthProvider>
     </BrowserRouter>
