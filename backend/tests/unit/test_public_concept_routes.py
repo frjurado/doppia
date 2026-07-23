@@ -266,8 +266,8 @@ def _index_response() -> Any:
     return ConceptIndexResponse(
         domains=[
             ConceptIndexDomain(
-                root_id="Cadence",
-                root_name="Cadence",
+                domain="cadences",
+                label="Cadences",
                 nodes=[
                     ConceptIndexNode(
                         id="Cadence",
@@ -311,7 +311,8 @@ class TestPublicConceptIndex:
         body = resp.json()
         assert len(body["domains"]) == 1
         domain = body["domains"][0]
-        assert domain["root_id"] == "Cadence"
+        assert domain["domain"] == "cadences"
+        assert domain["label"] == "Cadences"
         pac = next(n for n in domain["nodes"] if n["id"] == "PerfectAuthenticCadence")
         assert pac["parent_id"] == "AuthenticCadenceRealised"
         assert pac["fragment_count"] == 12
@@ -616,29 +617,50 @@ class TestGetPublicIndexAssembly:
         from services import concepts as svc
         from services.concepts import ConceptService
 
-        roots = [{"id": "Cadence", "name": "Cadence", "aliases": []}]
-        subtree = [
+        # Two browsable roots in the same domain → one forest, several
+        # parent_id=None entries (the § Step 4b shape).
+        roots = [
+            {"id": "Cadence", "name": "Cadence", "aliases": [], "domain": "cadences"},
             {
-                "id": "Cadence",
-                "name": "Cadence",
+                "id": "ClosingSection",
+                "name": "Closing Section",
                 "aliases": [],
-                "hierarchy_path": ["Cadence"],
-                "parent_id": None,
-            },
-            {
-                "id": "PerfectAuthenticCadence",
-                "name": "Perfect Authentic Cadence",
-                "aliases": ["PAC"],
-                "hierarchy_path": ["Cadence", "Perfect Authentic Cadence"],
-                "parent_id": "Cadence",
+                "domain": "cadences",
             },
         ]
+        subtrees = {
+            "Cadence": [
+                {
+                    "id": "Cadence",
+                    "name": "Cadence",
+                    "aliases": [],
+                    "hierarchy_path": ["Cadence"],
+                    "parent_id": None,
+                },
+                {
+                    "id": "PerfectAuthenticCadence",
+                    "name": "Perfect Authentic Cadence",
+                    "aliases": ["PAC"],
+                    "hierarchy_path": ["Cadence", "Perfect Authentic Cadence"],
+                    "parent_id": "Cadence",
+                },
+            ],
+            "ClosingSection": [
+                {
+                    "id": "ClosingSection",
+                    "name": "Closing Section",
+                    "aliases": [],
+                    "hierarchy_path": ["Closing Section"],
+                    "parent_id": None,
+                },
+            ],
+        }
 
         async def _fake_roots(session: object) -> list[dict[str, Any]]:
             return roots
 
         async def _fake_subtree(session: object, root_id: str) -> list[dict[str, Any]]:
-            return subtree
+            return subtrees[root_id]
 
         monkeypatch.setattr(svc, "get_domain_roots", _fake_roots)
         monkeypatch.setattr(svc, "get_concept_subtree", _fake_subtree)
@@ -651,17 +673,21 @@ class TestGetPublicIndexAssembly:
 
         result = await service.get_public_index()
 
+        # One domain heading, not two "domains" for the two roots.
         assert len(result.domains) == 1
         domain = result.domains[0]
-        assert domain.root_id == "Cadence"
-        assert domain.root_name == "Cadence"
+        assert domain.domain == "cadences"
+        assert domain.label == "Cadences"
+        # Forest: both Cadence and ClosingSection are top-level (parent_id None).
+        top_level = [n.id for n in domain.nodes if n.parent_id is None]
+        assert set(top_level) == {"Cadence", "ClosingSection"}
         by_id = {n.id: n for n in domain.nodes}
         assert by_id["PerfectAuthenticCadence"].fragment_count == 7
         assert by_id["PerfectAuthenticCadence"].parent_id == "Cadence"
         assert by_id["Cadence"].fragment_count == 0  # no fragments → default 0
-        # Counts were requested for every node id across all domains.
+        # Counts were requested for every node id across all roots in the domain.
         service._fetch_fragment_counts.assert_awaited_once_with(
-            ["Cadence", "PerfectAuthenticCadence"]
+            ["Cadence", "PerfectAuthenticCadence", "ClosingSection"]
         )
 
     @pytest.mark.asyncio

@@ -262,44 +262,25 @@ export default function FragmentBrowser() {
   const [includeSubtypes, setIncludeSubtypes] = useState(true);
   const [statusFilter] = useState<'approved' | 'submitted' | 'draft' | 'rejected'>('approved');
 
-  // The root id set by the auto-load on mount — used by clearSelection to
-  // reset the tree back to the default domain view.
-  const defaultRootIdRef = useRef<string | null>(null);
-
-  // ---- auto-load domain roots on first visit (no root in URL) ----
+  // ---- load the concept tree ----
+  // Default view (no ?root): the whole domain forest — every browsable root's
+  // subtree concatenated — so the post-cadential concepts (ClosingSection,
+  // StandingOnTheDominant) are visible alongside the Cadence tree rather than
+  // only via search (Component 11 Step 4b). A ?root — set by picking a search
+  // result — narrows to that single root's subtree. Both paths feed the same
+  // flat treeNodes list, which the render groups into a forest by parent_id.
   useEffect(() => {
-    if (rootId) {
-      // Page opened with an explicit ?root — treat it as the default.
-      if (!defaultRootIdRef.current) defaultRootIdRef.current = rootId;
-      return;
-    }
-    getConceptRoots()
-      .then((roots) => {
-        if (roots.length > 0) {
-          defaultRootIdRef.current = roots[0].id;
-          setSearchParams((p) => {
-            const next = new URLSearchParams(p);
-            next.set('root', roots[0].id);
-            return next;
-          });
-        }
-      })
-      .catch(() => {
-        // Silently ignore — user can still type a root manually.
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ---- load tree when root changes ----
-  useEffect(() => {
-    if (!rootId) {
-      setTreeNodes([]);
-      return;
-    }
     setTreeLoading(true);
     setTreeError(null);
-    getConceptTree(rootId)
-      .then((res) => setTreeNodes(res.nodes))
+    const load: Promise<ConceptTreeNode[]> = rootId
+      ? getConceptTree(rootId).then((res) => res.nodes)
+      : getConceptRoots().then((roots) =>
+          Promise.all(roots.map((r) => getConceptTree(r.id).then((res) => res.nodes))).then(
+            (lists) => lists.flat()
+          )
+        );
+    load
+      .then(setTreeNodes)
       .catch((err) => {
         if (err instanceof ApiError) setTreeError(err);
       })
@@ -391,13 +372,12 @@ export default function FragmentBrowser() {
   );
 
   const clearSelection = useCallback(() => {
+    // Clear the concept selection and drop any focused root, returning to the
+    // default domain forest.
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.delete('concept');
-      const defaultRoot = defaultRootIdRef.current;
-      if (defaultRoot) {
-        next.set('root', defaultRoot);
-      }
+      next.delete('root');
       return next;
     });
   }, [setSearchParams]);
@@ -501,7 +481,7 @@ export default function FragmentBrowser() {
                 </Type>
               </div>
             )}
-            {!treeLoading && !treeError && !rootId && (
+            {!treeLoading && !treeError && treeNodes.length === 0 && (
               <div className={styles.treeEmpty}>
                 <Type
                   variant="label-sm"

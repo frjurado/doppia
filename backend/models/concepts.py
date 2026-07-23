@@ -433,18 +433,28 @@ class ConceptIndexNode(BaseModel):
 
 
 class ConceptIndexDomain(BaseModel):
-    """One domain (a root concept and its non-stub subtree) in the index.
+    """One domain in the index — a **forest** of its browsable roots' subtrees.
+
+    A domain can contain several browsable roots (Component 11 Step 4b): the
+    cadences domain has ``Cadence`` (a 12-node ``IS_SUBTYPE_OF`` tree) plus the
+    post-cadential ``ClosingSection`` and ``StandingOnTheDominant``, which are
+    top-level in the domain but subtypes of nothing. So ``nodes`` is a flat
+    forest — several entries carry ``parent_id = None`` — and the frontend
+    assembles it by grouping on ``parent_id`` exactly as the editor tree does.
 
     Attributes:
-        root_id: The domain root's concept id (a concept with no
-            ``IS_SUBTYPE_OF`` parent, e.g. ``"Cadence"``).
-        root_name: The domain root's human-readable name.
-        nodes: All non-stub concepts in the root's ``IS_SUBTYPE_OF`` subtree,
-            including the root itself (``parent_id = None``), ordered by name.
+        domain: The machine-readable domain key (e.g. ``"cadences"``), from the
+            concepts' ``domain`` field / ``BELONGS_TO`` edge.
+        label: A display string for the domain heading, derived from ``domain``
+            (e.g. ``"cadences"`` → ``"Cadences"``). A ``Domain`` node property
+            can supply a nicer label later without changing this shape.
+        nodes: Every non-stub concept across all the domain's browsable roots'
+            subtrees, ordered by name; each browsable root has ``parent_id =
+            None``.
     """
 
-    root_id: str
-    root_name: str
+    domain: str
+    label: str
     nodes: list[ConceptIndexNode] = Field(default_factory=list)
 
 
@@ -457,7 +467,8 @@ class ConceptIndexResponse(BaseModel):
     which keeps inbound links stable without cluttering the browse index.
 
     Attributes:
-        domains: One entry per non-stub domain root, ordered by root name.
+        domains: One entry per domain, ordered by domain key; each carries the
+            forest of its browsable roots' subtrees.
     """
 
     domains: list[ConceptIndexDomain] = Field(default_factory=list)

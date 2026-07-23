@@ -211,6 +211,16 @@ The tagging UI renders `CONTAINS` targets as either a separate bracket row (`dis
 
 In practice: for a compound structural slot (e.g. `CompoundPredominant` with two sub-stages), set `display_mode: 'segment'` on the sub-stage `CONTAINS` edges. The two sub-stages appear as segments within the Pre-Dominant bracket, not as a third row of brackets. The hierarchy in the data is preserved; only the visual display is flattened.
 
+#### A `CONTAINS` target is not a browsable root
+
+The concept-browse surfaces — the editor concept tree (`/api/v1/concepts/roots` + `/tree`) and the public glossary index (`/api/v1/public/concepts`) — enumerate **browsable roots**, and the rule is structural (Component 11 Step 4b):
+
+> A concept is a browsable root iff it has **no `IS_SUBTYPE_OF` parent** *and* is **not the target of any `CONTAINS` edge**. Browse groups roots by their `domain`, not by taxonomic orphanhood — a domain is a *forest* of roots, not a single tree.
+
+The `CONTAINS` clause is what keeps stage concepts (e.g. `CadentialDominant`, a `CONTAINS` target of `Cadence`) out of the root list: a stage has no `IS_SUBTYPE_OF` parent, so without it a stage would float up as a spurious top-level "domain". Stage concepts remain reachable as the `CONTAINS` relationships listed on their parent concept's page.
+
+The rule is deliberately **not** keyed on `top_level_taggable`: an abstract root like `Cadence` is `top_level_taggable: false`, so a taggability filter would wrongly drop it. Conversely, a domain can hold several legitimate roots — e.g. the cadences domain has `Cadence` plus the post-cadential `ClosingSection` / `StandingOnTheDominant`, which are subtypes of nothing and structural targets of nothing, so they are genuine roots that browse renders as siblings under the one **Cadences** heading.
+
 ---
 
 ### 5. Layer 2 — PropertySchema

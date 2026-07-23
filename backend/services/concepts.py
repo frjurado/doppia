@@ -445,8 +445,13 @@ class ConceptService:
     async def get_public_index(self) -> ConceptIndexResponse:
         """Assemble the public browse-by-domain concept index.
 
-        For every non-stub domain root, fetch its non-stub ``IS_SUBTYPE_OF``
-        subtree, then attach approved-fragment counts in a single batch read.
+        Fetch every browsable root (Component 11 Step 4b: no ``IS_SUBTYPE_OF``
+        parent and not a ``CONTAINS`` target), fetch each root's non-stub
+        subtree, **group the roots by their ``domain`` field**, and emit one
+        forest per domain — so a domain with several roots (e.g. cadences:
+        ``Cadence`` + ``ClosingSection`` + ``StandingOnTheDominant``) renders as
+        a single heading with several top-level entries, not as several
+        "domains". Approved-fragment counts are attached in one batch read.
         English-only (no translation overlay in the Phase-2 public glossary).
 
         Counts come from :meth:`_fetch_fragment_counts` — the same source the
@@ -456,8 +461,9 @@ class ConceptService:
 
         Returns:
             :class:`~models.concepts.ConceptIndexResponse` with one entry per
-            domain root (ordered by root name), each carrying its flat subtree.
-            Empty ``domains`` when the graph has no non-stub roots.
+            domain (ordered by domain key), each carrying the forest of its
+            browsable roots' subtrees. Empty ``domains`` when the graph has no
+            browsable roots.
         """
         async with self._driver.session() as session:
             roots = await get_domain_roots(session)
@@ -469,8 +475,15 @@ class ConceptService:
         all_ids = [node["id"] for nodes in subtrees.values() for node in nodes]
         counts = await self._fetch_fragment_counts(all_ids)
 
-        domains: list[ConceptIndexDomain] = []
+        # Group roots by domain, preserving the name-ordered root sequence; a
+        # root with no domain (defensive — every seeded concept has one) is
+        # bucketed under an empty-string key so it is never silently dropped.
+        roots_by_domain: dict[str, list[dict]] = {}
         for root in roots:
+            roots_by_domain.setdefault(root.get("domain") or "", []).append(root)
+
+        domains: list[ConceptIndexDomain] = []
+        for domain_key in sorted(roots_by_domain):
             nodes = [
                 ConceptIndexNode(
                     id=n["id"],
@@ -480,12 +493,13 @@ class ConceptService:
                     parent_id=n["parent_id"],
                     fragment_count=counts.get(n["id"], 0),
                 )
+                for root in roots_by_domain[domain_key]
                 for n in subtrees[root["id"]]
             ]
             domains.append(
                 ConceptIndexDomain(
-                    root_id=root["id"],
-                    root_name=root["name"],
+                    domain=domain_key,
+                    label=_domain_label(domain_key),
                     nodes=nodes,
                 )
             )
@@ -516,6 +530,23 @@ class ConceptService:
         )
         result = await self._db.execute(stmt)
         return {row.concept_id: row.cnt for row in result}
+
+
+# ---------------------------------------------------------------------------
+# Public-index helpers (module-private)
+# ---------------------------------------------------------------------------
+
+
+def _domain_label(domain_key: str) -> str:
+    """Derive a display heading from a machine-readable domain key.
+
+    ``"cadences"`` → ``"Cadences"``, ``"formal-function"`` → ``"Formal
+    Function"``. Deliberately simple (Component 11 Step 4b): a ``Domain`` node
+    ``label`` property can supply a curated string later without changing the
+    response shape. An empty key (a concept with no ``domain``) yields an empty
+    label; the frontend can render such a group under a neutral fallback.
+    """
+    return domain_key.replace("-", " ").title()
 
 
 # ---------------------------------------------------------------------------

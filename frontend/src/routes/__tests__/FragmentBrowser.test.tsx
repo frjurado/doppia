@@ -109,7 +109,7 @@ function makeBrowseItem(overrides: Partial<ConceptBrowseItem> = {}): ConceptBrow
 
 function makeBrowseResponse(
   items: ConceptBrowseItem[],
-  next_cursor: string | null = null,
+  next_cursor: string | null = null
 ): ConceptBrowseResponse {
   return {
     items,
@@ -135,7 +135,7 @@ function renderBrowser(qs = '') {
         <Route path="/concepts" element={<FragmentBrowser />} />
         <Route path="/fragments/:fragmentId" element={<div data-testid="detail-stub" />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -157,9 +157,39 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('FragmentBrowser — initial state', () => {
-  it('renders the prompt to search when no root param is set', () => {
+  it('renders the prompt to search when no browsable roots exist', async () => {
+    // Default view loads the domain forest (all roots' subtrees); with no roots
+    // it resolves empty and falls back to the search prompt (Step 4b).
     renderBrowser();
-    expect(screen.getByText(/search for a concept to browse/i)).toBeInTheDocument();
+    expect(await screen.findByText(/search for a concept to browse/i)).toBeInTheDocument();
+  });
+
+  it('loads the domain forest (all browsable roots) when no root param is set', async () => {
+    vi.mocked(conceptApi.getConceptRoots).mockResolvedValue([
+      { id: 'Cadence', name: 'Cadence', aliases: [] },
+      { id: 'ClosingSection', name: 'Closing Section', aliases: [] },
+    ]);
+    vi.mocked(conceptApi.getConceptTree).mockImplementation(async (rootId: string) =>
+      rootId === 'Cadence'
+        ? TREE_RESPONSE
+        : {
+            root_id: 'ClosingSection',
+            nodes: [
+              {
+                id: 'ClosingSection',
+                name: 'Closing Section',
+                aliases: [],
+                hierarchy_path: ['Closing Section'],
+                parent_id: null,
+                fragment_count: 0,
+              },
+            ],
+          }
+    );
+    renderBrowser();
+    // Both browsable roots render as top-level entries in one forest.
+    await screen.findByText('Cadence', { exact: true, selector: 'span' });
+    expect(screen.getByText('Closing Section')).toBeInTheDocument();
   });
 
   it('renders the prompt to select a concept when root is set but no concept selected', async () => {
@@ -179,7 +209,7 @@ describe('FragmentBrowser — initial state', () => {
 
   it('shows an error message when the tree fetch fails', async () => {
     vi.mocked(conceptApi.getConceptTree).mockRejectedValue(
-      new ApiError('SERVER_ERROR', 'Tree unavailable', 500),
+      new ApiError('SERVER_ERROR', 'Tree unavailable', 500)
     );
     renderBrowser('?root=Cadence');
     await screen.findByText(/tree unavailable/i);
@@ -254,10 +284,7 @@ describe('FragmentBrowser — fragment list', () => {
   it('renders a fragment card for each item returned by the API', async () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
-      makeBrowseResponse([
-        makeBrowseItem({ id: 'frag-001' }),
-        makeBrowseItem({ id: 'frag-002' }),
-      ]),
+      makeBrowseResponse([makeBrowseItem({ id: 'frag-001' }), makeBrowseItem({ id: 'frag-002' })])
     );
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -271,7 +298,7 @@ describe('FragmentBrowser — fragment list', () => {
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
       makeBrowseResponse([
         makeBrowseItem({ id: 'frag-001', preview_url: 'https://preview.test/frag-001.svg' }),
-      ]),
+      ])
     );
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -287,7 +314,7 @@ describe('FragmentBrowser — fragment list', () => {
   it('renders the "Preview generating…" placeholder when preview_url is null', async () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
-      makeBrowseResponse([makeBrowseItem({ id: 'frag-001', preview_url: null })]),
+      makeBrowseResponse([makeBrowseItem({ id: 'frag-001', preview_url: null })])
     );
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -298,7 +325,7 @@ describe('FragmentBrowser — fragment list', () => {
   it('shows the status badge with the correct data-status attribute', async () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
-      makeBrowseResponse([makeBrowseItem({ id: 'frag-001', status: 'approved' })]),
+      makeBrowseResponse([makeBrowseItem({ id: 'frag-001', status: 'approved' })])
     );
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -310,9 +337,7 @@ describe('FragmentBrowser — fragment list', () => {
   it('displays data_licence when present', async () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
-      makeBrowseResponse([
-        makeBrowseItem({ id: 'frag-001', data_licence: 'CC BY-SA 4.0' }),
-      ]),
+      makeBrowseResponse([makeBrowseItem({ id: 'frag-001', data_licence: 'CC BY-SA 4.0' })])
     );
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -330,7 +355,7 @@ describe('FragmentBrowser — fragment list', () => {
   it('shows a Load more button when next_cursor is non-null', async () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
-      makeBrowseResponse([makeBrowseItem({ id: 'frag-001' })], 'cursor-page-2'),
+      makeBrowseResponse([makeBrowseItem({ id: 'frag-001' })], 'cursor-page-2')
     );
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -341,11 +366,9 @@ describe('FragmentBrowser — fragment list', () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept)
       .mockResolvedValueOnce(
-        makeBrowseResponse([makeBrowseItem({ id: 'frag-001' })], 'cursor-page-2'),
+        makeBrowseResponse([makeBrowseItem({ id: 'frag-001' })], 'cursor-page-2')
       )
-      .mockResolvedValueOnce(
-        makeBrowseResponse([makeBrowseItem({ id: 'frag-002' })], null),
-      );
+      .mockResolvedValueOnce(makeBrowseResponse([makeBrowseItem({ id: 'frag-002' })], null));
 
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');
 
@@ -360,7 +383,7 @@ describe('FragmentBrowser — fragment list', () => {
     // Second call must include the cursor from the first page.
     expect(vi.mocked(fragmentApi.listByConcept)).toHaveBeenCalledWith(
       'PerfectAuthenticCadence',
-      expect.objectContaining({ cursor: 'cursor-page-2' }),
+      expect.objectContaining({ cursor: 'cursor-page-2' })
     );
   });
 
@@ -368,7 +391,7 @@ describe('FragmentBrowser — fragment list', () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept)
       .mockResolvedValueOnce(
-        makeBrowseResponse([makeBrowseItem({ id: 'frag-001' })], 'cursor-page-2'),
+        makeBrowseResponse([makeBrowseItem({ id: 'frag-001' })], 'cursor-page-2')
       )
       .mockResolvedValueOnce(makeBrowseResponse([makeBrowseItem({ id: 'frag-002' })], null));
 
@@ -409,7 +432,7 @@ describe('FragmentBrowser — include_subtypes toggle', () => {
     await waitFor(() => {
       expect(vi.mocked(fragmentApi.listByConcept)).toHaveBeenCalledWith(
         'PerfectAuthenticCadence',
-        expect.objectContaining({ includeSubtypes: false }),
+        expect.objectContaining({ includeSubtypes: false })
       );
     });
   });
@@ -440,7 +463,7 @@ describe('FragmentBrowser — navigation', () => {
   it('navigates to /fragments/:id when a card is clicked', async () => {
     vi.mocked(conceptApi.getConceptTree).mockResolvedValue(TREE_RESPONSE);
     vi.mocked(fragmentApi.listByConcept).mockResolvedValue(
-      makeBrowseResponse([makeBrowseItem({ id: 'frag-click-test' })]),
+      makeBrowseResponse([makeBrowseItem({ id: 'frag-click-test' })])
     );
 
     renderBrowser('?root=Cadence&concept=PerfectAuthenticCadence');

@@ -73,6 +73,26 @@ def _relationships(concept_id: str) -> list[dict[str, Any]]:
     return asyncio.run(_run())
 
 
+def _domain_roots() -> list[dict[str, Any]]:
+    """Run ``get_domain_roots`` against a fresh async driver / event loop."""
+    from graph.queries.concepts import get_domain_roots
+
+    uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+    user = os.environ.get("NEO4J_USER", "neo4j")
+    password = os.environ.get("NEO4J_PASSWORD", "localpassword")
+
+    async def _run() -> list[dict[str, Any]]:
+        driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
+        await driver.verify_connectivity()
+        try:
+            async with driver.session() as session:
+                return await get_domain_roots(session)
+        finally:
+            await driver.close()
+
+    return asyncio.run(_run())
+
+
 def _public_index() -> Any:
     """Run ``ConceptService.get_public_index`` against a fresh async driver.
 
@@ -167,30 +187,73 @@ class TestConceptRelationships:
         assert all(r["direction"] in ("outgoing", "incoming") for r in rels)
 
 
+class TestDomainRoots:
+    """graph.queries.concepts.get_domain_roots — the Step 4b root-selection rule."""
+
+    def test_includes_cadence_and_post_cadential(self) -> None:
+        ids = {r["id"] for r in _domain_roots()}
+        assert "Cadence" in ids
+        assert "ClosingSection" in ids
+        assert "StandingOnTheDominant" in ids
+
+    def test_excludes_contains_target_stages(self) -> None:
+        ids = {r["id"] for r in _domain_roots()}
+        for stage in (
+            "CadentialInitialTonic",
+            "CadentialPreDominant",
+            "CadentialDominant",
+            "CadentialFinalTonic",
+        ):
+            assert stage not in ids, f"{stage} is a CONTAINS target, not a root"
+
+    def test_rows_carry_domain(self) -> None:
+        rows = _domain_roots()
+        assert rows, "expected at least one root"
+        cadence = next(r for r in rows if r["id"] == "Cadence")
+        assert cadence["domain"] == "cadences"
+
+
 class TestPublicIndex:
     """ConceptService.get_public_index against live Neo4j (db=None, counts 0)."""
 
-    def test_index_has_cadence_domain_with_subtree(self) -> None:
+    def test_cadences_is_one_domain_forest(self) -> None:
         index = _public_index()
 
-        domains = {d.root_id: d for d in index.domains}
-        assert "Cadence" in domains, "cadence domain root missing from index"
-        cadence = domains["Cadence"]
-        assert cadence.root_name == "Cadence"
+        domains = {d.domain: d for d in index.domains}
+        assert "cadences" in domains, "cadences domain missing from index"
+        cadences = domains["cadences"]
+        assert cadences.label == "Cadences"
 
-        by_id = {n.id: n for n in cadence.nodes}
-        # The root is a node (parent_id None); PAC is a descendant.
-        assert by_id["Cadence"].parent_id is None
+        by_id = {n.id: n for n in cadences.nodes}
+        # Cadence and the post-cadential concepts are all top-level (parent_id
+        # None) within the single cadences domain — a forest, not separate
+        # "domains" (Step 4b).
+        top_level = {n.id for n in cadences.nodes if n.parent_id is None}
+        assert {"Cadence", "ClosingSection", "StandingOnTheDominant"} <= top_level
+        # PAC is a descendant of Cadence.
         assert "PerfectAuthenticCadence" in by_id
+        assert by_id["PerfectAuthenticCadence"].parent_id is not None
         assert by_id["PerfectAuthenticCadence"].hierarchy_path[0] == "Cadence"
         # db=None → counts default to 0 for every node.
-        assert all(n.fragment_count == 0 for n in cadence.nodes)
+        assert all(n.fragment_count == 0 for n in cadences.nodes)
+
+    def test_stage_concepts_are_not_index_roots(self) -> None:
+        """CONTAINS-target stage concepts never surface as browsable roots."""
+        index = _public_index()
+        top_level_ids = {
+            n.id for d in index.domains for n in d.nodes if n.parent_id is None
+        }
+        for stage in (
+            "CadentialInitialTonic",
+            "CadentialPreDominant",
+            "CadentialDominant",
+            "CadentialFinalTonic",
+        ):
+            assert stage not in top_level_ids, f"{stage} must not be an index root"
 
     def test_index_excludes_stubs(self) -> None:
         """A domain's browsable tree is its non-stub subtree."""
         index = _public_index()
         for d in index.domains:
-            # Every node came from get_concept_subtree, which filters stubs; a
-            # stub root would never appear as a domain root either.
-            assert d.root_id, "domain root id must be present"
-            assert d.nodes, f"domain {d.root_id} has no nodes"
+            assert d.domain, "domain key must be present"
+            assert d.nodes, f"domain {d.domain} has no nodes"

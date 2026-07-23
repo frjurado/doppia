@@ -576,33 +576,53 @@ async def get_concept_subtree(
 _GET_DOMAIN_ROOTS = """\
 MATCH (c:Concept)
 WHERE NOT (c)-[:IS_SUBTYPE_OF]->(:Concept)
+  AND NOT (c)<-[:CONTAINS]-(:Concept)
   AND NOT c.stub
 RETURN c.id                       AS id,
        c.name                     AS name,
-       coalesce(c.aliases, [])    AS aliases
+       coalesce(c.aliases, [])    AS aliases,
+       c.domain                   AS domain
 ORDER BY c.name
 """
-"""Return all non-stub concept nodes that have no IS_SUBTYPE_OF parent.
+"""Return the browsable concept roots — the entry points for both the editor
+concept-tree navigator and the public glossary index.
 
-These are the domain roots (e.g. 'Cadence') — the natural entry points for
-the concept-tree navigator.  Stub concepts are excluded because the tree
-endpoint also excludes stubs, so a stub root would yield an empty tree.
+A **browsable root** is a non-stub concept that (a) has no ``IS_SUBTYPE_OF``
+parent *and* (b) is not the target of any ``CONTAINS`` edge (Component 11
+Step 4b, § Decisions 5). Condition (b) excludes stage concepts — e.g.
+``CadentialDominant``, which is a ``CONTAINS`` target of ``Cadence``, not a
+subtype — so a stage never floats up as a spurious root even though it has no
+``IS_SUBTYPE_OF`` parent. Stage concepts stay reachable as the ``CONTAINS``
+relationships surfaced on their parent's page.
+
+The rule is deliberately structural rather than keyed on ``top_level_taggable``:
+``Cadence`` itself is ``top_level_taggable: false`` (an abstract root), so a
+taggability filter would wrongly drop it.
+
+``domain`` is returned so the public index can group roots into a forest per
+domain (a domain can have several browsable roots — e.g. cadences has
+``Cadence`` plus the post-cadential ``ClosingSection`` / ``StandingOnTheDominant``).
+Stub concepts are excluded because the subtree endpoint also excludes them.
 """
 
 
 async def get_domain_roots(
     session: _AsyncSession,
 ) -> list[dict[str, Any]]:
-    """Return all non-stub concept nodes with no IS_SUBTYPE_OF parent.
+    """Return the browsable concept roots (no IS_SUBTYPE_OF parent, not a CONTAINS target).
 
-    Each dict has keys: ``id``, ``name``, ``aliases`` (list).
+    Each dict has keys: ``id``, ``name``, ``aliases`` (list), ``domain`` (str).
+
+    See :data:`_GET_DOMAIN_ROOTS` for the root-selection rule (Component 11
+    Step 4b): stage concepts (``CONTAINS`` targets) are excluded so they never
+    appear as spurious roots on either the editor tree or the public index.
 
     Args:
         session: An open async Neo4j session.
 
     Returns:
         List of root dicts ordered alphabetically by name; empty when the
-        graph contains no concepts or all roots are stubs.
+        graph contains no eligible roots.
     """
     result = await session.run(_GET_DOMAIN_ROOTS)
     return await result.data()
