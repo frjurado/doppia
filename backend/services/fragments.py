@@ -43,6 +43,7 @@ from models.analysis import MovementAnalysis
 from models.fragment import (
     ConceptBrowseItem,
     ConceptBrowseResponse,
+    ConceptExamplesResponse,
     ConceptTagDetail,
     Fragment,
     FragmentConceptTag,
@@ -170,6 +171,23 @@ def _licence_excludes_public(licence: str | None) -> bool:
     if not licence:
         return False
     return "nc" in re.split(r"[^a-z0-9]+", licence.lower())
+
+
+def _normalise_setseed(seed: int) -> float:
+    """Map an arbitrary integer seed to the ``[-1, 1]`` domain of PG ``setseed``.
+
+    PostgreSQL's ``setseed`` accepts a double in ``[-1, 1]``; the glossary
+    example endpoint exposes an opaque integer seed instead. A stable modulo maps
+    any int deterministically into ``[0, 1)`` (well within domain), so the same
+    seed always yields the same reproducible draw.
+
+    Args:
+        seed: Any integer (may be negative).
+
+    Returns:
+        A float in ``[0, 1)`` derived deterministically from ``seed``.
+    """
+    return (seed % 1_000_000) / 1_000_000.0
 
 
 def _sources_in_range(
@@ -1474,6 +1492,40 @@ class FragmentService:
                 include_subtypes=include_subtypes,
             )
 
+        items = await self._hydrate_browse_items(page)
+
+        next_cursor = (
+            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+        )
+        return ConceptBrowseResponse(
+            items=items,
+            next_cursor=next_cursor,
+            concept_id=concept_id,
+            include_subtypes=include_subtypes,
+        )
+
+    async def _hydrate_browse_items(
+        self, page: list[Fragment]
+    ) -> list[ConceptBrowseItem]:
+        """Turn a list of Fragment rows into browse-card items.
+
+        Batches the four hydration reads shared by the concept-scoped browse and
+        the glossary example draw: primary concept tags, Neo4j concept
+        name/alias, movement context, and in-range harmony sources — plus the
+        concurrent preview signed-URL resolution. Preserves the input order, so
+        the caller controls ordering (time-ordered for browse, random for
+        examples).
+
+        Args:
+            page: The Fragment rows to render; may be empty (returns ``[]``).
+
+        Returns:
+            One :class:`~models.fragment.ConceptBrowseItem` per input fragment,
+            in the same order.
+        """
+        if not page:
+            return []
+
         page_ids = [f.id for f in page]
         movement_ids = list({f.movement_id for f in page})
 
@@ -1581,13 +1633,95 @@ class FragmentService:
                     movement_title=ctx.get("movement_title"),
                 )
             )
+        return items
 
-        next_cursor = (
-            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+    async def list_examples_by_concept(
+        self,
+        concept_id: str,
+        *,
+        include_subtypes: bool = True,
+        limit: int = 3,
+        seed: int | None = None,
+    ) -> ConceptExamplesResponse:
+        """Draw up to ``limit`` random approved example fragments for a concept.
+
+        The glossary's inline examples (Component 11 Step 3). Public-only: the
+        pool is always ``approved`` and always excludes NonCommercial corpora
+        (ADR-009 § 2), so this needs no caller identity — it mirrors exactly what
+        the anonymous browse would return for the same concept, but randomly
+        sampled and capped instead of time-ordered and paginated.
+
+        Randomness is server-side per request. When ``seed`` is provided the draw
+        is made reproducible by seeding PostgreSQL's RNG (``setseed``) on the same
+        session before the ``ORDER BY random()`` select; otherwise each call
+        re-draws freshly (the "shuffle" affordance). Reproducibility is only as
+        stable as the underlying pool — approving a new fragment reshuffles it.
+
+        Args:
+            concept_id: Neo4j Concept id whose examples to draw (subtree root
+                when ``include_subtypes``).
+            include_subtypes: Include fragments tagged with non-stub subtypes of
+                the concept, not only exact-concept matches (default True, as the
+                public browse).
+            limit: Maximum number of examples to return (default 3).
+            seed: Optional integer to make the draw reproducible; ``None`` (the
+                default) draws freshly each call.
+
+        Returns:
+            :class:`~models.fragment.ConceptExamplesResponse` with up to
+            ``limit`` approved example fragments (fewer, or empty, when the pool
+            is smaller).
+        """
+        concept_ids = await self._resolve_subtree(concept_id, include_subtypes)
+        if not concept_ids:
+            return ConceptExamplesResponse(
+                examples=[],
+                concept_id=concept_id,
+                include_subtypes=include_subtypes,
+            )
+
+        # Distinct fragment_ids carrying any matching concept tag (not only
+        # is_primary) — the same pool rule as list_by_concept.
+        matching_ids_sq = (
+            select(FragmentConceptTag.fragment_id)
+            .where(FragmentConceptTag.concept_id.in_(concept_ids))
+            .distinct()
+            .subquery()
         )
-        return ConceptBrowseResponse(
-            items=items,
-            next_cursor=next_cursor,
+
+        # ADR-009 § 2: exclude NonCommercial corpora (ABC) from the public draw,
+        # keyed on the corpus licence via a movement subquery.
+        nc_movements = (
+            select(Movement.id)
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .where(Corpus.licence.op("~*")(_NC_LICENCE_REGEX))
+        )
+
+        stmt = (
+            select(Fragment)
+            .where(
+                Fragment.parent_fragment_id.is_(None),
+                Fragment.id.in_(select(matching_ids_sq.c.fragment_id)),
+                Fragment.status == "approved",
+                Fragment.movement_id.not_in(nc_movements),
+            )
+            .order_by(func.random())
+            .limit(limit)
+        )
+
+        # Optional deterministic draw: seed the session RNG before the select.
+        if seed is not None:
+            await self._db.execute(
+                text("SELECT setseed(:s)"), {"s": _normalise_setseed(seed)}
+            )
+
+        result = await self._db.execute(stmt)
+        page = list(result.scalars().all())
+
+        examples = await self._hydrate_browse_items(page)
+        return ConceptExamplesResponse(
+            examples=examples,
             concept_id=concept_id,
             include_subtypes=include_subtypes,
         )

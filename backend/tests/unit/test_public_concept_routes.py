@@ -96,6 +96,27 @@ async def concept_client() -> AsyncGenerator[tuple[AsyncClient, AsyncMock], None
         yield client, mock_service
 
 
+@pytest_asyncio.fixture
+async def examples_client() -> AsyncGenerator[tuple[AsyncClient, AsyncMock], None]:
+    """Anonymous async client with the FragmentService stubbed for examples.
+
+    Yields:
+        ``(client, mock_service)`` — the HTTP client and the mocked
+        :class:`~services.fragments.FragmentService`.
+    """
+    from api.routes.fragments import get_fragment_service
+    from services.fragments import FragmentService
+
+    app = _build_app()
+    mock_service = AsyncMock(spec=FragmentService)
+    app.dependency_overrides[get_fragment_service] = lambda: mock_service
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client, mock_service
+
+
 # ---------------------------------------------------------------------------
 # Response-model factory
 # ---------------------------------------------------------------------------
@@ -207,6 +228,128 @@ class TestPublicConceptDetail:
 
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "CONCEPT_NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# Public concept examples
+# ---------------------------------------------------------------------------
+
+
+def _examples_response(n: int = 2, **overrides: Any) -> Any:
+    import uuid
+    from datetime import datetime, timezone
+
+    from models.fragment import ConceptBrowseItem, ConceptExamplesResponse
+
+    now = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
+    items = [
+        ConceptBrowseItem(
+            id=uuid.uuid4(),
+            movement_id=uuid.uuid4(),
+            bar_start=1,
+            bar_end=4,
+            beat_start=None,
+            beat_end=None,
+            repeat_context=None,
+            status="approved",
+            primary_concept_id="PerfectAuthenticCadence",
+            primary_concept_alias="PAC",
+            primary_concept_name="Perfect Authentic Cadence",
+            data_licence="CC BY-SA 4.0",
+            data_licence_url="https://creativecommons.org/licenses/by-sa/4.0/",
+            harmony_sources=["DCML"],
+            preview_url="https://signed.example/preview.svg",
+            created_by=uuid.uuid4(),
+            updated_at=now,
+            composer_name="Mozart",
+            work_title="Piano Sonata",
+            work_catalogue_number="K.331",
+            movement_number=1,
+            movement_title=None,
+        )
+        for _ in range(n)
+    ]
+    base: dict[str, Any] = {
+        "examples": items,
+        "concept_id": "PerfectAuthenticCadence",
+        "include_subtypes": True,
+    }
+    base.update(overrides)
+    return ConceptExamplesResponse(**base)
+
+
+class TestPublicConceptExamples:
+    """GET /api/v1/public/concepts/{id}/examples — random approved example draw."""
+
+    @pytest.mark.asyncio
+    async def test_defaults_pass_through(
+        self, examples_client: tuple[AsyncClient, AsyncMock]
+    ) -> None:
+        client, service = examples_client
+        service.list_examples_by_concept.return_value = _examples_response(n=2)
+
+        resp = await client.get(
+            "/api/v1/public/concepts/PerfectAuthenticCadence/examples"
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["examples"]) == 2
+        assert body["examples"][0]["preview_url"].endswith(".svg")
+        service.list_examples_by_concept.assert_awaited_once_with(
+            "PerfectAuthenticCadence",
+            include_subtypes=True,
+            limit=3,
+            seed=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_query_params_pass_through(
+        self, examples_client: tuple[AsyncClient, AsyncMock]
+    ) -> None:
+        client, service = examples_client
+        service.list_examples_by_concept.return_value = _examples_response(
+            n=1, include_subtypes=False
+        )
+
+        resp = await client.get(
+            "/api/v1/public/concepts/PerfectAuthenticCadence/examples",
+            params={"include_subtypes": "false", "limit": 5, "seed": 42},
+        )
+
+        assert resp.status_code == 200
+        service.list_examples_by_concept.assert_awaited_once_with(
+            "PerfectAuthenticCadence",
+            include_subtypes=False,
+            limit=5,
+            seed=42,
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_pool_returns_empty_list(
+        self, examples_client: tuple[AsyncClient, AsyncMock]
+    ) -> None:
+        """An unknown/untagged concept is not an error — it draws no examples."""
+        client, service = examples_client
+        service.list_examples_by_concept.return_value = _examples_response(
+            n=0, concept_id="Nope"
+        )
+
+        resp = await client.get("/api/v1/public/concepts/Nope/examples")
+
+        assert resp.status_code == 200
+        assert resp.json()["examples"] == []
+
+    @pytest.mark.asyncio
+    async def test_limit_out_of_range_is_422(
+        self, examples_client: tuple[AsyncClient, AsyncMock]
+    ) -> None:
+        client, _ = examples_client
+        resp = await client.get(
+            "/api/v1/public/concepts/PerfectAuthenticCadence/examples",
+            params={"limit": 99},
+        )
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------

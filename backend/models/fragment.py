@@ -499,6 +499,34 @@ class ConceptBrowseResponse(BaseModel):
     include_subtypes: bool
 
 
+class ConceptExamplesResponse(BaseModel):
+    """A small random draw of approved example fragments for a concept.
+
+    Returned by ``GET /api/v1/public/concepts/{id}/examples`` — the glossary's
+    inline examples (Component 11 Step 3). Unlike the browse response this is
+    **not** paginated: it is a fixed-size (default 3) random sample re-drawn on
+    each call, so the frontend "shuffle" control simply re-requests. Items reuse
+    :class:`ConceptBrowseItem`, so the glossary can render them with the same
+    preview card as the public browse.
+
+    The pool is ``approved`` fragments tagged with the concept (any tag, not
+    only ``is_primary``; subtypes included when ``include_subtypes``), minus the
+    ADR-009 NonCommercial exclusion — identical to what the anonymous browse
+    would return for the same concept.
+
+    Attributes:
+        examples: Up to ``limit`` randomly-drawn approved fragments; fewer when
+            the pool is smaller, empty when the concept has no eligible
+            fragments.
+        concept_id: The queried concept id, echoed back.
+        include_subtypes: Whether subtype fragments were included in the pool.
+    """
+
+    examples: list[ConceptBrowseItem]
+    concept_id: str
+    include_subtypes: bool
+
+
 class Fragment(Base):
     """A tagged musical excerpt.
 
