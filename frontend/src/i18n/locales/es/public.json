@@ -20,6 +20,14 @@
     "loading": "Cargando concepto…",
     "loadError": "No se pudo cargar este concepto.",
     "notFound": "No existe ningún concepto con ese identificador en el glosario.",
+    "index": {
+      "pageTitle": "Glosario de conceptos — Doppia",
+      "heading": "Glosario de conceptos",
+      "intro": "Explora los conceptos que Doppia ha modelado, agrupados por dominio. Abre uno para leer su definición, ver su lugar en la jerarquía y estudiar ejemplos aprobados del corpus.",
+      "loading": "Cargando el glosario…",
+      "loadError": "No se pudo cargar el glosario.",
+      "empty": "Todavía no se ha publicado ningún concepto en el glosario."
+    },
     "breadcrumbLabel": "Jerarquía de conceptos",
     "aliases": "También conocido como {{aliases}}",
     "definitionHeading": "Definición",

@@ -301,7 +301,10 @@ CI runs `npm test` in the lint job on every push.
 
 ### Frontend e2e (Playwright)
 
-Browser-level coverage of the **anonymous public read journey** (Component 10 Step 14): browse a concept → open a fragment detail → the Verovio render and MIDI controls appear, with no editor affordance reachable. The suite runs against a `vite preview` of the production build with the backend stubbed per-test (`page.route`), so **no live backend, database, or seeded data is needed** — it is fast and deterministic.
+Browser-level coverage of the **anonymous public read journey**. Two specs, both against a `vite preview` of the production build with the backend stubbed per-test (`page.route`), so **no live backend, database, or seeded data is needed** — fast and deterministic:
+
+- **browse → detail** (Component 10 Step 14): browse a concept → open a fragment detail → the Verovio render and MIDI controls appear, with no editor affordance reachable.
+- **glossary journey** (Component 11 Step 7): glossary index → concept page → expand an inline example (Verovio + MIDI) → browse the concept's fragments → fragment detail — the full public read path end to end.
 
 ```bash
 cd frontend

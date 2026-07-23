@@ -6,17 +6,15 @@
  *   GET /api/v1/public/concepts/{id}/examples   — example draw (Step 3, Step 6)
  *   GET /api/v1/public/concepts                 — browse index (Step 4, Step 7)
  *
- * The index wrapper lands with Step 7 (it consumes the § Step 4b shape).
- *
  * Sibling to `publicApi.ts`: same anonymous posture (the shared `apiFetch`
  * attaches a Bearer token only when a session exists, so an anonymous reader
  * sends no Authorization header). Responses are validated with Zod at the API
  * boundary, as `conceptApi.ts` does for the editor concept surface.
  *
  * References:
- *   docs/roadmap/component-11-concept-glossary.md § Steps 1, 5, 6
+ *   docs/roadmap/component-11-concept-glossary.md § Steps 1, 4b, 5, 6, 7
  *   backend/api/routes/public_concepts.py
- *   backend/models/concepts.py (ConceptDetailResponse)
+ *   backend/models/concepts.py (ConceptDetailResponse, ConceptIndexResponse)
  *   backend/models/fragment.py (ConceptExamplesResponse)
  */
 
@@ -76,6 +74,41 @@ const ConceptDetailSchema = z.object({
   relationships: z.array(ConceptRelationshipSchema),
 });
 
+/**
+ * One concept in the browse-by-domain index (Step 4b). A flat node in a domain's
+ * forest: `parent_id` links it to its IS_SUBTYPE_OF parent within the domain, or
+ * is `null` for a top-level entry (a domain can have several — the `Cadence` tree
+ * plus the post-cadential roots — so the nodes form a forest, not a single tree).
+ * The frontend assembles the nesting by grouping on `parent_id`, exactly as the
+ * editor tree does. Stub concepts are not in the index (reached only as marked
+ * links from a concept page).
+ */
+const ConceptIndexNodeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  aliases: z.array(z.string()),
+  /** Ancestor names from the domain root to this concept, inclusive. */
+  hierarchy_path: z.array(z.string()),
+  parent_id: z.string().nullable(),
+  /** Approved fragments tagged with this concept (any tag, not only primary). */
+  fragment_count: z.number(),
+});
+
+/**
+ * One domain in the index — a forest of its browsable roots' subtrees. `domain`
+ * is the machine key (e.g. `"cadences"`); `label` a display string derived from
+ * it. `nodes` is the flat forest, several entries carrying `parent_id: null`.
+ */
+const ConceptIndexDomainSchema = z.object({
+  domain: z.string(),
+  label: z.string(),
+  nodes: z.array(ConceptIndexNodeSchema),
+});
+
+const ConceptIndexResponseSchema = z.object({
+  domains: z.array(ConceptIndexDomainSchema),
+});
+
 // ---------------------------------------------------------------------------
 // TypeScript types (inferred from Zod)
 // ---------------------------------------------------------------------------
@@ -83,6 +116,9 @@ const ConceptDetailSchema = z.object({
 export type ConceptRef = z.infer<typeof ConceptRefSchema>;
 export type ConceptRelationship = z.infer<typeof ConceptRelationshipSchema>;
 export type ConceptDetail = z.infer<typeof ConceptDetailSchema>;
+export type ConceptIndexNode = z.infer<typeof ConceptIndexNodeSchema>;
+export type ConceptIndexDomain = z.infer<typeof ConceptIndexDomainSchema>;
+export type ConceptIndexResponse = z.infer<typeof ConceptIndexResponseSchema>;
 
 /**
  * A random draw of approved example fragments for one concept (Step 3).
@@ -116,6 +152,20 @@ export interface ConceptExamplesResponse {
  */
 export async function getPublicConcept(conceptId: string): Promise<ConceptDetail> {
   return apiFetch(`${BASE}/${encodeURIComponent(conceptId)}`, undefined, ConceptDetailSchema);
+}
+
+/**
+ * Fetch the public browse-by-domain concept index, anonymously (Step 4b/7).
+ *
+ * The glossary's entry surface: every non-stub domain, each carrying the flat
+ * forest of its browsable roots' IS_SUBTYPE_OF subtrees (assemble by grouping on
+ * `parent_id`). This is the anonymous navigation Component 10 left out of the
+ * public fragment browser.
+ *
+ * @throws ApiError on network failure.
+ */
+export async function getPublicConceptIndex(): Promise<ConceptIndexResponse> {
+  return apiFetch(BASE, undefined, ConceptIndexResponseSchema);
 }
 
 /**

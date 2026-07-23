@@ -6,6 +6,7 @@ import PublicLayout from './components/ui/PublicLayout';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import ConceptPage from './routes/ConceptPage';
+import GlossaryIndex from './routes/GlossaryIndex';
 import CorpusBrowser from './routes/CorpusBrowser';
 import FragmentBrowser from './routes/FragmentBrowser';
 import FragmentDetail from './routes/FragmentDetail';
@@ -47,9 +48,10 @@ export default function App() {
               path="/public/fragments/:fragmentId"
               element={<FragmentDetail loadFragment={getPublicFragment} publicMode />}
             />
-            {/* Concept glossary — Component 11 Step 5. Keyed on the immutable
-              concept id (§ Decisions 1); the browse-by-domain index at
-              /glossary lands with Step 7. */}
+            {/* Concept glossary — Component 11. The browse-by-domain index
+              (Step 7) is the public entry surface; each concept page (Step 5)
+              is keyed on the immutable concept id (§ Decisions 1). */}
+            <Route path="/glossary" element={<GlossaryIndex />} />
             <Route path="/glossary/:conceptId" element={<ConceptPage />} />
           </Route>
 

@@ -20,6 +20,14 @@
     "loading": "Loading concept…",
     "loadError": "This concept could not be loaded.",
     "notFound": "No concept with that identifier exists in the glossary.",
+    "index": {
+      "pageTitle": "Concept glossary — Doppia",
+      "heading": "Concept glossary",
+      "intro": "Browse the concepts Doppia has modelled, grouped by domain. Open one to read its definition, see where it sits in the hierarchy, and study approved examples from the corpus.",
+      "loading": "Loading the glossary…",
+      "loadError": "The glossary could not be loaded.",
+      "empty": "No concepts have been published to the glossary yet."
+    },
     "breadcrumbLabel": "Concept hierarchy",
     "aliases": "Also known as {{aliases}}",
     "definitionHeading": "Definition",

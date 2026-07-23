@@ -22,6 +22,8 @@ interface TypeProps {
   children: React.ReactNode;
   style?: React.CSSProperties;
   role?: React.AriaRole;
+  /** DOM id, so a heading can be the target of an `aria-labelledby`. */
+  id?: string;
 }
 
 const defaultTags: Record<TypeVariant, AsProp> = {
@@ -40,7 +42,16 @@ const defaultTags: Record<TypeVariant, AsProp> = {
  * typographic scale. label-md and label-sm use Public Sans; all others use
  * Newsreader. No downstream component should hard-code font or size values.
  */
-export default function Type({ variant, as, bold, className, children, style, role }: TypeProps) {
+export default function Type({
+  variant,
+  as,
+  bold,
+  className,
+  children,
+  style,
+  role,
+  id,
+}: TypeProps) {
   const Tag = (as ?? defaultTags[variant]) as AsProp;
   const variantClass = styles[variant];
   const combined =
@@ -48,7 +59,7 @@ export default function Type({ variant, as, bold, className, children, style, ro
     undefined;
 
   return (
-    <Tag className={combined} style={style} role={role}>
+    <Tag className={combined} style={style} role={role} id={id}>
       {children}
     </Tag>
   );
