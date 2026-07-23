@@ -218,13 +218,98 @@ The traversal already exists (`get_domain_roots`, `get_concept_subtree` in
 graph work. The editor's `/api/v1/concepts/tree`, `/roots`, and `/search`
 endpoints stay editor-only (role-gated); the public index is a separate,
 anonymous surface with only the fields a public reader needs (no schema trees, no
-CONTAINS fingerprints). Stub concepts are included in the index but marked, so an
-inbound link to a not-yet-covered concept resolves to an honest stub page
-(§ Step 1) rather than a 404.
+CONTAINS fingerprints).
+
+**Stubs are not listed in the index** (confirmed 2026-07-23, revising an earlier
+draft of this step): a domain's browsable tree is its *non-stub* subtree, which
+is what `get_domain_roots`/`get_concept_subtree` already return. A stub concept
+stays reachable through the **marked stub links on a concept page** (§ Step 1
+returns a valid `stub: true` payload, and stub relationship/child targets are
+flagged) — that is what actually keeps an inbound link from 404ing, without
+cluttering the browse index with not-yet-modelled concepts.
 
 **Concept-count display (ties to M11, Step 8):** if the index shows a
 per-concept approved-fragment count, it must read from the same source the M11
 fix makes non-stale — do not stand up a second, independently-cached count here.
+
+### Step 4b — Index root selection: group by domain, exclude stage concepts
+
+**Found on staging verification of Step 4 (2026-07-23); decided the same day.**
+Step 4 shipped keying the index on `get_domain_roots`, which means *"non-stub
+concept with no `IS_SUBTYPE_OF` parent"* — a **taxonomic** root, not a **domain**.
+Conflating the two is the defect: the deployed index returned **seven** top-level
+"domains" for the single cadence domain.
+
+In `cadences.yaml`, three different kinds of concept have no `IS_SUBTYPE_OF`
+parent, and they are not the same thing at all:
+
+| Class | Concepts | `type` | `top_level_taggable` | Subtypes? | `CONTAINS` target? |
+|---|---|---|---|---|---|
+| Taxonomic root | `Cadence` | CadenceType | **false** | yes (12 nodes) | no |
+| Stage leaves | `CadentialInitialTonic`, `…PreDominant`, `…Dominant`, `…FinalTonic` | *(none)* | false | no | **yes** |
+| Post-cadential | `ClosingSection`, `StandingOnTheDominant` | FormalUnit | **true** | no | no |
+
+**The obvious filter does not work.** Selecting roots on `top_level_taggable`
+drops `Cadence` itself — it is deliberately `top_level_taggable: false` (an
+abstract root, not directly taggable). The stages and `Cadence` share that flag
+for completely different reasons, so the flag cannot separate them.
+
+**The rule (decided — § Decisions 5):** a concept is an index root iff it has
+**no `IS_SUBTYPE_OF` parent *and* is not the target of any `CONTAINS` edge.**
+That yields exactly `Cadence`, `ClosingSection`, `StandingOnTheDominant`. It is
+structural rather than capability-based, so it survives a stage ever becoming
+taggable, and it needs no YAML change. (The data corroborates the split three
+ways: stage concepts also have no `type` and are `tlt: false`.) The alternative
+formulation — *taggable OR has subtypes* — gives the same three today but keys on
+capability, so it is the fallback, not the rule.
+
+Stage concepts do not disappear from the glossary: § Step 1 already surfaces
+`CONTAINS` as a typed relationship, so the **Cadence** page links to Initial
+Tonic / Pre-Dominant / Dominant. They keep their pages, reachable from their
+parent — they are simply not top-level index entries. That is the correct IA.
+
+**Group by domain, not by taxonomic orphanhood.** The model already carries a
+real domain notion (the `domain:` field and the auto-created `BELONGS_TO` edge to
+a `Domain` node). "Browse by domain" should key on *that*. The index becomes one
+**Cadences** heading containing the `Cadence` tree plus the two post-cadential
+concepts as sibling top-level entries — i.e. a **forest per domain**, not a
+single tree. Nothing is labelled a "domain" that is not one, no fake parent is
+invented, and no taxonomy decision is committed.
+
+Response shape moves the node list up one level and replaces `root_id`/
+`root_name` with the domain key:
+
+```
+{ domains: [ { domain: "cadences",
+               label:  "Cadences",
+               nodes:  [ {id, name, aliases, hierarchy_path,
+                          parent_id, fragment_count}, … ] } ] }
+```
+
+`parent_id` is `null` for each top-level entry, so the frontend assembles a
+**forest** by grouping on `parent_id` — the same flat-list-plus-`parent_id`
+pattern the editor tree already uses, just with more than one root. (`label` is a
+display string for the domain key; deriving it is fine for now — a `Domain` node
+property can carry it later if the keys ever need nicer names.)
+
+**This is a general fix, not a public-only one.** `get_domain_roots` is **shared
+with the editor concept tree** (`/api/v1/concepts/roots`), so applying the rule
+there fixes both surfaces at once — and that is what closes the related gap
+Francisco observed: `ClosingSection` and `StandingOnTheDominant` are taggable but
+currently unreachable by *browsing* on either surface (findable only via the
+search bar), so any approved fragments tagged with them are invisible in browse.
+Knock-on: `FragmentBrowser` renders a single default tree today and needs a small
+change to handle several top-level entries.
+
+**Sequencing.** This revises the Step 4 response shape, and **§ Step 7 is its
+consumer** — land it *before* Step 7's index view is built, or Step 7 reworks.
+It does not touch the concept page (Step 5) or examples (Step 6), so Part 2 can
+proceed on those in parallel.
+
+**Deliberately not decided here:** whether `ClosingSection` /
+`StandingOnTheDominant` eventually get a real parent (see § Deferred to Later
+Components). Domain grouping makes them presentable *now* without committing to
+that taxonomy.
 
 ---
 
@@ -271,12 +356,20 @@ The distinctive glossary feature (from `extended-features.md` § Concept Glossar
 
 ### Step 7 — Concept index / browse-by-domain
 
-The public entry surface (Step 4): a browse-by-domain hierarchy of concept
-links, honouring stubs (shown, marked). This is the anonymous navigation
-Component 10 deliberately left out of `PublicFragmentBrowser`; wiring it here
-completes the public read journey (index → concept page → example expand →
-fragment browse → fragment detail). Extend the Playwright e2e anonymous-read
-scaffold (Component 10 Step 14) to cover that journey end to end.
+The public entry surface (Steps 4 + 4b): a browse-by-domain hierarchy of concept
+links. This is the anonymous navigation Component 10 deliberately left out of
+`PublicFragmentBrowser`; wiring it here completes the public read journey
+(index → concept page → example expand → fragment browse → fragment detail).
+Extend the Playwright e2e anonymous-read scaffold (Component 10 Step 14) to cover
+that journey end to end.
+
+**Consumes the § Step 4b shape — read that step first.** Two consequences for
+this view: each domain renders a **forest**, not a single tree (group the flat
+`nodes` list on `parent_id`, where several entries have `parent_id: null`), and
+the domain heading comes from `domain`/`label` rather than a root concept's name.
+Stub concepts are not in the index (§ Step 4); they are reached only as marked
+links from a concept page. **Step 4b must land before this step is built**, or it
+is reworked.
 
 ---
 
@@ -429,6 +522,19 @@ choice to implementation time.
    time.** Option 1 / 2 / 3 (Component 10 plan § "Deferred within M0"); the
    choice is made when the step is reached, not now. Recommendation to open the
    discussion: Option 1 (lowest risk, reuses the tested create-time path).
+5. **Index root selection (Step 4b) — group by domain; a root is a concept with
+   no `IS_SUBTYPE_OF` parent that is not a `CONTAINS` target.** Decided
+   2026-07-23 after staging verification returned seven "domains" for one domain.
+   Filtering on `top_level_taggable` was rejected because `Cadence` itself is
+   `top_level_taggable: false`. Stage concepts drop out of the index and stay
+   reachable as `CONTAINS` relationships on their parent's page;
+   `ClosingSection`/`StandingOnTheDominant` remain top-level entries *within* the
+   Cadences domain — no invented parent, no taxonomy commitment. The rule is
+   applied in the **shared** `get_domain_roots`, so the editor concept tree is
+   fixed by the same change.
+
+Also stated as shipped rather than open: **stubs are not listed in the concept
+index** (§ Step 4), only reachable as marked links from a concept page.
 
 A settled default, revisited only if the work surfaces a reason: the
 `featured_rank` editorial-override column (Step 3) is **documented but not
@@ -461,6 +567,16 @@ Stated so the boundary is a decision, not a gap:
   (Step 4) is built domain-general but exercised against one domain. The
   multi-domain fragment filter stays deferred until a second domain is seeded
   (`phase-2.md` § Still deferred).
+- **A taxonomic parent for `ClosingSection` / `StandingOnTheDominant`.** Step 4b
+  makes them presentable as top-level entries in the Cadences domain *without*
+  deciding whether they should hang off a parent. The candidate is an abstract
+  `PostCadentialFunction` (both are `IS_SUBTYPE_OF` it), which would make one
+  mechanism — `IS_SUBTYPE_OF` — explain the whole index and is defensible in
+  Caplin's terms. It is deferred because the likelier home is the
+  **formal-function domain**: both carry `type: FormalUnit`, both are
+  post-cadential *functions*, and that domain is currently ten stubs.
+  **Trigger for the revisit: designing the Formal Function domain.** Until then
+  they stay parentless, which the domain grouping renders honestly.
 
 ---
 
@@ -475,13 +591,17 @@ Part 1  Glossary read model (backend)          ┐ parallel with Part 3;
   Step 1  public concept-detail payload         │ both green before switch-on
   Step 2  definition_reviewed gate (mechanism)  │
   Step 3  example-fragment selection            │
-  Step 4  public concept index                  ┘
+  Step 4  public concept index                  │
+  Step 4b index roots: domain grouping +        │ ← also fixes the shared
+          CONTAINS filter (shared query)        ┘   editor concept tree
         │
         ▼
 Part 2  Glossary frontend                       ← needs Part 1 endpoints
-  Step 5  concept page
-  Step 6  inline example fragments (preview → Verovio/MIDI expand)
-  Step 7  concept index / browse-by-domain + e2e journey
+  Step 5  concept page                           ┐ independent of 4b —
+  Step 6  inline example fragments               ┘ can proceed in parallel
+          (preview → Verovio/MIDI expand)
+  Step 7  concept index / browse-by-domain  ←──── MUST follow Step 4b
+          + e2e journey                          (consumes its shape)
 
 Part 3  Public-surface fixes                    ┐ parallel with Parts 1–2;
   Step 8  M11 count-cache staleness             │ all green before switch-on
@@ -516,6 +636,11 @@ touches, in the same change as the work:
   `definition_reviewed` states), if the shape proves non-obvious. The
   `definition_reviewed` flag joins `stub` in the domain-YAML flag vocabulary —
   record it in the knowledge-graph design reference.
+- **`knowledge-graph-design-reference.md`** — record the § Step 4b index-root
+  rule ("a browsable root has no `IS_SUBTYPE_OF` parent and is not a `CONTAINS`
+  target; browse groups by `domain`, not by taxonomic orphanhood"). It is a
+  modelling rule, not a glossary detail: it governs the editor concept tree too,
+  and it is the reason a stage concept never appears as a root.
 - **`ADR-015`** — the duplicate-`@n` disambiguation amendment (Step 9 / M12).
 - **`fragment-schema.md`** — if the M6 summary key/meter bug (Step 10) is a
   derivation bug, note the fix and bump `summary` version only if the field
