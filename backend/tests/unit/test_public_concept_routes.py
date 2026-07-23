@@ -97,6 +97,27 @@ async def concept_client() -> AsyncGenerator[tuple[AsyncClient, AsyncMock], None
 
 
 @pytest_asyncio.fixture
+async def index_client() -> AsyncGenerator[tuple[AsyncClient, AsyncMock], None]:
+    """Anonymous async client with the index ConceptService stubbed.
+
+    Yields:
+        ``(client, mock_service)`` — the HTTP client and the mocked
+        :class:`~services.concepts.ConceptService`.
+    """
+    from api.routes.public_concepts import get_public_index_service
+    from services.concepts import ConceptService
+
+    app = _build_app()
+    mock_service = AsyncMock(spec=ConceptService)
+    app.dependency_overrides[get_public_index_service] = lambda: mock_service
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client, mock_service
+
+
+@pytest_asyncio.fixture
 async def examples_client() -> AsyncGenerator[tuple[AsyncClient, AsyncMock], None]:
     """Anonymous async client with the FragmentService stubbed for examples.
 
@@ -228,6 +249,89 @@ class TestPublicConceptDetail:
 
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "CONCEPT_NOT_FOUND"
+
+
+# ---------------------------------------------------------------------------
+# Public concept index
+# ---------------------------------------------------------------------------
+
+
+def _index_response() -> Any:
+    from models.concepts import (
+        ConceptIndexDomain,
+        ConceptIndexNode,
+        ConceptIndexResponse,
+    )
+
+    return ConceptIndexResponse(
+        domains=[
+            ConceptIndexDomain(
+                root_id="Cadence",
+                root_name="Cadence",
+                nodes=[
+                    ConceptIndexNode(
+                        id="Cadence",
+                        name="Cadence",
+                        aliases=[],
+                        hierarchy_path=["Cadence"],
+                        parent_id=None,
+                        fragment_count=0,
+                    ),
+                    ConceptIndexNode(
+                        id="PerfectAuthenticCadence",
+                        name="Perfect Authentic Cadence",
+                        aliases=["PAC"],
+                        hierarchy_path=[
+                            "Cadence",
+                            "Authentic Cadence",
+                            "Perfect Authentic Cadence",
+                        ],
+                        parent_id="AuthenticCadenceRealised",
+                        fragment_count=12,
+                    ),
+                ],
+            )
+        ]
+    )
+
+
+class TestPublicConceptIndex:
+    """GET /api/v1/public/concepts — anonymous browse-by-domain index."""
+
+    @pytest.mark.asyncio
+    async def test_index_is_served(
+        self, index_client: tuple[AsyncClient, AsyncMock]
+    ) -> None:
+        client, service = index_client
+        service.get_public_index.return_value = _index_response()
+
+        resp = await client.get("/api/v1/public/concepts")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["domains"]) == 1
+        domain = body["domains"][0]
+        assert domain["root_id"] == "Cadence"
+        pac = next(n for n in domain["nodes"] if n["id"] == "PerfectAuthenticCadence")
+        assert pac["parent_id"] == "AuthenticCadenceRealised"
+        assert pac["fragment_count"] == 12
+        service.get_public_index.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_index_carries_wildcard_cors(
+        self, index_client: tuple[AsyncClient, AsyncMock]
+    ) -> None:
+        client, service = index_client
+        service.get_public_index.return_value = _index_response()
+
+        resp = await client.get(
+            "/api/v1/public/concepts",
+            headers={"Origin": "https://third-party.example"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "*"
+        assert "access-control-allow-credentials" not in resp.headers
 
 
 # ---------------------------------------------------------------------------
@@ -500,3 +604,80 @@ class TestGetPublicDetailAssembly:
         service = ConceptService(_FakeDriver())  # type: ignore[arg-type]
         with pytest.raises(ConceptNotFoundError):
             await service.get_public_detail("Nope")
+
+
+class TestGetPublicIndexAssembly:
+    """ConceptService.get_public_index — domain grouping and count attachment."""
+
+    @pytest.mark.asyncio
+    async def test_assembles_domains_with_counts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from services import concepts as svc
+        from services.concepts import ConceptService
+
+        roots = [{"id": "Cadence", "name": "Cadence", "aliases": []}]
+        subtree = [
+            {
+                "id": "Cadence",
+                "name": "Cadence",
+                "aliases": [],
+                "hierarchy_path": ["Cadence"],
+                "parent_id": None,
+            },
+            {
+                "id": "PerfectAuthenticCadence",
+                "name": "Perfect Authentic Cadence",
+                "aliases": ["PAC"],
+                "hierarchy_path": ["Cadence", "Perfect Authentic Cadence"],
+                "parent_id": "Cadence",
+            },
+        ]
+
+        async def _fake_roots(session: object) -> list[dict[str, Any]]:
+            return roots
+
+        async def _fake_subtree(session: object, root_id: str) -> list[dict[str, Any]]:
+            return subtree
+
+        monkeypatch.setattr(svc, "get_domain_roots", _fake_roots)
+        monkeypatch.setattr(svc, "get_concept_subtree", _fake_subtree)
+
+        service = ConceptService(_FakeDriver())  # type: ignore[arg-type]
+        # Counts come from the shared source; stub it to prove wiring.
+        service._fetch_fragment_counts = AsyncMock(  # type: ignore[method-assign]
+            return_value={"PerfectAuthenticCadence": 7}
+        )
+
+        result = await service.get_public_index()
+
+        assert len(result.domains) == 1
+        domain = result.domains[0]
+        assert domain.root_id == "Cadence"
+        assert domain.root_name == "Cadence"
+        by_id = {n.id: n for n in domain.nodes}
+        assert by_id["PerfectAuthenticCadence"].fragment_count == 7
+        assert by_id["PerfectAuthenticCadence"].parent_id == "Cadence"
+        assert by_id["Cadence"].fragment_count == 0  # no fragments → default 0
+        # Counts were requested for every node id across all domains.
+        service._fetch_fragment_counts.assert_awaited_once_with(
+            ["Cadence", "PerfectAuthenticCadence"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_graph_returns_no_domains(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from services import concepts as svc
+        from services.concepts import ConceptService
+
+        async def _no_roots(session: object) -> list[dict[str, Any]]:
+            return []
+
+        monkeypatch.setattr(svc, "get_domain_roots", _no_roots)
+
+        service = ConceptService(_FakeDriver())  # type: ignore[arg-type]
+        service._fetch_fragment_counts = AsyncMock(return_value={})  # type: ignore[method-assign]
+
+        result = await service.get_public_index()
+        assert result.domains == []

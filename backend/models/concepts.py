@@ -396,3 +396,68 @@ class ConceptDetailResponse(BaseModel):
     parent: ConceptRef | None = None
     children: list[ConceptRef] = Field(default_factory=list)
     relationships: list[ConceptRelationship] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Public concept-index response models  (GET /api/v1/public/concepts)
+# ---------------------------------------------------------------------------
+
+
+class ConceptIndexNode(BaseModel):
+    """One concept in the public browse-by-domain index.
+
+    A flat node in a domain's ``IS_SUBTYPE_OF`` subtree; the frontend assembles
+    the nested display by keying on ``parent_id`` (the same shape as the editor
+    tree, minus the schema/CONTAINS detail a public reader does not need).
+
+    Attributes:
+        id: Immutable concept identifier (the link target for the concept page).
+        name: Human-readable concept name.
+        aliases: Alternative names / abbreviations (e.g. ``["PAC"]``).
+        hierarchy_path: Ancestor names from the domain root to this concept,
+            inclusive.
+        parent_id: The id of this node's direct ``IS_SUBTYPE_OF`` parent within
+            the domain subtree, or ``None`` for the domain root.
+        fragment_count: Number of ``approved`` fragments whose concept tags
+            include this concept (any tag, not only ``is_primary``) — the count
+            the browse surface shows. Reads the same source as the editor tree,
+            so the M11 count-cache fix (Step 8) de-stales both at once.
+    """
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    hierarchy_path: list[str] = Field(default_factory=list)
+    parent_id: str | None = None
+    fragment_count: int = 0
+
+
+class ConceptIndexDomain(BaseModel):
+    """One domain (a root concept and its non-stub subtree) in the index.
+
+    Attributes:
+        root_id: The domain root's concept id (a concept with no
+            ``IS_SUBTYPE_OF`` parent, e.g. ``"Cadence"``).
+        root_name: The domain root's human-readable name.
+        nodes: All non-stub concepts in the root's ``IS_SUBTYPE_OF`` subtree,
+            including the root itself (``parent_id = None``), ordered by name.
+    """
+
+    root_id: str
+    root_name: str
+    nodes: list[ConceptIndexNode] = Field(default_factory=list)
+
+
+class ConceptIndexResponse(BaseModel):
+    """The public concept glossary index — every domain, browsable anonymously.
+
+    Returned by ``GET /api/v1/public/concepts``. Stub concepts are not listed
+    here (a domain's browsable tree is its non-stub subtree); a stub concept
+    remains reachable through the marked stub links on a concept page (Step 1),
+    which keeps inbound links stable without cluttering the browse index.
+
+    Attributes:
+        domains: One entry per non-stub domain root, ordered by root name.
+    """
+
+    domains: list[ConceptIndexDomain] = Field(default_factory=list)

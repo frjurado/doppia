@@ -27,6 +27,9 @@ from graph.queries.concepts import (
 )
 from models.concepts import (
     ConceptDetailResponse,
+    ConceptIndexDomain,
+    ConceptIndexNode,
+    ConceptIndexResponse,
     ConceptRef,
     ConceptRelationship,
     ConceptRootItem,
@@ -438,6 +441,55 @@ class ConceptService:
             children=children,
             relationships=relationships,
         )
+
+    async def get_public_index(self) -> ConceptIndexResponse:
+        """Assemble the public browse-by-domain concept index.
+
+        For every non-stub domain root, fetch its non-stub ``IS_SUBTYPE_OF``
+        subtree, then attach approved-fragment counts in a single batch read.
+        English-only (no translation overlay in the Phase-2 public glossary).
+
+        Counts come from :meth:`_fetch_fragment_counts` — the same source the
+        editor tree uses — so the M11 count-cache fix (Step 8) de-stales the
+        public index and the editor tree together, and no second count source is
+        introduced here.
+
+        Returns:
+            :class:`~models.concepts.ConceptIndexResponse` with one entry per
+            domain root (ordered by root name), each carrying its flat subtree.
+            Empty ``domains`` when the graph has no non-stub roots.
+        """
+        async with self._driver.session() as session:
+            roots = await get_domain_roots(session)
+            subtrees: dict[str, list[dict]] = {}
+            for root in roots:
+                subtrees[root["id"]] = await get_concept_subtree(session, root["id"])
+
+        # Batch approved-fragment counts across every node in every domain.
+        all_ids = [node["id"] for nodes in subtrees.values() for node in nodes]
+        counts = await self._fetch_fragment_counts(all_ids)
+
+        domains: list[ConceptIndexDomain] = []
+        for root in roots:
+            nodes = [
+                ConceptIndexNode(
+                    id=n["id"],
+                    name=n["name"],
+                    aliases=n["aliases"] or [],
+                    hierarchy_path=n["hierarchy_path"] or [],
+                    parent_id=n["parent_id"],
+                    fragment_count=counts.get(n["id"], 0),
+                )
+                for n in subtrees[root["id"]]
+            ]
+            domains.append(
+                ConceptIndexDomain(
+                    root_id=root["id"],
+                    root_name=root["name"],
+                    nodes=nodes,
+                )
+            )
+        return ConceptIndexResponse(domains=domains)
 
     async def _fetch_fragment_counts(self, concept_ids: list[str]) -> dict[str, int]:
         """Return approved fragment counts keyed by concept_id.

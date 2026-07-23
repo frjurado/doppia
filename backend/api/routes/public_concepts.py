@@ -27,11 +27,13 @@ from api.dependencies import get_neo4j
 from api.rate_limiting import GRAPH_ANONYMOUS, READ_ANONYMOUS, limiter
 from api.routes.fragments import get_fragment_service
 from fastapi import APIRouter, Depends, Path, Query, Request
-from models.concepts import ConceptDetailResponse
+from models.base import get_db
+from models.concepts import ConceptDetailResponse, ConceptIndexResponse
 from models.fragment import ConceptExamplesResponse
 from neo4j import AsyncDriver
 from services.concepts import ConceptService
 from services.fragments import FragmentService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/public/concepts", tags=["Public"])
 
@@ -53,6 +55,54 @@ def get_public_concept_service(
         A :class:`~services.concepts.ConceptService` bound to the driver.
     """
     return ConceptService(driver)
+
+
+def get_public_index_service(
+    driver: AsyncDriver = Depends(get_neo4j),
+    db: AsyncSession = Depends(get_db),
+) -> ConceptService:
+    """Construct a :class:`~services.concepts.ConceptService` for the index.
+
+    Unlike the detail service this also wires the SQLAlchemy session, because
+    the index attaches approved-fragment counts (a PostgreSQL read). Separated
+    so tests can override it independently.
+
+    Args:
+        driver: Async Neo4j driver (injected by ``get_neo4j``).
+        db: Async SQLAlchemy session (injected by ``get_db``) for counts.
+
+    Returns:
+        A :class:`~services.concepts.ConceptService` bound to the driver and db.
+    """
+    return ConceptService(driver, db=db)
+
+
+@router.get(
+    "",
+    response_model=ConceptIndexResponse,
+    summary="Browse the concept glossary index by domain (anonymous)",
+    response_description=(
+        "Every non-stub domain root with its non-stub IS_SUBTYPE_OF subtree "
+        "(flat node list, keyed by parent_id) and approved-fragment counts. "
+        "The public entry point into the glossary."
+    ),
+)
+@limiter.limit(GRAPH_ANONYMOUS)
+async def public_list_concept_index(
+    request: Request,
+    service: ConceptService = Depends(get_public_index_service),
+) -> ConceptIndexResponse:
+    """Return the public browse-by-domain concept index, anonymously.
+
+    Args:
+        request: The incoming request (used by the rate limiter).
+        service: Public index service (injected; driver + db).
+
+    Returns:
+        :class:`~models.concepts.ConceptIndexResponse` — one entry per domain
+        root, each with its flat subtree and per-concept approved counts.
+    """
+    return await service.get_public_index()
 
 
 @router.get(

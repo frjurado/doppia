@@ -73,6 +73,31 @@ def _relationships(concept_id: str) -> list[dict[str, Any]]:
     return asyncio.run(_run())
 
 
+def _public_index() -> Any:
+    """Run ``ConceptService.get_public_index`` against a fresh async driver.
+
+    ``db=None`` so approved-fragment counts are all zero and no PostgreSQL is
+    needed — this test only exercises the real domain-root + subtree Cypher and
+    the domain-grouping assembly.
+    """
+    from services.concepts import ConceptService
+
+    uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+    user = os.environ.get("NEO4J_USER", "neo4j")
+    password = os.environ.get("NEO4J_PASSWORD", "localpassword")
+
+    async def _run() -> Any:
+        driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
+        await driver.verify_connectivity()
+        try:
+            service = ConceptService(driver)  # db=None → counts default to 0
+            return await service.get_public_index()
+        finally:
+            await driver.close()
+
+    return asyncio.run(_run())
+
+
 class TestConceptDetail:
     """graph.queries.concepts.get_concept_detail against live Neo4j."""
 
@@ -140,3 +165,32 @@ class TestConceptRelationships:
         rels = _relationships("AuthenticCadenceRealised")
         assert rels, "expected at least one typed relationship"
         assert all(r["direction"] in ("outgoing", "incoming") for r in rels)
+
+
+class TestPublicIndex:
+    """ConceptService.get_public_index against live Neo4j (db=None, counts 0)."""
+
+    def test_index_has_cadence_domain_with_subtree(self) -> None:
+        index = _public_index()
+
+        domains = {d.root_id: d for d in index.domains}
+        assert "Cadence" in domains, "cadence domain root missing from index"
+        cadence = domains["Cadence"]
+        assert cadence.root_name == "Cadence"
+
+        by_id = {n.id: n for n in cadence.nodes}
+        # The root is a node (parent_id None); PAC is a descendant.
+        assert by_id["Cadence"].parent_id is None
+        assert "PerfectAuthenticCadence" in by_id
+        assert by_id["PerfectAuthenticCadence"].hierarchy_path[0] == "Cadence"
+        # db=None → counts default to 0 for every node.
+        assert all(n.fragment_count == 0 for n in cadence.nodes)
+
+    def test_index_excludes_stubs(self) -> None:
+        """A domain's browsable tree is its non-stub subtree."""
+        index = _public_index()
+        for d in index.domains:
+            # Every node came from get_concept_subtree, which filters stubs; a
+            # stub root would never appear as a domain root either.
+            assert d.root_id, "domain root id must be present"
+            assert d.nodes, f"domain {d.root_id} has no nodes"
