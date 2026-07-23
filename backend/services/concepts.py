@@ -17,13 +17,18 @@ from errors import ConceptNotFoundError
 from graph.queries.concepts import (
     check_concept_exists,
     get_concept_contains_stages,
+    get_concept_detail,
     get_concept_property_schemas,
+    get_concept_relationships,
     get_concept_subtree,
     get_domain_roots,
     get_type_refinement_children,
     search_concepts,
 )
 from models.concepts import (
+    ConceptDetailResponse,
+    ConceptRef,
+    ConceptRelationship,
     ConceptRootItem,
     ConceptRootsResponse,
     ConceptSchemaTreeResponse,
@@ -349,6 +354,90 @@ class ConceptService:
             await set_tree_cache(self._redis, root_id, language, response.model_dump())
 
         return response
+
+    async def get_public_detail(self, concept_id: str) -> ConceptDetailResponse:
+        """Assemble the public concept-page payload for one concept.
+
+        Runs two Neo4j queries within one session — the detail row (identity,
+        flags, hierarchy, parent, children) and the typed relationships — and
+        assembles them into a :class:`~models.concepts.ConceptDetailResponse`.
+        English-only: the public glossary carries no translation overlay in
+        Phase 2 (i18n is deferred to Track M / Component 12).
+
+        The raw ``definition`` prose is returned as-is together with the
+        ``definition_reviewed`` flag; whether to show the prose or a placeholder
+        is the frontend's call (Step 2). A stub concept returns a valid payload
+        with ``stub=true`` so its page can state its domain is not yet modelled.
+
+        Args:
+            concept_id: The immutable concept id to resolve.
+
+        Returns:
+            :class:`~models.concepts.ConceptDetailResponse`.
+
+        Raises:
+            ConceptNotFoundError: If no Concept node with ``concept_id`` exists.
+        """
+        async with self._driver.session() as session:
+            row = await get_concept_detail(session, concept_id)
+            if row is None:
+                raise ConceptNotFoundError(
+                    f"Concept '{concept_id}' not found.",
+                    detail={"concept_id": concept_id},
+                )
+            rel_rows = await get_concept_relationships(session, concept_id)
+
+        # Sort relationships deterministically for a stable page: by edge type,
+        # then outgoing before incoming, then target name.
+        rel_rows.sort(
+            key=lambda r: (
+                r["rel_type"],
+                r["direction"] != "outgoing",
+                r["target_name"],
+            )
+        )
+        relationships = [
+            ConceptRelationship(
+                type=r["rel_type"],
+                direction=r["direction"],
+                target=ConceptRef(
+                    id=r["target_id"],
+                    name=r["target_name"],
+                    stub=r["target_stub"],
+                ),
+            )
+            for r in rel_rows
+        ]
+
+        parent = (
+            ConceptRef(
+                id=row["parent"]["id"],
+                name=row["parent"]["name"],
+                stub=row["parent"]["stub"],
+            )
+            if row["parent"] is not None
+            else None
+        )
+        children = [
+            ConceptRef(id=c["id"], name=c["name"], stub=c["stub"])
+            for c in row["children"]
+        ]
+
+        return ConceptDetailResponse(
+            id=row["id"],
+            name=row["name"],
+            aliases=row["aliases"] or [],
+            definition=row["definition"],
+            domain=row["domain"],
+            complexity=row["complexity"],
+            stub=row["stub"],
+            definition_reviewed=row["definition_reviewed"],
+            top_level_taggable=row["top_level_taggable"],
+            hierarchy_path=row["hierarchy_path"] or [],
+            parent=parent,
+            children=children,
+            relationships=relationships,
+        )
 
     async def _fetch_fragment_counts(self, concept_ids: list[str]) -> dict[str, int]:
         """Return approved fragment counts keyed by concept_id.

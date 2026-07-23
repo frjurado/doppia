@@ -15,6 +15,7 @@ from api.routes.fragments import router as fragments_router
 from api.routes.health import router as health_router
 from api.routes.movements import router as movements_router
 from api.routes.public import router as public_router
+from api.routes.public_concepts import router as public_concepts_router
 from api.routes.reviews import router as reviews_router
 from fastapi import APIRouter
 
@@ -30,4 +31,5 @@ router.include_router(concepts_router)
 router.include_router(fragments_router)
 router.include_router(movements_router)
 router.include_router(public_router)
+router.include_router(public_concepts_router)
 router.include_router(reviews_router)
