@@ -47,6 +47,13 @@ const DOMAINS: ReadonlyArray<{ key: string; label: string }> = [
 export interface ConceptPickerProps {
   /** Currently selected concept id, or null. */
   selectedConceptId: string | null;
+  /**
+   * The full selected concept, when known. Lets the picker render the current
+   * selection as a persistent card even when it is not in the active search
+   * results — e.g. restored on the fragment edit flow, where no search has run.
+   * Without it the selected concept is invisible and the box reads as empty.
+   */
+  selectedConcept?: ConceptSearchHit | null;
   /** Called when the user selects or deselects a concept. */
   onSelect: (concept: ConceptSearchHit | null) => void;
 }
@@ -83,10 +90,7 @@ function ConceptCard({
   onSelect: (c: ConceptSearchHit) => void;
 }) {
   const { t } = useTranslation('score');
-  const aliasSnippet =
-    concept.aliases.length > 0
-      ? concept.aliases.slice(0, 2).join(', ')
-      : null;
+  const aliasSnippet = concept.aliases.length > 0 ? concept.aliases.slice(0, 2).join(', ') : null;
 
   return (
     <button
@@ -103,12 +107,12 @@ function ConceptCard({
           {concept.name}
         </Type>
         {isSelected && (
-          <span className={styles.selectedBadge} aria-label={t('conceptPicker.selected')}>✓</span>
+          <span className={styles.selectedBadge} aria-label={t('conceptPicker.selected')}>
+            ✓
+          </span>
         )}
       </span>
-      {aliasSnippet && (
-        <span className={styles.aliases}>{aliasSnippet}</span>
-      )}
+      {aliasSnippet && <span className={styles.aliases}>{aliasSnippet}</span>}
       <HierarchyPath path={concept.hierarchy_path} />
     </button>
   );
@@ -118,7 +122,11 @@ function ConceptCard({
 // ConceptPicker
 // ---------------------------------------------------------------------------
 
-export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPickerProps) {
+export default function ConceptPicker({
+  selectedConceptId,
+  selectedConcept = null,
+  onSelect,
+}: ConceptPickerProps) {
   const { t } = useTranslation('score');
   const [query, setQuery] = useState('');
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
@@ -159,7 +167,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
         }
       }, DEBOUNCE_MS);
     },
-    [t],
+    [t]
   );
 
   useEffect(() => {
@@ -174,7 +182,7 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
   };
 
   const handleDomainToggle = (key: string) => {
-    setActiveDomain(prev => (prev === key ? null : key));
+    setActiveDomain((prev) => (prev === key ? null : key));
   };
 
   const handleSelect = (concept: ConceptSearchHit) => {
@@ -230,23 +238,24 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
           onClick={() => setActiveDomain(null)}
           aria-pressed={activeDomain === null}
         >
-          <Type variant="label-sm" as="span">{t('conceptPicker.all')}</Type>
+          <Type variant="label-sm" as="span">
+            {t('conceptPicker.all')}
+          </Type>
         </button>
         {DOMAINS.map(({ key, label }) => (
           <button
             key={key}
             type="button"
-            className={[
-              styles.facetPill,
-              activeDomain === key ? styles.facetPillActive : '',
-            ]
+            className={[styles.facetPill, activeDomain === key ? styles.facetPillActive : '']
               .filter(Boolean)
               .join(' ')}
             onClick={() => handleDomainToggle(key)}
             aria-pressed={activeDomain === key}
             data-testid={`facet-${key}`}
           >
-            <Type variant="label-sm" as="span">{label}</Type>
+            <Type variant="label-sm" as="span">
+              {label}
+            </Type>
           </button>
         ))}
       </div>
@@ -273,7 +282,18 @@ export default function ConceptPicker({ selectedConceptId, onSelect }: ConceptPi
             {t('conceptPicker.typeToSearch')}
           </Type>
         )}
-        {results.map(concept => (
+        {/* Persistent selected-concept card: keeps the current selection visible
+            when it is not in the active results (e.g. restored on edit, or after
+            the search box is cleared). Skipped when the same concept is already
+            rendered below from the live results, to avoid a duplicate card. */}
+        {selectedConcept &&
+          selectedConcept.id === selectedConceptId &&
+          !results.some((c) => c.id === selectedConcept.id) && (
+            <div role="listitem">
+              <ConceptCard concept={selectedConcept} isSelected onSelect={handleSelect} />
+            </div>
+          )}
+        {results.map((concept) => (
           <div key={concept.id} role="listitem">
             <ConceptCard
               concept={concept}

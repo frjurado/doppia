@@ -669,6 +669,69 @@ switches to editing/draw brackets and "Fragment drawn" is toggleable; saving the
 edit round-trips the values correctly. Exercise it end to end on at least one
 real fragment (e.g. one of the 279/i fragments from the errata list) in the UI.
 
+#### Landed in the M0 repair (2026-07-23)
+
+First diagnosis fixed the blank prefill: the edit flow reset the React
+selection/flags mirrors and relied on `AnnotationSession._restoreSelection`,
+which sets the session's internal `fragmentSet`/selection but fires no callbacks
+— so the editing bracket, "Fragment drawn", and the `fragmentSet`-gated
+Harmony/Commentary panels never lit up. Fix: sync `selectionRange`,
+`committedSelection`, and `fragmentSet` back into React state in the edit branch;
+plus `ConceptPicker` now renders the restored concept as a persistent card.
+
+A real edit session then surfaced a second batch, now fixed:
+
+- **Sub-part values not restored.** `handleConceptChange` restored stage
+  *geometry* but cleared `subPartTags`, so the stage cards showed empty forms.
+  Now rebuilt from the stored sub-parts (`buildSubPartTagsFromSubParts`).
+- **Duplicate brackets.** The fragment under edit still rendered as a stored
+  overlay bracket beside its live editing bracket. The overlay now filters out
+  `fragmentDraftId`.
+- **Reset re-prefilled the concept.** `resetAnnotation` did not clear
+  `editPrefillFormData`/refs/`editSession`, so the FormPanel remount re-consumed
+  the stale prefill. Now cleared.
+- **Cancel vs Delete** (confirmed 2026-07-23): edit mode now offers **Cancel**
+  (discard, return to viewing the stored fragment) and a real **Delete** (DB
+  delete + cascade, behind an inline confirmation), distinct from the create-mode
+  discard.
+- **Status-aware save** (confirmed 2026-07-23): editing a submitted/approved
+  fragment showed "Submit for review", which `POST /submit` rejects for
+  non-drafts. Draft/rejected keep Save draft + Submit; submitted/approved now
+  show a single **Save changes** (a PATCH, which re-opens review via the
+  backend's revision semantics).
+
+#### Deferred within M0 — main-bracket resize during edit (revisit)
+
+**Not fixed, by decision (2026-07-23) — rare, and it touches the fragile
+bracket-drag code.** Symptom: while editing, shrinking the main bracket "jumps
+back"; it frees up only when the *outermost* stage is shrunk first.
+
+**Root cause (verified, not a stale-ref bug).**
+`buildStageAssignmentsFromSubParts` marks every restored stage `confirmed: true`
+(so restored optional stages don't trip "limbo" warnings), and
+`computeResizeClamp` hard-clamps the main bracket to the span of all confirmed
+stages. Restored stages fill the fragment, so the bracket cannot shrink. During
+*creation*, pre-populated stages are `confirmed: false`, take no part in the
+clamp, and redistribute by weight on resize (`respondToMainResize`) — hence the
+asymmetry. "Sometimes" = the clamp only relaxes when the shrunk stage is the one
+defining the outer `minBarStart`/`maxBarEnd`.
+
+**Options (for the revisit):**
+1. *Redistribute like creation* — treat restored stages as unconfirmed for the
+   clamp so the tested create-time resize path applies. Lowest risk; cost:
+   optional stages read as needing re-confirmation until touched, and a resize
+   can move carefully-set stage boundaries.
+2. *Keep stages fixed* — leave restored stages confirmed (boundaries preserved);
+   to shrink the fragment you first drag the outermost stage smaller. Minimal
+   code; the "jumps back" feel remains for inner-stage edits.
+3. *Clamp only against orphaning* — keep stages confirmed but let a main-bracket
+   shrink push/trim the stages it crosses; the clamp blocks only truly illegal
+   (orphaning) moves. Best UX, most new bracket-drag code and the highest risk
+   in that area.
+
+The `confirmed` flag currently does double duty (limbo suppression **and** the
+resize clamp); a clean fix likely decouples those two meanings.
+
 ---
 
 ## Decisions Confirmed

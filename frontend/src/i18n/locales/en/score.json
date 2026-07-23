@@ -47,7 +47,8 @@
     "saving": "Saving…",
     "saveDraft": "Save Draft",
     "submitting": "Submitting…",
-    "submitForReview": "Submit for Review"
+    "submitForReview": "Submit for Review",
+    "saveChanges": "Save Changes"
   },
   "propertyForm": {
     "aboutAria": "About: {{name}}",
@@ -68,6 +69,7 @@
     "annotationFormAria": "Annotation form",
     "fragmentLabel": "Fragment",
     "deleteAria": "Delete fragment and start over",
+    "cancelEdit": "Cancel",
     "sectionConcept": "Concept",
     "loadingSchema": "Loading schema…",
     "conceptSchemaError": "Could not load concept schema. Try again.",
@@ -253,6 +255,7 @@
     "failedLoadScore": "Failed to load score",
     "rerendering": "Re-rendering…",
     "submitSuccess": "Fragment submitted for review.",
+    "saveChangesSuccess": "Changes saved — review re-opened.",
     "dismissConfirmationAria": "Dismiss confirmation",
     "dismiss": "Dismiss",
     "audioUnavailablePre": "Audio unavailable — set ",
