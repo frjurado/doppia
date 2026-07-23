@@ -1,0 +1,187 @@
+/* Public concept page — Component 11 Step 5.
+   Depth through tonal layering only: no borders, no dividers, 0px radius.
+   Sections are separated by spacing (DESIGN.md § 6 "Use Spacing as a Divider"). */
+
+.page {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--spacing-12) var(--spacing-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-10);
+}
+
+/* --- Header --------------------------------------------------------------- */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--spacing-2);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-on-surface-variant);
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+}
+
+.crumbLink {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.crumbLink:hover {
+  text-decoration: underline;
+}
+
+.title {
+  margin: 0;
+  color: var(--color-on-background);
+}
+
+.aliases {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+}
+
+.meta {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+}
+
+/* --- Sections ------------------------------------------------------------- */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.sectionHeading {
+  margin: 0;
+  color: var(--color-primary);
+}
+
+.definition {
+  margin: 0;
+  max-width: 62ch;
+  line-height: 1.75;
+}
+
+.definitionPlaceholder {
+  margin: 0;
+  max-width: 62ch;
+  line-height: 1.75;
+  font-style: italic;
+  color: var(--color-on-surface-variant);
+}
+
+/* The stub banner is the page's most prominent statement, so it sits on the
+   highest ordinary tonal layer rather than announcing itself with a rule. */
+.stubBanner {
+  padding: var(--spacing-6);
+}
+
+.stubBanner p {
+  margin: 0;
+  max-width: 62ch;
+  line-height: 1.7;
+}
+
+/* --- Concept lists -------------------------------------------------------- */
+
+.conceptList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.conceptLink {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.conceptLink:hover {
+  text-decoration: underline;
+}
+
+/* A stub target is shown, never linked: it reads as covered-but-not-yet. */
+.conceptStub {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+  color: var(--color-on-surface-variant);
+}
+
+.stubTag {
+  color: var(--color-on-surface-variant);
+  opacity: 0.75;
+}
+
+/* --- Typed relationships -------------------------------------------------- */
+
+.relationships {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-5);
+}
+
+.relationshipGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.relationshipLabel {
+  color: var(--color-on-surface-variant);
+}
+
+.relationshipTargets {
+  margin: 0;
+}
+
+/* --- Fragment browse link ------------------------------------------------- */
+
+/* Tertiary button per DESIGN.md § 5: serif, underlined in primary, no box. */
+.browse {
+  padding-top: var(--spacing-2);
+}
+
+.browseLink {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.browseLink:hover {
+  color: var(--color-primary-container);
+}
+
+/* --- Notices -------------------------------------------------------------- */
+
+.notice {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+}

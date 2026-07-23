@@ -13,5 +13,61 @@
   "detail": {
     "pageTitle": "Fragmento — Doppia",
     "back": "← Volver a fragmentos"
+  },
+  "glossary": {
+    "pageTitle": "{{concept}} — Doppia",
+    "pageTitleFallback": "Concepto — Doppia",
+    "loading": "Cargando concepto…",
+    "loadError": "No se pudo cargar este concepto.",
+    "notFound": "No existe ningún concepto con ese identificador en el glosario.",
+    "breadcrumbLabel": "Jerarquía de conceptos",
+    "aliases": "También conocido como {{aliases}}",
+    "definitionHeading": "Definición",
+    "definitionUnderReview": "Esta definición está en revisión editorial y todavía no se ha publicado.",
+    "definitionMissing": "Todavía no se ha redactado una definición para este concepto.",
+    "stubBanner": "Doppia aún no ha modelado el dominio de este concepto. Aparece en el glosario porque otros conceptos se refieren a él; su definición y sus ejemplos llegarán cuando se cubra el dominio.",
+    "stubTag": "aún sin cubrir",
+    "childrenHeading": "Tipos más específicos",
+    "relationshipsHeading": "Conceptos relacionados",
+    "browseFragments": "Explorar fragmentos etiquetados con {{concept}} →",
+    "domains": {
+      "cadences": "Cadencias",
+      "formal-function": "Función formal",
+      "harmonic-functions": "Función armónica",
+      "prolongation": "Prolongación"
+    },
+    "complexities": {
+      "foundational": "Fundamental",
+      "intermediate": "Intermedio",
+      "advanced": "Avanzado"
+    },
+    "relationships": {
+      "CONTAINS": {
+        "outgoing": "Contiene",
+        "incoming": "Forma parte de"
+      },
+      "PRECEDES": {
+        "outgoing": "Conduce a",
+        "incoming": "Precedido por"
+      },
+      "FOLLOWS": {
+        "outgoing": "Prolonga",
+        "incoming": "Prolongado por"
+      },
+      "RESOLVES_TO": {
+        "outgoing": "Resuelve en",
+        "incoming": "Resolución de"
+      },
+      "CONTRASTS_WITH": {
+        "symmetric": "Contrasta con"
+      },
+      "IS_EQUIVALENT_TO": {
+        "symmetric": "Equivalente a"
+      },
+      "PREREQUISITE_FOR": {
+        "outgoing": "Requisito previo para",
+        "incoming": "Se apoya en"
+      }
+    }
   }
 }

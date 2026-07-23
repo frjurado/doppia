@@ -13,5 +13,61 @@
   "detail": {
     "pageTitle": "Fragment — Doppia",
     "back": "← Back to fragments"
+  },
+  "glossary": {
+    "pageTitle": "{{concept}} — Doppia",
+    "pageTitleFallback": "Concept — Doppia",
+    "loading": "Loading concept…",
+    "loadError": "This concept could not be loaded.",
+    "notFound": "No concept with that identifier exists in the glossary.",
+    "breadcrumbLabel": "Concept hierarchy",
+    "aliases": "Also known as {{aliases}}",
+    "definitionHeading": "Definition",
+    "definitionUnderReview": "This definition is under editorial review and is not published yet.",
+    "definitionMissing": "No definition has been written for this concept yet.",
+    "stubBanner": "Doppia has not modelled this concept's domain yet. It appears in the glossary because other concepts refer to it; its definition and examples will follow when the domain is covered.",
+    "stubTag": "not yet covered",
+    "childrenHeading": "More specific types",
+    "relationshipsHeading": "Related concepts",
+    "browseFragments": "Browse fragments tagged {{concept}} →",
+    "domains": {
+      "cadences": "Cadences",
+      "formal-function": "Formal function",
+      "harmonic-functions": "Harmonic function",
+      "prolongation": "Prolongation"
+    },
+    "complexities": {
+      "foundational": "Foundational",
+      "intermediate": "Intermediate",
+      "advanced": "Advanced"
+    },
+    "relationships": {
+      "CONTAINS": {
+        "outgoing": "Contains",
+        "incoming": "Part of"
+      },
+      "PRECEDES": {
+        "outgoing": "Leads into",
+        "incoming": "Led into by"
+      },
+      "FOLLOWS": {
+        "outgoing": "Extends",
+        "incoming": "Extended by"
+      },
+      "RESOLVES_TO": {
+        "outgoing": "Resolves to",
+        "incoming": "Resolved to from"
+      },
+      "CONTRASTS_WITH": {
+        "symmetric": "Contrasts with"
+      },
+      "IS_EQUIVALENT_TO": {
+        "symmetric": "Equivalent to"
+      },
+      "PREREQUISITE_FOR": {
+        "outgoing": "Prerequisite for",
+        "incoming": "Builds on"
+      }
+    }
   }
 }
