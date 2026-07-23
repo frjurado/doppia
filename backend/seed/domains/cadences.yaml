@@ -247,6 +247,12 @@ property_schemas:
 # in prose definitions, not in structural required-ness (hard-locked decision 4
 # in cadences-design.md).
 #
+# definition_reviewed (default false): set to true on a concept once its
+# `definition` prose has passed the editorial review pass and may be shown
+# verbatim on the public glossary page. While false, the glossary substitutes an
+# "under editorial review" placeholder (Component 11 Step 2). Flipping the flag
+# is editorial content work (Track M / Component 11 Part 4), not a code change.
+#
 # Reference: docs/seed-drafts/cadences-design.md
 # ─────────────────────────────────────────────────────────────────────────────
 
