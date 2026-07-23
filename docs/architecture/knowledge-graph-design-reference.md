@@ -34,14 +34,18 @@ Each node represents a musical concept — anything from abstract categories lik
 - A prose definition
 - Domain and complexity metadata
 - A set of typed edges to other nodes and to corpus fragments
-- Two boolean fields that govern tagging tool behaviour:
+- Three informational boolean fields that govern tagging tool and public
+  glossary behaviour:
 
 | Field | Default | Meaning |
 |---|---|---|
 | `stub` | `false` | When `true`, the node exists in the graph as a placeholder — referenced by other edges but not yet fully modelled (no definition, no `HAS_PROPERTY_SCHEMA`, no `CONTAINS` edges). Stub nodes are excluded from all tagging UI. Set to `false` when the node is promoted to full status. |
 | `top_level_taggable` | `true` | When `false`, the node does not appear in the concept picker as a direct fragment tag. Use this for abstract category nodes (`Cadence`, `AuthenticCadence`) whose instances are always better described by a specific subtype, and for structural sub-components that are only ever meaningful within their parent's stage structure. Nodes that can legitimately be tagged independently — even if they also appear as stages in other concepts — should remain `true`. |
+| `definition_reviewed` | `false` | When `false`, the `definition` prose has not passed the editorial review pass that makes it fit for a public reader — it was written for annotators. The public concept page then renders the concept's hierarchy, relationships, and example fragments but substitutes an "under editorial review" placeholder for the prose; the page and its links stay stable either way. Set to `true` per concept as prose is revised. Purely editorial: nothing in the tagging tool or in traversal reads it. |
 
 The concept picker in the tagging tool filters to `stub: false AND top_level_taggable: true`.
+The public glossary (Component 11) reads `stub` and `definition_reviewed`; both
+are seeded from the domain YAML and `MERGE`d like any other node property.
 
 #### What earns a concept node
 
