@@ -2532,6 +2532,7 @@ export default function ScoreViewer() {
             <FragmentOverlay
               fragments={overlayFragments}
               ghostLayer={ghostLayer}
+              mcIndex={mcIndexRef.current}
               onBracketClick={setSelectedFragmentId}
             >
               <MainBracket
@@ -2596,6 +2597,8 @@ export default function ScoreViewer() {
             subPartResetKey={subPartResetKey}
             movementId={movementId}
             selectionRange={selectionRange}
+            selectionMcStart={committedSelection?.mc_start ?? null}
+            selectionMcEnd={committedSelection?.mc_end ?? null}
             proseAnnotation={proseAnnotation}
             onProseChange={setProseAnnotation}
             onSaveDraft={handleSaveDraft}

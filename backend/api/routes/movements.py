@@ -158,23 +158,53 @@ async def get_harmony_events(
     bar_end: int | None = Query(
         None, ge=0, description="Inclusive upper bound on notated bar number (mn)"
     ),
+    mc_start: int | None = Query(
+        None,
+        ge=1,
+        description=(
+            "Inclusive lower bound on the machine measure coordinate (mc). "
+            "Takes precedence over bar_start/bar_end — prefer it."
+        ),
+    ),
+    mc_end: int | None = Query(
+        None,
+        ge=1,
+        description=(
+            "Inclusive upper bound on the machine measure coordinate (mc). "
+            "Takes precedence over bar_start/bar_end — prefer it."
+        ),
+    ),
     service: MovementAnalysisService = Depends(get_analysis_service),
 ) -> list[HarmonyEventOut]:
-    """Return harmony events for a movement, optionally sliced by bar range.
+    """Return harmony events for a movement, optionally sliced by range.
 
-    The ``bar_start`` / ``bar_end`` filters are inclusive and match on ``mn``
-    (the human-readable notated bar number). Omit both to return all events.
+    Two coordinate systems are accepted, and **``mc`` is the one to use**: it is
+    document-order and unique (ADR-015), whereas ``mn`` does not reliably name a
+    measure. On K331/ii the MEI's ``@n`` restarts at the Trio while the DCML
+    annotation numbers straight through, so a request for "bars 29-30" in the
+    Trio returned the *Menuetto's* harmony (Component 11 Step 10 / M6). When
+    ``mc_start``/``mc_end`` are supplied the bar bounds are ignored.
+
+    Omit everything to return all events.
 
     Args:
         movement_id: UUID of the movement to read.
         bar_start: Inclusive lower bound on notated bar number.
         bar_end: Inclusive upper bound on notated bar number.
+        mc_start: Inclusive lower bound on mc; wins over the bar bounds.
+        mc_end: Inclusive upper bound on mc; wins over the bar bounds.
         service: Analysis service (injected).
 
     Returns:
         List of :class:`~models.analysis.HarmonyEventOut` in (mn, volta, beat) order.
     """
-    events = await service.get_events(movement_id, bar_start=bar_start, bar_end=bar_end)
+    events = await service.get_events(
+        movement_id,
+        bar_start=bar_start,
+        bar_end=bar_end,
+        mc_start=mc_start,
+        mc_end=mc_end,
+    )
     return [HarmonyEventOut.model_validate(ev) for ev in events]
 
 

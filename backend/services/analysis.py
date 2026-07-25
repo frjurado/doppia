@@ -71,16 +71,28 @@ class MovementAnalysisService:
         movement_id: uuid.UUID,
         bar_start: int | None = None,
         bar_end: int | None = None,
+        mc_start: int | None = None,
+        mc_end: int | None = None,
     ) -> list[dict]:
-        """Return harmony events for a movement, optionally filtered by bar range.
+        """Return harmony events for a movement, optionally filtered by range.
 
-        The ``bar_start`` / ``bar_end`` filter is inclusive on both ends and
-        matches against the event's ``mn`` (human notated bar number).
+        **Prefer the ``mc`` range.** When ``mc_start``/``mc_end`` are given they
+        take precedence and the ``mn`` bounds are ignored, because ``mn`` does
+        not reliably identify a measure: on K331/ii the MEI's ``@n`` restarts at
+        the Trio while the DCML annotation numbers straight through, so the two
+        disagree outright — asking for "bars 29-30" of the Trio returned the
+        Menuetto's harmony (Component 11 Step 10 / M6). ``mc`` is document-order
+        and unique (ADR-015), and every ingested event carries it.
+
+        The ``bar_start``/``bar_end`` path is kept for callers that genuinely
+        mean notated bars and for movements without ``mc`` on their events.
 
         Args:
             movement_id: UUID of the movement whose analysis to read.
             bar_start: Inclusive lower bound on ``mn``.
             bar_end: Inclusive upper bound on ``mn``.
+            mc_start: Inclusive lower bound on ``mc``; wins over the bar bounds.
+            mc_end: Inclusive upper bound on ``mc``; wins over the bar bounds.
 
         Returns:
             List of event dicts from ``movement_analysis.events``.
@@ -90,6 +102,25 @@ class MovementAnalysisService:
         """
         analysis = await self._load(movement_id)
         events: list[dict] = analysis.events
+
+        if mc_start is not None or mc_end is not None:
+            # An event with no mc cannot be placed on this axis; excluding it is
+            # correct — including it would reintroduce the ambiguity the mc path
+            # exists to remove.
+            if mc_start is not None:
+                events = [
+                    ev
+                    for ev in events
+                    if ev.get("mc") is not None and ev["mc"] >= mc_start
+                ]
+            if mc_end is not None:
+                events = [
+                    ev
+                    for ev in events
+                    if ev.get("mc") is not None and ev["mc"] <= mc_end
+                ]
+            return events
+
         if bar_start is not None:
             events = [ev for ev in events if ev.get("mn", 0) >= bar_start]
         if bar_end is not None:

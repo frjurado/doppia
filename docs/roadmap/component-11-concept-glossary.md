@@ -785,8 +785,35 @@ expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
 - **Harmony sliced to fragment range** — the sidebar shows whole-measure chords
   instead of the sub-beat-precision slice (already solved on creation; regressed
   here).
-- ✅ **Harmony coordinate — the § 9F fix** (split from Step 9, 2026-07-25;
-  landed with this step). The slice filtered on the *human* coordinate
+- ✅ **Harmony coordinate — the § 9F fix, and three more surfaces it exposed**
+  (2026-07-25/26). The § 9F change fixed the stored-fragment slice and the
+  in-score labels, and Francisco's verification on K331/ii found the same defect
+  in three places it had not reached. All three are one root cause — **a bar
+  number was being used where only `mc` is unique** — and all three are fixed the
+  same way:
+
+  1. **The tagging sidebar showed Menuetto harmony for a Trio selection.**
+     `HarmonyPanel` queried `GET /analysis/events?bar_start=&bar_end=`. Worse
+     than a duplicate match: on this movement the MEI's `@n` and the DCML `mn`
+     **disagree outright** — the MEI restarts at the Trio, the annotation numbers
+     through 1–101 — so the Trio's notated m. 29 is `mn=77`, and asking for bars
+     29–30 returned the Menuetto's bars, or nothing. The endpoint now takes an
+     optional `mc_start`/`mc_end` that overrides the bar bounds, and the panel
+     sends the committed selection's mc. Its beat clip keys on `mc` too, for the
+     same reason.
+  2. **A stored fragment's bracket was painted on both passes**, and
+  3. **only the Menuetto one was clickable.** `FragmentOverlay.toSelectionRange`
+     dropped `mc_start`/`mc_end`, so `effectiveMeasureKeys` fell back to scanning
+     the ghost layer for `barN` in range and matched both `m29` and `m29#1`. It
+     now supplies `measureKeys` from the fragment's mc interval via
+     `measureKeysForMcRange`, which is authoritative and short-circuits that
+     scan.
+
+  Verified against the live corpus: Menuetto fragments unchanged (there `mc ==
+  mn`), every Trio fragment now returns its own harmony instead of the
+  Menuetto's or none.
+
+  The original § 9F item: the slice filtered on the *human* coordinate
   (`bar_start <= mn <= bar_end`) and the overlay maps events to score positions
   by `(mn, volta)`, so on a movement whose bar numbers restart, both passes
   collide: K331/ii renders all harmony on the Menuetto and shows Menuetto
