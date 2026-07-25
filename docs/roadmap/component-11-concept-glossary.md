@@ -390,6 +390,35 @@ recomputes the per-concept approved count, and on which fragment-lifecycle
 transitions it should) and fix it so approve/reject/delete/re-tag events are
 reflected. The Step 4 index consumes the fixed source (§ Part 1 note).
 
+**Diagnosis and fix (2026-07-25).** There was no invalidation seam to repair —
+there was a **payload boundary** in the wrong place. `ConceptService.get_tree`
+cached the entire `ConceptTreeResponse`, `fragment_count` included, under
+`tree:{root}:{language}` with a 1-hour TTL that only `scripts/seed.py`
+invalidated. So the counts inherited the *graph's* invalidation schedule (a
+re-seed) while depending on the *fragment database's* write rate (every
+approve / reject / delete / re-tag) — a mismatch no amount of extra hooks fixes
+cleanly, because every fragment mutation in the system would have to know about
+a graph cache.
+
+The fix moves the boundary rather than adding invalidation: the cache now holds
+only the count-free, translated node structure, and `_fetch_fragment_counts` is
+called on every request (one grouped PostgreSQL query over an `IN` list) and
+attached to the cached structure. Structure keeps the seed-time invalidation it
+always had — correctly, since a re-seed is the only thing that can change it.
+Counts are simply never cached, so there is nothing to go stale and no
+lifecycle event to hook. The key was bumped to `tree:v2:{root}:{language}` so a
+pre-fix entry surviving a deploy cannot be read back as a structure (it would
+reintroduce the bug until its TTL expired); the seed-time `tree:*` pattern still
+matches. This lands on the **shared** service method, so the editor concept tree
+and the Step 4 public index are de-staled by the same change — as § Part 1
+required, with no second count source.
+
+**Not done here, deliberately:** the public index (Step 4) still runs its
+`1 + N` Neo4j traversals uncached on every anonymous request. Now that a cache
+entry is count-free it *could* share the structure cache, but that is a
+performance decision on a public endpoint, not part of M11's correctness fix —
+noted for Component 12's public-surface hardening.
+
 ### Step 9 — M12: duplicate-`@n` display disambiguation
 
 K331/ii "Menuetto da capo" produces duplicate `@n` measure labels; public
@@ -532,6 +561,16 @@ choice to implementation time.
    Cadences domain — no invented parent, no taxonomy commitment. The rule is
    applied in the **shared** `get_domain_roots`, so the editor concept tree is
    fixed by the same change.
+
+6. **Count-cache fix shape (Step 8 / M11) — cache graph structure, never
+   fragment-derived data.** Decided 2026-07-25 at implementation time. The
+   alternative was to keep counts in the cached payload and invalidate it on
+   every fragment-lifecycle transition; rejected because it spreads knowledge of
+   a graph cache across every fragment mutation path and leaves re-tagging (a
+   join-table write, not a status change) easy to miss. Counts are read live
+   instead — one grouped PostgreSQL query, on a surface that already queries
+   Neo4j. Generalised into a cache-boundary rule in
+   `tech-stack-and-database-reference.md` § 5.
 
 Also stated as shipped rather than open: **stubs are not listed in the concept
 index** (§ Step 4), only reachable as marked links from a concept page.

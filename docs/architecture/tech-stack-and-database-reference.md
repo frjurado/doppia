@@ -323,8 +323,10 @@ Soundfonts are the one public-read artifact class (no signed URL — Tone.js can
 
 **Role:** Live from Phase 1, in two capacities: the cache for knowledge-graph read queries (the Component 8 concept-subtree/tree cache, language-scoped keys, invalidated on seed), and the Celery broker for the `celery` dispatch mode (ADR-017; since ADR-034 the default dispatch mode is in-process, so broker traffic occurs only in deliberate bulk-ingest windows).
 
+**Cache-boundary rule:** these caches hold **graph structure only** — nothing derived from the fragment database. Graph structure changes only when `scripts/seed.py` runs, which is exactly what the seed-time invalidation covers; anything that changes on a fragment-lifecycle transition (approve / reject / delete / re-tag) is read live per request. Per-concept approved-fragment counts are the case in point: they used to ride inside the cached tree response and went stale for up to an hour (fixed in Component 11 Step 8 / M11 — see `services/cache.py`).
+
 **What it stores (Phase 1):**
-- Cached concept subtree/tree query results (`services/cache.py`)
+- Cached concept subtree/tree query results — structure only, no fragment counts (`services/cache.py`)
 - Celery broker state, only while a worker window is active
 
 **Phase 2 additions:**

@@ -49,7 +49,7 @@ from models.concepts import (
 from models.fragment import Fragment, FragmentConceptTag
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from services.cache import get_tree_cache, set_tree_cache
+from services.cache import get_tree_structure_cache, set_tree_structure_cache
 from services.i18n import DEFAULT_LANGUAGE
 from services.translation import TranslationOverlay, is_translation_missing
 from sqlalchemy import func, select
@@ -285,19 +285,18 @@ class ConceptService:
     ) -> ConceptTreeResponse:
         """Return the concept subtree rooted at root_id for the tag browser.
 
-        Performs three operations:
+        Two reads, with different freshness requirements deliberately kept
+        apart (Component 11 Step 8 / M11):
 
-        1. Checks Redis for a cached ``ConceptTreeResponse`` (key
-           ``tree:{root_id}:{language}``); returns it immediately on a hit.
-        2. Queries Neo4j for all non-stub concepts in the IS_SUBTYPE_OF
-           subtree, building a flat node list with parent_id linkage and
-           hierarchy paths.
-        3. Queries PostgreSQL for ``approved`` fragment counts per concept id
-           (cross-reference tags, not only ``is_primary``) and attaches them
-           to each node.
-
-        The assembled response is written back to Redis with a 1-hour TTL
-        (invalidated by ``scripts/seed.py`` after every re-seed).
+        1. The **structure** — the flat, translated node list with parent_id
+           linkage and hierarchy paths — comes from
+           :meth:`_get_tree_structure`, which is Redis-cached because the graph
+           shape changes only on a re-seed.
+        2. The **counts** — ``approved`` fragments per concept id
+           (cross-reference tags, not only ``is_primary``) — are read live from
+           PostgreSQL on every call and attached to the cached structure, so an
+           approve / reject / delete / re-tag is reflected immediately. Counts
+           are never written to the cache.
 
         Raises :class:`~errors.ConceptNotFoundError` (→ HTTP 404) when
         ``root_id`` is unknown or refers to a stub concept.
@@ -315,10 +314,51 @@ class ConceptService:
         Raises:
             ConceptNotFoundError: If no non-stub Concept with ``root_id`` exists.
         """
+        structure = await self._get_tree_structure(root_id, language)
+        counts = await self._fetch_fragment_counts([n["id"] for n in structure])
+
+        nodes = [
+            ConceptTreeNode(
+                id=n["id"],
+                name=n["name"],
+                aliases=n["aliases"],
+                hierarchy_path=n["hierarchy_path"],
+                parent_id=n["parent_id"],
+                fragment_count=counts.get(n["id"], 0),
+                translation_missing=n["translation_missing"],
+            )
+            for n in structure
+        ]
+        return ConceptTreeResponse(root_id=root_id, nodes=nodes)
+
+    async def _get_tree_structure(self, root_id: str, language: str) -> list[dict]:
+        """Return the cached, count-free node structure for a concept subtree.
+
+        Checks Redis (key ``tree:v2:{root_id}:{language}``) and returns the
+        cached flat node list on a hit. On a miss, queries Neo4j for every
+        non-stub concept in the IS_SUBTYPE_OF subtree, applies the translation
+        overlay, and writes the result back with a 1-hour TTL (invalidated by
+        ``scripts/seed.py`` after every re-seed — the only event that can change
+        the shape).
+
+        The payload deliberately carries **no** ``fragment_count``: see
+        :meth:`get_tree`.
+
+        Args:
+            root_id: Immutable concept identifier for the tree root.
+            language: Requested response language (part of the cache key).
+
+        Returns:
+            A flat list of node dicts with keys ``id``, ``name``, ``aliases``,
+            ``hierarchy_path``, ``parent_id``, and ``translation_missing``.
+
+        Raises:
+            ConceptNotFoundError: If no non-stub Concept with ``root_id`` exists.
+        """
         if self._redis is not None:
-            cached = await get_tree_cache(self._redis, root_id, language)
+            cached = await get_tree_structure_cache(self._redis, root_id, language)
             if cached is not None:
-                return ConceptTreeResponse.model_validate(cached)
+                return cached
 
         async with self._driver.session() as neo4j_session:
             rows = await get_concept_subtree(neo4j_session, root_id)
@@ -330,33 +370,31 @@ class ConceptService:
             )
 
         node_ids = [r["id"] for r in rows]
-        counts = await self._fetch_fragment_counts(node_ids)
         translations = await self._overlay().concept_translations(node_ids, language)
 
-        nodes = []
+        structure: list[dict] = []
         for r in rows:
             t = translations.get(r["id"])
-            nodes.append(
-                ConceptTreeNode(
-                    id=r["id"],
-                    name=t.name if t else r["name"],
-                    aliases=(t.aliases if t and t.aliases is not None else r["aliases"])
+            structure.append(
+                {
+                    "id": r["id"],
+                    "name": t.name if t else r["name"],
+                    "aliases": (
+                        t.aliases if t and t.aliases is not None else r["aliases"]
+                    )
                     or [],
-                    hierarchy_path=r["hierarchy_path"] or [],
-                    parent_id=r["parent_id"],
-                    fragment_count=counts.get(r["id"], 0),
-                    translation_missing=is_translation_missing(
+                    "hierarchy_path": r["hierarchy_path"] or [],
+                    "parent_id": r["parent_id"],
+                    "translation_missing": is_translation_missing(
                         language, translations, r["id"]
                     ),
-                )
+                }
             )
 
-        response = ConceptTreeResponse(root_id=root_id, nodes=nodes)
-
         if self._redis is not None:
-            await set_tree_cache(self._redis, root_id, language, response.model_dump())
+            await set_tree_structure_cache(self._redis, root_id, language, structure)
 
-        return response
+        return structure
 
     async def get_public_detail(self, concept_id: str) -> ConceptDetailResponse:
         """Assemble the public concept-page payload for one concept.
@@ -455,9 +493,9 @@ class ConceptService:
         English-only (no translation overlay in the Phase-2 public glossary).
 
         Counts come from :meth:`_fetch_fragment_counts` — the same source the
-        editor tree uses — so the M11 count-cache fix (Step 8) de-stales the
-        public index and the editor tree together, and no second count source is
-        introduced here.
+        editor tree uses, read live per request and never cached (Step 8 / M11)
+        — so the public index and the editor tree can never disagree, and no
+        second count source is introduced here.
 
         Returns:
             :class:`~models.concepts.ConceptIndexResponse` with one entry per
@@ -511,6 +549,12 @@ class ConceptService:
         Counts every fragment whose concept tags include a concept in the list,
         regardless of ``is_primary``.  Only ``approved`` fragments are counted
         (the "browse the finished corpus" baseline).
+
+        This is the **single** count source for every browse surface (editor
+        concept tree and public glossary index alike) and is intentionally
+        uncached: the result changes on every fragment approve / reject / delete
+        / re-tag, so caching it is what made counts go stale before Component 11
+        Step 8 (M11). It is one grouped PostgreSQL query over an ``IN`` list.
 
         Returns an empty dict when no database session is available.
         """

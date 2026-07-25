@@ -11,7 +11,7 @@ I'm dumping here a set of issues and questions already identified but not yet ta
 
 ## Fragment browser
 
-- What's the update schedule of the numbers in the concept tree? Right now it seems to get stuck on cache.
+- ~~What's the update schedule of the numbers in the concept tree? Right now it seems to get stuck on cache.~~ **Fixed (M11 — Component 11 Step 8, 2026-07-25).** They were genuinely stuck: the Redis concept-tree cache stored the whole response with `fragment_count` baked in, on a 1-hour TTL that only a re-seed invalidated — so an approve/reject/delete/re-tag was invisible until the entry expired. The counts are no longer cached at all (only the graph structure is, which changes only on a re-seed); every request reads them live from PostgreSQL. Answer to the original question: **immediately, on every load.**
 
 
 ## Fragment editor
