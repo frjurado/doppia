@@ -421,10 +421,257 @@ noted for Component 12's public-surface hardening.
 
 ### Step 9 — M12: duplicate-`@n` display disambiguation
 
-K331/ii "Menuetto da capo" produces duplicate `@n` measure labels; public
-fragment labels must disambiguate them (issues doc; backlog §3; an ADR-015
-amendment). Resolve the display convention and apply it wherever a bar reference
-is shown to a public reader (fragment cards, detail range, example captions).
+K331/ii produces duplicate `@n` measure labels; public fragment labels must
+disambiguate them (issues doc; backlog §3; an ADR-015 amendment). Resolve the
+display convention and apply it wherever a bar reference is shown to a public
+reader (fragment cards, detail range, example captions).
+
+**Investigated 2026-07-25; scope confirmed with Francisco the same day.** The
+investigation changed this step's shape twice over, so the findings are recorded
+before the plan.
+
+#### What is actually wrong
+
+**Two families of duplicate bar labels exist, and M12 as written names only one.**
+
+- **Family A — a restarting bar-number sequence.** K331/ii numbers 1–48 twice.
+  **The cause is the Trio restarting the count** (confirmed by Francisco from the
+  score, 2026-07-25) — the Menuetto *da capo* is not written out. The ADR-015
+  amendment states the opposite ("a written-out repeat … *not* the minuet+trio
+  renumbering the issue backlog assumed"); **that sentence is factually wrong and
+  must be corrected** (§ 9G). The later 2026-06-30 readthrough and ADR-032, which
+  describe the Trio restarting, are the correct account.
+- **Family B — volta endings.** First and second endings legitimately share `@n`
+  by project convention (`mei-ingest-normalization.md` §6); K331/i and K283/ii
+  carry them. This *is* modelled — `fragment.repeat_context` — and partially
+  displayed in the editor (the harmony sidebar appends `V1` to the measure
+  number; the detail panel prints the raw enum, "Contexto de repetición:
+  first_ending"). It is absent from every card and caption, i.e. from the whole
+  public surface. **In scope for this step** (decided 2026-07-25).
+
+**The blast radius is unknown and must be measured first.** The "only K331/ii"
+reading came from `ingestion-warnings.json`, which covers the **15-movement**
+Component 9 staging subset. The live corpus is **54 movements**
+(`mc-stability-snapshot.json`) and there is no equivalent warnings report for
+that ingest, so no authoritative list of affected movements exists today.
+
+**K282/ii is a known source erratum.** It is a Menuet I & II movement whose NMA
+text restarts the numbering at Menuet II; the DCML encoding does not, so our
+corpus shows a continuous count where the edition restarts. Francisco's decision
+(2026-07-25): **fix the numbering to restart, then section it like K331/ii.**
+See § 9F for the coupling this drags in — it is the riskiest part of this step.
+
+**The duplicate labels are not display-only, contrary to the ADR-015 amendment.**
+Harmony events are keyed `(mn, volta, beat)` (`services/analysis.py`) and the
+fragment harmony slice filters `bar_start <= mn <= bar_end`
+(`services/fragments.py` — `_slice_harmony_events` and `sources_in_range`). On a
+movement where `@n` restarts, both passes collide on that identity. Francisco's
+observed symptoms match exactly: **the K331/ii score shows harmony on the
+Menuetto only and none on the Trio, and selecting a Trio fragment shows the
+corresponding *Menuetto* measures' harmonies in the sidebar.** The ADR-015
+amendment's "never used as a join key, so no data is at risk" holds for
+rendering and fragment ranges; it does not hold for the harmony layer.
+**In scope for this step** (decided 2026-07-25).
+
+#### Decisions (Francisco, 2026-07-25)
+
+1. **Editorial section marking** (investigation Option 1) is the labelling
+   mechanism: a section carries a real musical name ("Trio", "Menuet II"), which
+   a derived ordinal ("2nd pass") cannot. These movements are few and alike.
+2. **Structural detection** (Option 2) rides alongside, for *detection only* —
+   it decides whether a movement is ambiguous and flags a movement that restarts
+   numbering without editorial section names. It never generates a label.
+3. **Voltas are in scope**; **the harmony coordinate bug is in scope**.
+4. K331/ii carries **no fragments on staging**, so nothing public is wrong
+   *today* — the harmony defect is live in the editor, and the label defect is
+   latent until the first fragment is tagged there.
+
+#### 9A — Survey the real corpus (blocks every design commitment below)
+
+Query `movement.normalization_warnings` across all 54 movements for
+`MEASURE_N_MULTI_SECTION_DUPLICATE`, `MEASURE_N_DUPLICATE`, and the ending
+duplicate codes; produce the authoritative list of affected movements and,
+for each, the run boundaries in `mc` terms. Record it as a short report
+alongside the other Component 9 reports. Also confirm, per affected movement,
+whether any fragments exist (K331/ii is known clear; the others are not).
+**Do not size the rest of this step until this list exists** — "two movements"
+and "eleven movements" imply different amounts of editorial data entry, and
+K282/ii is proof the 15-movement report is not representative.
+
+#### 9B — Structural detection at ingest
+
+The normalizer already computes the restart runs — `_split_increasing_runs` in
+`services/mei_normalizer.py` — but interpolates them into a warning *message*.
+Promote them to structured data on the advisory, expressed in **`mc`** terms
+(the message's current run lengths are positions in the filtered `@n` list, not
+`mc`, so they cannot be used directly). It lands in `movement.normalization_
+warnings`, which is already JSONB, so no migration. Two consumers: the § 9A
+survey, and a check that fails loudly when a movement restarts its numbering but
+has no editorial sections recorded — that is what stops a future corpus from
+silently regressing to today's behaviour.
+
+#### 9C — The editorial section model
+
+**Decided 2026-07-25: a `movement_section` table** (`movement_id`, `ordinal`,
+`name`, `mc_start`, `mc_end`), indexed on `movement_id` — not a JSONB column.
+**The ADR recording it is still a prerequisite to writing the migration** (per
+CLAUDE.md Definition of Done — this is a new persisted structure). Rationale
+over JSONB on `movement`: the read path
+resolves a section for every fragment on a page of browse cards, which is one
+indexed join rather than a per-row JSON scan; and the rows are editorial content
+worth constraining, not an opaque blob. Keyed on `mc` so it survives a re-ingest
+(`@n` is display-only; `mc` is document order — ADR-015).
+
+Population is editorial, through a script in `backend/data_migrations/`: the
+affected movements from § 9A with their section names and `mc` bounds read off
+the ingested MEI. For K331/ii that is two rows (Menuetto, Trio).
+
+A movement with fewer than two sections has **no rows**, so nothing changes for
+the ~52 unaffected movements.
+
+#### 9D — Read model: attach the qualifier
+
+The service resolves a fragment's section by `mc` containment and exposes it as
+`section_label: str | None` (null when the movement has no sections) on the four
+fragment read models: `FragmentDetailResponse`, `FragmentListItem`,
+`ReviewQueueItem`, and — the one that matters for the public surface —
+**`ConceptBrowseItem`**, which is the model behind both the public browse cards
+and the glossary example captions and which today carries *no* machine
+coordinate at all (no `mc_start`/`mc_end`, so no client-side disambiguation is
+even possible).
+
+#### 9E — The display convention (the actual M12 deliverable)
+
+There are three independent bar-range formatters today and no shared notion of a
+disambiguated label:
+
+| Formatter | Used by | Beat-aware | Knows `repeat_context` |
+|---|---|---|---|
+| `formatFragmentRange` (`utils/fragmentRange.ts`) | fragment detail, info sidebar, stage sub-ranges | yes | no |
+| `common:barRangeMm` → "mm. X–Y" | `FragmentBrowser` cards **and** `ConceptExamples` captions | no | no |
+| `review:barRange` → "bars X–Y" | review queue (editor-only) | no | no |
+
+**Consolidate them into one utility** so the convention cannot drift again, and
+apply:
+
+- Unambiguous movement, no repeat context → unchanged: `mm. 12–15`.
+- Sectioned movement → prefix the section name: `Trio, mm. 12–15`. **Qualify
+  both sections**, not only the second — in a sectioned movement an unqualified
+  label is itself ambiguous.
+- Volta → suffix in prose: `mm. 12–15 (1st ending)`, replacing the raw
+  `first_ending` enum in the detail panel. The harmony sidebar's per-event `V1`
+  marker stays as it is: it is a compact per-row marker, a different job from a
+  fragment-level label.
+- Both → `Trio, mm. 12–15 (1st ending)`.
+- New i18n keys for `en` and `es`.
+
+#### 9F — The harmony coordinate fix → **executed in Step 10**
+
+*Split out 2026-07-25 (§ Decisions 7). The design stays here because it belongs
+with the duplicate-`@n` analysis; the work lands with M6, which touches the same
+function. Step 10 is not green until this is done.*
+
+Switch the fragment harmony slice (`_slice_harmony_events`) and
+`sources_in_range` from the `mn` range to an **`mc` range**
+(`mc_start <= mc <= mc_end`), which is unambiguous by construction, and switch
+the frontend overlay's event→score-position mapping from `(mn, volta)` to `mc`
+— that mapping is what currently piles the Trio's events onto Menuetto bars.
+
+Every DCML-ingested event already carries `mc`
+(`services/tasks/ingest_analysis.py`), so no migration is needed for corpus
+data. Three things to resolve during implementation:
+
+- **`mc` is `int | None` on the harmony API payloads** — a manually inserted
+  event may lack it. Decide between requiring `mc` on insert going forward (the
+  tagging tool has the MEI in memory and can supply it, exactly as it does for
+  fragment coordinates) plus a one-time backfill, versus an `(mn, volta)`
+  fallback when `mc` is null. The backfill is unambiguous for every movement
+  except the affected ones — check § 9A for whether any manual events exist there.
+- **Event identity for edit/delete is `(mn, volta, beat)`** and is ambiguous on
+  the same movements. The lookup already cross-checks `mc` when both are present;
+  promoting `mc` to the primary identity with the triple as fallback is the
+  smaller half of what ADR-015 deferred as "filter by `mc` directly".
+- **Why it moved to Step 10.** M6's "harmony sliced to fragment range" bug
+  (whole-measure chords instead of the sub-beat slice) lives in the same
+  function. The *coordinate* change and the *precision* change should touch that
+  function once, coherently — the same reasoning that pairs Steps 11 and 12 on
+  the bracket-bounds code.
+
+#### 9G — K282/ii source erratum → **executed in Step 13**
+
+*Split out 2026-07-25 (§ Decisions 7). It is an editorial-data repair on the
+corpus, not glossary code, so it rides with the M1/M2 sweep in Part 4 — where
+the other corpus-data corrections already live.*
+
+Restarting K282/ii's numbering at Menuet II is a corpus-prep change, and it is
+the one part of this step that touches data that is currently *correct by our own
+convention*. The coupling to spell out before starting:
+
+- Renumbering the MEI `@n` alone is not enough: the DCML harmony rows keep the
+  continuous `mn`, so the sidebar would print bar numbers that disagree with the
+  score. **The `@n` renumbering and the harmony `mn` renumbering must land
+  together**, in the same prep + re-ingest.
+- Any stored fragment on that movement carries `bar_start`/`bar_end` in the old
+  numbering; per ADR-015 a deliberate re-ingest that moves `@n` is an editorial
+  act requiring a data migration. Confirm from § 9A whether K282/ii has
+  fragments; if it does, the migration is part of this sub-step.
+- `mc` is untouched throughout, so rendering, fragment ranges, previews, and the
+  mc-stability check are unaffected — that is what makes this safe to do at all.
+
+If § 9A turns up more movements in this class, treat them as one batch here
+rather than one-off fixes.
+
+#### Verification
+
+**Step 9 proper (§ 9A–9E):**
+
+- The § 9A survey report exists and is referenced from the docs below.
+- Labels render as `Trio, mm. 12–15` on a browse card, a glossary example
+  caption, and the detail range; `mm. 12–15 (1st ending)` on a K331/i volta
+  fragment; unchanged on an unaffected movement.
+- Unit tests: the formatter matrix (sectioned × volta × beats × single/multi
+  bar), section resolution by `mc` containment, and the detection check firing on
+  a restart-without-sections movement.
+- **Verified on a real render, not only on tests** (the Component 9 lesson).
+
+**Carried to Step 10 with § 9F:** on staging, on K331/ii, the score shows harmony
+on the **Trio** as well as the Menuetto; a Trio fragment's sidebar shows **Trio**
+harmonies; a Menuetto fragment's shows only the Menuetto's. Plus unit coverage of
+`mc`-range slicing. This is a rendering surface where an audit passes and the
+page still looks wrong — confirm it on the overlay, not in a test alone.
+
+#### Docs to update
+
+- **ADR-015** — correct the amendment's factual error (K331/ii is the Trio
+  restarting the count, not a written-out repeat), and correct "no data is at
+  risk": the harmony layer keyed on `(mn, volta, beat)` *was* at risk. Record the
+  `mc`-range slice as the resolution of the deferral this ADR already noted.
+- **New ADR** — the `movement_section` model and the display convention (§ 9C,
+  § 9E), plus the harmony identity shift toward `mc` (§ 9F) if that is not folded
+  into the ADR-015 amendment.
+- **`harmony-score-overlay.md`** — the `(mn, volta)` identity it documents
+  becomes `mc`.
+- **`mei-ingest-normalization.md`** — the structured runs (§ 9B) and the K282/ii
+  erratum with its disposition.
+- **`fragment-schema.md`** — `repeat_context` display convention; `section_label`
+  on the read models.
+- **`phase-2.md`** M12, **backlog §3**, **issues-deferred** — struck as they land.
+
+#### The split (decided 2026-07-25)
+
+The investigation grew this well past label formatting: it spans corpus prep, the
+normalizer, a new persisted model, editorial data entry, four read models, three
+frontend formatters, and the harmony coordinate system. It is therefore split
+along its natural seams, each part independently shippable and verifiable:
+
+| Part | Lands in | Why there |
+|---|---|---|
+| § 9A–9E — survey, detection, `movement_section`, read models, display convention | **Step 9** | The M12 deliverable proper: the public-facing label |
+| § 9F — harmony `mc`-coordinate fix | **Step 10** (with M6) | Same function as M6's slice-precision bug; touch it once |
+| § 9G — K282/ii renumbering | **Step 13** (with M1/M2) | An editorial corpus-data repair, not glossary code |
+
+The Component-11 exit gate is unchanged: all three must be green before public
+switch-on, because all three are things a stranger can see be wrong.
 
 ### Step 10 — M6: info-sidebar fixes
 
@@ -436,6 +683,14 @@ expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
 - **Harmony sliced to fragment range** — the sidebar shows whole-measure chords
   instead of the sub-beat-precision slice (already solved on creation; regressed
   here).
+- **Harmony coordinate — the § 9F fix lands here** (split from Step 9,
+  2026-07-25). The slice filters on the *human* coordinate
+  (`bar_start <= mn <= bar_end`) and the overlay maps events to score positions
+  by `(mn, volta)`, so on a movement whose bar numbers restart, both passes
+  collide: K331/ii renders all harmony on the Menuetto and shows Menuetto
+  harmonies for a Trio fragment. Move both to `mc`. **Read § 9F before starting**
+  — the coordinate change and the slice-precision fix above are the same
+  function, and it should be touched once.
 - **Local-key convention** — show local key only on the first event and when it
   changes (score convention), matching the harmony-panel display.
 - **Stage properties shown** — sub-part/stage properties are currently missing
@@ -521,6 +776,15 @@ with the glossary:
   events across the corpus so gated concepts have clean, confirmed harmony
   behind their public examples. Ride M2 with M1 since both are editorial-data
   passes over the same fragments.
+- **K282/ii renumbering — the § 9G repair lands here** (split from Step 9,
+  2026-07-25). The NMA text restarts the bar numbers at Menuet II; the DCML
+  encoding runs them continuously, so our corpus disagrees with the edition.
+  Restart them in corpus prep and section the movement like K331/ii. **Read § 9G
+  before starting** — the MEI `@n` and the harmony `mn` must be renumbered in the
+  same pass, or the sidebar prints numbers the score does not show; `mc` is
+  untouched throughout, which is what makes it safe. It sits here because it is
+  an editorial corpus-data repair like the rest of this step, and because § 9A
+  may add more movements to the same batch.
 
 **Definition-review pass (Step 2 consumer):** flipping `definition_reviewed` to
 `true` for the launch set of concepts is the same kind of editorial content work
@@ -571,6 +835,23 @@ choice to implementation time.
    instead — one grouped PostgreSQL query, on a surface that already queries
    Neo4j. Generalised into a cache-boundary rule in
    `tech-stack-and-database-reference.md` § 5.
+
+7. **Duplicate-`@n` disambiguation (Step 9 / M12) — editorial section marking,
+   with structural detection, split across three steps.** Decided 2026-07-25
+   after investigation. Sections are named editorially ("Trio", "Menuet II")
+   because a derived ordinal ("2nd pass") is musically mute and the affected
+   movements are few and alike; automatic run detection rides along for
+   *detection only*. Sections are persisted in a **`movement_section` table**,
+   not JSONB on `movement` — the read path resolves a section for every fragment
+   on a page of browse cards, which is one indexed join rather than a per-row
+   JSON scan, and the rows are editorial content worth constraining. Volta
+   endings are folded into the same display convention. K331/ii is the **Trio
+   restarting the count** — the ADR-015 amendment's account of it is wrong and is
+   corrected as part of the step. Two findings are split off to where their code
+   already lives: the harmony coordinate bug (events keyed on `(mn, volta, beat)`,
+   ambiguous on a restarting movement) → **Step 10** with M6; the K282/ii source
+   erratum → **Step 13** with M1/M2. All three still gate switch-on. Full plan in
+   § Step 9; the split table is § Step 9 "The split".
 
 Also stated as shipped rather than open: **stubs are not listed in the concept
 index** (§ Step 4), only reachable as marked links from a concept page.
@@ -643,14 +924,19 @@ Part 2  Glossary frontend                       ← needs Part 1 endpoints
           + e2e journey                          (consumes its shape)
 
 Part 3  Public-surface fixes                    ┐ parallel with Parts 1–2;
-  Step 8  M11 count-cache staleness             │ all green before switch-on
+  Step 8  M11 count-cache staleness  ✅ 24afc3f │ all green before switch-on
   Step 9  M12 duplicate-@n disambiguation       │
+          (§ 9A survey → 9B detection →         │
+           9C movement_section → 9D read        │
+           models → 9E display convention)      │
   Step 10 M6 info-sidebar fixes                 │
-  Step 11 M7 stage-bracket overflow  ───────────┼── touch bracket-bounds code
-        │                                        │   ONCE with Step 12
-Part 4  Editor follow-through + editorial sweep  │
+          + § 9F harmony mc-coordinate  ────────┼── touch the harmony slice
+  Step 11 M7 stage-bracket overflow  ───────────┼── ONCE (M6 precision + 9F
+        │                                        │   coordinate); bracket-bounds
+Part 4  Editor follow-through + editorial sweep  │   code ONCE with Step 12
   Step 12 deferred resize decision + fix  ───────┘   (decision made here)
   Step 13 M1 errata sweep + M2 harmony_gate      ← needs the whole editor (12)
+          + § 9G K282/ii renumbering
 ```
 
 The exit gate is **"the glossary is correct to show a stranger"**: the concept
