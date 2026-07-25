@@ -90,7 +90,7 @@ export function formatFragmentRange(
   barStart: number,
   barEnd: number,
   beatStart: number | null,
-  beatEnd: number | null,
+  beatEnd: number | null
 ): string {
   // Complete measures: no beats at all.
   if (beatStart === null && beatEnd === null) {
@@ -132,9 +132,7 @@ export function formatFragmentRange(
       return `m. ${barStart}, beats ${formatBeat(beatStart)}–${formatBeat(displayEnd)}`;
     }
     const beat = beatStart ?? effBeatEnd;
-    return beat !== null
-      ? `m. ${barStart}, beat ${formatBeat(beat)}`
-      : `m. ${barStart}`;
+    return beat !== null ? `m. ${barStart}, beat ${formatBeat(beat)}` : `m. ${barStart}`;
   }
 
   // Multiple measures: each beat qualifies only its own measure.
@@ -145,4 +143,75 @@ export function formatFragmentRange(
       ? `m. ${effBarEnd}, beat ${formatBeat(displayEndBeat(effBeatEnd))}`
       : `m. ${effBarEnd}`;
   return `${startLabel} – ${endLabel}`;
+}
+
+/**
+ * Format a plain measure range — "m. 3" / "mm. 3–7" — with no beat detail.
+ *
+ * The listing surfaces (browse cards, glossary example captions) deliberately
+ * stay at measure precision: a card is a glance, not a reading. This exists so
+ * they share one implementation with the detail formatter above rather than
+ * three near-identical i18n templates, which is how the bar label drifted in the
+ * first place.
+ */
+export function formatBarRange(barStart: number, barEnd: number): string {
+  return barStart === barEnd ? `m. ${barStart}` : `mm. ${barStart}–${barEnd}`;
+}
+
+/**
+ * Qualifiers that disambiguate a bar range — ADR-036.
+ *
+ * `sectionLabel` is set by the API only for movements whose bar numbers restart
+ * (K331/ii: the Trio renumbers from 1), where "mm. 12–15" names two different
+ * places in the score. `repeatContext` marks a volta ending; it disambiguates
+ * nothing in the present corpus — no two endings share a bar number — but it is
+ * real musical information, and it reached the UI as the raw enum
+ * `"first_ending"` before this.
+ */
+export interface RangeQualifiers {
+  sectionLabel?: string | null;
+  repeatContext?: string | null;
+  /**
+   * Renders a `repeat_context` value as prose ("first_ending" → "1st ending").
+   * Supplied by the caller so the utility stays free of i18n wiring; when
+   * omitted the qualifier is dropped rather than leaking the enum.
+   */
+  formatRepeatContext?: (context: string) => string | null;
+}
+
+/**
+ * Apply section and volta qualifiers to an already-formatted range — ADR-036.
+ *
+ * "mm. 12–15" → "Trio, mm. 12–15" → "Trio, mm. 12–15 (1st ending)".
+ *
+ * **Both sections are qualified, not only the second.** In a sectioned movement
+ * an unqualified label is itself ambiguous: the reader cannot tell whether its
+ * absence means "the first section" or "not applicable". Unsectioned movements —
+ * all but one in the corpus — get no `sectionLabel` from the API and so pass
+ * through unchanged.
+ *
+ * This is the single place the convention lives. Every surface that shows a bar
+ * reference to a reader routes through it.
+ */
+export function qualifyRange(range: string, qualifiers: RangeQualifiers = {}): string {
+  const { sectionLabel, repeatContext, formatRepeatContext } = qualifiers;
+  let out = sectionLabel ? `${sectionLabel}, ${range}` : range;
+  if (repeatContext) {
+    const prose = formatRepeatContext?.(repeatContext);
+    if (prose) out = `${out} (${prose})`;
+  }
+  return out;
+}
+
+/**
+ * Build a `formatRepeatContext` from a translation function.
+ *
+ * Renders `repeat_context` as prose via `common:repeatContext.*`. An
+ * unrecognised value yields `null` so the qualifier is dropped: showing nothing
+ * beats showing a raw enum, which is what this replaces.
+ */
+export function makeRepeatContextFormatter(
+  t: (key: string, options?: Record<string, unknown>) => string
+): (context: string) => string | null {
+  return (context: string) => t(`common:repeatContext.${context}`, { defaultValue: '' }) || null;
 }

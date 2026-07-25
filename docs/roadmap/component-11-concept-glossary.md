@@ -532,7 +532,11 @@ Two things the survey opened, both resolved 2026-07-25:
 The `bar_start`-cannot-hold-`X1` gap § 9A also surfaced is likewise documented
 and deferred — Track M **M16**.
 
-#### 9B — Structural detection (a validation guard, not persisted state)
+#### 9B — Structural detection (a validation guard, not persisted state) ✅ done
+
+*Shipped as [`scripts/validate_movement_sections.py`](../../scripts/validate_movement_sections.py).
+Passes across all 54 movements; warns (correctly) that K282/ii is sectioned
+without a restart, pending the Step 13 repair.*
 
 The normalizer already computes the restart runs — `_split_increasing_runs` in
 `services/mei_normalizer.py` — but interpolates them into a warning *message*.
@@ -558,7 +562,12 @@ the normalizer's current run computation gets wrong: bounds **include `<ending>`
 measures**, and the proposed **name** comes from the `<dir>` text at the
 boundary.
 
-#### 9C — The editorial section model
+#### 9C — The editorial section model ✅ done
+
+*[ADR-036](../adr/ADR-036-movement-sections-and-bar-label-disambiguation.md);
+migration `0009_movement_section`; `models.music.MovementSection`; seeded by
+[`scripts/seed_movement_sections.py`](../../scripts/seed_movement_sections.py)
+(idempotent — four rows across the two movements).*
 
 **Decided 2026-07-25: a `movement_section` table** (`movement_id`, `ordinal`,
 `name`, `mc_start`, `mc_end`), indexed on `movement_id` — not a JSONB column.
@@ -579,7 +588,11 @@ movements is the whole editorial burden.
 A movement with fewer than two sections has **no rows**, so nothing changes for
 the ~52 unaffected movements.
 
-#### 9D — Read model: attach the qualifier
+#### 9D — Read model: attach the qualifier ✅ done
+
+*`FragmentService._fetch_movement_sections` batches the spans per page;
+`_section_label` resolves by `mc` containment. `section_label` is on all four
+read models.*
 
 The service resolves a fragment's section by `mc` containment and exposes it as
 `section_label: str | None` (null when the movement has no sections) on the four
@@ -590,9 +603,17 @@ and the glossary example captions and which today carries *no* machine
 coordinate at all (no `mc_start`/`mc_end`, so no client-side disambiguation is
 even possible).
 
-#### 9E — The display convention (the actual M12 deliverable)
+#### 9E — The display convention (the actual M12 deliverable) ✅ done
 
-There are three independent bar-range formatters today and no shared notion of a
+*`qualifyRange` in `utils/fragmentRange.ts` is the single place the convention
+lives; `formatBarRange` replaces the duplicated `common:barRangeMm` template.
+Applied on the browse card, the glossary example caption, the fragment detail
+header, the info sidebar, and the review queue. Stage sub-ranges are
+deliberately left unqualified — they sit under an already-qualified parent.
+Listing surfaces keep measure precision (a card is a glance): only the qualifier
+logic is shared, not the precision.*
+
+There were three independent bar-range formatters and no shared notion of a
 disambiguated label:
 
 | Formatter | Used by | Beat-aware | Knows `repeat_context` |
@@ -626,11 +647,22 @@ ending in this corpus is — has no faithful human coordinate to store. No such
 fragment exists today, so nothing is currently wrong; it is a latent gap for
 whoever next touches selection bounds.
 
-#### 9F — The harmony coordinate fix → **executed in Step 10**
+#### 9F — The harmony coordinate fix ✅ done (with Step 10)
 
-*Split out 2026-07-25 (§ Decisions 7). The design stays here because it belongs
-with the duplicate-`@n` analysis; the work lands with M6, which touches the same
-function. Step 10 is not green until this is done.*
+*Landed 2026-07-25. `_event_in_range` is now the shared membership test behind
+`_slice_harmony_events` and `_sources_in_range`: `mc` where the event has one,
+the `(mn, volta)` test where it does not. On the frontend,
+`HarmonyOverlay._resolveMeasureKey` resolves the measure ghost through the
+inverted `mcIndex`.*
+
+**The frontend half was worse than predicted, and its cause was not where this
+plan said.** The overlay recomputed `measureGhostKey(event.mn, volta)`, which
+returns a **base** key — it is `walkMeasureKeys()` that disambiguates a repeated
+key by suffixing the later occurrence (`m12#1`). So the ghost layer *did* hold
+the Trio's measures under distinct keys all along; the overlay simply never
+asked for them, and every Trio event resolved onto the Menuetto ghost of the
+same number. `harmony-score-overlay.md` § Step 1 asserted the opposite
+("handles … section-reset numbering") and is corrected.
 
 Switch the fragment harmony slice (`_slice_harmony_events`) and
 `sources_in_range` from the `mn` range to an **`mc` range**
@@ -703,15 +735,19 @@ page still looks wrong — confirm it on the overlay, not in a test alone.
 
 #### Docs to update
 
-- **ADR-015** — correct the amendment's factual errors, all three confirmed by
-  § 9A: K331/ii is the **Trio** restarting the count (not a written-out repeat),
-  the runs are **1–48 and 1–52** (not "1–48 twice"), and the volta claim that
-  both endings share `@n` does not hold for this corpus. Correct "no data is at
-  risk" too: the harmony layer keyed on `(mn, volta, beat)` *was* at risk. Record
-  the `mc`-range slice as the resolution of the deferral this ADR already noted.
-- **`mei-ingest-normalization.md` §6** — the documented
-  duplicate-`@n`-in-endings convention does not describe the corpus (§ 9A);
-  correct it to the X-complement shape actually present.
+- ✅ **ADR-015** — corrected: K331/ii is the **Trio** restarting the count (not a
+  written-out repeat), the runs are **1–48 and 1–52** (not "1–48 twice"), and the
+  volta claim that both endings share `@n` does not hold for this corpus. "No
+  data is at risk" narrowed too — the harmony layer keyed on `(mn, volta, beat)`
+  *was* at risk; the `mc`-range slice that resolves it lands in Step 10.
+- ✅ **`mei-ingest-normalization.md` §6** — corrected to the X-complement shape
+  actually present, with the two consequences noted (the "integer `@n`
+  required" rule is not enforced in practice; M16).
+- ✅ **New ADR** — [ADR-036](../adr/ADR-036-movement-sections-and-bar-label-disambiguation.md)
+  records the `movement_section` model, the display convention, and the
+  alternatives rejected.
+- ✅ **`fragment-schema.md`** — `section_label` documented as a read-resolved
+  field rather than a stored column.
 - **New ADR** — the `movement_section` model and the display convention (§ 9C,
   § 9E), plus the harmony identity shift toward `mc` (§ 9F) if that is not folded
   into the ADR-015 amendment.
@@ -749,8 +785,8 @@ expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
 - **Harmony sliced to fragment range** — the sidebar shows whole-measure chords
   instead of the sub-beat-precision slice (already solved on creation; regressed
   here).
-- **Harmony coordinate — the § 9F fix lands here** (split from Step 9,
-  2026-07-25). The slice filters on the *human* coordinate
+- ✅ **Harmony coordinate — the § 9F fix** (split from Step 9, 2026-07-25;
+  landed with this step). The slice filtered on the *human* coordinate
   (`bar_start <= mn <= bar_end`) and the overlay maps events to score positions
   by `(mn, volta)`, so on a movement whose bar numbers restart, both passes
   collide: K331/ii renders all harmony on the Menuetto and shows Menuetto

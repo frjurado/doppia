@@ -312,6 +312,9 @@ class FragmentDetailResponse(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    # Movement section this fragment begins in; non-null only where bar numbers
+    # restart and the qualifier is needed to disambiguate a label (ADR-036).
+    section_label: str | None = None
     summary: dict
     prose_annotation: str | None
     data_licence: str | None
@@ -355,6 +358,9 @@ class FragmentListItem(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    # Movement section this fragment begins in (ADR-036); null unless the
+    # movement's bar numbers restart.
+    section_label: str | None = None
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
@@ -392,6 +398,9 @@ class ReviewQueueItem(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    # Movement section this fragment begins in (ADR-036); null unless the
+    # movement's bar numbers restart.
+    section_label: str | None = None
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
@@ -456,6 +465,12 @@ class ConceptBrowseItem(BaseModel):
     ADR-009).  ``data_licence_url`` is the canonical URL for that licence.
     ``harmony_sources`` is the sorted set of distinct ``source`` values from
     in-range ``movement_analysis`` events, for transparency (ADR-009).
+
+    ``section_label`` names the movement section the fragment begins in, and is
+    non-null only for movements whose bar numbers restart (ADR-036) — the card
+    renders "Trio, mm. 12-15" instead of an ambiguous "mm. 12-15". It is resolved
+    server-side because this model carries no machine coordinate to resolve it
+    from.
     """
 
     model_config = ConfigDict(from_attributes=False)
@@ -467,6 +482,7 @@ class ConceptBrowseItem(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    section_label: str | None = None
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None

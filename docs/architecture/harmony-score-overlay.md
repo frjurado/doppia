@@ -56,12 +56,15 @@ The ghost layer already computes exact pixel x-positions for every beat. The map
 ### Step 1 — resolve the measure ghost
 
 ```ts
-const measureKey = measureGhostKey(mn, volta);             // e.g. "m12-e1"
+// Prefer the machine coordinate; fall back to the mn-derived key.
+const measureKey = mcToMeasureKey.get(event.mc) ?? measureGhostKey(mn, volta);
 const measureEntry = ghostLayer.measureIndex.get(measureKey);
 if (!measureEntry) return;                                   // system not yet rendered
 ```
 
-`measureGhostKey` is the canonical deduplication key (handles volta collision and section-reset numbering). The `measureIndex` is populated by `buildGhosts()` after each Verovio render.
+**Corrected 2026-07-25 (Component 11 § 9F, ADR-036).** This step originally read `measureGhostKey(mn, volta)` and nothing else, on the belief — stated in the sentence below — that the key handles section-reset numbering. **It does not.** `measureGhostKey` returns a *base* key (`m12`); it is `walkMeasureKeys()` that disambiguates a repeated key by suffixing the later occurrence (`m12#1`). Recomputing the key from `mn` therefore always resolves to the **first** measure with that number, so on K331/ii every Trio event landed on the Menuetto's ghost: the score showed all its harmony on the Menuetto and none on the Trio.
+
+The overlay now resolves the key from the event's `mc` (unique by construction, ADR-015) via the inverted `mcIndex` it already receives, falling back to `measureGhostKey(mn, volta)` for an event with no `mc` — `mc` is optional on the harmony API payloads, so a manually inserted event may lack it. `measureGhostKey` remains the canonical key *format*, and handles the volta collision correctly; it is the *section-reset* case it cannot handle on its own. The `measureIndex` is populated by `buildGhosts()` after each Verovio render.
 
 ### Step 2 — resolve the beat ghost
 
@@ -115,6 +118,8 @@ const y = systemBottom + LANE_OFFSET_PX;
 An event with `volta = 1` belongs to the first ending only; it must not render at the same notated position as `volta = 2`. The `measureGhostKey(mn, volta)` key already disambiguates: if a measure ghost for `m12-e1` is visible and one for `m12-e2` is not (because only one ending is rendered on this pass), only the visible ghost has a `measureIndex` entry. The lookup in Step 1 naturally returns `undefined` for the absent ending, and the event is silently skipped.
 
 This mirrors the approval-gate logic in `fragment-schema.md` § "Fragment approval and harmony review": `repeat_context = "first_ending"` restricts the gate check to events with `volta = 1`. The overlay uses the same `(mn, volta)` identity to determine which events to show, so the visual and analytical surfaces are consistent.
+
+**Amended 2026-07-25 (Component 11 § 9F).** Both surfaces have since moved to `mc` where the event carries one, and the consistency claim still holds because they moved together: the fragment harmony slice (`_slice_harmony_events` / `_sources_in_range`) matches on `mc_start <= mc <= mc_end`, and the overlay resolves its measure ghost by `mc`. `mc` *is* the ending-aware coordinate — a first-ending measure and a second-ending measure have different `mc` values — so the volta filter is redundant on that path and is applied only on the `mn` fallback. Note also that in the ingested corpus no two sibling endings share an `@n` at all (see the Step 9A survey), so the collision this section describes does not arise in practice; the handling stays because it costs nothing and the convention may return.
 
 For Verovio renders that expand both endings (some score layouts render both passes in full), both `m12-e1` and `m12-e2` will have ghost entries, and both sets of events will be shown — one label set per ending. This is correct: the annotator can see which events belong to which pass.
 

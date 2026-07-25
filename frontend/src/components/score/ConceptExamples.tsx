@@ -32,6 +32,11 @@ import { ApiError } from '../../services/api';
 import type { ConceptBrowseItem, FragmentDetailResponse } from '../../services/fragmentApi';
 import { getPublicConceptExamples } from '../../services/glossaryApi';
 import { getPublicFragment } from '../../services/publicApi';
+import {
+  formatBarRange,
+  makeRepeatContextFormatter,
+  qualifyRange,
+} from '../../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../../utils/workTitle';
 import styles from './ConceptExamples.module.css';
 
@@ -88,7 +93,13 @@ function ExampleCard({ item, expanded, onToggle }: ExampleCardProps) {
   }, [expanded, item.id]);
 
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
-  const barRange = t('common:barRangeMm', { start: item.bar_start, end: item.bar_end });
+  // ADR-036: qualified with its movement section where bar numbers restart, so a
+  // glossary example never shows a stranger an ambiguous "mm. 12–15".
+  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end), {
+    sectionLabel: item.section_label,
+    repeatContext: item.repeat_context,
+    formatRepeatContext: makeRepeatContextFormatter(t),
+  });
   // work_title already embeds the catalogue number (DCML corpus-prep
   // convention); strip it before re-appending so it renders once (Component 9 J2).
   const workTitle = stripEmbeddedCatalogue(item.work_title, item.work_catalogue_number);

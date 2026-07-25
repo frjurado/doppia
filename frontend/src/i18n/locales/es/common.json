@@ -7,6 +7,11 @@
   "expand": "Expandir",
   "movementNumber": "Movimiento {{number}}",
   "barRangeMm": "cc. {{start}}–{{end}}",
+  "repeatContext": {
+    "first_ending": "1.ª casilla",
+    "second_ending": "2.ª casilla",
+    "third_ending": "3.ª casilla"
+  },
   "nothingHere": "Nada por aquí",
   "play": "Reproducir",
   "pause": "Pausar",

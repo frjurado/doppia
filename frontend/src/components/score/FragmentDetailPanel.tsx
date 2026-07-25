@@ -34,7 +34,12 @@ import {
 } from '../../services/fragmentApi';
 import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
-import { formatFragmentRange, formatBeat } from '../../utils/fragmentRange';
+import {
+  formatBeat,
+  formatFragmentRange,
+  makeRepeatContextFormatter,
+  qualifyRange,
+} from '../../utils/fragmentRange';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -571,20 +576,24 @@ export default function FragmentDetailPanel({
               </Type>
               {/* Measure/beat display rule (Component 9 Step 15): beats render
                   only within their measure's context, and not at all when the
-                  fragment spans complete measures. */}
+                  fragment spans complete measures. The section and volta
+                  qualifiers (ADR-036) are folded into the same line — a range
+                  and its qualifiers are one label, not two facts. */}
               <Type variant="body-sm" as="p" className={styles.rangeText}>
-                {formatFragmentRange(
-                  fragment.bar_start,
-                  fragment.bar_end,
-                  fragment.beat_start,
-                  fragment.beat_end
+                {qualifyRange(
+                  formatFragmentRange(
+                    fragment.bar_start,
+                    fragment.bar_end,
+                    fragment.beat_start,
+                    fragment.beat_end
+                  ),
+                  {
+                    sectionLabel: fragment.section_label,
+                    repeatContext: fragment.repeat_context,
+                    formatRepeatContext: makeRepeatContextFormatter(t),
+                  }
                 )}
               </Type>
-              {fragment.repeat_context && (
-                <Type variant="label-sm" as="p" className={styles.repeatContext}>
-                  {t('score:detailPanel.repeatContext', { context: fragment.repeat_context })}
-                </Type>
-              )}
             </section>
           )}
 
@@ -761,6 +770,10 @@ export default function FragmentDetailPanel({
                       </Type>
                       <Type variant="body-sm" as="span" className={styles.subPartRange}>
                         {' '}
+                        {/* Deliberately unqualified (ADR-036): a stage sits
+                            inside its parent fragment, whose range above already
+                            carries the section, so repeating "Trio," on every
+                            stage would be noise, not clarity. */}
                         {formatFragmentRange(sp.bar_start, sp.bar_end, sp.beat_start, sp.beat_end)}
                       </Type>
                     </li>

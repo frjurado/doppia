@@ -186,3 +186,58 @@ class Movement(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class MovementSection(Base):
+    """An editorial section span within a movement (ADR-036).
+
+    Some movements restart their notated bar numbers partway through — K331/ii
+    numbers 1–48 for the Menuetto, then 1–52 again for the Trio — so the human
+    coordinate alone cannot say which "m. 12" a fragment means. A row here names
+    a span so a display label can be qualified: "Trio, mm. 12–15".
+
+    Spans are keyed on ``mc`` (1-based document-order position index, ADR-015),
+    **never** on ``@n``: ``mc`` is unique and survives a re-ingest, and ``@n`` is
+    the very coordinate being disambiguated. ``mc_start``/``mc_end`` are
+    inclusive and **span ``<ending>`` measures** — K331/ii's Trio ends at mc 101,
+    not 99, because its last two measures sit inside a volta ending.
+
+    A movement with fewer than two sections carries **no rows**, which is how the
+    read path tells "unsectioned" from "sectioned": an empty result means no
+    qualifier, and the ~52 unaffected movements of the corpus are untouched.
+
+    ``name`` is editorial but derived rather than invented — it is the ``<dir>``
+    text at the section boundary in the MEI, confirmed and cased by a human.
+    """
+
+    __tablename__ = "movement_section"
+    __table_args__ = (
+        UniqueConstraint("movement_id", "ordinal", name="movement_section_ordinal"),
+        CheckConstraint("ordinal >= 1", name="movement_section_ordinal_positive"),
+        CheckConstraint("mc_start >= 1", name="movement_section_mc_start_positive"),
+        CheckConstraint("mc_end >= mc_start", name="movement_section_mc_range_ordered"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    movement_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        # CASCADE: sections are movement-owned display metadata, meaningless
+        # without their movement.
+        ForeignKey("movement.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    mc_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    mc_end: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

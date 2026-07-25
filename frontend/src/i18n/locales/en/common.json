@@ -7,6 +7,11 @@
   "expand": "Expand",
   "movementNumber": "Movement {{number}}",
   "barRangeMm": "mm. {{start}}–{{end}}",
+  "repeatContext": {
+    "first_ending": "1st ending",
+    "second_ending": "2nd ending",
+    "third_ending": "3rd ending"
+  },
   "nothingHere": "Nothing here",
   "play": "Play",
   "pause": "Pause",

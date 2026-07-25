@@ -7,6 +7,7 @@ import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import { ConceptTreeNode, getConceptRoots, getConceptTree } from '../services/conceptApi';
 import { ConceptBrowseItem, listByConcept } from '../services/fragmentApi';
+import { formatBarRange, makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentBrowser.module.css';
 
@@ -133,7 +134,13 @@ interface FragmentCardProps {
 export function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const { t } = useTranslation(['fragments', 'common']);
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
-  const barRange = t('common:barRangeMm', { start: item.bar_start, end: item.bar_end });
+  // ADR-036: qualified with its movement section where bar numbers restart
+  // ("Trio, mm. 12–15"), so two cards from different sections never read alike.
+  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end), {
+    sectionLabel: item.section_label,
+    repeatContext: item.repeat_context,
+    formatRepeatContext: makeRepeatContextFormatter(t),
+  });
   // work_title already embeds the catalogue number (DCML corpus-prep
   // convention); strip it before re-appending so it renders once, not twice
   // (Component 9 J2).

@@ -26,12 +26,7 @@
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { HarmonyOverlay } from '../harmonyOverlay';
-import type {
-  GhostLayer,
-  MeasureGhostEntry,
-  BeatGhostEntry,
-  SubBeatGhostEntry,
-} from '../ghosts';
+import type { GhostLayer, MeasureGhostEntry, BeatGhostEntry, SubBeatGhostEntry } from '../ghosts';
 import { encodeBeat, encodeSubBeat, measureGhostKey } from '../ghosts';
 import type { HarmonyEventOut } from '../../../services/analysisApi';
 
@@ -61,7 +56,7 @@ function makeMockGhostLayer(
     bounds: { left: number; top: number; width?: number; height?: number };
     beats?: Array<{ beatIdx: number; beatFloat: number; left: number }>;
     subBeats?: Array<{ beatIdx: number; sb: number; beatFloat: number; left: number }>;
-  }>,
+  }>
 ): GhostLayer {
   const measureIndex = new Map<string, MeasureGhostEntry>();
   const beatIndex = new Map<number, BeatGhostEntry>();
@@ -180,7 +175,7 @@ function createOverlay(
     events?: HarmonyEventOut[];
     scale?: number;
     onLabelClick?: (mn: number, volta: number | null, beat: number) => void;
-  } = {},
+  } = {}
 ): { overlay: HarmonyOverlay; container: HTMLDivElement } {
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -272,8 +267,8 @@ describe('HarmonyOverlay — label text', () => {
     });
     const labels = container.firstElementChild!.children;
     expect(labels).toHaveLength(2);
-    expect(labels[0]!.textContent).toBe('I (C)');  // first label: key shown
-    expect(labels[1]!.textContent).toBe('V');       // same key: suppressed
+    expect(labels[0]!.textContent).toBe('I (C)'); // first label: key shown
+    expect(labels[1]!.textContent).toBe('V'); // same key: suppressed
   });
 
   it('re-shows key when it changes between consecutive labels', () => {
@@ -316,7 +311,7 @@ describe('HarmonyOverlay — stacked figures', () => {
     if (!label) return null;
     const figure = label.querySelector('[data-figure]');
     if (!figure) return null;
-    return Array.from(figure.children).map(c => c.textContent ?? '');
+    return Array.from(figure.children).map((c) => c.textContent ?? '');
   }
 
   it('stacks a figbass figure: V65 → rows 6,5; textContent unchanged', () => {
@@ -582,7 +577,7 @@ describe('HarmonyOverlay — volta filtering', () => {
     const ghostLayer = makeMockGhostLayer([
       {
         barN: 1,
-        endingN: 1,   // generates key "m1-e1"
+        endingN: 1, // generates key "m1-e1"
         renderOrder: 0,
         bounds: { left: 0, top: 100 },
         beats: [{ beatIdx: 0, beatFloat: 1.0, left: 77 }],
@@ -600,7 +595,7 @@ describe('HarmonyOverlay — volta filtering', () => {
     const ghostLayer = makeMockGhostLayer([
       {
         barN: 1,
-        endingN: 1,   // only ending 1 present
+        endingN: 1, // only ending 1 present
         renderOrder: 0,
         bounds: { left: 0, top: 100 },
         beats: [{ beatIdx: 0, beatFloat: 1.0, left: 10 }],
@@ -750,8 +745,115 @@ describe('HarmonyOverlay — onLabelClick', () => {
       events: [makeEvent({ mn: 1, beat: 1.0 })],
       // no onLabelClick
     });
-    expect(() =>
-      (container.firstElementChild!.children[0] as HTMLElement).click()
-    ).not.toThrow();
+    expect(() => (container.firstElementChild!.children[0] as HTMLElement).click()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mc-based measure resolution (Component 11 § 9F / ADR-036)
+// ---------------------------------------------------------------------------
+
+/**
+ * A movement whose bar numbers restart: two measures both notated "m. 2", kept
+ * apart in the ghost index the way walkMeasureKeys() does it — the second
+ * occurrence of a key gets a "#1" suffix. mcIndex maps each key to its unique
+ * document-order mc.
+ *
+ * Mirrors K331/ii, where the Trio renumbers from 1 over the Menuetto.
+ */
+function restartingGhostLayer(): { ghostLayer: GhostLayer; mcIndex: Map<string, number> } {
+  const measureIndex = new Map<string, MeasureGhostEntry>();
+  const beatIndex = new Map<number, BeatGhostEntry>();
+
+  const makeMeasure = (key: string, renderOrder: number, left: number) => {
+    const bounds = { left, top: 100, width: 60, height: 40 };
+    measureIndex.set(key, {
+      el: document.createElement('div'),
+      barN: 2,
+      endingN: null,
+      key,
+      bounds,
+      systemTop: 100,
+      renderOrder,
+    });
+    const encoded = encodeBeat(renderOrder, 0);
+    beatIndex.set(encoded, {
+      el: document.createElement('div'),
+      barN: 2,
+      endingN: null,
+      measureKey: key,
+      beatIdx: 0,
+      encodedKey: encoded,
+      beatFloat: 1.0,
+      bounds: { left, top: 100, width: 20, height: 40 },
+      noteheadCenter: left,
+    });
+  };
+
+  // "Menuetto" m. 2 at mc 2 (x=10); "Trio" m. 2 at mc 50 (x=500).
+  makeMeasure('m2', 0, 10);
+  makeMeasure('m2#1', 1, 500);
+
+  return {
+    ghostLayer: { measureIndex, beatIndex, subBeatIndex: new Map() } as unknown as GhostLayer,
+    mcIndex: new Map([
+      ['m2', 2],
+      ['m2#1', 50],
+    ]),
+  };
+}
+
+describe('HarmonyOverlay — mc-based measure resolution', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  function mount(events: HarmonyEventOut[]): HTMLDivElement {
+    const { ghostLayer, mcIndex } = restartingGhostLayer();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    new HarmonyOverlay({ container, ghostLayer, mcIndex, events });
+    return container;
+  }
+
+  it('places an event on the measure its mc names, not the first with that mn', () => {
+    // Before this fix the key was recomputed as measureGhostKey(mn, volta) —
+    // "m2" — so a second-pass event landed on the first pass's measure. That is
+    // why K331/ii rendered all its harmony on the Menuetto and none on the Trio.
+    const container = mount([makeEvent({ mn: 2, mc: 50, beat: 1.0 })]);
+    const label = container.querySelector('[class*="label"]') as HTMLElement;
+    expect(label.style.left).toBe('500px');
+  });
+
+  it('places a first-pass event on the first-pass measure', () => {
+    const container = mount([makeEvent({ mn: 2, mc: 2, beat: 1.0 })]);
+    const label = container.querySelector('[class*="label"]') as HTMLElement;
+    expect(label.style.left).toBe('10px');
+  });
+
+  it('renders both passes, each in its own place', () => {
+    const container = mount([
+      makeEvent({ mn: 2, mc: 2, beat: 1.0, numeral: 'I' }),
+      makeEvent({ mn: 2, mc: 50, beat: 1.0, numeral: 'V' }),
+    ]);
+    const lefts = Array.from(container.querySelectorAll('[class*="label"]')).map(
+      (el) => (el as HTMLElement).style.left
+    );
+    expect(lefts).toEqual(['10px', '500px']);
+  });
+
+  it('falls back to the mn-derived key when the event carries no mc', () => {
+    // A manually inserted event: mc is optional on the harmony API payloads.
+    const container = mount([makeEvent({ mn: 2, mc: null, beat: 1.0 })]);
+    const label = container.querySelector('[class*="label"]') as HTMLElement;
+    expect(label.style.left).toBe('10px');
+  });
+
+  it('falls back when the mc is not in the current render', () => {
+    // Paged/partial renders: an mc outside this page resolves through the mn
+    // key rather than dropping the label outright.
+    const container = mount([makeEvent({ mn: 2, mc: 999, beat: 1.0 })]);
+    const label = container.querySelector('[class*="label"]') as HTMLElement;
+    expect(label.style.left).toBe('10px');
   });
 });

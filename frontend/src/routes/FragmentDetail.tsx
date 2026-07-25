@@ -42,7 +42,11 @@ import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import type { FragmentDetailResponse } from '../services/fragmentApi';
 import { getFragment } from '../services/fragmentApi';
-import { formatFragmentRange } from '../utils/fragmentRange';
+import {
+  formatFragmentRange,
+  makeRepeatContextFormatter,
+  qualifyRange,
+} from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentDetail.module.css';
 
@@ -198,11 +202,18 @@ export default function FragmentDetail({
               </div>
               <div className={styles.headerMeta}>
                 <Type variant="label-md" as="p" className={styles.locationLine}>
-                  {formatFragmentRange(
-                    fragment.bar_start,
-                    fragment.bar_end,
-                    fragment.beat_start,
-                    fragment.beat_end
+                  {qualifyRange(
+                    formatFragmentRange(
+                      fragment.bar_start,
+                      fragment.bar_end,
+                      fragment.beat_start,
+                      fragment.beat_end
+                    ),
+                    {
+                      sectionLabel: fragment.section_label,
+                      repeatContext: fragment.repeat_context,
+                      formatRepeatContext: makeRepeatContextFormatter(t),
+                    }
                   )}
                 </Type>
                 {(fragment.data_licence || fragment.harmony_sources.length > 0) && (
