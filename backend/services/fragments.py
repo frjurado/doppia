@@ -198,19 +198,28 @@ def _event_in_range(
     bar_start: int,
     bar_end: int,
     volta_filter: int | None,
+    beat_start: float | None = None,
+    beat_end: float | None = None,
 ) -> bool:
     """Return whether a harmony event falls inside a fragment's range.
 
     **Prefers the machine coordinate** (ADR-015/ADR-036): when the event carries
-    an ``mc``, membership is ``mc_start <= mc <= mc_end``, which is unambiguous
-    by construction. The notated-bar path was not: on a movement whose bar
-    numbers restart, ``bar_start <= mn <= bar_end`` matches *both* passes, so a
-    K331/ii Trio fragment picked up the Menuetto's harmonies as well as its own.
+    an ``mc``, measure membership is ``mc_start <= mc <= mc_end``, which is
+    unambiguous by construction. The notated-bar path was not: on a movement
+    whose bar numbers restart, ``bar_start <= mn <= bar_end`` matches *both*
+    passes, so a K331/ii Trio fragment picked up the Menuetto's harmonies as
+    well as its own. The ``(mn, volta)`` test remains the fallback for an event
+    with no ``mc`` — it is optional on the harmony API payloads, so a manually
+    inserted event may lack it.
 
-    Falls back to the ``(mn, volta)`` test for an event with no ``mc`` — ``mc``
-    is optional on the harmony API payloads, so a manually inserted event may
-    lack it. That path keeps exactly its former behaviour, ambiguity included;
-    only DCML-ingested events (which always carry ``mc``) gain the guarantee.
+    **Beat bounds clip the boundary measures** (M6). A sub-measure fragment
+    covers part of its first and last bars, and ``fragment-schema.md`` § approval
+    gate defines the range as ``[bar_start, beat_start] .. [bar_end, beat_end)``
+    — onset-based inclusion, exclusive at the end, the same rule the ghost layer
+    and the tagging-side harmony panel apply. Without this the read sidebar
+    showed every chord in the boundary measures rather than the ones the fragment
+    actually spans, and the approval gate demanded review of events outside the
+    fragment. Middle measures are unconstrained.
 
     Args:
         ev: One ``movement_analysis.events`` entry.
@@ -219,20 +228,39 @@ def _event_in_range(
         bar_start: Inclusive lower bound, notated bar number (fallback path).
         bar_end: Inclusive upper bound, notated bar number (fallback path).
         volta_filter: Volta number to restrict to, or ``None`` (fallback path).
+        beat_start: Onset at or after which events in the first measure are
+            included; ``None`` for a whole-measure start.
+        beat_end: Exclusive onset bound in the last measure; ``None`` for a
+            whole-measure end.
 
     Returns:
         ``True`` when the event belongs to the fragment's range.
     """
     mc = ev.get("mc")
     if mc is not None:
-        return mc_start <= int(mc) <= mc_end
+        if not (mc_start <= int(mc) <= mc_end):
+            return False
+        at_first = int(mc) == mc_start
+        at_last = int(mc) == mc_end
+    else:
+        mn = ev.get("mn")
+        if mn is None:
+            return False
+        if not (bar_start <= int(mn) <= bar_end):
+            return False
+        if volta_filter is not None and ev.get("volta") != volta_filter:
+            return False
+        at_first = int(mn) == bar_start
+        at_last = int(mn) == bar_end
 
-    mn = ev.get("mn")
-    if mn is None:
+    beat = ev.get("beat")
+    if beat is None:
+        return True
+    if beat_start is not None and at_first and beat < beat_start:
         return False
-    if not (bar_start <= int(mn) <= bar_end):
+    if beat_end is not None and at_last and beat >= beat_end:
         return False
-    return volta_filter is None or ev.get("volta") == volta_filter
+    return True
 
 
 def _sources_in_range(
@@ -242,6 +270,8 @@ def _sources_in_range(
     bar_start: int,
     bar_end: int,
     repeat_context: str | None,
+    beat_start: float | None = None,
+    beat_end: float | None = None,
 ) -> list[str]:
     """Return sorted distinct source values for events in a fragment's range.
 
@@ -264,7 +294,16 @@ def _sources_in_range(
     volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(repeat_context or "", None)
     sources: set[str] = set()
     for ev in events:
-        if not _event_in_range(ev, mc_start, mc_end, bar_start, bar_end, volta_filter):
+        if not _event_in_range(
+            ev,
+            mc_start,
+            mc_end,
+            bar_start,
+            bar_end,
+            volta_filter,
+            beat_start,
+            beat_end,
+        ):
             continue
         src = ev.get("source")
         if src:
@@ -971,6 +1010,8 @@ class FragmentService:
             fragment.bar_start,
             fragment.bar_end,
             fragment.repeat_context,
+            fragment.beat_start,
+            fragment.beat_end,
         )
 
         # Derive licence fields from harmony events and the stored licence string.
@@ -1708,7 +1749,14 @@ class FragmentService:
             ctx = movement_ctx.get(f.movement_id, {})
             evs = movement_events.get(f.movement_id, [])
             h_sources = _sources_in_range(
-                evs, f.mc_start, f.mc_end, f.bar_start, f.bar_end, f.repeat_context
+                evs,
+                f.mc_start,
+                f.mc_end,
+                f.bar_start,
+                f.bar_end,
+                f.repeat_context,
+                f.beat_start,
+                f.beat_end,
             )
             dl_url = _LICENCE_URL_MAP.get(f.data_licence) if f.data_licence else None
             items.append(
@@ -2273,12 +2321,15 @@ class FragmentService:
         bar_start: int,
         bar_end: int,
         repeat_context: str | None,
+        beat_start: float | None = None,
+        beat_end: float | None = None,
     ) -> list[dict]:
         """Slice harmony events from movement_analysis for a fragment's range.
 
         Membership is decided by :func:`_event_in_range`: the machine coordinate
         (``mc``) where the event has one, the notated bar plus volta filter where
-        it does not. See that function for why the ``mc`` path exists.
+        it does not, with the beat bounds clipping the boundary measures. See
+        that function for both rules.
 
         Args:
             movement_id: The movement whose analysis to query.
@@ -2288,6 +2339,8 @@ class FragmentService:
             bar_end: Inclusive upper bound, notated bar number (fallback path).
             repeat_context: Fragment repeat context string (e.g. ``"first_ending"``),
                 or ``None`` for no volta filter.
+            beat_start: Onset at or after which first-measure events count.
+            beat_end: Exclusive onset bound in the last measure.
 
         Returns:
             Subset of event dicts in the fragment's range, in their original
@@ -2305,7 +2358,16 @@ class FragmentService:
         return [
             ev
             for ev in events
-            if _event_in_range(ev, mc_start, mc_end, bar_start, bar_end, volta_filter)
+            if _event_in_range(
+                ev,
+                mc_start,
+                mc_end,
+                bar_start,
+                bar_end,
+                volta_filter,
+                beat_start,
+                beat_end,
+            )
         ]
 
     async def _run_approval_gate(self, fragment: Fragment) -> dict:
@@ -2355,6 +2417,8 @@ class FragmentService:
                 fragment.bar_start,
                 fragment.bar_end,
                 fragment.repeat_context,
+                fragment.beat_start,
+                fragment.beat_end,
             )
             unreviewed = [ev for ev in in_range if not ev.get("reviewed")]
             if unreviewed:

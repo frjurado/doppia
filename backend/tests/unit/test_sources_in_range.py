@@ -249,3 +249,75 @@ class TestSourcesInRangeMachineCoordinate:
         """
         events = [{"mn": 12, "mc": 98, "volta": 2, "source": "DCML"}]
         assert _sources_in_range(events, 98, 98, 12, 12, "first_ending") == ["DCML"]
+
+
+# ---------------------------------------------------------------------------
+# TestSourcesInRangeBeatClipping
+# ---------------------------------------------------------------------------
+
+
+class TestSourcesInRangeBeatClipping:
+    """Beat bounds clip the boundary measures (M6, Component 11 Step 10).
+
+    ``fragment-schema.md`` defines a fragment's range as
+    ``[bar_start, beat_start] .. [bar_end, beat_end)`` — onset-based inclusion,
+    exclusive at the end. Before this the slice was measure-granular, so the
+    read sidebar showed every chord in the first and last bars regardless of
+    where the fragment actually started and stopped, and the approval gate
+    demanded review of events outside the fragment.
+    """
+
+    def test_events_before_beat_start_are_clipped(self) -> None:
+        """A fragment starting on beat 3 excludes beats 1-2 of its first bar."""
+        events = [
+            {"mc": 5, "mn": 5, "beat": 1.0, "source": "early"},
+            {"mc": 5, "mn": 5, "beat": 3.0, "source": "DCML"},
+        ]
+        assert _sources_in_range(events, 5, 6, 5, 6, None, 3.0, None) == ["DCML"]
+
+    def test_events_at_or_after_beat_end_are_clipped(self) -> None:
+        """beat_end is exclusive: an event exactly on it belongs to the next slice."""
+        events = [
+            {"mc": 6, "mn": 6, "beat": 1.0, "source": "DCML"},
+            {"mc": 6, "mn": 6, "beat": 2.0, "source": "late"},
+        ]
+        assert _sources_in_range(events, 5, 6, 5, 6, None, None, 2.0) == ["DCML"]
+
+    def test_middle_measures_are_unconstrained(self) -> None:
+        """Beat bounds apply only at the boundaries, never in between."""
+        events = [
+            {"mc": 5, "mn": 5, "beat": 1.0, "source": "clipped-start"},
+            {"mc": 6, "mn": 6, "beat": 1.0, "source": "DCML"},  # middle bar, beat 1
+            {"mc": 7, "mn": 7, "beat": 4.0, "source": "clipped-end"},
+        ]
+        assert _sources_in_range(events, 5, 7, 5, 7, None, 3.0, 2.0) == ["DCML"]
+
+    def test_single_measure_fragment_clips_both_ends(self) -> None:
+        """When first and last measure are the same, both bounds apply to it."""
+        events = [
+            {"mc": 5, "mn": 5, "beat": 1.0, "source": "before"},
+            {"mc": 5, "mn": 5, "beat": 2.0, "source": "DCML"},
+            {"mc": 5, "mn": 5, "beat": 4.0, "source": "after"},
+        ]
+        assert _sources_in_range(events, 5, 5, 5, 5, None, 2.0, 3.0) == ["DCML"]
+
+    def test_whole_measure_fragment_clips_nothing(self) -> None:
+        """Null beat bounds mean complete measures — the pre-existing behaviour."""
+        events = [
+            {"mc": 5, "mn": 5, "beat": 1.0, "source": "a"},
+            {"mc": 5, "mn": 5, "beat": 4.0, "source": "b"},
+        ]
+        assert _sources_in_range(events, 5, 5, 5, 5, None, None, None) == ["a", "b"]
+
+    def test_clipping_applies_on_the_mn_fallback_too(self) -> None:
+        """An event with no mc is clipped by the same rule, keyed on mn."""
+        events = [
+            {"mn": 5, "beat": 1.0, "source": "before"},
+            {"mn": 5, "beat": 3.0, "source": "manual"},
+        ]
+        assert _sources_in_range(events, 5, 5, 5, 5, None, 3.0, None) == ["manual"]
+
+    def test_event_without_a_beat_is_kept(self) -> None:
+        """A beatless event cannot be clipped; excluding it would lose data."""
+        events = [{"mc": 5, "mn": 5, "source": "DCML"}]
+        assert _sources_in_range(events, 5, 5, 5, 5, None, 3.0, 4.0) == ["DCML"]

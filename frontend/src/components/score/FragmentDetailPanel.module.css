@@ -291,6 +291,10 @@
   display: flex;
   align-items: baseline;
   gap: var(--spacing-2);
+
+  /* Wraps so the stage's property list drops to its own line below the
+     name + range, which stay together on the first. */
+  flex-wrap: wrap;
 }
 
 .subPartName {
@@ -299,6 +303,18 @@
 
 .subPartRange {
   color: var(--color-on-surface-variant);
+}
+
+/* Stage properties (M6). Nesting under the stage is carried by indentation
+   alone — no rule, no border (DESIGN.md: depth through tonal layering, never
+   1px dividers). */
+.subPartProperties {
+  flex-basis: 100%;
+  margin: var(--spacing-1) 0 0;
+  padding: 0 0 0 var(--spacing-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
 }
 
 /* ── Data licence / harmony sources (Component 8 Step 12) ──────────────────── */

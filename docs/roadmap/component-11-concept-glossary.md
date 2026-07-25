@@ -780,11 +780,22 @@ switch-on, because all three are things a stranger can see be wrong.
 The fragment info sidebar (detail view) is public via the glossary's example
 expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
 
-- **Property order** — show properties in the same order as the create/edit form
-  (the ADR-023 group/order the schema-tree query already returns).
-- **Harmony sliced to fragment range** — the sidebar shows whole-measure chords
+- ✅ **Property order** — show properties in the same order as the create/edit form
+  (the ADR-023 group/order the schema-tree query already returns). *The sidebar
+  iterated the stored `summary.properties` object, i.e. JSONB insertion order —
+  whatever sequence the tagging session happened to write. It now follows the
+  schema list the server already sorts, which is exactly what `PropertyForm`
+  renders. Properties whose schema is missing keep their order and go last, so a
+  value can never disappear (the public path skips the editor-only schema fetch,
+  and there this is a no-op).*
+- ✅ **Harmony sliced to fragment range** — the sidebar shows whole-measure chords
   instead of the sub-beat-precision slice (already solved on creation; regressed
-  here).
+  here). *The slice was measure-granular server-side. `_event_in_range` now
+  clips the boundary measures by `beat_start`/`beat_end` — onset-based,
+  exclusive at the end, the rule `fragment-schema.md` already specified and the
+  ghost layer and harmony panel already applied. **This also corrects the
+  approval gate**, which shares the function and was demanding review of events
+  outside the fragment.*
 - ✅ **Harmony coordinate — the § 9F fix, and three more surfaces it exposed**
   (2026-07-25/26). The § 9F change fixed the stored-fragment slice and the
   in-score labels, and Francisco's verification on K331/ii found the same defect
@@ -820,10 +831,16 @@ expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
   harmonies for a Trio fragment. Move both to `mc`. **Read § 9F before starting**
   — the coordinate change and the slice-precision fix above are the same
   function, and it should be touched once.
-- **Local-key convention** — show local key only on the first event and when it
-  changes (score convention), matching the harmony-panel display.
-- **Stage properties shown** — sub-part/stage properties are currently missing
-  from the read sidebar.
+- ✅ **Local-key convention** — show local key only on the first event and when it
+  changes (score convention), matching the harmony-panel display. *Applied to the
+  harmony list. Deliberately **not** applied to the approval gate's
+  unreviewed-events list: that is a list of items needing attention, each read on
+  its own, not a running harmonic reading.*
+- ✅ **Stage properties shown** — sub-part/stage properties are currently missing
+  from the read sidebar. *A stage's properties belong to the stage's concept, so
+  the panel now fetches each distinct stage concept's schema tree — the same
+  fetch `SubPartForm` makes on the write side — in parallel and independently of
+  the parent's, so one stage failing cannot cost the parent its labels.*
 - ✅ **Summary key/meter bug** — 279/ii shows "C major / 4/4" irrespective of the
   real key/meter (really F major, 3/4). `phase-2.md` M6 flags this as *possibly a
   real bug* and *glossary-visible*; investigate whether it is a summary-derivation
