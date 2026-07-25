@@ -196,6 +196,8 @@ async def get_movement_mei_url(
         composer_name=composer.name,
         movement_number=movement.movement_number,
         movement_title=movement.title,
+        key_signature=movement.key_signature,
+        meter=movement.meter,
     )
 
 

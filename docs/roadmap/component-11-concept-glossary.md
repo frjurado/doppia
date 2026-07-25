@@ -797,10 +797,32 @@ expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
   changes (score convention), matching the harmony-panel display.
 - **Stage properties shown** — sub-part/stage properties are currently missing
   from the read sidebar.
-- **Summary key/meter bug** — 279/ii shows "C major / 4/4" irrespective of the
+- ✅ **Summary key/meter bug** — 279/ii shows "C major / 4/4" irrespective of the
   real key/meter (really F major, 3/4). `phase-2.md` M6 flags this as *possibly a
   real bug* and *glossary-visible*; investigate whether it is a summary-derivation
   or a display bug and fix at the source.
+
+  **A real derivation bug, and corpus-wide (fixed 2026-07-25).** Not specific to
+  279/ii: **every fragment in the database** carried `"C major"` / `"4/4"`, which
+  happened to be right for the two C-major-4/4 movements and wrong for the other
+  six — 51 of 65 fragments. `parseMeiKey`/`parseMeiMeter` read `key.sig` /
+  `meter.count` **attributes on the first `<scoreDef>`**; the corpus MEI carries
+  no attributes there at all, keeping key and meter in `<keySig>` / `<meterSig>`
+  children of `<staffDef>`. Both parses therefore always fell through to their
+  defaults. (`parseMeiMeterParts` and `parseMeiMeterUnit` already probed both
+  encodings correctly, which is why the beat grid was right while the summary was
+  not — the drift between two functions that should have agreed.)
+
+  Fixed at the source, but **not by fixing the parser alone**: the MEI records
+  *no mode anywhere*, and `<keySig sig="4f"/>` is A♭ major and F minor alike, so
+  the key is not recoverable from the notation however carefully it is parsed.
+  `summary.key`/`summary.meter` now come from the **movement record**, served on
+  the `mei-url` response the score viewer already fetches; the (now correct)
+  MEI parse remains the fallback for a movement with no curated metadata.
+  Existing rows repaired by `backend/data_migrations/fix_summary_key_meter.py`
+  (idempotent; merges the two keys into the existing JSONB rather than replacing
+  it). **No `summary` version bump** — this is a population bug, not a schema
+  change, exactly as this plan's § Docs to Update anticipated.
 
 ### Step 11 — M7: stage-bracket overflow at sub-beat bounds
 

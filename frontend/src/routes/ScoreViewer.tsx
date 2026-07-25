@@ -1531,8 +1531,13 @@ export default function ScoreViewer() {
     (formData: FormSubmitData, meiText: string): FragmentUpdatePayload | null => {
       if (!committedSelection) return null;
 
-      const key = parseMeiKey(meiText);
-      const meter = parseMeiMeter(meiText);
+      // summary.key / summary.meter come from the movement record, not the MEI
+      // (M6, Component 11 Step 10). The MEI encodes `<keySig sig="4f"/>` with no
+      // mode, which is A♭ major and F minor alike — parsing it stamped every
+      // fragment in the corpus "C major / 4/4". The MEI parse stays as the
+      // fallback for a movement whose curated metadata is missing.
+      const key = scoreTitle?.key_signature ?? parseMeiKey(meiText);
+      const meter = scoreTitle?.meter ?? parseMeiMeter(meiText);
 
       // Serialize property values: omit nulls, booleans become "true"/"false".
       const properties: Record<string, string | string[]> = {};
@@ -1629,7 +1634,7 @@ export default function ScoreViewer() {
         sub_parts: subParts,
       };
     },
-    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc]
+    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc, scoreTitle]
   );
 
   /** Save the current annotation as a draft (incompleteness allowed). */

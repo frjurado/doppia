@@ -1,11 +1,17 @@
 /**
  * MEI text parsing utilities for extracting score metadata.
  *
- * Used at submission time (Step 18) to populate the fragment summary's `key`
- * and `meter` fields from the loaded MEI, which are required by the
- * FragmentSummary schema. Reads the initial <scoreDef> only — per
- * fragment-schema.md, these fields reflect the notated (high-reliability) key
- * and meter of the source movement.
+ * These populate the fragment summary's `key` and `meter` fields, which the
+ * FragmentSummary schema requires and which per fragment-schema.md reflect the
+ * notated key and meter of the source movement.
+ *
+ * **Since M6 (Component 11 Step 10) the tagging tool prefers the movement
+ * record** (`fetchMeiUrl()` returns `key_signature` / `meter`) and uses these
+ * only as a fallback. Two reasons, both learned the hard way: the corpus MEI
+ * puts key and meter in `<keySig>` / `<meterSig>` children rather than
+ * `<scoreDef>` attributes, and reading only the latter stamped every fragment
+ * "C major / 4/4"; and the MEI records no *mode* at all, so a minor key cannot
+ * be recovered from the notation however carefully it is parsed.
  *
  * Score title (composer, work title, movement) is sourced from the DB via the
  * mei-url API response and lives in services/scoreApi.ts — not parsed here.
@@ -22,18 +28,42 @@
  * Uses Unicode flat/sharp glyphs to match the transposeKey display convention.
  */
 const KEY_SIG_MAJOR: Record<string, string> = {
-  '0':  'C',
-  '1s': 'G',  '2s': 'D',  '3s': 'A',  '4s': 'E',  '5s': 'B',  '6s': 'F♯', '7s': 'C♯',
-  '1f': 'F',  '2f': 'B♭', '3f': 'E♭', '4f': 'A♭', '5f': 'D♭', '6f': 'G♭', '7f': 'C♭',
+  '0': 'C',
+  '1s': 'G',
+  '2s': 'D',
+  '3s': 'A',
+  '4s': 'E',
+  '5s': 'B',
+  '6s': 'F♯',
+  '7s': 'C♯',
+  '1f': 'F',
+  '2f': 'B♭',
+  '3f': 'E♭',
+  '4f': 'A♭',
+  '5f': 'D♭',
+  '6f': 'G♭',
+  '7f': 'C♭',
 };
 
 /**
  * Map from MEI key.sig attribute value to minor key tonic name.
  */
 const KEY_SIG_MINOR: Record<string, string> = {
-  '0':  'A',
-  '1s': 'E',  '2s': 'B',  '3s': 'F♯', '4s': 'C♯', '5s': 'G♯', '6s': 'D♯', '7s': 'A♯',
-  '1f': 'D',  '2f': 'G',  '3f': 'C',  '4f': 'F',  '5f': 'B♭', '6f': 'E♭', '7f': 'A♭',
+  '0': 'A',
+  '1s': 'E',
+  '2s': 'B',
+  '3s': 'F♯',
+  '4s': 'C♯',
+  '5s': 'G♯',
+  '6s': 'D♯',
+  '7s': 'A♯',
+  '1f': 'D',
+  '2f': 'G',
+  '3f': 'C',
+  '4f': 'F',
+  '5f': 'B♭',
+  '6f': 'E♭',
+  '7f': 'A♭',
 };
 
 // ---------------------------------------------------------------------------
@@ -43,43 +73,68 @@ const KEY_SIG_MINOR: Record<string, string> = {
 /**
  * Extract the notated key as a human-readable string from MEI text.
  *
- * Reads the first <scoreDef> element's key.sig and key.mode attributes.
- * Falls back to "C major" when the attribute is absent or unrecognised.
+ * **This is a fallback, not the source of truth.** Prefer the movement record's
+ * `key_signature`, which `fetchMeiUrl()` returns. The reason is a hard limit of
+ * the encoding, not a preference: the corpus MEI writes `<keySig sig="4f"/>`
+ * with **no mode attribute anywhere**, and 4 flats is A♭ major and F minor
+ * alike. Mode is unrecoverable here, so this always answers "major" and is
+ * wrong for every minor movement (M6, Component 11 Step 10).
+ *
+ * Probe order, mirroring parseMeiMeterParts:
+ *   1. key.sig / key.mode attributes on <scoreDef> or <staffDef>
+ *   2. sig / mode attributes on the first <keySig> child — what this corpus has
+ * Falls back to "C major" when nothing is found.
  *
  * @example parseMeiKey(meiText) → "G major", "B♭ minor", "C major"
  */
 export function parseMeiKey(meiText: string): string {
   const doc = new DOMParser().parseFromString(meiText, 'text/xml');
-  const scoreDefs = doc.getElementsByTagName('scoreDef');
-  const scoreDef = scoreDefs.length > 0 ? scoreDefs[0]! : null;
-  if (!scoreDef) return 'C major';
 
-  const sig  = scoreDef.getAttribute('key.sig')  ?? '0';
-  const mode = (scoreDef.getAttribute('key.mode') ?? 'major').toLowerCase();
+  let sig: string | null = null;
+  let mode: string | null = null;
 
-  const table = mode === 'minor' ? KEY_SIG_MINOR : KEY_SIG_MAJOR;
-  const root  = table[sig] ?? 'C';
+  for (const tag of ['scoreDef', 'staffDef']) {
+    const els = doc.getElementsByTagName(tag);
+    for (let i = 0; i < els.length && sig === null; i++) {
+      const s = els[i]!.getAttribute('key.sig');
+      if (s) {
+        sig = s;
+        mode = els[i]!.getAttribute('key.mode');
+      }
+    }
+    if (sig !== null) break;
+  }
 
-  return `${root} ${mode}`;
+  if (sig === null) {
+    const keySigs = doc.getElementsByTagName('keySig');
+    for (let i = 0; i < keySigs.length && sig === null; i++) {
+      const s = keySigs[i]!.getAttribute('sig');
+      if (s) {
+        sig = s;
+        mode = keySigs[i]!.getAttribute('mode');
+      }
+    }
+  }
+
+  const resolvedMode = (mode ?? 'major').toLowerCase();
+  const table = resolvedMode === 'minor' ? KEY_SIG_MINOR : KEY_SIG_MAJOR;
+  const root = table[sig ?? '0'] ?? 'C';
+
+  return `${root} ${resolvedMode}`;
 }
 
 /**
  * Extract the notated meter as a "count/unit" string from MEI text.
  *
- * Reads meter.count and meter.unit from the first <scoreDef>.
- * Falls back to "4/4" when attributes are absent.
+ * Delegates to parseMeiMeterParts, which already probes both encodings
+ * (meter.count/meter.unit attributes, then <meterSig> children). Reading only
+ * the first <scoreDef>'s attributes — as this did before M6 — always returned
+ * "4/4" for this corpus, whose <scoreDef> carries no attributes at all.
  *
  * @example parseMeiMeter(meiText) → "4/4", "3/4", "6/8"
  */
 export function parseMeiMeter(meiText: string): string {
-  const doc = new DOMParser().parseFromString(meiText, 'text/xml');
-  const scoreDefs = doc.getElementsByTagName('scoreDef');
-  const scoreDef = scoreDefs.length > 0 ? scoreDefs[0]! : null;
-  if (!scoreDef) return '4/4';
-
-  const count = scoreDef.getAttribute('meter.count') ?? '4';
-  const unit  = scoreDef.getAttribute('meter.unit')  ?? '4';
-
+  const [count, unit] = parseMeiMeterParts(meiText);
   return `${count}/${unit}`;
 }
 
@@ -100,7 +155,7 @@ export function parseMeiMeterParts(meiText: string): [number, number] {
     const els = doc.getElementsByTagName(tag);
     for (let i = 0; i < els.length; i++) {
       const count = parseInt(els[i]!.getAttribute('meter.count') ?? '', 10);
-      const unit  = parseInt(els[i]!.getAttribute('meter.unit')  ?? '', 10);
+      const unit = parseInt(els[i]!.getAttribute('meter.unit') ?? '', 10);
       if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
         return [count, unit];
       }
@@ -110,7 +165,7 @@ export function parseMeiMeterParts(meiText: string): [number, number] {
   const sigs = doc.getElementsByTagName('meterSig');
   for (let i = 0; i < sigs.length; i++) {
     const count = parseInt(sigs[i]!.getAttribute('count') ?? '', 10);
-    const unit  = parseInt(sigs[i]!.getAttribute('unit')  ?? '', 10);
+    const unit = parseInt(sigs[i]!.getAttribute('unit') ?? '', 10);
     if (!isNaN(count) && !isNaN(unit) && count > 0 && unit > 0) {
       return [count, unit];
     }

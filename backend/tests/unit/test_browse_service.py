@@ -405,7 +405,18 @@ class TestGetMovementMeiUrl:
     def _make_row(self, **kwargs: Any) -> tuple[MagicMock, MagicMock, MagicMock]:
         """Return a (Movement, Work, Composer) mock tuple as returned by the join query."""
         movement = MagicMock(
-            spec_set=["id", "mei_object_key", "updated_at", "movement_number", "title"]
+            spec_set=[
+                "id",
+                "mei_object_key",
+                "updated_at",
+                "movement_number",
+                "title",
+                # The tagging tool writes these into summary.key / summary.meter
+                # (M6) — the MEI cannot supply the key, so the response carries
+                # the movement's curated values.
+                "key_signature",
+                "meter",
+            ]
         )
         movement.id = kwargs.get("id", uuid.uuid4())
         movement.mei_object_key = kwargs.get(
@@ -416,6 +427,8 @@ class TestGetMovementMeiUrl:
         )
         movement.movement_number = kwargs.get("movement_number", 1)
         movement.title = kwargs.get("movement_title", "Allegro")
+        movement.key_signature = kwargs.get("key_signature", "A major")
+        movement.meter = kwargs.get("meter", "6/8")
 
         work = MagicMock(spec_set=["id", "title"])
         work.id = uuid.uuid4()
@@ -461,4 +474,8 @@ class TestGetMovementMeiUrl:
         assert result.composer_name == "Wolfgang Amadeus Mozart"
         assert result.movement_number == 1
         assert result.movement_title == "Allegro"
+        # The tagging tool reads these to fill summary.key / summary.meter; the
+        # MEI cannot supply the key at all (M6), so they must come through here.
+        assert result.key_signature == "A major"
+        assert result.meter == "6/8"
         storage.signed_url.assert_awaited_once_with(key, expires_in=3600)

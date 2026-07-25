@@ -83,6 +83,14 @@ class MeiUrlResponse(BaseModel):
     proper title block without a second round-trip.  ``work_title`` and
     ``composer_name`` are always present; ``movement_title`` may be null for
     movements that have no dedicated title in the database.
+
+    ``key_signature`` and ``meter`` are the movement's curated notated key and
+    time signature. The tagging tool writes them into ``summary.key`` /
+    ``summary.meter`` on every fragment. They are served from here rather than
+    parsed out of the MEI because **the MEI cannot express the key**: the corpus
+    encodes ``<keySig sig="4f"/>`` with no mode, which is A-flat major and F
+    minor alike (Component 11 Step 10 / M6). Both are nullable, matching the
+    movement columns.
     """
 
     url: str
@@ -90,3 +98,5 @@ class MeiUrlResponse(BaseModel):
     composer_name: str
     movement_number: int
     movement_title: str | None
+    key_signature: str | None = None
+    meter: str | None = None
