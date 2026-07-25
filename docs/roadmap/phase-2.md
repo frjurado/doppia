@@ -402,6 +402,8 @@ everything else rides alongside the component it pairs with naturally.
 | M12 | Duplicate-`@n` display disambiguation (K331/ii "Menuetto da capo") | During 11–12 — public-facing labels | backlog §3; ADR-015 amendment |
 | M13 | i18n surface inventory (list per type/complexity/urgency, then decide) | During 12 — UI text grows fastest with registration and the new topbar | issues doc § I18N; full second-language machinery stays deferred per ADR-006 |
 | M14 | Verovio 6.2.0 upgrade — deliberate event per ADR-013, only after snapshot tests (Component 10) exist | During 14 — after snapshot tests, settled before 15/16 build on rendering | backlog §3 |
+| M15 | **Normalizer advisories are not persisted** — `movement.normalization_warnings` is `null` for 52 of 54 movements after the 2026-07-05 re-ingest, so the normalizer computes advisories (51 of them for K331/ii alone) and stores none. Nothing downstream can ask "what did ingest find about this movement?" | Documented and deferred 2026-07-25 (Component 11 § 9A); slot with the next ingest/corpus work | Component 11 § Step 9A survey report |
+| M16 | **`bar_start`/`bar_end` cannot represent an X-prefixed `@n`** — they are `INTEGER`, but split-measure complements (`X1`, `X2`, …) appear in 16 movements and are what *every* second volta ending in the corpus carries. A selection beginning on one has no faithful human coordinate to store. No such fragment exists today, so nothing is wrong yet | Documented and deferred 2026-07-25 (Component 11 § 9A); slot with the next selection-bounds work | Component 11 § Step 9A survey report; ADR-015 |
 
 Still deferred beyond Phase 2 unless triggered: Component 6 music21
 auto-analysis (trigger: first non-DCML corpus), multi-domain fragment filter

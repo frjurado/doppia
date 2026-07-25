@@ -441,19 +441,19 @@ before the plan.
   renumbering the issue backlog assumed"); **that sentence is factually wrong and
   must be corrected** (§ 9G). The later 2026-06-30 readthrough and ADR-032, which
   describe the Trio restarting, are the correct account.
-- **Family B — volta endings.** First and second endings legitimately share `@n`
-  by project convention (`mei-ingest-normalization.md` §6); K331/i and K283/ii
-  carry them. This *is* modelled — `fragment.repeat_context` — and partially
-  displayed in the editor (the harmony sidebar appends `V1` to the measure
-  number; the detail panel prints the raw enum, "Contexto de repetición:
-  first_ending"). It is absent from every card and caption, i.e. from the whole
-  public surface. **In scope for this step** (decided 2026-07-25).
+- **Family B — volta endings.** *Assumed* at planning time: first and second
+  endings share `@n` by project convention (`mei-ingest-normalization.md` §6),
+  disambiguated only by `fragment.repeat_context`, which the public surface never
+  shows. **§ 9A disproved this** — the corpus has no such duplicates; second
+  endings carry X-prefixed `@n`. What survives is a cosmetic enum-vs-prose fix in
+  the detail panel. The paragraphs below are kept as the record of what was
+  assumed; § 9A is what actually holds.
 
-**The blast radius is unknown and must be measured first.** The "only K331/ii"
-reading came from `ingestion-warnings.json`, which covers the **15-movement**
-Component 9 staging subset. The live corpus is **54 movements**
-(`mc-stability-snapshot.json`) and there is no equivalent warnings report for
-that ingest, so no authoritative list of affected movements exists today.
+**The blast radius was unknown and had to be measured first.** The "only
+K331/ii" reading came from `ingestion-warnings.json`, which covers the
+**15-movement** Component 9 staging subset; the live corpus is **54 movements**
+(`mc-stability-snapshot.json`) with no equivalent warnings report. § 9A settled
+it: one movement now, one more at Step 13.
 
 **K282/ii is a known source erratum.** It is a Menuet I & II movement whose NMA
 text restarts the numbering at Menuet II; the DCML encoding does not, so our
@@ -486,29 +486,77 @@ rendering and fragment ranges; it does not hold for the harmony layer.
    *today* — the harmony defect is live in the editor, and the label defect is
    latent until the first fragment is tagged there.
 
-#### 9A — Survey the real corpus (blocks every design commitment below)
+#### 9A — Survey the real corpus ✅ done 2026-07-25
 
-Query `movement.normalization_warnings` across all 54 movements for
-`MEASURE_N_MULTI_SECTION_DUPLICATE`, `MEASURE_N_DUPLICATE`, and the ending
-duplicate codes; produce the authoritative list of affected movements and,
-for each, the run boundaries in `mc` terms. Record it as a short report
-alongside the other Component 9 reports. Also confirm, per affected movement,
-whether any fragments exist (K331/ii is known clear; the others are not).
-**Do not size the rest of this step until this list exists** — "two movements"
-and "eleven movements" imply different amounts of editorial data entry, and
-K282/ii is proof the 15-movement report is not representative.
+**Report: [`step-9a-duplicate-bar-number-survey.md`](../reports/component-11-reports/step-9a-duplicate-bar-number-survey.md).**
+`movement.normalization_warnings` proved unusable (null for 52 of 54 movements),
+so the survey walked every movement's normalised MEI from object storage
+instead — the authoritative source either way. Findings that change the steps
+below:
 
-#### 9B — Structural detection at ingest
+- **Family A is exactly one movement.** `k331/movement-2`: Menuetto **mc 1–48**
+  (`@n` 1–48), Trio **mc 49–101** (`@n` 1–52 then `X1`), with `dir:MENUETTO`,
+  `dir:Fine`, `dir:TRIO` and `dir:Menuetto da capo` marking the structure in the
+  MEI itself. No fragments on it. K282/ii joins it in Step 13: Menuetto I
+  **mc 1–34**, Menuetto II **mc 35–76**, numbering continuous (the erratum),
+  also fragment-free.
+- **Family B does not exist.** Nine movements carry `<ending>` elements; in every
+  one the second ending's measure has an **X-prefixed `@n`**, never a repeat of
+  the first ending's number. No two measures in this corpus share a bar label
+  because of a volta. `mei-ingest-normalization.md` §6 and ADR-015 both document
+  the opposite convention; that is a **documentation erratum**, corrected here.
+- **Section names are already in the score** — the `<dir>` text sits exactly at
+  each boundary, so § 9C's editorial step is *confirming and casing* a proposed
+  name, not inventing one, and § 9B can propose bounds **and** name.
+- **Section bounds must span `<ending>` measures.** Walking only bare measures
+  ends K331/ii's Trio at mc 99 instead of 101, orphaning any fragment in its
+  second ending. The normalizer's current run computation has exactly this bug.
+- **Neither repair needs a data migration** — no fragments exist on either
+  affected movement, provided both land before anything is tagged there.
+
+Two things the survey opened, both resolved 2026-07-25:
+
+- **The volta item is no longer a correctness item — and stays anyway.** All that
+  remains is the detail panel printing the raw enum `first_ending` where prose
+  belongs. Kept in Step 9 (decided): the point of this step is a label that reads
+  as standard, musically meaningful text, and an enum leaking into the UI fails
+  that whether or not it is ambiguous. It gates nothing, so it is the first thing
+  to cut if the step runs long.
+- **`normalization_warnings` is not populated** — § 9B planned to persist the
+  structured runs into a column the 54-movement re-ingest wrote `null` to for 52
+  movements. **Repairing that ingest path is documented and deferred** (decided);
+  it is a reporting gap well beyond M12 — a normalizer that computes 51 advisories
+  for K331/ii and stores none of them. § 9B therefore **persists nothing** (see
+  there). Recorded as `phase-2.md` Track M **M15**.
+
+The `bar_start`-cannot-hold-`X1` gap § 9A also surfaced is likewise documented
+and deferred — Track M **M16**.
+
+#### 9B — Structural detection (a validation guard, not persisted state)
 
 The normalizer already computes the restart runs — `_split_increasing_runs` in
 `services/mei_normalizer.py` — but interpolates them into a warning *message*.
-Promote them to structured data on the advisory, expressed in **`mc`** terms
-(the message's current run lengths are positions in the filtered `@n` list, not
-`mc`, so they cannot be used directly). It lands in `movement.normalization_
-warnings`, which is already JSONB, so no migration. Two consumers: the § 9A
-survey, and a check that fails loudly when a movement restarts its numbering but
-has no editorial sections recorded — that is what stops a future corpus from
-silently regressing to today's behaviour.
+Promote them to structured data expressed in **`mc`** terms (the message's
+current run lengths are positions in the filtered `@n` list, not `mc`, so they
+cannot be used directly), and **include `<ending>` measures in the bounds** —
+§ 9A found that walking bare measures alone ends K331/ii's Trio at mc 99 instead
+of 101. Propose the section **name** too, from the `<dir>` text at the boundary
+(§ 9A found it there in both affected movements).
+
+**It persists nothing** (decided 2026-07-25). The original plan wrote the runs to
+`movement.normalization_warnings`; § 9A found that column `null` for 52 of 54
+movements, and repairing the ingest path that drops advisories is deferred to
+Track M **M15**. Rather than depend on a column nothing populates — or add a
+second one — the detection ships as a **validation script** in the shape of
+`scripts/validate_graph.py`: it walks every movement's MEI, computes the runs,
+and fails when a movement whose numbering restarts has no `movement_section`
+rows. That is precisely the guard the plan wanted, it has no storage to go stale,
+and it is runnable in CI against a seeded environment.
+
+The § 9A survey walk is the prototype for it. Two corrections it must carry that
+the normalizer's current run computation gets wrong: bounds **include `<ending>`
+measures**, and the proposed **name** comes from the `<dir>` text at the
+boundary.
 
 #### 9C — The editorial section model
 
@@ -522,9 +570,11 @@ indexed join rather than a per-row JSON scan; and the rows are editorial content
 worth constraining, not an opaque blob. Keyed on `mc` so it survives a re-ingest
 (`@n` is display-only; `mc` is document order — ADR-015).
 
-Population is editorial, through a script in `backend/data_migrations/`: the
-affected movements from § 9A with their section names and `mc` bounds read off
-the ingested MEI. For K331/ii that is two rows (Menuetto, Trio).
+Population is editorial, through a script in `backend/data_migrations/`. § 9A
+supplies the content exactly: **K331/ii — Menuetto mc 1–48, Trio mc 49–101**
+(names from the MEI's own `dir:MENUETTO` / `dir:TRIO`); and, at Step 13,
+**K282/ii — Menuetto I mc 1–34, Menuetto II mc 35–76**. Four rows across two
+movements is the whole editorial burden.
 
 A movement with fewer than two sections has **no rows**, so nothing changes for
 the ~52 unaffected movements.
@@ -561,9 +611,20 @@ apply:
 - Volta → suffix in prose: `mm. 12–15 (1st ending)`, replacing the raw
   `first_ending` enum in the detail panel. The harmony sidebar's per-event `V1`
   marker stays as it is: it is a compact per-row marker, a different job from a
-  fragment-level label.
+  fragment-level label. **§ 9A demoted this to a prose fix** — no volta produces
+  an ambiguous label in this corpus — but it **stays in Step 9** (decided
+  2026-07-25): a raw enum in the UI fails this step's standard whether or not it
+  is ambiguous. It gates nothing, so it is the first thing to cut if the step
+  runs long.
 - Both → `Trio, mm. 12–15 (1st ending)`.
 - New i18n keys for `en` and `es`.
+
+**Not in scope, recorded by § 9A and deferred as Track M M16:**
+`fragment.bar_start` is an `INTEGER` and cannot hold an X-prefixed `@n`, so a
+selection beginning on a split-measure complement — which every second volta
+ending in this corpus is — has no faithful human coordinate to store. No such
+fragment exists today, so nothing is currently wrong; it is a latent gap for
+whoever next touches selection bounds.
 
 #### 9F — The harmony coordinate fix → **executed in Step 10**
 
@@ -642,10 +703,15 @@ page still looks wrong — confirm it on the overlay, not in a test alone.
 
 #### Docs to update
 
-- **ADR-015** — correct the amendment's factual error (K331/ii is the Trio
-  restarting the count, not a written-out repeat), and correct "no data is at
-  risk": the harmony layer keyed on `(mn, volta, beat)` *was* at risk. Record the
-  `mc`-range slice as the resolution of the deferral this ADR already noted.
+- **ADR-015** — correct the amendment's factual errors, all three confirmed by
+  § 9A: K331/ii is the **Trio** restarting the count (not a written-out repeat),
+  the runs are **1–48 and 1–52** (not "1–48 twice"), and the volta claim that
+  both endings share `@n` does not hold for this corpus. Correct "no data is at
+  risk" too: the harmony layer keyed on `(mn, volta, beat)` *was* at risk. Record
+  the `mc`-range slice as the resolution of the deferral this ADR already noted.
+- **`mei-ingest-normalization.md` §6** — the documented
+  duplicate-`@n`-in-endings convention does not describe the corpus (§ 9A);
+  correct it to the X-complement shape actually present.
 - **New ADR** — the `movement_section` model and the display convention (§ 9C,
   § 9E), plus the harmony identity shift toward `mc` (§ 9F) if that is not folded
   into the ADR-015 amendment.
@@ -876,6 +942,14 @@ Stated so the boundary is a decision, not a gap:
   triggered only if random-3 proves insufficient.
 - **Posts-that-mention-this-concept back-links** on the concept page — depend on
   the Blog's knowledge-graph linkage and land with **Component 16**.
+- **Two defects the § 9A survey surfaced**, both documented and deferred
+  2026-07-25 as new Track M rows because neither is public-facing and neither
+  blocks the glossary: **M15** — the normalizer's advisories are not persisted
+  (`movement.normalization_warnings` is `null` for 52 of 54 movements), so § 9B
+  ships its detection as a validation script rather than depending on that
+  column; **M16** — `bar_start`/`bar_end` are `INTEGER` and cannot represent an
+  X-prefixed `@n`, so a selection beginning on a split-measure complement has no
+  faithful human coordinate. No such fragment exists today.
 - **The remaining Track M items.** Only the public-surface set
   (M1/M2/M6/M7/M11/M12) is slotted here. M3 (post-approval lifecycle UI), M4
   (review-queue UX — *unless the evaded/abandoned-cadence naming bug also affects
