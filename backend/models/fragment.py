@@ -183,8 +183,9 @@ class SubPartFragmentCreate(_FragmentWriteBase):
     """Write model for a sub-part (child) fragment.
 
     Sub-parts share the same coordinate and content fields as the parent.
-    The service layer checks containment: every sub-part's bar range must
-    fall within the parent's range before the atomic write proceeds.
+    The service layer checks containment: every sub-part's extent, as an
+    ``(mc, beat)`` position pair, must fall within the parent's before the
+    atomic write proceeds.
     """
 
 

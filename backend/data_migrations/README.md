@@ -1,8 +1,15 @@
 # Data Migrations
 
-This directory contains per-version data migration scripts for the `fragment.summary` JSONB field.
+This directory contains one-off scripts that repair or transform stored fragment *data*.
 
-These are **not** Alembic schema migrations (those live in `backend/migrations/`). Alembic migrations change the PostgreSQL schema (table structure, columns, indexes). Data migrations here transform the *content* of `fragment.summary` records when a breaking change is made to the `summary` JSONB schema defined in `docs/architecture/fragment-schema.md`.
+These are **not** Alembic schema migrations (those live in `backend/migrations/`). Alembic migrations change the PostgreSQL schema (table structure, columns, indexes); nothing here touches the schema.
+
+Two kinds live here:
+
+1. **`summary` schema-version migrations** — transform the *content* of `fragment.summary` records when a breaking change is made to the JSONB schema defined in `docs/architecture/fragment-schema.md`. These follow the naming convention below and pair with a `version` bump.
+2. **Value repairs** — fix rows written wrong by a bug that has since been fixed at its source. The schema is unchanged, so there is **no `version` bump**: the shape was always right, the values were not. Named for what they repair (`fix_…`, `clamp_…`), and each script's docstring must state the defect, why it is not a version bump, and that it is idempotent. Current: `fix_summary_key_meter.py` (M6 — key/meter parsed from the wrong place in the MEI), `clamp_subpart_bounds.py` (M7 — stage bounds overflowing their parent fragment).
+
+Every script here takes `--dry-run`; use it first, read the diff it prints, then run for real.
 
 ## When to write a data migration here
 

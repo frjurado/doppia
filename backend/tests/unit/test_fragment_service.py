@@ -109,15 +109,20 @@ def _make_fragment_update(
     bar_end: int = 8,
     sub_parts: list[dict] | None = None,
 ) -> Any:
-    """Build a minimal valid FragmentUpdate for containment tests."""
+    """Build a minimal valid FragmentUpdate for containment tests.
+
+    ``mc`` tracks ``bar`` (as it does in ``_sub_part``): containment compares
+    document-order measure positions, so a fixture whose two coordinate systems
+    disagree describes a movement that does not exist.
+    """
     from models.fragment import FragmentUpdate
 
     return FragmentUpdate.model_validate(
         {
             "bar_start": bar_start,
             "bar_end": bar_end,
-            "mc_start": 1,
-            "mc_end": 8,
+            "mc_start": bar_start,
+            "mc_end": bar_end,
             "summary": _min_summary(),
             "concept_tags": [
                 {"concept_id": "PerfectAuthenticCadence", "is_primary": True}

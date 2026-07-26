@@ -81,7 +81,7 @@ Components continue Phase 1's numbering (Phase 1 ended at Component 9).
                                           in Component 10
 
 Track M (parallel): editorial-tool repairs and UX debt — runs alongside,
-prioritised opportunistically. M0 (fragment editor repair) is urgent.
+prioritised opportunistically. M0 (fragment editor repair) was urgent; done.
 ```
 
 Rationale for the order: cheapest-public-value first (glossary needs no
@@ -375,8 +375,8 @@ the Component 10 spike.
 
 ## Track M — Editorial-Tool Repairs & UX Debt (parallel)
 
-Runs alongside Components 10–16; no public-launch gate, but M0 blocks
-editorial work and should go first. Sources:
+Runs alongside Components 10–16; no public-launch gate, but M0 blocked
+editorial work and went first (closed 2026-07-27). Sources:
 `../reports/component-9-reports/issues-deferred-for-phase-2.md` and backlog §3.
 
 **Target: the whole track is clear before Component 15 (Exercises) begins.**
@@ -387,14 +387,14 @@ everything else rides alongside the component it pairs with naturally.
 
 | # | Item | Suggested slot | Notes / pointer |
 |---|---|---|---|
-| M0 | **Fragment editor repair** — concept, stages, harmony panel, commentary all blank on edit; effectively unusable | **Immediately, alongside Component 10** | issues doc § Fragment editor. Blocks M1/M2 |
+| ~~M0~~ | ~~**Fragment editor repair** — concept, stages, harmony panel, commentary all blank on edit; effectively unusable~~ | ✅ Fixed — the editor itself in Component 10 (§ M0); its one deferred carryover, "shrinking the main bracket during edit jumps back", in Component 11 Step 12 (2026-07-27, Option 1): `StageAssignment` now separates `anchored` (set by a drag in this session — the only thing the resize clamp reads) from `confirmed` (position settled — what limbo warnings and boundary pinning read). Restored stages are confirmed but not anchored, so a stored fragment shrinks as freely as a new one. M1/M2 are unblocked | issues doc § Fragment editor; Component 10 § "Deferred within M0" |
 | M1 | Editorial data fixes (harmony confirmations sweep, the per-fragment errata list) | After M0, **before Component 11 ships** — the errata become public with the glossary | issues doc § Editorial work |
 | M2 | `harmony_gate` seeding + one-time confirmation sweep | With M1 (during 11) | backlog §3 |
 | M3 | Fragment edit/lifecycle UI (post-approval flow) | During 13 | backlog §3 |
 | M4 | Review-queue UX: scroll-to-fragment on select; back button returns to queue; evaded/abandoned cadence naming | During 12–13 (the naming bug earlier if it also affects public labels) | issues doc § Revision workflow |
 | M5 | Bracket redesign (square handles, edited-vs-rest differentiation, collision/label overlap) — needs design thinking first | With Component 12's design-system work (topbar / DESIGN.md addendum) — one design pass | issues doc § Score |
 | M6 | Info sidebar fixes: property order, harmony sliced to fragment range, local-key convention, stage properties missing, wrong key/meter in summary (C major/4/4 on 279/ii — possibly a real bug) | **Before Component 11 ships** — the summary bug is glossary-visible | issues doc § Info sidebar |
-| M7 | Stage-bracket overflow bug at sub-beat fragment bounds (279/ii m. 8–10) | With M6, before 11 | issues doc § Real bugs |
+| ~~M7~~ | ~~Stage-bracket overflow bug at sub-beat fragment bounds (279/ii m. 8–10)~~ | ✅ Fixed — Component 11 Step 11 (2026-07-27): the stage layout frame applied the selection's beat-precision endpoint filters at beat/sub-beat resolution only, so a beat-precise fragment whose stages fit *measure*-granularly — the normal case, since the grid follows the stage count — got whole-measure outer stages that overflowed their parent. Invariant I7 was quietly false exactly there. `buildStageSlots` now clips both endpoint slots (geometry and beat coordinates) and `prePopulateStages` pins its outer edges; stored rows repaired by `clamp_subpart_bounds.py` | issues doc § Real bugs |
 | M8 | Harmony panel refinements (Grado vs Fundamental semantics, local-key prepopulation/display; "edit events outside a fragment?" question) | During 13–14 — harmony data quality feeds exercises | issues doc § Harmony panel |
 | M9 | Tagging sidebar cleanup (drop "stage properties" label; fix stage ordering) | During 12 (small; batch with any tagging-tool touch) | issues doc § Tagging sidebar |
 | M10 | G1 beat-range display convention; pickup/partial-bar beat numbering; caret at repeat barlines | During 12–13 — display conventions worth settling before wide public exposure | backlog §3 |
@@ -404,6 +404,7 @@ everything else rides alongside the component it pairs with naturally.
 | M14 | Verovio 6.2.0 upgrade — deliberate event per ADR-013, only after snapshot tests (Component 10) exist | During 14 — after snapshot tests, settled before 15/16 build on rendering | backlog §3 |
 | M15 | **Normalizer advisories are not persisted** — `movement.normalization_warnings` is `null` for 52 of 54 movements after the 2026-07-05 re-ingest, so the normalizer computes advisories (51 of them for K331/ii alone) and stores none. Nothing downstream can ask "what did ingest find about this movement?" | Documented and deferred 2026-07-25 (Component 11 § 9A); slot with the next ingest/corpus work | Component 11 § Step 9A survey report |
 | M16 | **`bar_start`/`bar_end` cannot represent an X-prefixed `@n`** — they are `INTEGER`, but split-measure complements (`X1`, `X2`, …) appear in 16 movements and are what *every* second volta ending in the corpus carries. A selection beginning on one has no faithful human coordinate to store. No such fragment exists today, so nothing is wrong yet | Documented and deferred 2026-07-25 (Component 11 § 9A); slot with the next selection-bounds work | Component 11 § Step 9A survey report; ADR-015 |
+| M17 | **3/8 is read as compound by the ghost layer and as simple by DCML — harmony labels land on the wrong beat.** Confirmed visible on **280/iii m. 15**: the harmony record is right (events on beats 1 and 3) but both labels draw on beat 1, and there are **dozens of such bars in that movement**. The ghost layer's `isCompoundMeter` is `unit == 8 && count % 3 == 0`, so 3/8 becomes one dotted-quarter beat — beat 3 does not exist for it to place a label on, and the resolution controls show the same single beat. DCML (and `ingest_analysis`, which requires `count >= 6`) reads 3/8 as three eighth-note beats. Francisco's reading: **3/8 should behave like 3/4, not like 6/8**; the deeper question is what the rule for "compound" should be, and whether one-beat time signatures should be allowed at all. Note the blast radius is wider than display: a beat coordinate written by the tagging tool in a 3/8 movement means something different from the same number in a harmony record, so any fix needs a data pass over 3/8 fragments as well as the rule change | Francisco noted it on 280/iii; independently hit 2026-07-27 (Component 11 Step 11, writing `measure_end_beat`). **Triage with the post-Component-11 issues batch** | Component 11 § Step 11; `ghosts.ts` `isCompoundMeter`/`beatSlotCount`, `ingest_analysis.py`, `clamp_subpart_bounds.py` `measure_end_beat` |
 
 Still deferred beyond Phase 2 unless triggered: Component 6 music21
 auto-analysis (trigger: first non-DCML corpus), multi-domain fragment filter

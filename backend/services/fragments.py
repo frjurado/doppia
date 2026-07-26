@@ -2846,27 +2846,14 @@ def _check_not_creator(fragment: Fragment, reviewer_id: str) -> None:
 
 
 def validate_containment_for_update(payload: FragmentUpdate) -> None:
-    """Run bar-range containment check on a FragmentUpdate payload.
+    """Run the containment check on a FragmentUpdate payload.
 
     Mirrors :func:`~services.fragment_validation.validate_containment` but
     accepts a :class:`~models.fragment.FragmentUpdate` instead of
     :class:`~models.fragment.FragmentCreate`, since the two share sub-part
-    semantics but differ at the top-level type.
+    semantics but differ at the top-level type.  Both delegate to the same
+    comparison so create and update can never diverge.
     """
-    from errors import FragmentValidationError
+    from services.fragment_validation import _assert_contained
 
-    for idx, child in enumerate(payload.sub_parts):
-        if child.bar_start < payload.bar_start or child.bar_end > payload.bar_end:
-            raise FragmentValidationError(
-                f"Sub-part {idx} bar range [{child.bar_start}, {child.bar_end}] "
-                f"falls outside the parent fragment's range "
-                f"[{payload.bar_start}, {payload.bar_end}]. "
-                "Every sub-part must be contained within its parent.",
-                detail={
-                    "sub_part_index": idx,
-                    "child_bar_start": child.bar_start,
-                    "child_bar_end": child.bar_end,
-                    "parent_bar_start": payload.bar_start,
-                    "parent_bar_end": payload.bar_end,
-                },
-            )
+    _assert_contained(payload, payload.sub_parts)

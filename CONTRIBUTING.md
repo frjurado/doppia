@@ -301,10 +301,11 @@ CI runs `npm test` in the lint job on every push.
 
 ### Frontend e2e (Playwright)
 
-Browser-level coverage of the **anonymous public read journey**. Two specs, both against a `vite preview` of the production build with the backend stubbed per-test (`page.route`), so **no live backend, database, or seeded data is needed** — fast and deterministic:
+Browser-level coverage of the **anonymous public surface**. All specs run against a `vite preview` of the production build with the backend stubbed per-test (`page.route`), so **no live backend, database, or seeded data is needed** — fast and deterministic:
 
 - **browse → detail** (Component 10 Step 14): browse a concept → open a fragment detail → the Verovio render and MIDI controls appear, with no editor affordance reachable.
 - **glossary journey** (Component 11 Step 7): glossary index → concept page → expand an inline example (Verovio + MIDI) → browse the concept's fragments → fragment detail — the full public read path end to end.
+- **sub-part bracket geometry** (Component 11 Step 11, the M7 guard): a sub-part's bracket must never start before or end after its parent fragment's. This one is here rather than in a unit test because the answer depends on real Verovio output — the bracket's left edge comes from where Verovio actually drew the notehead at the fragment's start beat. It pairs a positive case with a control: the same fixture given measure-level sub-part bounds must render the overflow, or the positive case would be passing vacuously.
 
 ```bash
 cd frontend
@@ -313,7 +314,18 @@ npm run build         # the e2e serves the production build
 npm run e2e           # run the journey headless
 ```
 
-Specs live in `frontend/e2e/`. The scaffold is deliberately minimal and public-path-focused; editor/authoring flows get e2e coverage when their components stabilise (Component 12+). CI runs it as the **E2E (Playwright)** job. (The fragment's MEI is served from `e2e/fixtures/sample.mei`, a comment-stripped MEI — Verovio's `loadData` rejects XML comments before the root, exactly as production-normalised MEI has none.)
+Specs live in `frontend/e2e/`. The scaffold is deliberately minimal and public-path-focused; editor/authoring flows get e2e coverage when their components stabilise (Component 12+). CI runs it as the **E2E (Playwright)** job.
+
+**Fixtures — what an MEI fixture must carry, and how it fails if it doesn't.** Every omission below produces a *silently* degraded render, not an error, so a fixture missing one can make a test pass for the wrong reason:
+
+| Requirement | If missing |
+|---|---|
+| No XML comment before the `<mei>` root | Verovio's format detection gives up ("unknown XML data" / "no root found") and the score renders blank. Put fixture commentary *inside* the root element |
+| `xml:id` on every `<measure>` | Bracket geometry matches MEI measures to SVG elements by id — no ids, no measure rects, no brackets at all |
+| `xml:id` on every `<note>` | Note x-positions are looked up in the SVG by id; without them there are no onsets |
+| `dur.ppq` on every `<note>` | The onset accumulator treats a note without it as a grace note, so a measure of them yields nothing and the ghost layer falls back to one synthetic whole-measure ghost (§6A.7) — beat and sub-beat ghosts never exist and every beat-precise bracket degrades to whole measures |
+
+`sample.mei` (6/8) satisfies only the first and is fine for journey tests that just need *a* render. `beat-precise.mei` (3/4, five measures) satisfies all four and is the one to use, or copy, for anything measuring geometry.
 
 ### What is not tested in Phase 1
 

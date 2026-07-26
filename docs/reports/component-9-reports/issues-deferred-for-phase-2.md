@@ -76,7 +76,7 @@ The cadence editor doesn't work properly:
 
 ## Real bugs
 
-- 279/ii, m. 8-10 (also m. 48-50): main bracket & info show real fragment ("m. 8, beat 3 – m. 10, beat 1"), but stages show whole measures, so first & last overflow the actual fragment size (seen both in stage brackets & sidebar info).
+- ~~279/ii, m. 8-10 (also m. 48-50): main bracket & info show real fragment ("m. 8, beat 3 – m. 10, beat 1"), but stages show whole measures, so first & last overflow the actual fragment size (seen both in stage brackets & sidebar info).~~ **✅ Fixed — M7, Component 11 Step 11 (2026-07-27).** The stage layout frame applied the selection's beat-precision endpoint filters at beat/sub-beat resolution only; at measure resolution every slot spanned its whole measure. Since the stage grid is chosen from the *stage count*, a beat-precise fragment whose stages fit measure-granularly is the ordinary case — so invariant I7 ("first stage start ≡ main bracket start, exactly, at all resolutions") was quietly false exactly there, and the overflow was written into the sub-part rows, not merely rendered. `buildStageSlots` now clips both endpoint slots and `prePopulateStages` pins its outer edges; stored rows repaired by `backend/data_migrations/clamp_subpart_bounds.py`.
 
 
 ---

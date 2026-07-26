@@ -33,6 +33,7 @@ function makeStage(overrides: Partial<StageAssignment> = {}): StageAssignment {
     defaultWeight: 1,
     bounds: { barStart: 14, beatStart: null, barEnd: 14, beatEnd: null },
     confirmed: true,
+    anchored: true,
     absent: false,
     orphaned: false,
     error: false,

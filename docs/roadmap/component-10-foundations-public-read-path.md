@@ -700,11 +700,21 @@ A real edit session then surfaced a second batch, now fixed:
   show a single **Save changes** (a PATCH, which re-opens review via the
   backend's revision semantics).
 
-#### Deferred within M0 — main-bracket resize during edit (revisit)
+#### Deferred within M0 — main-bracket resize during edit ✅ resolved 2026-07-27
 
-**Not fixed, by decision (2026-07-23) — rare, and it touches the fragile
-bracket-drag code.** Symptom: while editing, shrinking the main bracket "jumps
-back"; it frees up only when the *outermost* stage is shrunk first.
+**Fixed in Component 11 Step 12 (Option 1, decided by Francisco 2026-07-27),
+paired with Step 11 (M7) so the shared stage-bracket bounds code was touched
+once.** `StageAssignment` now carries `anchored` alongside `confirmed`: the clamp
+reads `anchored` (set only by a drag or an absent-toggle in the current session),
+limbo warnings and boundary pinning keep reading `confirmed`. Restored stages are
+confirmed but not anchored, so a stored fragment shrinks as freely as a new one
+while its untouched boundaries stay put. See that plan's Step 12 for why pinning
+deliberately did *not* move to `anchored`. The analysis below is kept as the
+record of the diagnosis.
+
+**Original report — not fixed, by decision (2026-07-23) — rare, and it touches
+the fragile bracket-drag code.** Symptom: while editing, shrinking the main
+bracket "jumps back"; it frees up only when the *outermost* stage is shrunk first.
 
 **Root cause (verified, not a stale-ref bug).**
 `buildStageAssignmentsFromSubParts` marks every restored stage `confirmed: true`
@@ -730,7 +740,9 @@ defining the outer `minBarStart`/`maxBarEnd`.
    in that area.
 
 The `confirmed` flag currently does double duty (limbo suppression **and** the
-resize clamp); a clean fix likely decouples those two meanings.
+resize clamp); a clean fix likely decouples those two meanings. *(That is what the
+Step 12 fix did — and the decoupling is why Option 1's first cost, "optional
+stages read as needing re-confirmation until touched", did not materialise.)*
 
 ---
 

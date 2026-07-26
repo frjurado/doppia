@@ -79,11 +79,26 @@ export interface StageAssignment {
   bounds: StageBounds | null;
 
   /**
-   * Confirmed = the annotator explicitly dragged this bracket from its
-   * pre-populated default position. Unconfirmed optional stages are in "limbo"
-   * and block submission (tagging-tool-design.md §4 §"Optional stages").
+   * Confirmed = this bracket's position is settled, not a default awaiting
+   * review. Unconfirmed optional stages are in "limbo" and block submission
+   * (tagging-tool-design.md §4 §"Optional stages"). Set by an explicit drag and
+   * by restoring a stored fragment, whose bounds an annotator already settled in
+   * an earlier session.
    */
   confirmed: boolean;
+
+  /**
+   * Anchored = the annotator positioned this bracket *in this session*, by
+   * dragging its split handle or re-enabling it from absent.
+   *
+   * Only anchored stages hard-clamp the main-bracket drag (`computeResizeClamp`).
+   * `confirmed` used to carry both meanings, which is what made a stored
+   * fragment unshrinkable: restoring it marked every stage confirmed to suppress
+   * limbo warnings, and the clamp then read those same flags as "the annotator
+   * pinned these here" and refused to let the bracket move (ADR-011 §6,
+   * Component 11 Step 12). The two meanings are separate flags now.
+   */
+  anchored: boolean;
 
   /**
    * User explicitly toggled this optional stage absent via the absent toggle
@@ -149,32 +164,35 @@ export interface BeatSlot {
   measureKey?: string;
 }
 
+/** Slot capacity of the stage layout frame at each resolution (§6A.1). */
+export interface StageSlotCounts {
+  measure: number;
+  beat: number;
+  subbeat: number;
+}
+
 /**
  * Return the coarsest resolution at which stageCount stages can each occupy
- * at least one grid slot in the selection.
+ * at least one grid slot of the stage layout frame.
  *
  * Tries Measure → Beat → Sub-beat in order, falling through to 'subbeat'
  * even when all counts are below stageCount. The caller is responsible for
  * detecting and surfacing the blocking case (stageCount exceeds all tiers).
  *
- * beatSlots and subBeatSlots are counts of available ghost positions in the
- * selection at each finer resolution, computed by the caller from the ghost
- * layer. If omitted, those tiers are treated as having zero capacity.
+ * Counts are the frame's own slot counts at each resolution — `buildStageSlots`
+ * lengths, the same lists the brackets render from. They are not derived from
+ * the selection's bar range: bar arithmetic over-counts when `@n` repeats and
+ * miscounts discontiguous ranges (§6A.3), and the measure tier is not simply
+ * the key count either, since a beat-precise endpoint can leave its measure
+ * uncovered (M7).
  */
 export function chooseStageGrid(
-  selection: SelectionRange,
   stageCount: number,
-  beatSlots = 0,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _subBeatSlots = 0,
+  counts: StageSlotCounts,
 ): ResolutionMode {
   if (stageCount <= 0) return 'measure';
-  // Effective key count when committed (§6A.1) — bar arithmetic over-counts
-  // when @n repeats inside the range and miscounts discontiguous ranges.
-  const measureSlots = selection.measureKeys?.length
-    ?? (selection.barEnd - selection.barStart + 1);
-  if (measureSlots >= stageCount) return 'measure';
-  if (beatSlots >= stageCount) return 'beat';
+  if (counts.measure >= stageCount) return 'measure';
+  if (counts.beat >= stageCount) return 'beat';
   return 'subbeat';
 }
 
@@ -274,6 +292,7 @@ export function prePopulateStagesAtGrid(
       defaultWeight: stage.default_weight,
       bounds: { barStart, beatStart, barEnd, beatEnd, keyStart, keyEnd },
       confirmed: false,
+      anchored: false,
       absent: false,
       orphaned: false,
       error: false,
@@ -319,8 +338,16 @@ function _usableKeys(selection: SelectionRange): string[] | null {
  * a key list (restored from stored human coordinates) use the legacy bar
  * arithmetic.
  *
- * Beat-level snapping is left to the caller when the active grid is at beat
- * or sub-beat resolution — this function always returns null beat coordinates.
+ * Interior boundaries are measure-aligned (null beats), but the two outer edges
+ * are pinned to the selection's own endpoints — beats included (I7 outer-edge
+ * pinning, as at beat resolution). A measure-granular grid over a beat-precise
+ * fragment is normal: the grid only has to be fine enough to seat the stages.
+ * Inheriting the measure's edges instead of the fragment's is what made the
+ * first and last stage of "m. 8 beat 3 – m. 10 beat 1" cover whole measures and
+ * overflow their parent (M7, Component 11 Step 11).
+ *
+ * Beat-level snapping of the *interior* boundaries is left to the caller when
+ * the active grid is at beat or sub-beat resolution.
  */
 export function prePopulateStages(
   stages: ContainsStage[],
@@ -352,20 +379,24 @@ export function prePopulateStages(
       endUnit = Math.min(startUnit + unitCount - 1, maxEndUnit);
     }
 
+    // I7: the frame's outer edges are the selection's exact endpoints.
+    const beatStart = i === 0 ? (selection.beatStart ?? null) : null;
+    const beatEnd = isLast ? (selection.beatEnd ?? null) : null;
+
     const bounds: StageBounds = keys
       ? {
           barStart: _barNFromKey(keys[startUnit]!)!,
-          beatStart: null,
+          beatStart,
           barEnd: _barNFromKey(keys[endUnit]!)!,
-          beatEnd: null,
+          beatEnd,
           keyStart: keys[startUnit]!,
           keyEnd: keys[endUnit]!,
         }
       : {
           barStart: selection.barStart + startUnit,
-          beatStart: null,
+          beatStart,
           barEnd: selection.barStart + endUnit,
-          beatEnd: null,
+          beatEnd,
         };
 
     assignments.push({
@@ -378,6 +409,7 @@ export function prePopulateStages(
       defaultWeight: stage.default_weight,
       bounds,
       confirmed: false,
+      anchored: false,
       absent: false,
       orphaned: false,
       error: false,
@@ -408,7 +440,9 @@ export function prePopulateStages(
  *  - The nearest neighbour gives back proportional space based on default_weight.
  *    The restored stage takes the donor's old outer boundary exactly; only the
  *    newly created boundary between donor and restored stage is measure-aligned.
- *  - The re-enabled stage is marked confirmed so it doesn't immediately limbo.
+ *  - The re-enabled stage is marked confirmed so it doesn't immediately limbo,
+ *    and anchored: re-enabling is an explicit act of placement in this session,
+ *    so the restored bracket clamps the main-bracket drag like a dragged one.
  *
  * Required stages cannot be toggled absent (guard: returns unchanged).
  */
@@ -473,14 +507,18 @@ export function toggleStageAbsent(
     const donor = prevActive ?? nextActive;
     if (!donor) {
       return assignments.map(a =>
-        a.stageId === stageId ? { ...a, absent: false, confirmed: true } : a,
+        a.stageId === stageId
+          ? { ...a, absent: false, confirmed: true, anchored: true }
+          : a,
       );
     }
 
     return assignments.map(a => {
       if (a.stageId === stageId) {
         // Restore from donor based on weight proportion.
-        if (!donor.bounds) return { ...a, absent: false, confirmed: true };
+        if (!donor.bounds) {
+          return { ...a, absent: false, confirmed: true, anchored: true };
+        }
         const donorBars = donor.bounds.barEnd - donor.bounds.barStart + 1;
         const totalWeight = stage.defaultWeight + donor.defaultWeight || 1;
         const stageBars = Math.max(1, Math.round(donorBars * stage.defaultWeight / totalWeight));
@@ -504,7 +542,13 @@ export function toggleStageAbsent(
               beatEnd: null,
             };
 
-        return { ...a, absent: false, bounds: restoredBounds, confirmed: true };
+        return {
+          ...a,
+          absent: false,
+          bounds: restoredBounds,
+          confirmed: true,
+          anchored: true,
+        };
       }
 
       if (a.stageId === donor.stageId && donor.bounds) {
@@ -601,23 +645,29 @@ export function reconcileWithNewConcept(
 // ---------------------------------------------------------------------------
 
 /**
- * Return the tightest bar range that contains all confirmed (active) stage
- * bounds.  Null when no confirmed stages exist, meaning no clamp is needed.
+ * Return the tightest bar range that contains all **anchored** (active) stage
+ * bounds. Null when no anchored stages exist, meaning no clamp is needed.
  *
  * The caller should pass this to AnnotationSession.setMinBarRange() so that
  * the main-bracket drag cannot shrink below the point that would force a
- * confirmed stage outside the selection
+ * bracket the annotator just placed outside the selection
  * (tagging-tool-design.md §4, Component 7 Step 3).
+ *
+ * Keyed on `anchored`, not `confirmed` (Component 11 Step 12): stages restored
+ * from a stored fragment are confirmed but not anchored, so editing one is now
+ * as free as creating it. They redistribute against the resize on the stage
+ * layout frame instead — see `respondToMainResize`, which does keep its boundary
+ * pinning on `confirmed` so a surviving boundary stays exactly where it was.
  */
 export function computeResizeClamp(
   assignments: StageAssignment[],
 ): { minBarStart: number; maxBarEnd: number } | null {
-  const confirmed = assignments.filter(
-    a => a.confirmed && !a.absent && !a.orphaned && a.bounds !== null,
+  const anchored = assignments.filter(
+    a => a.anchored && !a.absent && !a.orphaned && a.bounds !== null,
   );
-  if (confirmed.length === 0) return null;
+  if (anchored.length === 0) return null;
 
-  const minBarStart = Math.min(...confirmed.map(a => a.bounds!.barStart));
-  const maxBarEnd   = Math.max(...confirmed.map(a => a.bounds!.barEnd));
+  const minBarStart = Math.min(...anchored.map(a => a.bounds!.barStart));
+  const maxBarEnd   = Math.max(...anchored.map(a => a.bounds!.barEnd));
   return { minBarStart, maxBarEnd };
 }

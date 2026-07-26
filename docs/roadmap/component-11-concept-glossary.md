@@ -868,7 +868,7 @@ expand and the fragment-detail route. Fix, per the issues doc § Info sidebar:
   it). **No `summary` version bump** — this is a population bug, not a schema
   change, exactly as this plan's § Docs to Update anticipated.
 
-### Step 11 — M7: stage-bracket overflow at sub-beat bounds
+### Step 11 — M7: stage-bracket overflow at sub-beat bounds ✅ done 2026-07-27
 
 279/ii m. 8–10 (also m. 48–50): the main bracket and info show the real fragment
 ("m. 8 beat 3 – m. 10 beat 1"), but the stages render as whole measures, so the
@@ -881,6 +881,111 @@ stages never exceed the parent fragment's sub-beat bounds.
 as the deferred resize clamp (`computeResizeClamp` / stage-bound derivation).
 Sequence Step 11 and Step 12 together and touch that code once, coherently,
 rather than in two passes.
+
+#### Root cause
+
+Not a clamp that was missing — an invariant that was only half true. The stage
+layout frame's grid comes from `chooseStageGrid`, which picks the **coarsest
+resolution that seats the stage count**; the fragment's own precision has no say,
+so a beat-precise fragment with three measure-fitting stages is laid out on a
+measure grid. That is correct and normal. What was wrong is that
+`buildStageSlots` applied the selection's beat-precision endpoint filters at beat
+and sub-beat resolution only. At measure resolution every slot spanned its whole
+measure, so the frame's outer edges were the endpoint *measures* rather than the
+selection — and I7 ("first stage start ≡ main bracket start, exactly, at all
+resolutions", §6A.4) was quietly false in precisely the case that occurs in the
+corpus. `prePopulateStages` had the same gap, hard-coded: `beatStart: null,
+beatEnd: null` on every stage it produced.
+
+So the overflow is not only rendered, it is **stored**: the sub-part rows for
+279/ii mm. 8–10 and 48–50 carry whole-measure bounds. The sidebar was reading
+them faithfully.
+
+#### The fix
+
+- **`buildStageSlots`, measure branch** — clip the two endpoint slots to the
+  selection's beat bounds, in geometry (`left`/`right`, read off the sub-beat
+  index, falling back to the beat index) *and* in beat coordinates
+  (`beatFloat`/`endFloat`), leaving interior slots measure-aligned. An endpoint
+  measure the bounds leave uncovered contributes no slot at all — the same
+  reduction `formatFragmentRange` already makes for display. A measure with no
+  fine ghosts in either index keeps its whole extent rather than vanishing.
+  Because every stage bound, every bracket pixel, and every sub-part payload
+  derives from this list, one clip fixes rendering, dragging, resizing, and what
+  gets written.
+- **`prePopulateStages`** — pin the outer edges to the selection's endpoints,
+  beats included, exactly as `prePopulateStagesAtGrid` already documented for the
+  finer grids. Interior boundaries stay measure-aligned.
+- **`chooseStageGrid(stageCount, slotCounts)`** — signature changed to take the
+  frame's own slot counts instead of deriving the measure tier from the
+  selection's key list. Two reasons: the key count is now the wrong number (an
+  uncovered endpoint measure is a key with no slot), and `respondToMainResize`
+  had an open-coded copy of the same three-line rule. One rule, fed by the lists
+  the brackets render.
+- **`frameToAssignments`** — a required stage left with an empty run now carries
+  `error: true`. It keeps its committed bounds (nothing is silently lost) but
+  `computeStagesComplete` blocks submission, so a required sub-part outside its
+  parent cannot be written. This closes a hole the Step 12 clamp change would
+  otherwise have widened: it was previously unreachable *because* the clamp
+  refused the shrink.
+- **`validate_containment`** — the server-side guard that should have caught this
+  compared **bar numbers only**, and said so: *"beat-level containment is not
+  checked here because beat values are measure-local … their comparison across
+  different measures is not meaningful without knowing the meter."* True of beats
+  stripped of their measure; false of `(mc, beat)` pairs, which order fine with a
+  null beat read as its measure's own edge (∓∞ *within one mc*) and need no meter
+  at all. Now compared that way — which also moves the check off bar numbers onto
+  `mc`, so a sub-part cannot slip through on a bar number that occurs twice
+  (ADR-015). Create and update share one implementation instead of two copies.
+  This is defence in depth, not the fix: the frame is what stops it happening.
+- **`backend/data_migrations/clamp_subpart_bounds.py`** — repairs the rows
+  written before the fix. Deterministic, not editorial: a sub-part is a *part of*
+  its parent, so a bound outside the parent's is wrong by definition and its
+  correct value is the parent's own. Interior boundaries between stages carry
+  real editorial intent and are untouched. Beat pairs are re-normalised
+  afterwards so the ADR-005 wire invariant still holds; a sub-part lying entirely
+  outside its parent is reported and skipped rather than guessed at. Idempotent,
+  `--dry-run` first.
+
+Tests: 6 frame cases (endpoint beat coordinates, clipped geometry, single-measure
+double clip, uncovered endpoint measure, no-fine-ghosts fallback, no-beat-precision
+no-op), 3 pre-population cases, 7 containment cases including the K331/ii
+duplicate-bar case, 24 unit tests on the repair's coordinate logic. Two existing
+containment fixtures set `mc_start`/`mc_end` inconsistently with their bar range —
+harmless under a bar-only check, meaningless as a movement — and were corrected.
+
+Plus **`e2e/sub-part-brackets.spec.ts`**, the geometry half of the guard: real
+Chromium, real Verovio, the public fragment detail. The unit suites can only
+check frame arithmetic against a mock layer, but whether a bracket lands on the
+right pixel depends on where Verovio actually drew the notehead at the fragment's
+start beat. Two cases — clamped bounds render flush inside the parent (I7/I8), and
+the *same* fixture with measure-level bounds renders the overflow M7 reported,
+which is the control that keeps the first from passing vacuously.
+
+Its fixture, `e2e/fixtures/beat-precise.mei`, is new because `sample.mei` fails
+this test three ways, each **silently**: without `xml:id` on measures no bracket
+renders at all; without `xml:id` on notes, and without `dur.ppq`, the ghost layer
+falls back to one synthetic whole-measure ghost per bar (§6A.7) and every
+beat-precise bracket degrades to whole measures — i.e. a fixture missing them
+reproduces the bug and calls it success. A fourth trap: a comment placed *before*
+the `<mei>` root defeats Verovio's format detection ("no root found") and renders
+a blank score. All four are recorded in the fixture's own header.
+
+**Noted, not fixed → M17.** `measure_end_beat` had to pick a compound-meter rule,
+and the two existing ones disagree: the ghost layer reads compound as `unit == 8
+&& count % 3 == 0` (so 3/8 is *one* dotted beat), `ingest_analysis` additionally
+requires `count >= 6` (so 3/8 is three beats). The script follows the ghost layer,
+which wrote the values it repairs — correct for this repair, and worth flagging
+that it becomes wrong the moment M17 changes the rule, so the M17 fix needs its
+own data pass over 3/8 fragments.
+
+Francisco had already seen the consequence from the other end: on **280/iii m. 15**
+the harmony record is right (beats 1 and 3) but both labels draw on beat 1, in
+dozens of bars of that movement — because under the ghost layer's reading beat 3
+does not exist. His view is that 3/8 should behave like 3/4 rather than 6/8, with
+the open question being what the rule for "compound" should be at all (perhaps:
+disallow one-beat time signatures). Deferred to the post-Component-11 issues
+triage by his decision, not resolved here.
 
 ---
 
@@ -916,15 +1021,48 @@ Three options are on the table (full trade-offs in the Component 10 plan):
    shrink push/trim the stages it crosses; best UX, most new bracket-drag code,
    highest risk in that fragile area.
 
-**The decision is deferred to Francisco and made when this step is reached**
-(per the 2026-07-23 instruction: *"I'll give it a thought, and come back to it
-later"*). This plan slots the decision here — as the enabler for the M1 errata
-that involve stage boundaries (the "wrong stages" fixes) — and pairs the
-implementation with Step 11 (M7) so the shared stage-bracket bounds code is
-touched once. Recommendation to open the discussion with: **Option 1** (lowest
-risk, reuses the tested path) unless the "resize can move stage boundaries" cost
-proves unacceptable in practice, in which case Option 3 with a proper
-`confirmed`/`clamp` decoupling.
+**Decision (Francisco, 2026-07-27): Option 1.** Implemented with the
+`confirmed`/`clamp` decoupling the analysis above anticipated, which is what lets
+Option 1 be taken without its first stated cost.
+
+#### As implemented ✅ done 2026-07-27
+
+`StageAssignment` carries two flags where it carried one:
+
+| Flag | Means | Read by |
+|---|---|---|
+| `confirmed` | The position is settled, not a default awaiting review. Set by a drag **and** by restoring a stored fragment. | limbo warnings, boundary pinning in `respondToMainResize` |
+| `anchored` | The annotator placed this bracket in *this* session — dragged its split handle, or re-enabled it from absent. | the hard clamp (`computeResizeClamp`) |
+
+`buildStageAssignmentsFromSubParts` sets `confirmed: true, anchored: false`, so a
+restored fragment no longer clamps: the main bracket shrinks as freely as during
+creation, and the outermost stages shrink with it (I7 — the frame's edges *are*
+the new selection's endpoints).
+
+**Pinning deliberately stays on `confirmed`.** Option 1 reads "treat restored
+stages as unconfirmed *for the clamp*", and that qualifier is load-bearing. A
+restored stage must not block a shrink, but while its slot survives the resize it
+should stay exactly where its annotator put it — and the ghost layer is rebuilt
+with a fresh selection object on every re-render, zoom, and progressive page load,
+each of which fires the resize-response effect. Pinning on `anchored` would
+redistribute a stored fragment's stage boundaries on a plain browser zoom. So:
+untouched boundaries hold, boundaries the shrink actually crosses redistribute,
+which is "redistribute like creation" where it matters.
+
+This also disposes of Option 1's first listed cost — "optional stages read as
+needing re-confirmation until touched" — which only followed from reusing
+`confirmed` for the clamp. `confirmed` is untouched, so no restored stage reads as
+in limbo. The second cost stands as accepted: a shrink that crosses a boundary
+moves it.
+
+Safety: with the clamp gone, a shrink can in principle leave a required stage
+without a slot, which `computeStagesComplete` previously allowed through (the
+clamp was the only thing preventing it). `frameToAssignments` now flags that
+`error: true` — see Step 11.
+
+Tests: 2 clamp cases pinning the new semantics (confirmed-not-anchored does not
+clamp; anchoring one restored stage starts clamping), plus the existing clamp
+suite re-keyed to `anchored`.
 
 ### Step 13 — M1 errata sweep + M2 `harmony_gate`
 

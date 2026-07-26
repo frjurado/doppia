@@ -320,8 +320,13 @@ function computeAutoPrePopulate(
 ): { assignments: StageAssignment[]; grid: ResolutionMode; blocked: boolean } {
   const beatPositions: BeatSlot[] = [];
   const subBeatPositions: BeatSlot[] = [];
+  let measureSlots = selection.measureKeys?.length ?? selection.barEnd - selection.barStart + 1;
 
   if (ghostLayer) {
+    // Every tier's capacity is the frame's own slot count, so the grid chosen
+    // here is the grid the brackets will render on. The measure tier is not the
+    // key count: a beat-precise endpoint can leave its measure uncovered (M7).
+    measureSlots = buildStageSlots(selection, ghostLayer, 'measure').length;
     for (const s of buildStageSlots(selection, ghostLayer, 'beat')) {
       beatPositions.push({ barN: s.barN, beatFloat: s.beatFloat ?? 1.0, measureKey: s.measureKey });
     }
@@ -334,14 +339,12 @@ function computeAutoPrePopulate(
     }
   }
 
-  const grid = chooseStageGrid(
-    selection,
-    stages.length,
-    beatPositions.length,
-    subBeatPositions.length
-  );
+  const grid = chooseStageGrid(stages.length, {
+    measure: measureSlots,
+    beat: beatPositions.length,
+    subbeat: subBeatPositions.length,
+  });
 
-  const measureSlots = selection.measureKeys?.length ?? selection.barEnd - selection.barStart + 1;
   const blocked =
     stages.length > 0 &&
     measureSlots < stages.length &&
@@ -352,6 +355,12 @@ function computeAutoPrePopulate(
 
   let assignments: StageAssignment[];
   if (grid === 'measure') {
+    // Distributes over the selection's effective keys, which equal the frame's
+    // measure slots for every selection the annotator can commit (beat_end always
+    // names a covered measure — it is the endFloat of a ghost inside it). The one
+    // shape where the two counts differ, an endpoint measure the beat bounds leave
+    // uncovered, is unreachable from here; the frame drops it, and any later drag
+    // or resize re-derives bounds from the frame anyway.
     assignments = prePopulateStages(stages, selection);
   } else if (grid === 'beat') {
     assignments = prePopulateStagesAtGrid(stages, selection, beatPositions);
@@ -414,8 +423,16 @@ function buildStageAssignmentsFromSubParts(
       containmentMode: stage.containment_mode,
       defaultWeight: stage.default_weight,
       bounds,
-      // Treat restored stages as confirmed so they don't trigger "limbo" warnings.
+      // Treat restored stages as confirmed so they don't trigger "limbo"
+      // warnings — an annotator settled these bounds in an earlier session.
       confirmed: bounds !== null,
+      // But *not* anchored: nobody placed them in this session, so they must not
+      // hard-clamp the main-bracket drag. This is the M0 "shrink jumps back"
+      // defect (Component 11 Step 12, Option 1) — the clamp read `confirmed` as
+      // "the annotator pinned this here" and a restored fragment, whose stages
+      // fill it completely, could therefore never be shrunk at all. They now
+      // redistribute against the resize on the stage layout frame instead.
+      anchored: false,
       absent: bounds === null && !stage.required,
       orphaned: false,
       error: false,
