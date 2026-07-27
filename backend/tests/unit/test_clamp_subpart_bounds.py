@@ -36,6 +36,30 @@ mod = _load()
 Bounds = mod.Bounds
 clamp_to_parent = mod.clamp_to_parent
 measure_end_beat = mod.measure_end_beat
+meter_is_disputed = mod.meter_is_disputed
+
+
+class TestMeterIsDisputed:
+    """The M17 guard: which meters have no agreed beat count."""
+
+    def test_three_eight_is_disputed(self) -> None:
+        # The ghost layer reads one dotted-quarter beat, ingest_analysis three
+        # eighth-note beats. A beat number there denotes no fixed position.
+        assert meter_is_disputed("3/8") is True
+
+    @pytest.mark.parametrize("meter", ["6/8", "9/8", "12/8"])
+    def test_larger_compound_meters_agree(self, meter: str) -> None:
+        # Both rules call these compound, so the clamp is sound in them.
+        assert meter_is_disputed(meter) is False
+
+    @pytest.mark.parametrize("meter", ["4/4", "3/4", "2/4", "2/2", "6/4", "5/8", "7/8"])
+    def test_simple_meters_agree(self, meter: str) -> None:
+        assert meter_is_disputed(meter) is False
+
+    @pytest.mark.parametrize("meter", [None, "", "common", "x/y"])
+    def test_unparseable_is_not_disputed(self, meter: str | None) -> None:
+        # Falls back to 4/4, on which the two rules agree.
+        assert meter_is_disputed(meter) is False
 
 
 class TestMeasureEndBeat:

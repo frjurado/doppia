@@ -22,6 +22,11 @@ there is no defensible automatic value for those, and none exist in the corpus.
 Beat pairs are re-normalised after clamping so the ADR-005 wire invariant (both
 null or both set, ordered within a bar) still holds.
 
+Sub-parts in a **3/8** movement are reported and deferred, not repaired: the
+corpus has two disagreeing readings of that meter's beat count (Track M17), so a
+beat number there does not yet denote a fixed position and the clamp would
+destroy real extent. See :func:`meter_is_disputed`.
+
 Idempotent: re-running after a successful run reports zero changes.
 
 Usage::
@@ -63,15 +68,51 @@ class Bounds:
     beat_end: float | None
 
 
+def _parse_meter(meter: str | None) -> tuple[int, int]:
+    """Split a stored meter into (count, unit); 4/4 for missing or unparseable."""
+    if meter and "/" in meter:
+        head, _, tail = meter.partition("/")
+        try:
+            return int(head), int(tail)
+        except ValueError:
+            return 4, 4
+    return 4, 4
+
+
+def meter_is_disputed(meter: str | None) -> bool:
+    """True when the corpus has no agreed beat count for this meter (Track M17).
+
+    The frontend ghost layer reads a meter as compound when ``unit == 8`` and
+    ``count % 3 == 0``; ``ingest_analysis`` additionally requires ``count >= 6``.
+    They therefore disagree on **3/8** and nothing else: one dotted-quarter beat
+    per bar (measure ends at 2.0) against three eighth-note beats (ends at 4.0).
+
+    A beat number in such a movement does not denote a fixed position until that
+    is settled, so this script refuses to adjudicate: it reports those sub-parts
+    and leaves them alone. Two things go wrong if it does not. A legitimate
+    ``beat_end`` of 3.0 looks out of bounds under the one-beat reading and gets
+    truncated — real extent destroyed on the strength of the disputed rule. And
+    rewriting a measure-level ``(null, null)`` into explicit beats freezes the
+    current reading into data that reads as "whole measure" under either rule
+    while the explicit pair would not survive the flip.
+
+    Both hazards are real on staging: K279/iii and K280/iii are 3/8, and K280/iii
+    is where Francisco first saw M17 (harmony labels for beats 1 and 3 both
+    drawing on beat 1).
+    """
+    count, unit = _parse_meter(meter)
+    return unit == 8 and count % 3 == 0 and count < 6
+
+
 def measure_end_beat(meter: str | None) -> float:
     """Exclusive beat upper bound of a full measure in the given meter (ADR-005).
 
     ``numBeats + 1``: the value ``beat_end`` takes for a bound at the end of its
     measure. Compound meters count the dotted beat (6/8 has two), matching
     ``beatSlotCount`` / ``isCompoundMeter`` in the frontend ghost layer — the code
-    that wrote the values this script repairs, so the rule to follow. Note that
-    ``ingest_analysis`` reads compound as ``count >= 6``, so the two disagree on
-    3/8; only the ghost layer's reading is relevant here.
+    that wrote the values this script repairs, so the rule to follow. Where the
+    two readings of "compound" disagree the caller must not reach this function
+    at all: see :func:`meter_is_disputed`.
 
     Args:
         meter: Meter as stored on the movement, e.g. ``"3/4"``. Unparseable or
@@ -80,13 +121,7 @@ def measure_end_beat(meter: str | None) -> float:
     Returns:
         The exclusive upper bound, e.g. 4.0 for 3/4 and 3.0 for 6/8.
     """
-    count, unit = 4, 4
-    if meter and "/" in meter:
-        head, _, tail = meter.partition("/")
-        try:
-            count, unit = int(head), int(tail)
-        except ValueError:
-            count, unit = 4, 4
+    count, unit = _parse_meter(meter)
     beats = count // 3 if (unit == 8 and count % 3 == 0) else count
     return float(max(1, beats) + 1)
 
@@ -174,6 +209,7 @@ async def _run(dry_run: bool) -> int:
     checked = 0
     changed = 0
     skipped = 0
+    deferred = 0
     try:
         async with AsyncSession(engine) as session:
             rows = (
@@ -219,6 +255,16 @@ async def _run(dry_run: bool) -> int:
                     row.p_beat_start,
                     row.p_beat_end,
                 )
+                if meter_is_disputed(row.meter):
+                    # Not a repair decision this script is entitled to make; the
+                    # beat scale itself is unsettled (M17).
+                    deferred += 1
+                    print(
+                        f"  DEFER {row.slug:20} {row.id}  {_fmt(child)}"
+                        f"  — {row.meter} beat count disputed (M17)"
+                    )
+                    continue
+
                 measure_end = measure_end_beat(row.meter)
                 clamped = clamp_to_parent(child, parent, measure_end)
 
@@ -266,11 +312,19 @@ async def _run(dry_run: bool) -> int:
     finally:
         await engine.dispose()
 
-    print(f"\n{checked} sub-part(s) checked; {changed} clamped; {skipped} skipped.")
+    print(
+        f"\n{checked} sub-part(s) checked; {changed} clamped; "
+        f"{skipped} skipped; {deferred} deferred."
+    )
     if dry_run:
         print("[dry-run] nothing written.")
     if skipped:
         print("Skipped sub-parts need an editorial decision — see the list above.")
+    if deferred:
+        print(
+            "Deferred sub-parts are in a meter whose beat count is disputed "
+            "(Track M17); re-run this script once that is settled."
+        )
     return 1 if skipped else 0
 
 
