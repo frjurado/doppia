@@ -1077,11 +1077,19 @@ with the glossary:
   lesson), not code — but they gate the glossary because the glossary is what
   makes them public.
 - **M2 — `harmony_gate` seeding + one-time confirmation sweep** (backlog §3): the
-  `capture_extensions` `harmony_gate` entries already exist on the cadence
-  concepts (`cadences.yaml`); this step is the one-time sweep to confirm harmony
-  events across the corpus so gated concepts have clean, confirmed harmony
-  behind their public examples. Ride M2 with M1 since both are editorial-data
-  passes over the same fragments.
+  one-time sweep to confirm harmony events so gated concepts have clean, confirmed
+  harmony behind their public examples. Ride M2 with M1 since both are
+  editorial-data passes over the same fragments.
+
+  > **Correction (2026-07-27).** This bullet said the `harmony_gate`
+  > `capture_extensions` entries "already exist on the cadence concepts
+  > (`cadences.yaml`)". **They do not.** `cadences.yaml` carries four
+  > `capture_extensions` — one `harmony_object` and two `fragment_pointer`s — and
+  > no `harmony_gate`; no seed file in any domain contains one. The enforcement
+  > code is all there and working (`check_concepts_have_harmony_gate`,
+  > `_run_approval_gate`), it simply never fires, because nothing declares the
+  > gate. So M2 is *seeding plus sweep*, exactly as its phase-2.md row always
+  > said, and the seeding half is unwritten work. See § 13A.
 - **K282/ii renumbering — the § 9G repair lands here** (split from Step 9,
   2026-07-25). The NMA text restarts the bar numbers at Menuet II; the DCML
   encoding runs them continuously, so our corpus disagrees with the edition.
@@ -1096,6 +1104,88 @@ with the glossary:
 `true` for the launch set of concepts is the same kind of editorial content work
 and rides alongside M1. Per § Decisions 3 the glossary **may launch with
 placeholders** on any unreviewed tail — the review pass is not a code gate.
+
+#### Sub-steps, ownership, and order (drafted 2026-07-27)
+
+Most of this step is **editorial judgement, which is Francisco's and cannot be
+delegated to a script**: confirming a harmony event asserts that an editor has
+read it and agrees, so a script that flipped `reviewed` in bulk would be
+manufacturing that assertion, not recording it. My share is the code and corpus
+work that makes his passes possible, fast, and verifiable.
+
+Two constraints set the order:
+
+1. **The gate must be seeded *last*.** `_run_approval_gate` fires at approval
+   time and demands every harmony event in the fragment's range be reviewed. Seed
+   it before the sweep and every M1 edit becomes un-re-approvable mid-flight.
+   Sweep first, seed after.
+2. **The K282/ii renumbering needs a re-ingest**, so it must not land in the
+   middle of an editorial pass over the same data. It goes first (before the
+   editorial work starts) or last (after it finishes) — not between.
+
+| # | Sub-step | Owner | Depends on |
+|---|---|---|---|
+| 13A | Decide the gate's scope: which concepts declare `harmony_gate` | **Francisco** (decision), me (writes the YAML) | — |
+| 13B | K282/ii renumbering: prep + re-ingest + fragment migration (§ 9G) | Me; Francisco confirms the editorial call | — |
+| 13C | M1 errata: the nine per-fragment corrections | **Francisco** | Step 12 (done) |
+| 13D | M2 sweep: confirm harmony inside each fragment's range | **Francisco** | 13C (same fragments, one sitting) |
+| 13E | `definition_reviewed` pass over the launch set | **Francisco** | — (not a code gate) |
+| 13F | Seed `harmony_gate`, re-seed the graph, deploy | Me | 13A, 13D |
+| 13G | Verification pass | Me | all |
+
+**13A — gate scope (decision first, then a small YAML change).** Which concepts
+should require confirmed harmony before approval? The natural candidates are the
+realised cadence types, where the harmonic content *is* the claim; the question is
+whether `Cadence` carries it (inherited by every subtype via `IS_SUBTYPE_OF`,
+including the evaded/abandoned/dominant-arrival family) or whether it sits on
+individual subtypes. Inheritance is how the query already resolves it — it walks
+ancestors — so putting it on the root is one line and catches everything, at the
+cost of gating types whose harmony may be deliberately partial. This is a
+modelling decision, so it needs Francisco before any YAML is written.
+
+**13B — K282/ii (§ 9G; read that section first).** The MEI `@n` renumbering and
+the DCML harmony `mn` renumbering must land in the *same* prep + re-ingest, or the
+sidebar prints bar numbers the score does not show. `mc` is untouched throughout,
+which is what makes it safe — rendering, fragment ranges, previews, and the
+mc-stability check are all unaffected. Then section the movement like K331/ii
+(`seed_movement_sections.py`) so "Menuetto I / Menuetto II" qualify the labels.
+Any stored fragment on that movement carries `bar_start`/`bar_end` in the old
+numbering and needs a migration — § 9A found none, to be re-confirmed against
+staging before starting rather than trusted.
+
+**13C — M1 errata (issues doc § Editorial work).** Nine items on 279/i and 279/ii:
+harmony corrections (V=64 then V7; a spurious IV6; an extra Final-Tonic), two
+commentary typos, an evaded cadence with no text, and two wrong-stage fixes
+(279/i m. 93, 279/ii m. 15) that were only editable once Step 12 freed the resize.
+One item is already partly resolved: "279/ii m. 3 … summary is generic (C major +
+4/4)" was the M6 key/meter bug, repaired corpus-wide by `fix_summary_key_meter.py`
+— worth confirming on screen rather than re-fixing. Verify on a real render, per
+the standing lesson that audits have blind spots.
+
+**13D — M2 sweep.** Smaller than "confirm the corpus" sounds, for two reasons: the
+gate only requires events **inside a fragment's range**, not every event in the
+movement, and that range is now beat-precise (Step 10). Locally that is 107 events
+across 18 fragments — roughly six per fragment — of which 4 are already reviewed;
+staging should scale to a few hundred across its ~90 top-level fragments. The
+harmony panel already has a **Confirm all (n)** control scoped to the open
+fragment, so the pass is: open fragment → read → confirm all → next. Events are
+movement-level, so overlapping fragments do not double the work. Riding this with
+13C means each fragment is opened once, not twice.
+
+**13F — seed and deploy.** Add the `harmony_gate` entries decided in 13A, re-seed,
+redeploy, and confirm the gate now blocks an unreviewed fragment and passes a
+reviewed one.
+
+**13G — verification.** Glossary examples render with confirmed harmony; K282/ii
+shows restarted numbers with section labels in both bracket and sidebar; the nine
+errata are visibly corrected; `validate_movement_sections.py` and
+`validate_graph.py` pass; the approval gate behaves as intended in both directions.
+
+**Open question to settle before 13C starts:** *where* does the editorial work
+happen. The campaign fragments live on staging, so the corrections must be made
+there — which means staging is the system of record for this data, and nothing in
+the deploy flow copies it back. Worth confirming that is intended, and that there
+is a backup, before spending an editorial session on it.
 
 ---
 
