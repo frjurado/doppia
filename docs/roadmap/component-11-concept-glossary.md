@@ -1140,7 +1140,12 @@ ancestors — so this is one entry in `cadences.yaml` covering the whole domain,
 including the evaded/abandoned/dominant-arrival family. Written in 13F, not now:
 seeding it before the sweep would block re-approval of every fragment M1 touches.
 
-**13B — K282/ii (§ 9G; read that section first).** The MEI `@n` renumbering and
+**13B — K282/ii (§ 9G; read that section first). Precondition re-checked against
+staging 2026-07-27: the movement has no fragments and no sub-parts**, so no
+coordinate migration is needed and § 9A's finding still holds. (A first count said
+one parent fragment; that was an artefact of my own query — a `LEFT JOIN` with no
+match yields one all-null row, and `parent_fragment_id IS NULL` is true of it.
+`count(f.id) FILTER (...)` is the right shape.) The MEI `@n` renumbering and
 the DCML harmony `mn` renumbering must land in the *same* prep + re-ingest, or the
 sidebar prints bar numbers the score does not show. `mc` is untouched throughout,
 which is what makes it safe — rendering, fragment ranges, previews, and the
