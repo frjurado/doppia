@@ -37,6 +37,7 @@ Bounds = mod.Bounds
 clamp_to_parent = mod.clamp_to_parent
 measure_end_beat = mod.measure_end_beat
 meter_is_disputed = mod.meter_is_disputed
+candidate_measure_ends = mod.candidate_measure_ends
 
 
 class TestMeterIsDisputed:
@@ -60,6 +61,22 @@ class TestMeterIsDisputed:
     def test_unparseable_is_not_disputed(self, meter: str | None) -> None:
         # Falls back to 4/4, on which the two rules agree.
         assert meter_is_disputed(meter) is False
+
+
+class TestCandidateMeasureEnds:
+    """Which measure ends a meter could have, across the readings in play."""
+
+    def test_an_agreed_meter_has_exactly_one(self) -> None:
+        assert candidate_measure_ends("3/4") == [4.0]
+        assert candidate_measure_ends("6/8") == [3.0]
+
+    def test_a_disputed_meter_has_both(self) -> None:
+        # 3/8: one dotted-quarter beat (ends at 2.0) or three eighths (ends 4.0).
+        assert candidate_measure_ends("3/8") == [2.0, 4.0]
+
+    def test_the_agreed_reading_is_measure_end_beat(self) -> None:
+        for meter in ("4/4", "3/4", "2/2", "6/8", "9/8"):
+            assert candidate_measure_ends(meter) == [measure_end_beat(meter)]
 
 
 class TestMeasureEndBeat:

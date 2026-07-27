@@ -104,6 +104,22 @@ def meter_is_disputed(meter: str | None) -> bool:
     return unit == 8 and count % 3 == 0 and count < 6
 
 
+def candidate_measure_ends(meter: str | None) -> list[float]:
+    """Every measure end this meter could have under the readings in play.
+
+    One value for an agreed meter; for a disputed one (:func:`meter_is_disputed`)
+    both — the compound reading the ghost layer applies and the simple reading
+    ``ingest_analysis`` and DCML apply. A sub-part is only worth *reporting* as
+    blocked on M17 when its repair differs between them; most sub-parts in a 3/8
+    movement need no repair under either reading and should stay silent, or the
+    report drowns the rows that matter (91 lines against the 2 that do).
+    """
+    count, unit = _parse_meter(meter)
+    if meter_is_disputed(meter):
+        return [float(count // 3 + 1), float(count + 1)]
+    return [measure_end_beat(meter)]
+
+
 def measure_end_beat(meter: str | None) -> float:
     """Exclusive beat upper bound of a full measure in the given meter (ADR-005).
 
@@ -256,13 +272,21 @@ async def _run(dry_run: bool) -> int:
                     row.p_beat_end,
                 )
                 if meter_is_disputed(row.meter):
-                    # Not a repair decision this script is entitled to make; the
-                    # beat scale itself is unsettled (M17).
-                    deferred += 1
-                    print(
-                        f"  DEFER {row.slug:20} {row.id}  {_fmt(child)}"
-                        f"  — {row.meter} beat count disputed (M17)"
-                    )
+                    # Not a repair decision this script is entitled to make: the
+                    # beat scale itself is unsettled (M17). Report only the rows
+                    # whose outcome actually depends on which reading wins — a
+                    # sub-part that needs no repair either way is not blocked.
+                    outcomes = {
+                        clamp_to_parent(child, parent, end)
+                        for end in candidate_measure_ends(row.meter)
+                    }
+                    if outcomes != {child}:
+                        deferred += 1
+                        print(
+                            f"  DEFER {row.slug:20} {row.id}  {_fmt(child)}"
+                            f"  — repair depends on the disputed {row.meter} beat"
+                            f" count (M17)"
+                        )
                     continue
 
                 measure_end = measure_end_beat(row.meter)
