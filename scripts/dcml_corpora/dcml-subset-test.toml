@@ -4,6 +4,13 @@
 # DCML repository.  Used by backend/tests/unit/test_prepare_dcml_corpus.py.
 #
 # Contains K331 movements 1–2 only (the minimal fixture subset).
+#
+# Movement `meter` is NOT carried here: it is derived from each movement's MEI
+# during preparation (`services.mei_meter.starting_meter`). It was hand-entered
+# once and disagreed with the notation for 21 of 54 movements (Track M18), which
+# put a wrong meter on 76 fragments. `key_signature` IS carried here, and must
+# be: MEI records no mode, so `sig="4f"` is A-flat major and F minor alike and
+# cannot be derived from the score at all.
 
 [composer]
 slug = "mozart"
@@ -34,12 +41,10 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Andante grazioso"
-meter = "6/8"
 mscx_filename = "K331-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Menuetto"
-meter = "3/4"
 mscx_filename = "K331-2.mscx"

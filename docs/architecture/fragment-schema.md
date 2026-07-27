@@ -231,10 +231,15 @@ Every record carries a top-level `version` integer. Code that reads `summary` mu
 Schema version. Currently always `1`. Increment on any breaking change. See versioning policy below.
 
 **`key`** *(string, required)*
-The notated key signature of the passage, as a canonical string: `"A major"`, `"D minor"`, `"F# major"`. Derived from the MEI `<key>` element. High-reliability; not flagged as auto.
+The notated key signature of the passage, as a canonical string: `"A major"`, `"D minor"`, `"F# major"`. **Taken from the movement record, not the notation** — MEI encodes `<keySig sig="4f"/>` with no mode, which is A♭ major and F minor alike, so key is not recoverable from the score however carefully it is parsed. It is curated per movement in the corpus manifest for exactly that reason (M6, Component 11 Step 10). High-reliability; not flagged as auto.
 
 **`meter`** *(string, required)*
-The notated time signature: `"4/4"`, `"3/8"`, `"6/8"`. Derived from MEI `<time>`. High-reliability; not flagged as auto.
+The notated time signature: `"4/4"`, `"3/8"`, `"6/8"`. **Derived from the MEI, at the fragment's own first measure** (`mc_start`). Two points, both learned the hard way (M18):
+
+- *From the notation, not the manifest.* Meter was hand-carried per movement alongside `key`, and 21 of 54 movements disagreed with their own score — which put a meter on 76 fragments that their bars were never in. Unlike key, meter is fully derivable, so nothing curates it now: `services.mei_meter.starting_meter` fills the movement record at prep time, and the manifests no longer carry the field.
+- *At the fragment, not at the movement.* A fragment sits in one place, so it records the meter sounding **there**. This differs from the movement's opening meter only where a movement changes meter mid-piece — two do (K331/i from mc 111, K284/iii from mc 248) — but labelling a fragment after such a change with the opening signature would simply be wrong.
+
+Written by `parseMeiMeterAtMc` on the tagging path and `services.mei_meter.meter_at_mc` on the server; the movement record is the fallback when the MEI cannot be read. High-reliability; not flagged as auto.
 
 **`actual_key`** *(object, optional)*
 The key inferred by music21's probabilistic key analysis (or carried over from a pre-existing tonicisation annotation where one is available). Distinct from `key` because passages may be in a key other than the movement's key signature (e.g. a tonicised region). Contains:

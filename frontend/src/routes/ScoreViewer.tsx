@@ -93,7 +93,12 @@ import type {
   FragmentUpdatePayload,
   SubPartPayload,
 } from '../services/fragmentApi';
-import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
+import {
+  parseMeiKey,
+  parseMeiMeter,
+  parseMeiMeterAtMc,
+  parseMeiMeterParts,
+} from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
 import { ApiError } from '../services/api';
 import { useStoredFragments } from '../hooks/useStoredFragments';
@@ -1548,13 +1553,19 @@ export default function ScoreViewer() {
     (formData: FormSubmitData, meiText: string): FragmentUpdatePayload | null => {
       if (!committedSelection) return null;
 
-      // summary.key / summary.meter come from the movement record, not the MEI
-      // (M6, Component 11 Step 10). The MEI encodes `<keySig sig="4f"/>` with no
-      // mode, which is A♭ major and F minor alike — parsing it stamped every
-      // fragment in the corpus "C major / 4/4". The MEI parse stays as the
-      // fallback for a movement whose curated metadata is missing.
+      // summary.key comes from the movement record, not the MEI (M6, Component
+      // 11 Step 10): the MEI encodes `<keySig sig="4f"/>` with no mode, which is
+      // A♭ major and F minor alike — parsing it stamped every fragment in the
+      // corpus "C major". The MEI parse stays as the fallback for a movement
+      // whose curated metadata is missing.
       const key = scoreTitle?.key_signature ?? parseMeiKey(meiText);
-      const meter = scoreTitle?.meter ?? parseMeiMeter(meiText);
+      // summary.meter comes from the MEI instead, at this fragment's own first
+      // measure (M18). The curated value was wrong for 21 of 54 movements, and
+      // even when right it names the movement's *opening* meter — which is the
+      // wrong label for a fragment sitting after a mid-piece change.
+      const meter = committedSelection.mc_start
+        ? parseMeiMeterAtMc(meiText, committedSelection.mc_start)
+        : (scoreTitle?.meter ?? parseMeiMeter(meiText));
 
       // Serialize property values: omit nulls, booleans become "true"/"false".
       const properties: Record<string, string | string[]> = {};

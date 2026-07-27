@@ -75,6 +75,7 @@ from models.ingestion import (  # noqa: E402
     MovementMetadata,
     WorkMetadata,
 )
+from services.mei_meter import starting_meter  # noqa: E402
 from services.mei_validator import validate_mei  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -1208,6 +1209,42 @@ def find_harmonies_tsv(repo_path: Path, mscx_path: Path) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
+def _movement_meter(am: AcceptedMovement) -> str | None:
+    """Return the movement's opening meter, read from its converted MEI.
+
+    The MEI is the notation, so it is the only authority on meter. Where the
+    manifest still carries a ``meter`` it is treated as a claim to check, not a
+    source: a disagreement is logged loudly and the notation wins. That check
+    exists because the manifest was wrong for 21 of 54 movements when this was
+    written (Track M18) — the entries are being removed as they are confirmed,
+    and this function is what makes their removal safe.
+
+    Args:
+        am: A movement that passed conversion, carrying its MEI bytes.
+
+    Returns:
+        The meter as ``"count/unit"``, or ``None`` when the MEI declares none —
+        in which case the manifest value, if any, is used as a last resort.
+    """
+    derived = starting_meter(am.mei_bytes)
+    claimed = am.entry.movement_toml.get("meter")
+
+    if derived is None:
+        if claimed:
+            _log(
+                f"  {am.entry.work_slug}/{am.entry.movement_slug}: MEI declares no "
+                f"meter; falling back to the manifest's {claimed!r}"
+            )
+        return claimed
+    if claimed and claimed != derived:
+        _log(
+            f"  {am.entry.work_slug}/{am.entry.movement_slug}: manifest says "
+            f"meter {claimed!r} but the score is in {derived!r} — using the score "
+            f"(remove the manifest entry)"
+        )
+    return derived
+
+
 def build_ingest_metadata(
     config: dict[str, Any],
     git_sha: str,
@@ -1241,7 +1278,14 @@ def build_ingest_metadata(
                 title=am.entry.movement_toml.get("title"),
                 tempo_marking=am.entry.movement_toml.get("tempo_marking"),
                 key_signature=am.entry.movement_toml.get("key_signature"),
-                meter=am.entry.movement_toml.get("meter"),
+                # Derived from the converted MEI, never from the manifest. The
+                # meter is a property of the notation, and hand-carrying it went
+                # badly: 21 of 54 movements disagreed with their own score
+                # (Track M18), two of them with fragments, which put a wrong
+                # meter on 76 fragments. `key_signature` above stays curated for
+                # the opposite reason — MEI records no mode, so `sig="4f"` is
+                # A-flat major and F minor alike and cannot be derived at all.
+                meter=_movement_meter(am),
                 mei_filename=f"mei/{am.entry.work_slug}/{am.entry.movement_slug}.mei",
                 harmonies_filename=(
                     f"harmonies/{am.entry.work_slug}/{am.entry.movement_slug}.tsv"

@@ -139,6 +139,40 @@ export function parseMeiMeter(meiText: string): string {
 }
 
 /**
+ * Extract the meter in force at one measure, as a "count/unit" string.
+ *
+ * A fragment sits at one place in a movement, so the meter it should record is
+ * the one sounding *there* — not the movement's opening signature. They differ
+ * only where a movement changes meter mid-piece (two in this corpus: K331/i at
+ * mc 111, K284/iii at mc 248), but a fragment tagged after such a change would
+ * otherwise be labelled with a meter its own bars are not in (Track M18).
+ *
+ * `mc` is the ADR-015 1-based document-order measure index. The scan walks
+ * measures in that order carrying the meter forward, because the normalizer
+ * writes a `<meterSig>` only where the meter *changes*, never restating it in
+ * the measures that follow. Mirrors `services.mei_meter.meter_at_mc` on the
+ * backend, which is what the repair script and corpus prep use.
+ *
+ * @example parseMeiMeterAtMc(meiText, 120) → "4/4"
+ */
+export function parseMeiMeterAtMc(meiText: string, mc: number): string {
+  const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+  const [count, unit] = parseMeiMeterParts(meiText);
+  let current: [number, number] = [count, unit];
+
+  const measures = doc.getElementsByTagName('measure');
+  const limit = Math.min(mc, measures.length);
+  for (let i = 0; i < limit; i++) {
+    const sig = measures[i]!.querySelector('meterSig');
+    if (!sig) continue;
+    const c = parseInt(sig.getAttribute('count') ?? '', 10);
+    const u = parseInt(sig.getAttribute('unit') ?? '', 10);
+    if (!isNaN(c) && !isNaN(u) && c > 0 && u > 0) current = [c, u];
+  }
+  return `${current[0]}/${current[1]}`;
+}
+
+/**
  * Extract the notated meter as a numeric pair [beatCount, beatUnit] from MEI text.
  *
  * Mirrors the probe order used by ghosts.ts parseGlobalMeter:

@@ -175,21 +175,26 @@ export function beatToFloat(
 // ---------------------------------------------------------------------------
 
 /**
- * Read the time signature for one MEI measure element.
+ * Read the time signature in force at one MEI measure element.
  *
- * Checks for a <meterSig count="…" unit="…"/> direct child before falling
- * back to the global scoreDef values. The MEI normalizer inserts <meterSig>
- * children at every meter change (mei-ingest-normalization.md §2), so this
- * check is sufficient for all normalised corpus files.
+ * Returns the measure's own <meterSig count="…" unit="…"/> when it has one,
+ * else the fallback pair unchanged. The MEI normalizer inserts <meterSig>
+ * children at every meter *change* only (mei-ingest-normalization.md §2), never
+ * restating it in the measures that follow — so the caller must pass **the
+ * meter currently in force**, not the movement's opening one, and thread the
+ * result forward as it walks measures in document order. Passing the global
+ * meter every time silently reverts to the opening signature at the first
+ * measure after a change (Track M18: two corpus movements change mid-piece —
+ * K331/i at mc 111, K284/iii at mc 248).
  *
  * @param meiMeasure     The MEI <measure> DOM element.
- * @param globalBeatCount Global beatCount from the active <scoreDef>.
- * @param globalBeatUnit  Global beatUnit from the active <scoreDef>.
+ * @param beatCount      beatCount currently in force (running, not global).
+ * @param beatUnit       beatUnit currently in force (running, not global).
  */
 export function getMeterForMeasure(
   meiMeasure: Element,
-  globalBeatCount: number,
-  globalBeatUnit: number,
+  beatCount: number,
+  beatUnit: number,
 ): [beatCount: number, beatUnit: number] {
   const localSig = meiMeasure.querySelector('meterSig');
   if (localSig) {
@@ -199,7 +204,7 @@ export function getMeterForMeasure(
       return [count, unit];
     }
   }
-  return [globalBeatCount, globalBeatUnit];
+  return [beatCount, beatUnit];
 }
 
 // ---------------------------------------------------------------------------
@@ -1198,8 +1203,21 @@ export function buildGhosts(
   // derivation so they can never drift from the barrier/volta builders or
   // the mc index. The dedup counter runs over ALL document measures, matching
   // those consumers even when a measure has no SVG group.
+  // Meter in force, carried forward across measures. The normalizer writes a
+  // <meterSig> only into the measure where the meter *changes*, so a measure
+  // without one inherits its predecessor's — not the opening signature (M18).
+  // Updated for every document measure, before the skip guards below, so a
+  // change inside an unrendered measure is not lost.
+  let curBeatCount = globalBeatCount;
+  let curBeatUnit  = globalBeatUnit;
+
   for (const walk of walkMeasureKeys(meiDoc)) {
     const meiMeasure = walk.el;
+
+    [curBeatCount, curBeatUnit] = getMeterForMeasure(
+      meiMeasure, curBeatCount, curBeatUnit,
+    );
+
     const measureId  = getMeiId(meiMeasure);
     if (!measureId) continue;
 
@@ -1218,9 +1236,8 @@ export function buildGhosts(
 
     const { barN, endingN, key } = walk;
 
-    const [beatCount, beatUnit] = getMeterForMeasure(
-      meiMeasure, globalBeatCount, globalBeatUnit,
-    );
+    const beatCount = curBeatCount;
+    const beatUnit  = curBeatUnit;
 
     // scoreTimeOnset from PPQ accumulation is 0-indexed from measure start, so
     // measureStartTime = 0 (computeBeatBoundaries subtracts it for localOnset).

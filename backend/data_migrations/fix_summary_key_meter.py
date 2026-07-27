@@ -12,14 +12,19 @@ parse fell through to its defaults and stamped **every fragment in the corpus**
 with ``"C major"`` / ``"4/4"``. Six of the eight movements carrying fragments are
 neither.
 
-The fix at the source now takes both values from the movement record, which is
-curated and correct. This script repairs the rows written before that. It is
-also the only way to get the *key* right at all: the MEI encodes
-``<keySig sig="4f"/>`` with no mode, which is A-flat major and F minor alike.
+**Key and meter come from different places, and that is the point.** ``key`` comes
+from the movement record: the MEI encodes ``<keySig sig="4f"/>`` with no mode,
+which is A-flat major and F minor alike, so it *cannot* be derived and has to be
+curated. ``meter`` is fully derivable, and curating it went badly — 21 of 54
+movements carried a meter their own notation contradicted (Track M18), and an
+earlier run of this script copied those into 76 fragments. It now reads the meter
+from the MEI, at the fragment's **own** measure rather than the movement's first:
+a fragment sits at one place, and two movements in the corpus change meter
+mid-piece. The movement record is the fallback for an unreadable MEI.
 
-Only rows that actually disagree with their movement are touched, and only when
-the movement has the value; a movement with a null ``key_signature`` or ``meter``
-leaves its fragments alone rather than writing a null into ``summary``.
+Only rows that actually disagree are touched, and only when the value is known; a
+movement with a null ``key_signature``, or with no meter anywhere, leaves its
+fragments alone rather than writing a null into ``summary``.
 
 Idempotent: re-running after a successful run reports zero changes.
 
@@ -41,6 +46,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from services.mei_meter import meter_at_mc  # noqa: E402
+from services.object_storage import make_storage_client  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 
@@ -57,13 +64,16 @@ async def _run(dry_run: bool) -> int:
     engine = create_async_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
     changed = 0
     checked = 0
+    mei_cache: dict[str, str | None] = {}
     try:
+        storage = make_storage_client()
         async with AsyncSession(engine) as session:
             rows = (
                 await session.execute(
                     text(
                         """
-                        SELECT f.id, f.summary, m.key_signature, m.meter,
+                        SELECT f.id, f.summary, f.mc_start, m.key_signature, m.meter,
+                               m.mei_object_key,
                                w.slug || '/' || m.slug AS slug
                           FROM fragment f
                           JOIN movement m ON m.id = f.movement_id
@@ -74,6 +84,18 @@ async def _run(dry_run: bool) -> int:
                 )
             ).all()
 
+            async def _mei(key: str) -> str | None:
+                """Fetch and cache a movement's MEI; None when unreadable."""
+                if key not in mei_cache:
+                    try:
+                        raw = await storage.get_mei(key)
+                        mei_cache[key] = (
+                            raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                        )
+                    except Exception:  # noqa: BLE001 — fall back to movement.meter
+                        mei_cache[key] = None
+                return mei_cache[key]
+
             for row in rows:
                 checked += 1
                 summary = row.summary
@@ -82,11 +104,20 @@ async def _run(dry_run: bool) -> int:
                 if not isinstance(summary, dict):
                     continue
 
+                # A fragment sits at one place in the movement, so it takes the
+                # meter in force *there* — which differs from the movement's
+                # opening meter only in the two movements that change mid-piece
+                # (M18, and Francisco's point when it was found). Falls back to
+                # the movement record when the MEI cannot be read.
+                xml = await _mei(row.mei_object_key)
+                local_meter = meter_at_mc(xml, row.mc_start) if xml else None
+                meter = local_meter or row.meter
+
                 updates: dict[str, str] = {}
                 if row.key_signature and summary.get("key") != row.key_signature:
                     updates["key"] = row.key_signature
-                if row.meter and summary.get("meter") != row.meter:
-                    updates["meter"] = row.meter
+                if meter and summary.get("meter") != meter:
+                    updates["meter"] = meter
                 if not updates:
                     continue
 

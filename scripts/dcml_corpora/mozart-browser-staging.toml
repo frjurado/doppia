@@ -20,6 +20,13 @@
 #
 # The full corpus (18 sonatas) is in mozart-piano-sonatas.toml.
 # Component 9 is responsible for ingesting the full corpus.
+#
+# Movement `meter` is NOT carried here: it is derived from each movement's MEI
+# during preparation (`services.mei_meter.starting_meter`). It was hand-entered
+# once and disagreed with the notation for 21 of 54 movements (Track M18), which
+# put a wrong meter on 76 fragments. `key_signature` IS carried here, and must
+# be: MEI records no mode, so `sig="4f"` is A-flat major and F minor alike and
+# cannot be derived from the score at all.
 
 [composer]
 slug = "mozart"
@@ -54,21 +61,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K279-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante"
-meter = "3/4"
 mscx_filename = "K279-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegro"
-meter = "3/8"
 mscx_filename = "K279-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -87,21 +91,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro assai"
-meter = "3/4"
 mscx_filename = "K280-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "6/8"
 mscx_filename = "K280-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Presto"
-meter = "3/8"
 mscx_filename = "K280-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -120,21 +121,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "3/4"
 mscx_filename = "K283-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante"
-meter = "4/4"
 mscx_filename = "K283-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Presto"
-meter = "3/8"
 mscx_filename = "K283-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -153,21 +151,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Andante grazioso"
-meter = "6/8"
 mscx_filename = "K331-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Menuetto"
-meter = "3/4"
 mscx_filename = "K331-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Alla Turca. Allegretto"
-meter = "2/4"
 mscx_filename = "K331-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -186,19 +181,16 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "3/4"
 mscx_filename = "K332-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "3/4"
 mscx_filename = "K332-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegro assai"
-meter = "2/4"
 mscx_filename = "K332-3.mscx"

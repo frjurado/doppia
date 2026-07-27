@@ -16,7 +16,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../meiParsing';
+import {
+  parseMeiKey,
+  parseMeiMeter,
+  parseMeiMeterAtMc,
+  parseMeiMeterParts,
+} from '../meiParsing';
 
 const MEI_NS = 'http://www.music-encoding.org/ns/mei';
 
@@ -101,5 +106,66 @@ describe('parseMeiMeter', () => {
     const mei = `<mei xmlns="${MEI_NS}"><music><body><mdiv><score>
       <scoreDef xml:id="a1"/></score></mdiv></body></music></mei>`;
     expect(parseMeiMeter(mei)).toBe('4/4');
+  });
+});
+
+describe('parseMeiMeterAtMc', () => {
+  /** A movement in `opening` that changes to `changed` at the given 1-based mc. */
+  function changingMei(
+    opening: [number, number],
+    changed: [number, number],
+    changeAtMc: number,
+    total = 6
+  ): string {
+    const measures = Array.from({ length: total }, (_, i) => {
+      const mc = i + 1;
+      const sig =
+        mc === changeAtMc
+          ? `<meterSig count="${changed[0]}" unit="${changed[1]}"/>`
+          : '';
+      return `<measure n="${mc}">${sig}<staff n="1"><layer n="1"/></staff></measure>`;
+    }).join('');
+    return `<mei xmlns="${MEI_NS}"><music><body><mdiv><score>
+      <scoreDef xml:id="a1"><staffGrp><staffDef xml:id="s1" n="1" lines="5">
+        <meterSig xml:id="m1" count="${opening[0]}" unit="${opening[1]}"/>
+      </staffDef></staffGrp></scoreDef>
+      <section>${measures}</section>
+    </score></mdiv></body></music></mei>`;
+  }
+
+  it('returns the opening meter for a movement that never changes', () => {
+    const mei = corpusStyleMei('1f', 3, 4);
+    expect(parseMeiMeterAtMc(mei, 1)).toBe('3/4');
+    expect(parseMeiMeterAtMc(mei, 99)).toBe('3/4');
+  });
+
+  it('returns the opening meter before the change', () => {
+    // The K331/i shape: 6/8 throughout, then 4/4 partway.
+    const mei = changingMei([6, 8], [4, 4], 4);
+    expect(parseMeiMeterAtMc(mei, 1)).toBe('6/8');
+    expect(parseMeiMeterAtMc(mei, 3)).toBe('6/8');
+  });
+
+  it('changes at the measure carrying the meterSig, not the one after', () => {
+    const mei = changingMei([6, 8], [4, 4], 4);
+    expect(parseMeiMeterAtMc(mei, 4)).toBe('4/4');
+  });
+
+  it('carries the new meter forward through measures that restate nothing', () => {
+    // The normalizer writes <meterSig> only at the change. Reverting to the
+    // opening meter one bar later is the bug this guards (M18).
+    const mei = changingMei([6, 8], [4, 4], 4);
+    expect(parseMeiMeterAtMc(mei, 5)).toBe('4/4');
+    expect(parseMeiMeterAtMc(mei, 6)).toBe('4/4');
+  });
+
+  it('past the last measure gives the meter last in force', () => {
+    expect(parseMeiMeterAtMc(changingMei([6, 8], [4, 4], 4), 999)).toBe('4/4');
+  });
+
+  it('falls back to 4/4 when the MEI declares no meter at all', () => {
+    const mei = `<mei xmlns="${MEI_NS}"><music><body><mdiv><score>
+      <scoreDef xml:id="a1"/></score></mdiv></body></music></mei>`;
+    expect(parseMeiMeterAtMc(mei, 1)).toBe('4/4');
   });
 });
