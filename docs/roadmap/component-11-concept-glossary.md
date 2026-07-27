@@ -1133,15 +1133,12 @@ Two constraints set the order:
 | 13F | Seed `harmony_gate`, re-seed the graph, deploy | Me | 13A, 13D |
 | 13G | Verification pass | Me | all |
 
-**13A — gate scope (decision first, then a small YAML change).** Which concepts
-should require confirmed harmony before approval? The natural candidates are the
-realised cadence types, where the harmonic content *is* the claim; the question is
-whether `Cadence` carries it (inherited by every subtype via `IS_SUBTYPE_OF`,
-including the evaded/abandoned/dominant-arrival family) or whether it sits on
-individual subtypes. Inheritance is how the query already resolves it — it walks
-ancestors — so putting it on the root is one line and catches everything, at the
-cost of gating types whose harmony may be deliberately partial. This is a
-modelling decision, so it needs Francisco before any YAML is written.
+**13A — gate scope. Decided (Francisco, 2026-07-27): `harmony_gate` goes on
+`Cadence`.** Every subtype inherits it through `IS_SUBTYPE_OF`, which is how
+`check_concepts_have_harmony_gate` already resolves the question — it walks
+ancestors — so this is one entry in `cadences.yaml` covering the whole domain,
+including the evaded/abandoned/dominant-arrival family. Written in 13F, not now:
+seeding it before the sweep would block re-approval of every fragment M1 touches.
 
 **13B — K282/ii (§ 9G; read that section first).** The MEI `@n` renumbering and
 the DCML harmony `mn` renumbering must land in the *same* prep + re-ingest, or the
@@ -1181,11 +1178,17 @@ shows restarted numbers with section labels in both bracket and sidebar; the nin
 errata are visibly corrected; `validate_movement_sections.py` and
 `validate_graph.py` pass; the approval gate behaves as intended in both directions.
 
-**Open question to settle before 13C starts:** *where* does the editorial work
-happen. The campaign fragments live on staging, so the corrections must be made
-there — which means staging is the system of record for this data, and nothing in
-the deploy flow copies it back. Worth confirming that is intended, and that there
-is a backup, before spending an editorial session on it.
+**Where the editorial work happens — settled (Francisco, 2026-07-27): directly on
+staging.** The campaign fragments live there, so that is the system of record for
+this data; nothing in the deploy flow copies it back to local.
+
+*Already under way.* Between two runs of the sub-part repair on 2026-07-27 the
+K279/ii fragments were re-saved through the editor, which rewrites parent and
+children transactionally — so the three overflowing sub-parts the first dry-run
+found there no longer exist, replaced by correctly bounded ones written by the
+Step 11 frontend. Incidental confirmation that the fix works on real data through
+the real editor, and a reminder that a dry-run's row list goes stale the moment
+someone opens the editor.
 
 ---
 
