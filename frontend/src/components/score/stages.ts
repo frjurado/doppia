@@ -88,19 +88,6 @@ export interface StageAssignment {
   confirmed: boolean;
 
   /**
-   * Anchored = the annotator positioned this bracket *in this session*, by
-   * dragging its split handle or re-enabling it from absent.
-   *
-   * Only anchored stages hard-clamp the main-bracket drag (`computeResizeClamp`).
-   * `confirmed` used to carry both meanings, which is what made a stored
-   * fragment unshrinkable: restoring it marked every stage confirmed to suppress
-   * limbo warnings, and the clamp then read those same flags as "the annotator
-   * pinned these here" and refused to let the bracket move (ADR-011 §6,
-   * Component 11 Step 12). The two meanings are separate flags now.
-   */
-  anchored: boolean;
-
-  /**
    * User explicitly toggled this optional stage absent via the absent toggle
    * (tagging-tool-design.md §7.3). Required stages cannot be absent.
    */
@@ -292,7 +279,6 @@ export function prePopulateStagesAtGrid(
       defaultWeight: stage.default_weight,
       bounds: { barStart, beatStart, barEnd, beatEnd, keyStart, keyEnd },
       confirmed: false,
-      anchored: false,
       absent: false,
       orphaned: false,
       error: false,
@@ -409,7 +395,6 @@ export function prePopulateStages(
       defaultWeight: stage.default_weight,
       bounds,
       confirmed: false,
-      anchored: false,
       absent: false,
       orphaned: false,
       error: false,
@@ -440,9 +425,7 @@ export function prePopulateStages(
  *  - The nearest neighbour gives back proportional space based on default_weight.
  *    The restored stage takes the donor's old outer boundary exactly; only the
  *    newly created boundary between donor and restored stage is measure-aligned.
- *  - The re-enabled stage is marked confirmed so it doesn't immediately limbo,
- *    and anchored: re-enabling is an explicit act of placement in this session,
- *    so the restored bracket clamps the main-bracket drag like a dragged one.
+ *  - The re-enabled stage is marked confirmed so it doesn't immediately limbo.
  *
  * Required stages cannot be toggled absent (guard: returns unchanged).
  */
@@ -508,7 +491,7 @@ export function toggleStageAbsent(
     if (!donor) {
       return assignments.map(a =>
         a.stageId === stageId
-          ? { ...a, absent: false, confirmed: true, anchored: true }
+          ? { ...a, absent: false, confirmed: true }
           : a,
       );
     }
@@ -517,7 +500,7 @@ export function toggleStageAbsent(
       if (a.stageId === stageId) {
         // Restore from donor based on weight proportion.
         if (!donor.bounds) {
-          return { ...a, absent: false, confirmed: true, anchored: true };
+          return { ...a, absent: false, confirmed: true };
         }
         const donorBars = donor.bounds.barEnd - donor.bounds.barStart + 1;
         const totalWeight = stage.defaultWeight + donor.defaultWeight || 1;
@@ -547,7 +530,6 @@ export function toggleStageAbsent(
           absent: false,
           bounds: restoredBounds,
           confirmed: true,
-          anchored: true,
         };
       }
 
@@ -638,36 +620,4 @@ export function reconcileWithNewConcept(
   }
 
   return updated;
-}
-
-// ---------------------------------------------------------------------------
-// Main-bracket resize response (Component 7 Step 3)
-// ---------------------------------------------------------------------------
-
-/**
- * Return the tightest bar range that contains all **anchored** (active) stage
- * bounds. Null when no anchored stages exist, meaning no clamp is needed.
- *
- * The caller should pass this to AnnotationSession.setMinBarRange() so that
- * the main-bracket drag cannot shrink below the point that would force a
- * bracket the annotator just placed outside the selection
- * (tagging-tool-design.md §4, Component 7 Step 3).
- *
- * Keyed on `anchored`, not `confirmed` (Component 11 Step 12): stages restored
- * from a stored fragment are confirmed but not anchored, so editing one is now
- * as free as creating it. They redistribute against the resize on the stage
- * layout frame instead — see `respondToMainResize`, which does keep its boundary
- * pinning on `confirmed` so a surviving boundary stays exactly where it was.
- */
-export function computeResizeClamp(
-  assignments: StageAssignment[],
-): { minBarStart: number; maxBarEnd: number } | null {
-  const anchored = assignments.filter(
-    a => a.anchored && !a.absent && !a.orphaned && a.bounds !== null,
-  );
-  if (anchored.length === 0) return null;
-
-  const minBarStart = Math.min(...anchored.map(a => a.bounds!.barStart));
-  const maxBarEnd   = Math.max(...anchored.map(a => a.bounds!.barEnd));
-  return { minBarStart, maxBarEnd };
 }

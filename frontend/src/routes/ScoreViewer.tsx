@@ -41,7 +41,6 @@ import type {
 } from '../components/score/stages';
 import {
   chooseStageGrid,
-  computeResizeClamp,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -431,13 +430,6 @@ function buildStageAssignmentsFromSubParts(
       // Treat restored stages as confirmed so they don't trigger "limbo"
       // warnings — an annotator settled these bounds in an earlier session.
       confirmed: bounds !== null,
-      // But *not* anchored: nobody placed them in this session, so they must not
-      // hard-clamp the main-bracket drag. This is the M0 "shrink jumps back"
-      // defect (Component 11 Step 12, Option 1) — the clamp read `confirmed` as
-      // "the annotator pinned this here" and a restored fragment, whose stages
-      // fill it completely, could therefore never be shrunk at all. They now
-      // redistribute against the resize on the stage layout frame instead.
-      anchored: false,
       absent: bounds === null && !stage.required,
       orphaned: false,
       error: false,
@@ -1820,15 +1812,6 @@ export default function ScoreViewer() {
     const complete = stageGridBlocked ? false : computeStagesComplete(stageAssignments);
     session.setStagesComplete(complete);
   }, [stageAssignments, stageGridBlocked]);
-
-  // Component 7 Step 3 — keep the annotator's hard-clamp in sync with the
-  // current confirmed stage bounds.  Fires whenever assignments change so
-  // the clamp is always up to date (e.g. after a split-handle drag confirms
-  // a stage or after an absent-toggle frees space).
-  useEffect(() => {
-    const clamp = computeResizeClamp(stageAssignments);
-    annotationSessionRef.current?.setMinBarRange(clamp);
-  }, [stageAssignments]);
 
   // When the committed selection changes, reconcile stage assignments with
   // the new main bracket bounds or (re-)attempt auto-grid pre-population.

@@ -40,7 +40,6 @@ import type { StageAssignment } from '../stages';
 import type { BeatSlot } from '../stages';
 import {
   chooseStageGrid,
-  computeResizeClamp,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -556,81 +555,6 @@ describe('prePopulateStagesAtGrid', () => {
     // All assignments have non-null beat coords for internal stages
     expect(result[1]!.bounds!.beatStart).not.toBeNull();
     expect(result[2]!.bounds!.beatStart).not.toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// computeResizeClamp
-// ---------------------------------------------------------------------------
-
-describe('computeResizeClamp', () => {
-  it('returns null when no anchored stages exist', () => {
-    const assignments = makePacAssignments(); // all anchored=false
-    expect(computeResizeClamp(assignments)).toBeNull();
-  });
-
-  it('returns null for empty assignments', () => {
-    expect(computeResizeClamp([])).toBeNull();
-  });
-
-  it('single anchored stage: minBarStart = barStart, maxBarEnd = barEnd', () => {
-    const assignments = makePacAssignments().map((a, i) =>
-      i === 1 ? { ...a, anchored: true } : a,
-    );
-    const clamp = computeResizeClamp(assignments);
-    const stage = assignments.find(a => a.anchored)!;
-    expect(clamp).not.toBeNull();
-    expect(clamp!.minBarStart).toBe(stage.bounds!.barStart);
-    expect(clamp!.maxBarEnd).toBe(stage.bounds!.barEnd);
-  });
-
-  it('multiple anchored stages: min of barStarts and max of barEnds', () => {
-    const assignments = makePacAssignments().map(a =>
-      a.order === 1 || a.order === 4 ? { ...a, anchored: true } : a,
-    );
-    const first = assignments.find(a => a.order === 1)!;
-    const last  = assignments.find(a => a.order === 4)!;
-    const clamp = computeResizeClamp(assignments);
-    expect(clamp!.minBarStart).toBe(first.bounds!.barStart);
-    expect(clamp!.maxBarEnd).toBe(last.bounds!.barEnd);
-  });
-
-  it('ignores absent anchored stages', () => {
-    const assignments = makePacAssignments().map((a, i) =>
-      i === 0 ? { ...a, anchored: true, absent: true, bounds: null } : a,
-    );
-    // Only the absent+anchored stage exists → null (no non-absent anchored)
-    expect(computeResizeClamp(assignments)).toBeNull();
-  });
-
-  it('ignores orphaned anchored stages', () => {
-    const assignments = makePacAssignments().map((a, i) =>
-      i === 0 ? { ...a, anchored: true, orphaned: true } : a,
-    );
-    expect(computeResizeClamp(assignments)).toBeNull();
-  });
-
-  // ── Step 12: confirmed alone must not clamp (the M0 "shrink jumps back") ──
-
-  it('does not clamp for stages that are confirmed but not anchored', () => {
-    // The shape a restored fragment takes: every stage confirmed (so no limbo
-    // warning) but none anchored. Before Step 12 this made the main bracket
-    // unshrinkable, because the restored stages fill the fragment exactly.
-    const assignments = makePacAssignments().map(a => ({ ...a, confirmed: true }));
-    expect(computeResizeClamp(assignments)).toBeNull();
-  });
-
-  it('clamps once the annotator anchors one of those restored stages', () => {
-    const restored = makePacAssignments().map(a => ({ ...a, confirmed: true }));
-    const dragged = restored.map(a =>
-      a.order === 2 ? { ...a, anchored: true } : a,
-    );
-    const stage = dragged.find(a => a.order === 2)!;
-    const clamp = computeResizeClamp(dragged);
-    expect(clamp).toEqual({
-      minBarStart: stage.bounds!.barStart,
-      maxBarEnd: stage.bounds!.barEnd,
-    });
   });
 });
 

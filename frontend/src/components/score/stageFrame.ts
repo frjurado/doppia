@@ -405,8 +405,7 @@ function boundsFromRun(slots: StageSlot[], lo: number, hi: number): StageBounds 
  * the physical measure keys, so geometry and mc resolution never fall back to
  * `@n` lookups); an empty run collapses an optional stage to absent. Absent
  * and orphaned assignments pass through unchanged. Stages whose id is in
- * `confirmIds` are marked confirmed *and anchored* — the annotator positioned
- * them here, by hand, in this session.
+ * `confirmIds` are marked confirmed — the annotator positioned them here.
  *
  * Containment (I8) and outer-edge pinning (I7) hold by construction: runs
  * partition the frame, whose ends are the selection's exact endpoints.
@@ -426,9 +425,7 @@ export function frameToAssignments(
     const lo = j === 0 ? 0 : boundaries[j - 1]!;
     const hi = j === K - 1 ? slots.length : boundaries[j]!;
     const bounds = boundsFromRun(slots, lo, hi);
-    const placed = confirmIds?.has(a.stageId) ?? false;
-    const confirmed = a.confirmed || placed;
-    const anchored = a.anchored || placed;
+    const confirmed = a.confirmed || (confirmIds?.has(a.stageId) ?? false);
 
     if (bounds === null) {
       // Zero-width run: optional stages collapse to absent (I10). A required
@@ -437,12 +434,10 @@ export function frameToAssignments(
       // but flag the error so submission blocks (computeStagesComplete) rather
       // than writing a required sub-part that lies outside its parent.
       derived.set(a.stageId, a.required
-        ? { ...a, confirmed, anchored, error: true }
-        : { ...a, absent: true, bounds: null, confirmed, anchored });
+        ? { ...a, confirmed, error: true }
+        : { ...a, absent: true, bounds: null, confirmed });
     } else {
-      derived.set(a.stageId, {
-        ...a, bounds, absent: false, error: false, confirmed, anchored,
-      });
+      derived.set(a.stageId, { ...a, bounds, absent: false, error: false, confirmed });
     }
   }
 
@@ -541,16 +536,14 @@ const GRID_RANK: Record<ResolutionMode, number> = { measure: 0, beat: 1, subbeat
  *  - The frame's outer edges are the new selection's exact endpoints, so I7
  *    holds at every resolution with no drift (STG-06, STG-07).
  *  - Required stages keep at least one slot (the normalisation pass shifts
- *    pinned anchors minimally when the hard-clamp escape valve forces it);
+ *    pinned anchors minimally when the escape valve forces it);
  *    optional stages left without space collapse to absent.
  *
- * Pinning stays keyed on `confirmed`, deliberately — unlike the hard clamp,
- * which moved to `anchored` in Component 11 Step 12. A stage restored from a
- * stored fragment must no longer *block* a shrink, but while its slot survives
- * the resize it should stay exactly where its annotator put it, and the ghost
- * layer is rebuilt (with a fresh selection object) on every re-render, zoom, and
- * progressive page load. Pinning on `anchored` would redistribute a stored
- * fragment's stage boundaries on a plain browser zoom.
+ * Pinning is keyed on `confirmed`: a stage whose slot survives the resize stays
+ * exactly where its annotator put it, and only boundaries the shrink actually
+ * crosses redistribute. There is no longer a hard clamp on top of this — the
+ * main bracket moves freely and this function absorbs the consequence, which is
+ * what "redistribute like creation" was always supposed to mean (Step 12).
  */
 export function respondToMainResize(
   assignments: StageAssignment[],

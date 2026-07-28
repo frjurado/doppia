@@ -392,7 +392,6 @@ describe('frameToAssignments', () => {
       defaultWeight: 1,
       bounds: { barStart: 0, beatStart: null, barEnd: 0, beatEnd: null },
       confirmed: false,
-      anchored: false,
       absent: false,
       orphaned: false,
       error: false,
@@ -447,16 +446,12 @@ describe('frameToAssignments', () => {
     expect(out.find(x => x.stageId === 'C')!.bounds).toMatchObject({ barStart: 3, barEnd: 4 });
   });
 
-  it('marks the stages in confirmIds confirmed and anchored', () => {
+  it('marks the stages in confirmIds confirmed', () => {
     const slots = buildStageSlots(fourBarSel(), fourBarLayer(), 'measure');
     const assignments = makeAssignments([['A', true], ['B', true]]);
     const out = frameToAssignments(assignments, assignments, slots, [2], new Set(['A']));
-    const a = out.find(x => x.stageId === 'A')!;
-    const b = out.find(x => x.stageId === 'B')!;
-    // A was dragged here by hand, so it both leaves limbo and starts clamping
-    // the main-bracket drag (Component 11 Step 12).
-    expect([a.confirmed, a.anchored]).toEqual([true, true]);
-    expect([b.confirmed, b.anchored]).toEqual([false, false]);
+    expect(out.find(x => x.stageId === 'A')!.confirmed).toBe(true);
+    expect(out.find(x => x.stageId === 'B')!.confirmed).toBe(false);
   });
 
   it('flags error on a required stage left with an empty run', () => {
@@ -496,7 +491,7 @@ describe('projectBoundaries', () => {
       stageId: id, stageName: id, order: i + 1, required: true,
       displayMode: 'stage', containmentMode: 'contiguous', defaultWeight: 1,
       bounds: { barStart: 0, beatStart: null, barEnd: 0, beatEnd: null },
-      confirmed: false, anchored: false, absent: false, orphaned: false, error: false,
+      confirmed: false, absent: false, orphaned: false, error: false,
     }));
     // B starts at m8#1 (slot 2) — barN alone could not say which slot.
     const derived = frameToAssignments(assignments, assignments, slots, [1, 2]);
@@ -512,7 +507,7 @@ describe('projectBoundaries', () => {
       displayMode: 'stage', containmentMode: 'contiguous', defaultWeight: 1,
       // B's bounds reference a bar outside the frame — stale state.
       bounds: { barStart: i === 0 ? 1 : 99, beatStart: null, barEnd: i === 0 ? 2 : 99, beatEnd: null },
-      confirmed: false, anchored: false, absent: false, orphaned: false, error: false,
+      confirmed: false, absent: false, orphaned: false, error: false,
     }));
     const { boundaries } = projectBoundaries(assignments, slots);
     expect(boundaries).toHaveLength(1);
