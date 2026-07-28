@@ -86,11 +86,11 @@ The cadence editor doesn't work properly:
 These are just small errors on the fragments recorded. As I can barely use the fragment editor, they are documented here. To be edited at some point:
 
 - General: harmonies are not confirmed in any places - check all.
-- 279/i m. 9-10: V = 64 (no comma), then V7 (grade, type major).
-- 279/i m. 11-12: Final Tonic harmony is not confirmed, an extra one is shown?
-- 279/i m. 77: commentary has a typo.
-- 279/i m. 81: delete the IV6?
-- 279/i m. 93: stages are not ok.
-- 279/ii, m. 3: evaded no text, summary is generic (C major + 4/4)
-- 279/ii, m. 15: wrong stages
-- 279/ii, m. 22: mistake on commentary (3 failed attemps).
+- 279/i m. 9-10: V = 64 (no comma), then V7 (grade, type major). [64 fixed, V7 not added yet, because I don't know what happens around the last two harmonies, VII/VI & VI, that don't appear on sidebar during edition.]
+- 279/i m. 11-12: Final Tonic harmony is not confirmed, an extra one is shown? [SOLVED]
+- 279/i m. 77: commentary has a typo. [SOLVED]
+- 279/i m. 81: delete the IV6? [Changed opinion; I'm leaving it that way.]
+- 279/i m. 93: stages are not ok. [SOLVED]
+- 279/ii, m. 3: evaded no text, summary is generic (C major + 4/4) [Not editorial, these are bugs dealt with elsewhere]
+- 279/ii, m. 15: wrong stages [SOLVED]
+- 279/ii, m. 22: mistake on commentary (3 failed attemps). [SOLVED]

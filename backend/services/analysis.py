@@ -104,22 +104,45 @@ class MovementAnalysisService:
         events: list[dict] = analysis.events
 
         if mc_start is not None or mc_end is not None:
-            # An event with no mc cannot be placed on this axis; excluding it is
-            # correct — including it would reintroduce the ambiguity the mc path
-            # exists to remove.
-            if mc_start is not None:
-                events = [
+            lo = mc_start if mc_start is not None else 1
+            hi = (
+                mc_end
+                if mc_end is not None
+                else max(
+                    (ev["mc"] for ev in events if ev.get("mc") is not None), default=lo
+                )
+            )
+            in_mc = [
+                ev for ev in events if ev.get("mc") is not None and lo <= ev["mc"] <= hi
+            ]
+
+            # An event with no mc still has to be reachable. Manual inserts were
+            # written without one, so filtering on mc alone hid them from the
+            # editor while the fragment detail and the in-score overlay — which
+            # both fall back to mn — went on showing them: visible everywhere
+            # except where they could be corrected (found on 279/i m. 10).
+            #
+            # Admitting them by the mn span of the surviving mc window keeps the
+            # ambiguity out: an event that *has* an mc is still judged on mc
+            # alone, so a restarting movement cannot pull in the other section's
+            # harmony. Only mc-less events consult mn, and only within the bars
+            # this window actually covers.
+            mns = [ev["mn"] for ev in in_mc if ev.get("mn") is not None]
+            if mns:
+                mn_lo, mn_hi = min(mns), max(mns)
+                orphans = [
                     ev
                     for ev in events
-                    if ev.get("mc") is not None and ev["mc"] >= mc_start
+                    if ev.get("mc") is None
+                    and ev.get("mn") is not None
+                    and mn_lo <= ev["mn"] <= mn_hi
                 ]
-            if mc_end is not None:
-                events = [
-                    ev
-                    for ev in events
-                    if ev.get("mc") is not None and ev["mc"] <= mc_end
-                ]
-            return events
+                if orphans:
+                    in_mc = sorted(
+                        in_mc + orphans,
+                        key=lambda ev: (ev.get("mn", 0), ev.get("beat", 0.0)),
+                    )
+            return in_mc
 
         if bar_start is not None:
             events = [ev for ev in events if ev.get("mn", 0) >= bar_start]
@@ -319,12 +342,71 @@ class MovementAnalysisService:
 
         return event
 
+    async def confirm_events(
+        self,
+        movement_id: uuid.UUID,
+        payloads: list[HarmonyEventConfirm],
+    ) -> list[dict]:
+        """Mark many events reviewed=True in a single transaction.
+
+        The batch form of :meth:`confirm_event`, and the one the "Confirm all"
+        control uses. Confirming N events as N parallel requests loses all but
+        one: each is a read-modify-write of the whole ``events`` array, so the
+        last writer's copy — in which only its own event is flipped — wins. Doing
+        the batch in one pass makes that impossible rather than merely unlikely.
+
+        Unmatched entries are skipped rather than failing the batch: an event may
+        have been deleted or edited between the panel's last fetch and the click,
+        and losing the other twenty confirmations to that is worse than silently
+        skipping one.
+
+        Args:
+            movement_id: UUID of the movement to modify.
+            payloads: Identities of the events to confirm.
+
+        Returns:
+            The updated event dicts, in the order matched.
+
+        Raises:
+            MovementNotFoundError: No analysis record for this movement.
+        """
+        updated: list[dict] = []
+        async with self._db.begin():
+            analysis = await self._load(movement_id)
+            events: list[dict] = list(analysis.events)
+
+            for payload in payloads:
+                try:
+                    idx = _find_event(
+                        events, payload.mn, payload.volta, payload.beat, payload.mc
+                    )
+                except HarmonyEventNotFoundError:
+                    continue
+                event = dict(events[idx])
+                event["reviewed"] = True
+                events[idx] = event
+                updated.append(event)
+
+            if updated:
+                self._persist(analysis, events)
+
+        return updated
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     async def _load(self, movement_id: uuid.UUID) -> MovementAnalysis:
-        """Load the analysis record or raise MovementNotFoundError.
+        """Load the analysis record for mutation, or raise MovementNotFoundError.
+
+        Takes a **row lock** (``FOR UPDATE``). Every mutation here is a
+        read-modify-write of the entire ``events`` array, so two concurrent
+        writers without the lock both read the old array, each apply their own
+        single change, and the second write silently discards the first. That is
+        not hypothetical: it is what made "Confirm all" appear to confirm one
+        event out of six — the panel fired one request per event in parallel and
+        all but the last were lost. `confirm_events` now does the whole batch in
+        one transaction, and this lock makes any *other* concurrent pair safe too.
 
         Raises:
             MovementNotFoundError: No ``movement_analysis`` row for this
@@ -332,7 +414,9 @@ class MovementAnalysisService:
                 analysed yet).
         """
         result = await self._db.execute(
-            select(MovementAnalysis).where(MovementAnalysis.movement_id == movement_id)
+            select(MovementAnalysis)
+            .where(MovementAnalysis.movement_id == movement_id)
+            .with_for_update()
         )
         analysis = result.scalar_one_or_none()
         if analysis is None:

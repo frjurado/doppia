@@ -228,3 +228,25 @@ export async function confirmHarmonyEvent(
     HarmonyEventOutSchema
   );
 }
+
+/**
+ * Confirm several harmony events in one request.
+ *
+ * Must not be expressed as N parallel `confirmHarmonyEvent` calls: every write
+ * replaces the movement's whole `events` array, so concurrent writers overwrite
+ * each other and all but one confirmation is silently lost. That is what made
+ * "Confirm all" appear to confirm a single event.
+ *
+ * Entries the server can no longer match are skipped, so the returned list may
+ * be shorter than the payload.
+ */
+export async function confirmHarmonyEvents(
+  movementId: string,
+  events: HarmonyEventConfirmPayload[]
+): Promise<HarmonyEventOut[]> {
+  return apiFetch(
+    `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/confirm-batch`,
+    { method: 'POST', body: JSON.stringify({ events }) },
+    HarmonyEventListSchema
+  );
+}

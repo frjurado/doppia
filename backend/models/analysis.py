@@ -255,3 +255,14 @@ class HarmonyEventConfirm(BaseModel):
     volta: int | None = None
     beat: float
     mc: int | None = None
+
+
+class HarmonyEventConfirmBatch(BaseModel):
+    """Several events to confirm in one transaction.
+
+    Exists because confirming N events as N requests loses all but one of them —
+    each write replaces the whole ``events`` array, so concurrent writers
+    overwrite each other. The "Confirm all" control sends this.
+    """
+
+    events: list[HarmonyEventConfirm] = Field(min_length=1)

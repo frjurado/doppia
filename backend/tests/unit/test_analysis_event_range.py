@@ -66,9 +66,13 @@ class TestGetEventsByMcRange:
     async def test_mc_range_selects_the_menuetto(
         self, service: MovementAnalysisService
     ) -> None:
-        """The Menuetto's measures, same notated bar numbers, different mc."""
+        """The Menuetto's measures, same notated bar numbers, different mc.
+
+        The trailing "ii" is the fixture's manual insert at mn 30, which belongs
+        to these bars — see ``test_an_mc_less_event_is_reachable_…`` below.
+        """
         events = await service.get_events(uuid.uuid4(), mc_start=29, mc_end=30)
-        assert _numerals(events) == ["I", "V"]
+        assert _numerals(events) == ["I", "V", "ii"]
 
     @pytest.mark.asyncio
     async def test_mc_bounds_win_over_bar_bounds(
@@ -86,16 +90,50 @@ class TestGetEventsByMcRange:
         assert _numerals(events) == ["V2", "V7"]
 
     @pytest.mark.asyncio
-    async def test_mc_path_excludes_events_without_mc(
+    async def test_an_mc_less_event_is_reachable_in_the_window_covering_its_bar(
         self, service: MovementAnalysisService
     ) -> None:
-        """An event with no mc cannot be placed on this axis, so it is excluded.
+        """A manual insert has no mc, and must still be editable.
 
-        Including it would reintroduce exactly the ambiguity the mc path removes.
+        Filtering on mc alone hid these from the harmony panel while the fragment
+        detail and the in-score overlay — which both fall back to mn — went on
+        showing them: visible everywhere except the one place they could be
+        corrected. Found on 279/i m. 10, whose two hand-added harmonies could not
+        be opened for editing.
         """
-        events = await service.get_events(uuid.uuid4(), mc_start=1, mc_end=999)
-        assert "manual" not in [e.get("source") for e in events]
-        assert len(events) == 4
+        events = await service.get_events(uuid.uuid4(), mc_start=29, mc_end=30)
+        assert _numerals(events) == ["I", "V", "ii"]
+
+    @pytest.mark.asyncio
+    async def test_admitting_it_does_not_reopen_the_ambiguity(
+        self, service: MovementAnalysisService
+    ) -> None:
+        """The Trio window must not pull in a Menuetto-bar manual event.
+
+        The mn-30 insert belongs to the Menuetto. Asking for the Trio by mc must
+        not serve it, or the mc path would be back to guessing — which is the
+        whole reason it exists. Only mc-less events consult mn, and only within
+        the bars the mc window itself covers.
+        """
+        events = await service.get_events(uuid.uuid4(), mc_start=77, mc_end=78)
+        assert _numerals(events) == ["V2", "V7"]
+
+    @pytest.mark.asyncio
+    async def test_an_event_with_an_mc_is_still_judged_on_mc_alone(
+        self, service: MovementAnalysisService
+    ) -> None:
+        """Placed events never fall back to mn, whatever their bar number."""
+        events = await service.get_events(uuid.uuid4(), mc_start=77, mc_end=77)
+        assert _numerals(events) == ["V2"]
+
+    @pytest.mark.asyncio
+    async def test_results_stay_in_musical_order_when_an_orphan_is_admitted(
+        self, service: MovementAnalysisService
+    ) -> None:
+        """The mn-30 beat-3 insert sorts after the mn-30 beat-1 event."""
+        events = await service.get_events(uuid.uuid4(), mc_start=29, mc_end=30)
+        positions = [(e.get("mn"), e.get("beat")) for e in events]
+        assert positions == sorted(positions)
 
 
 class TestGetEventsByBarRange:

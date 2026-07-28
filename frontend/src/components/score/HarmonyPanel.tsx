@@ -35,6 +35,7 @@ import {
   deleteHarmonyEvent,
   editHarmonyChord,
   getHarmonyEvents,
+  confirmHarmonyEvents,
   insertHarmonyEvent,
   moveHarmonyBoundary,
 } from '../../services/analysisApi';
@@ -362,6 +363,35 @@ export default function HarmonyPanel({
     [movementId, fetchEvents, onHarmonyUpdated]
   );
 
+  /**
+   * The machine measure coordinate (ADR-015) for a notated bar number, resolved
+   * from the events already loaded for this panel's range.
+   *
+   * Exact when the bar already holds an event. Otherwise interpolated from the
+   * nearest neighbour that does — correct wherever mc and mn advance together,
+   * which is everywhere except across a split-measure complement. Returns null
+   * when nothing in range can place the bar, which is the honest answer: better
+   * a null the backfill can repair later than a confident wrong mc.
+   */
+  const resolveMcForBar = useCallback(
+    (mn: number): number | null => {
+      const placed = events.filter(
+        (e): e is HarmonyEventOut & { mc: number } => e.mc != null
+      );
+      if (placed.length === 0) return null;
+      const exact = placed.find((e) => e.mn === mn);
+      if (exact) return exact.mc;
+      const nearest = placed.reduce((best, e) =>
+        Math.abs(e.mn - mn) < Math.abs(best.mn - mn) ? e : best
+      );
+      const guess = nearest.mc + (mn - nearest.mn);
+      if (mcStart != null && guess < mcStart) return null;
+      if (mcEnd != null && guess > mcEnd) return null;
+      return guess;
+    },
+    [events, mcStart, mcEnd]
+  );
+
   const handleConfirmAll = useCallback(async () => {
     const unreviewed = events.filter((e) => !e.reviewed);
     if (unreviewed.length === 0) return;
@@ -369,25 +399,32 @@ export default function HarmonyPanel({
     const keys = new Set(unreviewed.map(eventKey));
     setBusyKeys(keys);
 
-    const results = await Promise.allSettled(
-      unreviewed.map((event) =>
-        confirmHarmonyEvent(movementId, {
+    // One request for the whole batch, never one per event. Each write replaces
+    // the movement's entire `events` array, so N parallel confirms overwrite one
+    // another and only the last survives — which is why this used to report
+    // success and then show a single confirmed event.
+    let updates: HarmonyEventOut[] = [];
+    try {
+      updates = await confirmHarmonyEvents(
+        movementId,
+        unreviewed.map((event) => ({
           mn: event.mn,
           volta: event.volta ?? null,
           beat: event.beat,
           mc: event.mc ?? null,
-        })
-      )
-    );
-
-    const updates: HarmonyEventOut[] = results
-      .filter((r): r is PromiseFulfilledResult<HarmonyEventOut> => r.status === 'fulfilled')
-      .map((r) => r.value);
+        }))
+      );
+    } catch {
+      // Fall through to the refetch below, which shows whatever actually stuck.
+    }
 
     setEvents((prev) => prev.map((e) => updates.find((u) => eventKey(u) === eventKey(e)) ?? e));
     setBusyKeys(new Set());
+    // Re-read rather than trusting the optimistic merge: the panel's idea of
+    // what is confirmed is exactly what was wrong before.
+    await fetchEvents();
     onHarmonyUpdated?.();
-  }, [events, movementId, onHarmonyUpdated]);
+  }, [events, movementId, fetchEvents, onHarmonyUpdated]);
 
   // ── Edit ─────────────────────────────────────────────────────────────────
 
@@ -538,9 +575,19 @@ export default function HarmonyPanel({
 
     const invInt = parseInt(insertForm.inversion || '0', 10);
 
+    // Record the machine coordinate, not only the bar number. An event written
+    // without `mc` is invisible to every mc-scoped query — including this panel,
+    // which is the one place it could be corrected (M6 follow-up, found on
+    // 279/i m. 10). The bar being inserted into is inside the panel's own range,
+    // so its mc is already known from the events loaded here; when the bar holds
+    // no events yet, it is derived from a neighbour, and only a bar with no
+    // neighbour in range falls back to null.
+    const mcForInsert = resolveMcForBar(mnInt);
+
     const payload: HarmonyEventInsertPayload = {
       mn: mnInt,
       beat: beatFloat,
+      mc: mcForInsert,
       numeral: insertForm.numeral.trim(),
       local_key: insertForm.localKey || null,
       root: rootInt,
@@ -570,7 +617,15 @@ export default function HarmonyPanel({
     } finally {
       setInsertSaving(false);
     }
-  }, [insertForm, movementId, selectionRange, fetchEvents, onHarmonyUpdated, t]);
+  }, [
+    insertForm,
+    movementId,
+    selectionRange,
+    fetchEvents,
+    resolveMcForBar,
+    onHarmonyUpdated,
+    t,
+  ]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 

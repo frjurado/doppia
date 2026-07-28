@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import Response
 from models.analysis import (
     HarmonyEventConfirm,
+    HarmonyEventConfirmBatch,
     HarmonyEventDeleteRequest,
     HarmonyEventEditChord,
     HarmonyEventInsert,
@@ -357,3 +358,34 @@ async def confirm_harmony_event(
     """
     event = await service.confirm_event(movement_id, payload)
     return HarmonyEventOut.model_validate(event)
+
+
+@router.post(
+    "/{movement_id}/analysis/events/confirm-batch",
+    response_model=list[HarmonyEventOut],
+    dependencies=[require_role("editor")],
+    summary="Confirm many harmony events as reviewed, atomically",
+    response_description="The events that were matched and confirmed.",
+)
+async def confirm_harmony_events(
+    payload: HarmonyEventConfirmBatch,
+    movement_id: uuid.UUID = Path(..., description="UUID of the movement to modify"),
+    service: MovementAnalysisService = Depends(get_analysis_service),
+) -> list[HarmonyEventOut]:
+    """Mark several events ``reviewed=True`` in one transaction.
+
+    What "Confirm all" calls. Sending the same batch as one request per event
+    loses all but one of them: each write replaces the whole ``events`` array, so
+    concurrent writers overwrite each other. Entries that no longer match any
+    event are skipped rather than failing the batch.
+
+    Args:
+        payload: The events to confirm.
+        movement_id: UUID of the movement to modify.
+        service: Analysis service (injected).
+
+    Returns:
+        The confirmed :class:`~models.analysis.HarmonyEventOut` list.
+    """
+    events = await service.confirm_events(movement_id, payload.events)
+    return [HarmonyEventOut.model_validate(e) for e in events]
