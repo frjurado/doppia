@@ -64,10 +64,13 @@ _SECTIONS: dict[tuple[str, str], list[tuple[str, int, int]]] = {
         ("Menuetto", 1, 48),
         ("Trio", 49, 101),
     ],
-    # Menuetto I & II. The numbering runs continuously (0-72) in the DCML
-    # encoding where the NMA restarts at Menuetto II — a source erratum repaired
-    # separately (Component 11 Step 13). Sectioning it is useful either way, and
-    # is what the repair will re-key against.
+    # Menuetto I & II. The DCML encoding numbered these continuously (0-72) where
+    # the NMA restarts at Menuetto II; that source erratum was repaired in
+    # Component 11 Step 13B (`services.bar_renumber`), so Menuetto II now counts
+    # 0-40 from its own upbeat. These sections are therefore load-bearing, not
+    # merely editorial: bars 0-32 exist twice in the movement and the label is
+    # what tells a reader which one is meant. mc is untouched by the repair, so
+    # the bounds below are unchanged by it.
     # dir:"Menuetto I" at mc 1, dir:Fine at mc 34, dir:"Menuetto II" at mc 35,
     # dir:"Menuetto I da capo" at mc 76.
     ("k282", "movement-2"): [

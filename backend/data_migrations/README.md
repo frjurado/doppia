@@ -11,6 +11,7 @@ Two kinds live here:
    - `fix_summary_key_meter.py` (M6 — key and meter written from the wrong place)
    - `clamp_subpart_bounds.py` (M7 — stage bounds overflowing their parent fragment)
    - `fix_movement_meter.py` (M18 — curated movement meter contradicting the notation)
+   - `renumber_movement_bars.py` (§ 9G — an editorial bar renumbering the edition requires; rewrites `@n` and harmony `mn`, never `mc`)
 
    **Order matters between these.** `fix_movement_meter.py` corrects the movement record; `fix_summary_key_meter.py` reads it (as the fallback for an unreadable MEI) and writes fragment summaries. Run movement-level repairs before fragment-level ones, or the second pass propagates values the first was about to fix — which is exactly how M18 reached 76 fragments.
 

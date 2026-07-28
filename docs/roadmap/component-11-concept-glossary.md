@@ -1140,12 +1140,65 @@ ancestors — so this is one entry in `cadences.yaml` covering the whole domain,
 including the evaded/abandoned/dominant-arrival family. Written in 13F, not now:
 seeding it before the sweep would block re-approval of every fragment M1 touches.
 
-**13B — K282/ii (§ 9G; read that section first). Precondition re-checked against
-staging 2026-07-27: the movement has no fragments and no sub-parts**, so no
-coordinate migration is needed and § 9A's finding still holds. (A first count said
-one parent fragment; that was an artefact of my own query — a `LEFT JOIN` with no
-match yields one all-null row, and `parent_fragment_id IS NULL` is true of it.
-`count(f.id) FILTER (...)` is the right shape.) The MEI `@n` renumbering and
+**13B — K282/ii (§ 9G) ✅ done 2026-07-27.** Precondition re-checked against
+staging: the movement has no fragments and no sub-parts, so no coordinate
+migration is needed and § 9A's finding holds. (A first count said one parent
+fragment; that was an artefact of my own query — a `LEFT JOIN` with no match
+yields one all-null row, and `parent_fragment_id IS NULL` is true of it.
+`count(f.id) FILTER (...)` is the right shape.)
+
+*What the encoding actually looks like.* Investigating first changed the shape of
+the job. The movement is 76 measures in 3/4 with `@n` 0–72 plus three `X`
+complements — and every `X` is **beat 3 of a bar split across a repeat barline**,
+carrying its partner's `mn`, which is correct DCML practice rather than an error:
+
+```
+mc  1  @n=0    24 ppq (1 beat)   anacrusis, harmony mn=0 beat 3
+mc 13  @n=12   48 ppq (beats 1-2) ┐ one bar, split by the repeat
+mc 14  @n=X1   24 ppq (beat 3)    ┘ harmony mn=12 twice, beats 1 and 3
+mc 34  @n=32   48 ppq            ┐ "Fine"
+mc 35  @n=X2   24 ppq            ┘ "Menuetto II" — its upbeat completes bar 32
+mc 51  @n=48   48 ppq            ┐ split bar 48
+mc 52  @n=X3   24 ppq            ┘
+mc 76  @n=72   48 ppq            "Menuetto I da capo"
+```
+
+So the erratum is narrower than "renumber the movement": only Menuetto II's bars
+are wrong, and its first measure is an upbeat sharing a bar with Menuetto I's last.
+
+**Decision (Francisco, 2026-07-27): the upbeat is bar 0, then 1–40** — mirroring
+Menuetto I, whose own one-beat anacrusis is `@n` 0. Chosen over leaving the upbeat
+as an `X` complement, which would also have left the first measure of Menuetto II
+unrepresentable in `bar_start` (INTEGER — **M16**), so "tag Menuetto II from the
+top" would have stayed impossible. Under this scheme every bar number is an
+integer and M16 does not bite here.
+
+| mc | before | after |
+|---|---|---|
+| 35 | `X2` | `0` (upbeat) |
+| 36–51 | 33–48 | 1–16 |
+| 52 | `X3` | `X1` (complement of bar 16) |
+| 53–76 | 49–72 | 17–40 |
+
+*As implemented.* `services.bar_renumber` holds the editorial declaration and one
+plan builder, applied in two places so they cannot diverge: **corpus prep** (the
+durable path — a future re-ingest reproduces this rather than reverting it, and it
+rewrites the harmonies TSV's `mn` in the same pass) and
+**`data_migrations/renumber_movement_bars.py`** (the immediate path — the DCML
+harmonies TSV is not stored, so a real re-ingest needs the source repository and a
+full re-upload; this reaches the same end state now and the next re-ingest
+converges on it). The migration refuses to run on a movement that has fragments,
+since moving `@n` under a stored `bar_start` is a separate editorial decision.
+Only the normalised MEI object is rewritten; `mei_original_object_key` keeps the
+file as it arrived, which is still a true record.
+
+Verified: 76 measures still (mc never moves), 74 numbered bars over two runs of
+0–32 and 0–40, two `X1` complements — one per section — each reporting its partner
+bar, and harmony `mn` following `@n` at every measure. 70 harmony events moved.
+`validate_movement_sections.py`'s standing K282/ii warning ("has 2 sections but its
+numbering does not restart") is **gone**, which is the real confirmation: the
+sections are now load-bearing, because bars 0–32 exist twice and only the label
+says which is meant. The MEI `@n` renumbering and
 the DCML harmony `mn` renumbering must land in the *same* prep + re-ingest, or the
 sidebar prints bar numbers the score does not show. `mc` is untouched throughout,
 which is what makes it safe — rendering, fragment ranges, previews, and the

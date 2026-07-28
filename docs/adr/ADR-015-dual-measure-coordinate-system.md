@@ -98,6 +98,21 @@ Considered for movements without DCML data. Rejected as premature: for Phase 1 a
 > K331/ii renders all its harmony on the Menuetto and shows Menuetto harmonies
 > for a Trio fragment. Moving that filter to an `mc` range is the resolution of
 > the deferral this ADR notes in § Consequences (Component 11 Step 10).
+>
+> **Addendum (2026-07-27, Component 11 Step 13B).** A *second* movement now has
+> duplicate `@n`, and deliberately: **K282/ii** was renumbered to restart at
+> Menuetto II, because the NMA restarts there while the DCML encoding ran 0–72
+> straight through, so our bar labels disagreed with the edition a reader has open.
+> Its two runs are now **0–32 (Menuetto I, mc 1–34) and 0–40 (Menuetto II,
+> mc 35–76)**. This is the first case of these coordinates being used
+> *deliberately* rather than defensively: the renumbering moves `@n` and the
+> harmony `mn` together and leaves `mc` alone, which is exactly why it is safe —
+> rendering, fragment ranges, previews, and the mc-stability check are untouched by
+> construction. See `services.bar_renumber`. Two editorial rules worth recording:
+> an X-prefixed complement keeps its partner's `mn` across the restart, and the
+> measure a restart lands on takes the new first number outright even when it is
+> currently a complement (K282/ii's Menuetto II opens on the upbeat that completes
+> Menuetto I's final bar, and that upbeat is the new section's bar 0).
 
 Some staging movements carry **duplicate `@n` values outside `<ending>` elements** because the source MuseScore-to-MEI export writes a section out twice rather than expressing it as a repeat structure. The clearest case is **K.331/movement-2 (Menuetto)**, whose 48 bars are numbered 1–48 twice (a written-out repeat / multi-section restart — *not* the "minuet+trio renumbering" the issue backlog assumed). The same structure produces two unpaired `rptend` barlines.
 

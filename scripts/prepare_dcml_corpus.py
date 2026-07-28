@@ -75,6 +75,12 @@ from models.ingestion import (  # noqa: E402
     MovementMetadata,
     WorkMetadata,
 )
+from services.bar_renumber import (  # noqa: E402
+    RESTARTS,
+    apply_to_harmonies_tsv,
+    apply_to_mei,
+    renumber_plan,
+)
 from services.mei_meter import starting_meter  # noqa: E402
 from services.mei_validator import validate_mei  # noqa: E402
 
@@ -120,6 +126,9 @@ class AcceptedMovement:
     entry: MovementEntry
     mei_bytes: bytes
     harmonies_path: Path | None
+    #: Rewritten harmonies TSV text, when an editorial pass changed it (bar
+    #: renumbering — § 9G). ``None`` means ship ``harmonies_path`` unchanged.
+    harmonies_text: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1376,7 +1385,9 @@ def assemble_zip(
             ws = am.entry.work_slug
             ms = am.entry.movement_slug
             zf.writestr(f"mei/{ws}/{ms}.mei", am.mei_bytes)
-            if am.harmonies_path is not None:
+            if am.harmonies_text is not None:
+                zf.writestr(f"harmonies/{ws}/{ms}.tsv", am.harmonies_text)
+            elif am.harmonies_path is not None:
                 zf.write(am.harmonies_path, f"harmonies/{ws}/{ms}.tsv")
 
 
@@ -1467,18 +1478,42 @@ def main() -> None:
             for note in clef_notes:
                 _log(f"  {label}: {note}")
 
+            harmonies_path = find_harmonies_tsv(args.repo_path, entry.mscx_path)
+
+            # Editorial bar renumbering (§ 9G). The MEI `@n` and the harmony `mn`
+            # must move together or the sidebar prints numbers the score does not
+            # show, so both are rewritten here from one plan. `mc` is document
+            # position and is untouched, which is what makes this safe.
+            restarts = RESTARTS.get(f"{entry.work_slug}/{entry.movement_slug}")
+            harmonies_text: str | None = None
+            if restarts:
+                plan = renumber_plan(mei_bytes, restarts)
+                if not plan:
+                    _err(f"bar renumbering produced no plan for {label}")
+                    sys.exit(1)
+                mei_bytes = apply_to_mei(mei_bytes, plan)
+                first_mc = min(plan)
+                _log(
+                    f"  {label}: bar numbers restart at mc {first_mc} "
+                    f"(@n {plan[first_mc][0]}); {len(plan)} measures renumbered"
+                )
+                if harmonies_path is not None:
+                    harmonies_text = apply_to_harmonies_tsv(
+                        harmonies_path.read_text(encoding="utf-8"), plan
+                    )
+
             report = validate_mei(mei_bytes)
             if not report.is_valid:
                 for e in report.errors:
                     _err(f"MEI validation failed for {label}: [{e.code}] {e.message}")
                 sys.exit(1)
 
-            harmonies_path = find_harmonies_tsv(args.repo_path, entry.mscx_path)
             accepted.append(
                 AcceptedMovement(
                     entry=entry,
                     mei_bytes=mei_bytes,
                     harmonies_path=harmonies_path,
+                    harmonies_text=harmonies_text,
                 )
             )
 
