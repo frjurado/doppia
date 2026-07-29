@@ -1105,6 +1105,18 @@ with the glossary:
 and rides alongside M1. Per § Decisions 3 the glossary **may launch with
 placeholders** on any unreviewed tail — the review pass is not a code gate.
 
+> **✅ done 2026-07-29 (445fc5e).** All 18 cadence concepts, so the placeholder
+> path is now unexercised in that domain (the 16 stubs in the other three domains
+> still carry it). The pass was mostly *subtractive*: the definitions had been
+> written for annotators and carried graph-modelling rationale, which moved to
+> `cadences-design.md`. Conventions settled there under § Terminology and prose
+> conventions — the YAML prose is authoritative over that doc's draft *Definition
+> seed* lines, and property-schema `description` fields stay in the editorial
+> register because they never reach `ConceptDetailResponse`. Two deferrals filed
+> (bibliographic references as their own field, property-value label
+> capitalisation) plus a concept `notes` field in the Phase-2 entry backlog, for
+> the reader-facing analytical distinctions a one-paragraph definition can't hold.
+
 #### Sub-steps, ownership, and order (drafted 2026-07-27)
 
 Most of this step is **editorial judgement, which is Francisco's and cannot be
@@ -1125,12 +1137,12 @@ Two constraints set the order:
 
 | # | Sub-step | Owner | Depends on |
 |---|---|---|---|
-| 13A | Decide the gate's scope: which concepts declare `harmony_gate` | **Francisco** (decision), me (writes the YAML) | — |
-| 13B | K282/ii renumbering: prep + re-ingest + fragment migration (§ 9G) | Me; Francisco confirms the editorial call | — |
-| 13C | M1 errata: the nine per-fragment corrections | **Francisco** | Step 12 (done) |
-| 13D | M2 sweep: confirm harmony inside each fragment's range | **Francisco** | 13C (same fragments, one sitting) |
-| 13E | `definition_reviewed` pass over the launch set | **Francisco** | — (not a code gate) |
-| 13F | Seed `harmony_gate`, re-seed the graph, deploy | Me | 13A, 13D |
+| 13A | Decide the gate's scope: which concepts declare `harmony_gate` ✅ | **Francisco** (decision), me (writes the YAML) | — |
+| 13B | K282/ii renumbering: prep + re-ingest + fragment migration (§ 9G) ✅ | Me; Francisco confirms the editorial call | — |
+| 13C | M1 errata: the nine per-fragment corrections ✅ | **Francisco** | Step 12 (done) |
+| 13D | M2 sweep: confirm harmony inside each fragment's range ✅ | **Francisco** | 13C (same fragments, one sitting) |
+| 13E | `definition_reviewed` pass over the launch set ✅ | **Francisco** | — (not a code gate) |
+| 13F | Seed `harmony_gate`, re-seed the graph, deploy ✅ | Me | 13A, 13D |
 | 13G | Verification pass | Me | all |
 
 **13A — gate scope. Decided (Francisco, 2026-07-27): `harmony_gate` goes on
@@ -1227,9 +1239,27 @@ fragment, so the pass is: open fragment → read → confirm all → next. Event
 movement-level, so overlapping fragments do not double the work. Riding this with
 13C means each fragment is opened once, not twice.
 
-**13F — seed and deploy.** Add the `harmony_gate` entries decided in 13A, re-seed,
-redeploy, and confirm the gate now blocks an unreviewed fragment and passes a
-reviewed one.
+**13F — seed and deploy. ✅ done 2026-07-30 (e1221aa, deployed).** One
+`capture_extensions` entry on `Cadence` (`field: harmony`, `type: harmony_gate`,
+`required: true`), per 13A. Verified against the live graph that inheritance
+resolves as intended: all nine taggable cadence concepts gate, while the four
+stage concepts, `ClosingSection`, `StandingOnTheDominant`, and the
+harmonic-function stubs do not — neither `CONTAINS` nor `FOLLOWS` is an
+inheritance edge, so only the `IS_SUBTYPE_OF` subtree inherits. A tag list mixing
+a gated with an ungated concept gates.
+
+Deployed and re-seeded on staging (34 concepts, 0 new; `validate_graph.py` 10/10),
+which is also what made the 13E definitions public. Gate exercised in both
+directions on staging through the real `_run_approval_gate`, read-only: a
+`submitted` PAC on K331/ii mm. 17–18 blocks with 3 unreviewed events, an
+`approved` PAC on K279/i mm. 2–3 passes with 0.
+
+Exposure measured *before* seeding, since the gate is only safe to declare once
+the sweep is done: 14 of 383 fragments still hold unreviewed harmony in range, on
+K281/i and K331/i–iii, and **none is approved** — all draft or submitted. So no
+already-public example was retroactively invalidated. Those 14 now need their
+harmony confirmed before approval, which is the gate doing its job rather than a
+regression.
 
 **13G — verification.** Glossary examples render with confirmed harmony; K282/ii
 shows restarted numbers with section labels in both bracket and sidebar; the nine
