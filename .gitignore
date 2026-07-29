@@ -59,5 +59,10 @@ docs/.guide/
 # Spike output (generated SVGs from scripts/spike_verovio_incipit.py)
 scripts/spike_output/
 
-# pyvis vendored assets (copied by scripts/visualize_domain.py at render time)
+# pyvis output — scripts/visualize_domain.py writes <domain>.html plus a lib/
+# assets tree into the current directory, and CLAUDE.md has us run it from the
+# repo root after every YAML change. Root-level *.html only; the tracked mockup
+# and frontend HTML live in subdirectories.
+/lib/
 backend/lib/
+/*.html

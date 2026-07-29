@@ -17,7 +17,18 @@ repos:
     hooks:
       - id: seed-dry-run
         name: Validate seed YAML (dry-run)
-        language: system
+        # language: python (not system) so the hook runs in its own cached
+        # env. Under `system` the entry resolved whatever `python` came first
+        # on PATH — on a dev machine that is rarely the backend venv, so every
+        # seed-YAML commit failed with ModuleNotFoundError: No module named
+        # 'yaml'. The deps below are scripts/seed.py's module-level import
+        # chain (yaml, pydantic, and neo4j via backend.graph.queries.seed);
+        # keep them pinned to backend/requirements.txt.
+        language: python
+        additional_dependencies:
+          - pyyaml==6.0.2
+          - pydantic==2.10.3
+          - neo4j==5.26.0
         entry: python scripts/seed.py --all --dry-run
         files: ^backend/seed/domains/.*\.yaml$
         pass_filenames: false
