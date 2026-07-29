@@ -314,6 +314,21 @@ concepts:
         order: 12
       - schema: Unison
         order: 13
+    capture_extensions:
+      # A review gate, not stored data: nothing lands in
+      # summary.concept_extensions, because the harmony already lives in
+      # movement_analysis. Its only effect is that approving a cadence fragment
+      # requires every event in the fragment's range to carry reviewed: true.
+      #
+      # Declared once on the abstract root: check_concepts_have_harmony_gate
+      # walks IS_SUBTYPE_OF ancestors, so every subtype inherits it — including
+      # the evaded / abandoned / dominant-arrival family (§ 13A).
+      - field: harmony
+        type: harmony_gate
+        required: true
+        description: >-
+          Harmony events in the fragment's range must be reviewed before
+          approval.
 
   # ── Authentic-cadence branch ───────────────────────────────────────────────
 
