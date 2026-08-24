@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-24 / 2026-08-25
 **Author:** Francisco (raw lists) · investigation & triage in Claude Code
-**Source:** Francisco's read-through of the glossary and the tagging tool after Step 13F, in two batches: a mostly-bug batch (items 1–7) and a mostly-design batch (items 8–13).
+**Source:** Francisco's read-through of the glossary and the tagging tool after Step 13F, in two batches: a mostly-bug batch (items 1–7) and a mostly-design batch (items 8–13), plus item 14 split out of a mis-triaged entry on 2026-08-25.
 **Status:** batch A dispositions decided and **all fix-now items landed** (`510c06f`, `4152e1c`). **Batch B deferred in full to Component 12** (Francisco, 2026-08-25) — none of it implemented. Signalled in `../../roadmap/phase-2.md` § Component 12 → *Carried in from the Component 11 triage*, which is the planning surface; this report stays the grounded detail behind each item.
 
 This report is the canonical surface for both batches, following the pattern of
@@ -113,6 +113,49 @@ What does not exist: **any consumer**. The only code that reads `capture_extensi
 
 **Recommendation: Phase-2 backlog item**, scoped as: expose declarations on the concept payload → render a control per type (`harmony_object` = a harmony picker, `fragment_pointer` = a fragment picker pre-populated from the nearest preceding tagged match, per `capture_extensions.md` § Fragment Pointers) → validate on write → surface on the read models. Note in the entry that `harmony_gate` is already done, so the remaining work is the two *capturing* types. **Disposition: defer to Phase 2**, and record it in the backlog with the close-out.
 
+### 14. Six of the ten taggable cadence concepts render an unlabelled bracket
+
+**Added 2026-08-25, correcting this report.** The `issues-deferred-for-phase-2.md`
+entry "279/ii m. 3: evaded no text" was first written up here as the missing
+`post_evasion_harmony` capture extension (item 13). Francisco corrected that:
+they are two different problems. This is the other one, and it is still live.
+
+**Finding.** A stored fragment's bracket takes its label from the concept's
+*alias*, with no fallback:
+
+```tsx
+// FragmentOverlay.tsx — parent bracket
+alias: frag.primary_concept_alias,
+…
+{seg.isFirst && alias !== null && (<span className={bracketStyles.aliasLabel}>{alias}</span>)}
+```
+
+and **six of the ten taggable cadence concepts declare no alias**:
+`EvadedCadence`, `AbandonedCadence`, `ReopeningHalfCadence`, `DominantArrival`,
+`ClosingSection`, `StandingOnTheDominant`. Only PAC, IAC, DC and HC have one, so
+only those four brackets carry text; the other six are silently nameless.
+
+The asymmetry is the tell. The *sub-part* path in the same file already solves
+this deliberately — `subPartLabel` falls back `alias ?? name ?? "Part N"`, and
+its docstring says so explicitly ("the whole-score stage lane is never
+nameless"). The parent path never got the same treatment.
+
+**Options.**
+
+| | Cost | Trade-off |
+|---|---|---|
+| (a) Fall back to the concept name on the parent bracket | One line, matches `subPartLabel` | "Standing on the Dominant" is long for a bracket label — which is why aliases exist |
+| (b) Add aliases to the six concepts in `cadences.yaml` | YAML only | Several have no conventional abbreviation; inventing one is an editorial call |
+| (c) Both | — | Aliases where a conventional short form exists, name as the guaranteed floor so nothing is ever nameless |
+
+**Recommendation: (c).** The fallback is the correctness fix and should land
+regardless — a nameless bracket is never the intended outcome; aliases are then
+a display improvement on top, wherever Francisco is happy to coin one. Note this
+is the same underlying gap as item 8: the display needs a short label and the
+data model only reliably carries a long one. Worth solving once, together.
+
+**Disposition: deferred to Component 12**, with item 8.
+
 ---
 
 ## Carried forward from batch A
@@ -126,7 +169,7 @@ What does not exist: **any consumer**. The only code that reads `capture_extensi
 | Disposition | Items |
 |---|---|
 | **Landed in Component 11** | 1, 2, 3, 4, 5, 7 |
-| **Deferred to Component 12** | 8 (short names), 9 (grouping), 10 (button row), 11 (radio/checkbox design check), 12 (blocked notice), 13 (capture extensions) |
+| **Deferred to Component 12** | 8 (short names), 9 (grouping), 10 (button row), 11 (radio/checkbox design check), 12 (blocked notice), 13 (capture extensions), 14 (unlabelled brackets) |
 | **Phase-2 backlog** | 6 (glossary hierarchy), collapsible property groups, bracket-geometry unification |
 
 Deferring batch B in full was Francisco's call (2026-08-25). The items are

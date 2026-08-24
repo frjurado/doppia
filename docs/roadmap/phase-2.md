@@ -252,7 +252,7 @@ fallback layout on phones (a Component 16 design decision).
 ### Carried in from the Component 11 triage (2026-08-25)
 
 Francisco's read-through of the glossary and the tagging tool after Step 13F
-produced thirteen items. The bugs were fixed inside Component 11; **the six
+produced fourteen items. The bugs were fixed inside Component 11; **the seven
 below were deferred here in full** rather than landing piecemeal at the
 component's close. Each is triaged, grounded in code, and costed in
 [`../reports/component-11-reports/component-11-triage.md`](../reports/component-11-reports/component-11-triage.md)
@@ -266,12 +266,14 @@ component's close. Each is triaged, grounded in code, and costed in
 | 11 | **Radio and checkbox pairs look alike** — an exclusive choice and a multi-select are visually indistinguishable, so the control does not say whether a second click replaces or adds | Same design pass | Presentation switches on **value count, not cardinality** (≤2 inline, >2 popover), which is by design. With 0px radii and tonal-only depth the usual circle-vs-square cue is weak. A design check, not a code fix |
 | 12 | **A fragment too short for its stages shows no stages at all**, silently | The one bug-like item; small, but wants the design pass's copy | **The detection is already written and correct**: `computeAutoPrePopulate` sets `blocked`, empties the assignments, and its own docstring says the caller "should surface a UI note" — the caller stores it, uses it to block submission, and never renders it. Only the notice is missing |
 | 13 | **Capture extensions are declared, seeded, and never captured** | Genuinely unowned; scheduled here rather than thematically at home | Four are declared (`post_evasion_harmony`, `prior_ac_pointer`, `prior_cadence_pointer` ×2) and persisted on the concept node; `summary.concept_extensions` is an always-empty slot. `harmony_gate` is the only implemented type — and the only one needing no capture UI. For `ReopeningHalfCadence` the pointer is not optional detail: per `cadences-design.md` the concept exists *because* the relationship is captured that way, so tagging one today records the concept but not what makes it that concept |
+| 14 | **Six of the ten taggable cadence concepts render an unlabelled bracket** — `EvadedCadence`, `AbandonedCadence`, `ReopeningHalfCadence`, `DominantArrival`, `ClosingSection`, `StandingOnTheDominant` | Small correctness fix plus an editorial call; pairs with item 8 | The parent bracket labels from the concept *alias* with **no fallback**, and those six declare none. The sub-part path in the same file already falls back `alias ?? name ?? "Part N"` on purpose — the parent path never got it. Same underlying gap as item 8: the display needs a short label and the model only reliably carries a long one; worth solving once, together |
 
 Two of these are a natural fit for this component and two are a scheduling
 decision rather than a thematic one, which is worth knowing when Component 12 is
 planned: **10 and 11 belong to the design pass this component already owns**
-(the topbar redesign folds in F8–F13 and M5, § Scope above). **8, 9 and 12** are
-small and independent — they could ride any component. **13 is a tagging-tool
+(the topbar redesign folds in F8–F13 and M5, § Scope above). **8, 9, 12 and 14** are
+small and independent — they could ride any component, and 14 is a one-line
+correctness fix that pairs naturally with 8. **13 is a tagging-tool
 capture feature** with no relationship to user infrastructure; it sits here
 because nothing else owns it, and it may be worth re-homing when the Phase-2
 sequence is firmed up. `component-15-exercises.md` already flags it as a
