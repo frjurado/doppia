@@ -267,6 +267,49 @@ describe('FragmentOverlay — pointer-events', () => {
     expect(buttons).toHaveLength(1);
   });
 
+  it('renders a click target on every system a fragment spans, not just the first', async () => {
+    // Component 11 triage item 4: the target was gated on seg.isFirst, so a
+    // fragment crossing a system break was unselectable from the continuation
+    // part of its own bracket.
+    const user = userEvent.setup();
+    const handler = vi.fn();
+    const twoSystems = makeMockGhostLayer([
+      { barN: 1, left: 0, width: 100, systemTop: 50 },
+      { barN: 2, left: 100, width: 100, systemTop: 50 },
+      { barN: 3, left: 0, width: 100, systemTop: 200 }, // wraps to system 2
+    ]);
+    render(
+      <FragmentOverlay
+        fragments={[makeFragment('frag-wrap', 1, 3)]}
+        ghostLayer={twoSystems}
+        onBracketClick={handler}
+      />
+    );
+
+    // Both systems' segments carry a target. Queried through the segments
+    // rather than by accessible name: the continuation button is deliberately
+    // aria-hidden, so a name-based query cannot see it — which is the point.
+    const opening = screen.getByTestId('stored-bracket-frag-wrap').querySelector('button');
+    const continuation = screen.getByTestId('stored-bracket-frag-wrap-1').querySelector('button');
+    expect(opening).not.toBeNull();
+    expect(continuation).not.toBeNull();
+
+    // The continuation segment is clickable and reports the same fragment.
+    await user.click(continuation!);
+    expect(handler).toHaveBeenCalledWith('frag-wrap');
+
+    // …but only the opening segment is reachable by keyboard or screen reader:
+    // one fragment should appear once in the tab order, however many systems it
+    // happens to span.
+    expect(opening).not.toHaveAttribute('aria-hidden');
+    expect(continuation).toHaveAttribute('aria-hidden', 'true');
+    expect(continuation).toHaveAttribute('tabindex', '-1');
+    // Exactly one is exposed to assistive tech.
+    expect(
+      screen.getAllByRole('button', { name: 'Open fragment details', hidden: true })
+    ).toHaveLength(1);
+  });
+
   it('click target calls onBracketClick with the fragment id', async () => {
     const user = userEvent.setup();
     const handler = vi.fn();
@@ -666,6 +709,51 @@ describe('FragmentOverlay — sub-beat stages in compound meter', () => {
     expect(bRight - bLeft).toBeCloseTo(50);
     // Abutting, no overlap.
     expect(aRight).toBeLessThanOrEqual(bLeft + 1e-6);
+  });
+
+  /** A sub-part with only one endpoint constrained — the shape a stage takes
+   *  when prePopulateStages pins beats on the selection's outer edges only. */
+  function halfBoundPart(
+    id: string,
+    beatStart: number | null,
+    beatEnd: number | null
+  ): FragmentListItem {
+    return { ...makeFragment(id, 1, 1), beat_start: beatStart, beat_end: beatEnd };
+  }
+
+  it('stops a stage at its beat-precise end even when its start is unconstrained', async () => {
+    // Component 11 triage item 5: storedResolution read beatStart alone, so a
+    // null start demoted the whole fragment to measure resolution and the
+    // stage ran to the end of its bar (the Final Tonic symptom).
+    const user = userEvent.setup();
+    const parent: FragmentListItem = {
+      ...makeFragment('parent-hb', 1, 1),
+      sub_parts: [halfBoundPart('finalTonic', null, 2.0)],
+    };
+    render(<FragmentOverlay fragments={[parent]} ghostLayer={makeCompoundLayer()} />);
+    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+
+    const el = screen.getByTestId('stored-bracket-finalTonic');
+    expect(parseFloat(el.style.left)).toBeCloseTo(0); // pinned to the barline
+    expect(parseFloat(el.style.width)).toBeCloseTo(150); // beat 1 only, not 300
+  });
+
+  it('tiles a null-start stage against the beat-precise one that follows it', async () => {
+    const user = userEvent.setup();
+    const parent: FragmentListItem = {
+      ...makeFragment('parent-tile', 1, 1),
+      sub_parts: [halfBoundPart('before', null, 2.0), halfBoundPart('after', 2.0, null)],
+    };
+    render(<FragmentOverlay fragments={[parent]} ghostLayer={makeCompoundLayer()} />);
+    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+
+    const before = screen.getByTestId('stored-bracket-before');
+    const after = screen.getByTestId('stored-bracket-after');
+    const beforeRight = parseFloat(before.style.left) + parseFloat(before.style.width);
+    // Abutting, not overlapping — previously `before` covered the whole measure
+    // and painted straight over `after`.
+    expect(beforeRight).toBeCloseTo(parseFloat(after.style.left));
+    expect(parseFloat(after.style.width)).toBeCloseTo(150);
   });
 });
 

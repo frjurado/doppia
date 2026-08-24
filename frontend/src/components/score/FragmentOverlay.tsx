@@ -183,7 +183,13 @@ function toSelectionRange(
  * coordinates use 'beat'; measure-only fragments use 'measure'.
  */
 function storedResolution(beatStart: number | null, beatEnd: number | null): ResolutionMode {
-  if (beatStart === null) return 'measure';
+  // Only a fragment with *neither* endpoint constrained is a measure-level one.
+  // Keying this off beatStart alone painted a stage with a null start and a
+  // beat-precise end — the ordinary shape of a last stage, since
+  // prePopulateStages pins beats on the outer edges only — across both of its
+  // whole measures, so a Final Tonic ran to the end of its bar and adjacent
+  // stages overlapped (Component 11 triage item 5).
+  if (beatStart === null && beatEnd === null) return 'measure';
   const isSubBeat = (v: number | null): boolean => v !== null && !Number.isInteger(v);
   return isSubBeat(beatStart) || isSubBeat(beatEnd) ? 'subbeat' : 'beat';
 }
@@ -400,8 +406,15 @@ export default function FragmentOverlay({
                   toggle) OR when a side-panel handler is wired (Step 12).
                   Covers the full bracket width for easy targeting of the thin bar.
                   A single click both toggles collapse (if sub-parts exist) and
-                  opens the side panel (if onBracketClick is provided). */}
-              {seg.isFirst && (hasSubParts || onBracketClick !== undefined) && (
+                  opens the side panel (if onBracketClick is provided).
+
+                  On *every* segment, not just the first: a fragment crossing a
+                  system break used to be clickable only on its opening system,
+                  so the rest of its own bracket did nothing. Continuation
+                  segments are hidden from assistive tech and skipped by the tab
+                  order — one fragment should reach the keyboard once, however
+                  many systems it happens to span. */}
+              {(hasSubParts || onBracketClick !== undefined) && (
                 <button
                   type="button"
                   className={bracketStyles.clickTarget}
@@ -410,6 +423,7 @@ export default function FragmentOverlay({
                     if (hasSubParts) toggleCollapsed(id);
                     if (onBracketClick !== undefined) onBracketClick(id);
                   }}
+                  {...(seg.isFirst ? {} : { tabIndex: -1, 'aria-hidden': true })}
                   aria-label={
                     hasSubParts
                       ? collapsed

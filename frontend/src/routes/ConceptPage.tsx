@@ -306,8 +306,18 @@ export default function ConceptPage() {
         )}
 
         {/* Inline example fragments (Step 6) — non-stub concepts only; a stub
-          carries no approved fragments. Draws, previews, and expands its own. */}
-        {!concept.stub && <ConceptExamples conceptId={concept.id} />}
+          carries no approved fragments. Draws, previews, and expands its own.
+
+          Also skipped where an example is not merely absent but impossible. The
+          draw returns top-level fragments over the concept's IS_SUBTYPE_OF
+          subtree, so a concept that is neither taggable itself nor the parent of
+          anything taggable — a cadence *stage*, which only ever exists as a child
+          fragment — can never yield one. ConceptExamples' empty state says "none
+          yet", which is honest for a taggable concept awaiting approvals and
+          misleading for a stage, where the answer is "never". */}
+        {!concept.stub && (concept.top_level_taggable || concept.children.length > 0) && (
+          <ConceptExamples conceptId={concept.id} />
+        )}
 
         {!concept.stub && (
           <div className={styles.browse}>

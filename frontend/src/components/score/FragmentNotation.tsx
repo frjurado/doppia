@@ -256,7 +256,10 @@ interface BracketSegment {
  * same scale as the stored `beatStart`/`beatEnd` — so the comparison holds in
  * compound meters too (6/8 stages no longer collapse to whole-beat extents).
  */
-function computeBracketSegments(
+// Exported for unit testing, as MainBracket does with resolveSegments: this is
+// the read-only view's bracket geometry and the two must agree.
+// eslint-disable-next-line react-refresh/only-export-components
+export function computeBracketSegments(
   geo: FragmentGeometry,
   barStart: number,
   barEnd: number,
@@ -287,23 +290,40 @@ function computeBracketSegments(
   if (segments.length === 0) return [];
 
   if (beatStart !== null) {
-    const xs = geo.notes
-      .filter((n) => n.barN === barStart && n.beatFloat >= beatStart - EPS)
-      .map((n) => n.left);
-    if (xs.length > 0) {
-      const first = segments[0]!;
-      const refined = Math.min(...xs);
+    const inBar = geo.notes.filter((n) => n.barN === barStart);
+    const kept = inBar.filter((n) => n.beatFloat >= beatStart - EPS);
+    const first = segments[0]!;
+    if (kept.length > 0) {
+      const refined = Math.min(...kept.map((n) => n.left));
       if (refined > first.left && refined < first.right) first.left = refined;
+    } else if (inBar.length > 0) {
+      // The start bar has onsets but none of them are in range, so the range
+      // really begins at the *next* barline. See the beatEnd case below for why
+      // "no onset matched" must not be conflated with "no geometry available".
+      const r = geo.measures.get(barStart);
+      if (r) first.left = Math.max(first.left, r.right);
     }
   }
   if (beatEnd !== null) {
-    const xs = geo.notes
-      .filter((n) => n.barN === barEnd && n.beatFloat < beatEnd - EPS)
-      .map((n) => n.right);
-    if (xs.length > 0) {
-      const last = segments[segments.length - 1]!;
-      const refined = Math.max(...xs);
+    const inBar = geo.notes.filter((n) => n.barN === barEnd);
+    const kept = inBar.filter((n) => n.beatFloat < beatEnd - EPS);
+    const last = segments[segments.length - 1]!;
+    if (kept.length > 0) {
+      const refined = Math.max(...kept.map((n) => n.right));
       if (refined > last.left && refined < last.right) last.right = refined;
+    } else if (inBar.length > 0) {
+      // The end bar is inside [barStart, barEnd] but contributes no onset: the
+      // range stops on its opening barline. This is the ordinary shape of a
+      // stage that ends where the next one begins — a Dominant running to
+      // "m. 62 beat 1" holds nothing *of* m. 62, since beat_end is exclusive.
+      //
+      // Falling through to "keep the measure edge" here stretched the bracket
+      // across the whole of that bar, which is both the widest possible wrong
+      // answer and an overlap with whichever stage starts there. The fallback
+      // is only correct when there is no onset geometry at all to refine from,
+      // which is why the two cases are now told apart by inBar.
+      const r = geo.measures.get(barEnd);
+      if (r) last.right = Math.min(last.right, r.left);
     }
   }
 

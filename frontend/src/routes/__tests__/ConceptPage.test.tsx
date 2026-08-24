@@ -218,6 +218,44 @@ describe('ConceptPage — example fragments (Step 6)', () => {
     const examples = await screen.findByTestId('concept-examples');
     expect(examples).toHaveTextContent('PerfectAuthenticCadence');
   });
+
+  it('omits the section for a cadence stage, where an example is impossible', async () => {
+    // Stages live only as child fragments (fragment-schema.md § Stage
+    // sub-fragments) and the draw returns top-level fragments, so the section
+    // could only ever render its "none yet" note — misleading where the answer
+    // is "never". Neither taggable nor a parent of anything taggable.
+    vi.mocked(glossaryApi.getPublicConcept).mockResolvedValue(
+      makeConcept({
+        id: 'CadentialDominant',
+        name: 'Dominant',
+        top_level_taggable: false,
+        children: [],
+      })
+    );
+    renderConceptPage('CadentialDominant');
+
+    await screen.findByRole('heading', { name: 'Dominant', level: 1 });
+    expect(screen.queryByTestId('concept-examples')).not.toBeInTheDocument();
+  });
+
+  it('keeps the section for an abstract concept whose subtypes are taggable', async () => {
+    // Cadence and Authentic Cadence are not taggable themselves, but the draw
+    // walks IS_SUBTYPE_OF — their pages are exactly where examples matter most.
+    vi.mocked(glossaryApi.getPublicConcept).mockResolvedValue(
+      makeConcept({
+        id: 'AuthenticCadence',
+        name: 'Authentic Cadence',
+        top_level_taggable: false,
+        children: [
+          { id: 'PerfectAuthenticCadence', name: 'Perfect Authentic Cadence', stub: false },
+        ],
+      })
+    );
+    renderConceptPage('AuthenticCadence');
+
+    const examples = await screen.findByTestId('concept-examples');
+    expect(examples).toHaveTextContent('AuthenticCadence');
+  });
 });
 
 describe('ConceptPage — fragment browse link', () => {

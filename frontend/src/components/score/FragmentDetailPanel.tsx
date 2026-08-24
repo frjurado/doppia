@@ -40,6 +40,7 @@ import {
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../../utils/fragmentRange';
+import { formatKeyName } from '../../utils/keyName';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -723,7 +724,7 @@ export default function FragmentDetailPanel({
                   </dt>
                   <dd>
                     <Type variant="body-sm" as="span">
-                      {summary.key}
+                      {formatKeyName(summary.key as string | null | undefined)}
                     </Type>
                   </dd>
                 </div>
