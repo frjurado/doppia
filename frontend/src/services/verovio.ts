@@ -202,6 +202,135 @@ export interface FragmentRenderOptions extends RenderOptions {
  * @param options - Scale, transposition, page-width, and break settings.
  * @returns SVG markup string for the fragment.
  */
+/** A clef as carried on `<staffDef>`: shape, line, optional octave transfer. */
+interface ClefState {
+  shape: string;
+  line: string;
+  dis?: string;
+  disPlace?: string;
+}
+
+/**
+ * Make the clef in force at ``mcStart`` explicit on the header ``<staffDef>``s.
+ *
+ * Verovio's ``select({measureRange})`` carries a clef declared *before* the
+ * selection under ``breaks: 'none'`` but **not** under ``breaks: 'smart'``,
+ * where each staff falls back to the default treble. The fragment view renders
+ * with 'smart' (system breaks beat horizontal scrolling — Component 9 Step 15),
+ * so a left hand in bass came out in treble whenever the excerpt contained no
+ * ``<clef>`` of its own. The score viewer and the stored preview SVG use 'none'
+ * and were unaffected, which is why the same fragment looked right in one place
+ * and wrong in another.
+ *
+ * No movement in the corpus declares a clef on its ``<staffDef>`` — every clef
+ * is an in-measure ``<clef>`` — so the excerpt has nothing to fall back on.
+ * Stamping the running clef gives it one. This is a *render-time* transform:
+ * the stored MEI is untouched, so no re-ingestion is involved.
+ *
+ * The running clef is the last ``<clef>`` for that staff in any measure
+ * strictly before ``mcStart``, starting from whatever the ``<staffDef>``
+ * already declared. Measures are counted in document order (mc, per ADR-015),
+ * matching ``measureRange``'s own operands. Note that "strictly before" is what
+ * makes the cautionary-clef convention a non-issue: a clef printed at the end
+ * of the preceding bar and one printed at the start of that bar are both in
+ * force by ``mcStart``, and a clef inside ``mcStart`` itself is one Verovio
+ * renders anyway.
+ *
+ * Returns ``meiText`` unchanged if it cannot be parsed, if no staff has a
+ * running clef, or if ``DOMParser`` is unavailable — the caller then gets
+ * exactly today's behaviour rather than a broken render.
+ *
+ * @param meiText - Normalized MEI content string.
+ * @param mcStart - The excerpt's first measure, 1-based document order.
+ */
+export function withRunningClefs(meiText: string, mcStart: number): string {
+  try {
+    if (typeof DOMParser === 'undefined' || mcStart <= 1) return meiText;
+    const doc = new DOMParser().parseFromString(meiText, 'text/xml');
+    if (doc.getElementsByTagName('parsererror').length > 0) return meiText;
+
+    const running = new Map<string, ClefState>();
+
+    const readClefAttrs = (el: Element): ClefState | null => {
+      const shape = el.getAttribute('clef.shape') ?? el.getAttribute('shape');
+      const line = el.getAttribute('clef.line') ?? el.getAttribute('line');
+      if (shape === null || line === null) return null;
+      const dis = el.getAttribute('clef.dis') ?? el.getAttribute('dis');
+      const disPlace = el.getAttribute('clef.dis.place') ?? el.getAttribute('dis.place');
+      return {
+        shape,
+        line,
+        ...(dis !== null ? { dis } : {}),
+        ...(disPlace !== null ? { disPlace } : {}),
+      };
+    };
+
+    // Seed from the header staffDefs, so an encoding that *does* declare an
+    // initial clef is respected as the starting point.
+    const headerDefs = Array.from(doc.getElementsByTagName('staffDef')).filter(
+      (d) => d.closest('measure') === null
+    );
+    for (const def of headerDefs) {
+      const n = def.getAttribute('n');
+      const clef = readClefAttrs(def);
+      if (n !== null && clef !== null) running.set(n, clef);
+    }
+
+    // Walk measures in document order, applying every clef change before mcStart.
+    const measures = doc.getElementsByTagName('measure');
+    for (let i = 0; i < measures.length && i + 1 < mcStart; i++) {
+      const measure = measures[i]!;
+      for (const el of Array.from(measure.getElementsByTagName('clef'))) {
+        // A <clef> belongs to the <staff> it sits in; @n on that staff is the
+        // staff number the header <staffDef> shares.
+        const n = el.closest('staff')?.getAttribute('n');
+        const clef = readClefAttrs(el);
+        if (n != null && clef !== null) running.set(n, clef);
+      }
+      // A mid-score <scoreDef>/<staffDef> can also change the clef.
+      for (const def of Array.from(measure.getElementsByTagName('staffDef'))) {
+        const n = def.getAttribute('n');
+        const clef = readClefAttrs(def);
+        if (n !== null && clef !== null) running.set(n, clef);
+      }
+    }
+
+    if (running.size === 0) return meiText;
+
+    // Splice the attributes into the header staffDef tags by string surgery
+    // rather than re-serializing: the MEI runs to half a megabyte and this is
+    // on the render path, called again on every resize, scale, and transpose.
+    const bodyAt = meiText.indexOf('<section');
+    if (bodyAt < 0) return meiText;
+    const head = meiText.slice(0, bodyAt);
+
+    const patched = head.replace(/<staffDef\b[^>]*?\/?>/g, (tag) => {
+      const n = /\bn="([^"]+)"/.exec(tag)?.[1];
+      if (n === undefined) return tag;
+      const clef = running.get(n);
+      if (clef === undefined) return tag;
+      const selfClosing = tag.endsWith('/>');
+      const inner = tag
+        .slice(1, selfClosing ? -2 : -1)
+        // Drop any clef attributes already present: the running value supersedes
+        // them, having been computed starting *from* them.
+        .replace(/\s+clef\.(shape|line|dis|dis\.place)="[^"]*"/g, '')
+        .trimEnd();
+      const attrs = [
+        `clef.shape="${clef.shape}"`,
+        `clef.line="${clef.line}"`,
+        ...(clef.dis !== undefined ? [`clef.dis="${clef.dis}"`] : []),
+        ...(clef.disPlace !== undefined ? [`clef.dis.place="${clef.disPlace}"`] : []),
+      ].join(' ');
+      return `<${inner} ${attrs}${selfClosing ? '/>' : '>'}`;
+    });
+
+    return patched + meiText.slice(bodyAt);
+  } catch {
+    return meiText;
+  }
+}
+
 export async function renderFragment(
   tk: VerovioToolkitInstance,
   meiText: string,
@@ -228,7 +357,10 @@ export async function renderFragment(
     //   yields one page containing every system.
     ...(breaks === 'smart' ? { scaleToPageSize: true, pageHeight: 60000 } : {}),
   });
-  tk.loadData(meiText);
+  // Applied in both break modes, not just 'smart': it states explicitly what
+  // 'none' already infers, so the two agree by construction rather than by
+  // Verovio happening to carry the clef forward in one of them.
+  tk.loadData(withRunningClefs(meiText, mcStart));
   tk.select({ measureRange: `${mcStart}-${mcEnd}` });
   tk.redoLayout();
   return tk.renderToSVG(1);

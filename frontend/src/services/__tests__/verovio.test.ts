@@ -22,6 +22,7 @@ import {
   renderFragment,
   renderPage,
   renderProgressively,
+  withRunningClefs,
   type RenderOptions,
 } from '../verovio';
 
@@ -1184,5 +1185,115 @@ describe('parseMeiMeterUnit', () => {
     </mei>`;
     // Attribute style checked first → returns 4
     expect(parseMeiMeterUnit(mei)).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// withRunningClefs — Component 11 triage item 1
+// ---------------------------------------------------------------------------
+
+/**
+ * Verovio carries a clef declared before the selection under breaks:'none' but
+ * not under breaks:'smart', where each staff falls back to treble. No movement
+ * in the corpus declares a clef on its staffDefs, so the fragment view (which
+ * renders 'smart') showed a left hand in bass as treble. These pin the
+ * transform that makes the running clef explicit.
+ *
+ * Shape mirrors K279/iii: clefs live in measures, not on the staffDef, and the
+ * one governing the excerpt sits in an earlier bar.
+ */
+function meiWithClefs(): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mei xmlns="http://www.music-encoding.org/ns/mei">',
+    '  <scoreDef>',
+    '    <staffGrp>',
+    '      <staffDef xml:id="s1" n="1" lines="5" ppq="4"/>',
+    '      <staffDef xml:id="s2" n="2" lines="5" ppq="4"/>',
+    '    </staffGrp>',
+    '  </scoreDef>',
+    '  <section>',
+    '    <measure n="1">',
+    '      <staff n="1"><layer><note dur="4"/></layer></staff>',
+    '      <staff n="2"><layer><clef shape="F" line="4"/><note dur="4"/></layer></staff>',
+    '    </measure>',
+    '    <measure n="2">',
+    '      <staff n="1"><layer><note dur="4"/></layer></staff>',
+    '      <staff n="2"><layer><note dur="4"/></layer></staff>',
+    '    </measure>',
+    '    <measure n="3">',
+    '      <staff n="1"><layer><note dur="4"/></layer></staff>',
+    '      <staff n="2"><layer><clef shape="G" line="2"/><note dur="4"/></layer></staff>',
+    '    </measure>',
+    '    <measure n="4">',
+    '      <staff n="1"><layer><note dur="4"/></layer></staff>',
+    '      <staff n="2"><layer><note dur="4"/></layer></staff>',
+    '    </measure>',
+    '  </section>',
+    '</mei>',
+  ].join('\n');
+}
+
+/** Clef attributes the transform put on the header staffDef with the given @n. */
+function staffDefClef(mei: string, n: string): { shape?: string; line?: string } {
+  const head = mei.slice(0, mei.indexOf('<section'));
+  // \\b, not \b: inside a template literal \b is the backspace character.
+  const tag = new RegExp(`<staffDef\\b[^>]*\\bn="${n}"[^>]*>`).exec(head)?.[0] ?? '';
+  return {
+    shape: /clef\.shape="([^"]*)"/.exec(tag)?.[1],
+    line: /clef\.line="([^"]*)"/.exec(tag)?.[1],
+  };
+}
+
+describe('withRunningClefs', () => {
+  it('stamps the clef in force from an earlier measure', () => {
+    // Excerpt starts at mc 2; staff 2 took an F clef back in mc 1.
+    const out = withRunningClefs(meiWithClefs(), 2);
+    expect(staffDefClef(out, '2')).toEqual({ shape: 'F', line: '4' });
+  });
+
+  it('uses the latest change before the excerpt, not the first', () => {
+    // mc 4: staff 2 went F in mc 1 and back to G in mc 3.
+    const out = withRunningClefs(meiWithClefs(), 4);
+    expect(staffDefClef(out, '2')).toEqual({ shape: 'G', line: '2' });
+  });
+
+  it('ignores a clef inside the excerpt itself — Verovio renders that one', () => {
+    // Starting at mc 3, the G clef *in* mc 3 must not pre-empt the F from mc 1,
+    // or the excerpt would open on the clef it is about to change to.
+    const out = withRunningClefs(meiWithClefs(), 3);
+    expect(staffDefClef(out, '2')).toEqual({ shape: 'F', line: '4' });
+  });
+
+  it('leaves a staff that never declared a clef alone', () => {
+    const out = withRunningClefs(meiWithClefs(), 4);
+    expect(staffDefClef(out, '1').shape).toBeUndefined();
+  });
+
+  it('is a no-op for an excerpt starting at the first measure', () => {
+    // Nothing precedes mc 1, so there is no running state to make explicit.
+    const mei = meiWithClefs();
+    expect(withRunningClefs(mei, 1)).toBe(mei);
+  });
+
+  it('supersedes a clef already on the staffDef rather than duplicating it', () => {
+    const mei = meiWithClefs().replace(
+      '<staffDef xml:id="s2" n="2" lines="5" ppq="4"/>',
+      '<staffDef xml:id="s2" n="2" lines="5" ppq="4" clef.shape="G" clef.line="2"/>'
+    );
+    const out = withRunningClefs(mei, 2);
+    expect(staffDefClef(out, '2')).toEqual({ shape: 'F', line: '4' });
+    expect(out.slice(0, out.indexOf('<section')).match(/clef\.shape=/g)).toHaveLength(1);
+  });
+
+  it('keeps the body untouched', () => {
+    const mei = meiWithClefs();
+    const body = (s: string) => s.slice(s.indexOf('<section'));
+    expect(body(withRunningClefs(mei, 4))).toBe(body(mei));
+  });
+
+  it('returns the input unchanged when the MEI cannot be parsed', () => {
+    const junk = 'not xml at all';
+    expect(withRunningClefs(junk, 5)).toBe(junk);
   });
 });

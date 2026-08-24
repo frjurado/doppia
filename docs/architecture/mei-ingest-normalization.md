@@ -564,6 +564,16 @@ By default Verovio renders an auto-generated page header (`<g class="pgHead auto
 
 Confirmed in 6.1.0 on the k331 fixture: passing `"header": "none"` in `setOptions` removes the `pgHead` group entirely (SVG shrinks ~640 bytes, the title text disappears); the default (`"auto"`) and `"encoded"` both render it. Both server-side render tasks — `generate_incipit` and `render_fragment_preview` — set `"header": "none"`. The client-side score viewer (`frontend/src/services/verovio.ts`) is unaffected; this applies only to the thumbnail render path.
 
+### Finding 11 — `breaks="smart"` does not carry a clef declared before the selection (Component 11 triage)
+
+**`select({measureRange})` carries the running clef into the excerpt under `breaks="none"` but not under `breaks="smart"`.** Under `"smart"` each staff falls back to Verovio's default treble, so an excerpt whose own measures contain no `<clef>` renders a left hand in bass as treble. Confirmed in 6.1.0 (WASM) on `k279/movement-3`, mc 53–55: `"none"` gives treble/bass, `"smart"` gives treble/treble, everything else held equal.
+
+This bites the corpus generally rather than one movement: **no movement declares `clef.shape` on its `<staffDef>`** — 0 of 54 — because every clef is encoded as an in-measure `<clef>`. The excerpt therefore has no initial clef to fall back on, and only the carry-forward saves it. Across 14 sample ranges of that movement, 9 rendered the wrong clef under `"smart"`.
+
+It surfaced as a discrepancy *between views*: the score viewer and the server-side preview render `"none"` and were right, while the fragment viewer and glossary examples render `"smart"` (Component 9 Step 15 chose system breaks over horizontal scrolling) and were wrong for the same fragment.
+
+Fix, in `frontend/src/services/verovio.ts` (`withRunningClefs`, applied by `renderFragment`): before `loadData`, stamp the clef in force at `mc_start` onto the header `<staffDef>`s, computed as the last `<clef>` for that staff in any measure strictly before `mc_start`. "Strictly before" sidesteps the cautionary-clef convention — a clef printed at the end of the preceding bar and one printed at the start of it are both in force by `mc_start`, and a clef inside `mc_start` is one Verovio draws anyway. **It is a render-time transform: the stored MEI is untouched and no re-ingestion is involved.** Applied in both break modes so the two agree by construction; verified that `"none"` output is unchanged by it, and that `"smart"` then matches `"none"` on all 14 sample ranges.
+
 ---
 
 ## § Verovio WASM client-side verification: fragment rendering edge cases (Component 3, Step 13)
