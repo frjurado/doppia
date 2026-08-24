@@ -85,12 +85,17 @@ The cadence editor doesn't work properly:
 
 These are just small errors on the fragments recorded. As I can barely use the fragment editor, they are documented here. To be edited at some point:
 
-- General: harmonies are not confirmed in any places - check all.
-- 279/i m. 9-10: V = 64 (no comma), then V7 (grade, type major). [SOLVED]
-- 279/i m. 11-12: Final Tonic harmony is not confirmed, an extra one is shown? [SOLVED]
-- 279/i m. 77: commentary has a typo. [SOLVED]
-- 279/i m. 81: delete the IV6? [Changed opinion; I'm leaving it that way.]
-- 279/i m. 93: stages are not ok. [SOLVED]
-- 279/ii, m. 3: evaded no text, summary is generic (C major + 4/4) [Not editorial, these are bugs dealt with elsewhere]
-- 279/ii, m. 15: wrong stages [SOLVED]
-- 279/ii, m. 22: mistake on commentary (3 failed attemps). [SOLVED]
+All items below were worked through in **Component 11 Steps 13C/13D
+(2026-07-30)**, directly on staging — the system of record for campaign
+fragments. Struck items are done; the two that were not simple fixes are
+annotated with where they went.
+
+- ~~General: harmonies are not confirmed in any places - check all.~~ **Done for the movements in scope** — K279 and K280, all six movements, at **465/465 in-fragment harmony events confirmed**. Two bugs surfaced mid-sweep and were fixed (`288edd7`): "Confirm all" fired N parallel read-modify-writes of a single `events` array and lost all but the last (279/i had reached only 102/163), and manually inserted harmonies recorded no `mc`, so after Step 10's mc-scoped query they vanished from the editor while the score and details still showed them. Corpus-wide, 14 of 383 fragments still hold unreviewed harmony in range (K281/i, K331/i–iii) — **none of them approved**, and all now blocked from approval by the `harmony_gate` seeded in Step 13F, so the gap cannot reach the public glossary.
+- ~~279/i m. 9-10: V = 64 (no comma), then V7 (grade, type major).~~ **Fixed.**
+- ~~279/i m. 11-12: Final Tonic harmony is not confirmed, an extra one is shown?~~ **Fixed.**
+- ~~279/i m. 77: commentary has a typo.~~ **Fixed.**
+- ~~279/i m. 81: delete the IV6?~~ **Closed by decision** — Francisco changed his mind and kept it. Not a defect.
+- ~~279/i m. 93: stages are not ok.~~ **Fixed** — one of the two corrections that only became editable once Step 12 freed the main-bracket resize.
+- ~~279/ii, m. 3: evaded no text, summary is generic (C major + 4/4)~~ **Not editorial, as recorded — both halves resolved elsewhere.** The generic summary was **M6**: `summary.key`/`summary.meter` were parsed from the MEI, which encodes `<keySig sig="4f"/>` with no mode, so every fragment in the corpus was stamped "C major"; both now derive from the movement record (Step 10), and `fix_summary_key_meter.py` repaired 290 of 372 stored summaries. The evaded cadence having "no text" is the **`post_evasion_harmony` capture extension**, declared in `cadences.yaml` and seeded but with no capture UI — see `../component-11-reports/component-11-triage.md` § 13, deferred to Component 12.
+- ~~279/ii, m. 15: wrong stages~~ **Fixed** — the second Step 12-dependent correction.
+- ~~279/ii, m. 22: mistake on commentary (3 failed attemps).~~ **Fixed.**

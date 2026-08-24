@@ -1143,7 +1143,7 @@ Two constraints set the order:
 | 13D | M2 sweep: confirm harmony inside each fragment's range ✅ | **Francisco** | 13C (same fragments, one sitting) |
 | 13E | `definition_reviewed` pass over the launch set ✅ | **Francisco** | — (not a code gate) |
 | 13F | Seed `harmony_gate`, re-seed the graph, deploy ✅ | Me | 13A, 13D |
-| 13G | Verification pass | Me | all |
+| 13G | Verification pass ✅ | Me | all |
 
 **13A — gate scope. Decided (Francisco, 2026-07-27): `harmony_gate` goes on
 `Cadence`.** Every subtype inherits it through `IS_SUBTYPE_OF`, which is how
@@ -1261,10 +1261,23 @@ already-public example was retroactively invalidated. Those 14 now need their
 harmony confirmed before approval, which is the gate doing its job rather than a
 regression.
 
-**13G — verification.** Glossary examples render with confirmed harmony; K282/ii
-shows restarted numbers with section labels in both bracket and sidebar; the nine
-errata are visibly corrected; `validate_movement_sections.py` and
-`validate_graph.py` pass; the approval gate behaves as intended in both directions.
+**13G — verification. ✅ done 2026-08-25.** Francisco confirmed the editorial and
+visual side; the mechanical checks are: `validate_graph.py` 10/10,
+`validate_movement_sections.py` clean across all 54 movements, and the approval
+gate exercised in both directions on staging through the real
+`_run_approval_gate` (a submitted PAC on K331/ii blocks with 3 unreviewed
+events; an approved PAC on K279/i passes with 0). The public API returns the
+reviewed definitions with `definition_reviewed: true`, including
+`CadentialPreDominant` under its new name "Pre-dominant".
+
+The read-through that followed produced thirteen items, triaged in
+[`../reports/component-11-reports/component-11-triage.md`](../reports/component-11-reports/component-11-triage.md).
+Six were bugs and were fixed inside this component (`510c06f`, `4152e1c`) — the
+most consequential being a corpus-wide clef fault in the fragment viewer, where
+Verovio's `breaks:'smart'` silently drops a clef declared before the excerpt.
+**The remaining six were deferred in full to Component 12** (Francisco,
+2026-08-25) and are signalled in `phase-2.md` § Component 12; two further items
+went to the Phase-2 entry backlog.
 
 **Where the editorial work happens — settled (Francisco, 2026-07-27): directly on
 staging.** The campaign fragments live there, so that is the system of record for

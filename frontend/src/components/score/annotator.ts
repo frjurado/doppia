@@ -934,37 +934,7 @@ export class AnnotationSession {
 
   // ── Private: event handlers ────────────────────────────────────────────────
 
-
-  /**
-   * Opt-in drag diagnostics. Set `window.__doppiaDragDebug = true` in the
-   * console to print what each endpoint gesture sees and commits.
-   *
-   * Temporary: added to settle a reported "cannot shrink a fragment after
-   * resizing a stage" that survived the removal of the resize clamp, and that
-   * the annotator's own unit tests do not reproduce — so the cause is in how the
-   * session is driven, not in the drag logic. Remove once that is closed.
-   */
-  private _dbg(event: string, detail: Record<string, unknown>): void {
-    if (!(globalThis as { __doppiaDragDebug?: boolean }).__doppiaDragDebug) return;
-    console.log(`[drag] ${event}`, {
-      resolution: this._resolution,
-      fragmentSet: this._flags.fragmentSet,
-      stageDragActive: this._stageDragActive,
-      darkGhosts: this._darkGhosts.size,
-      dragging: this._dragging,
-      selection: this._selection
-        ? `${this._selection.barStart}..${this._selection.barEnd} beats ` +
-          `${this._selection.beatStart}..${this._selection.beatEnd}`
-        : null,
-      ...detail,
-    });
-  }
-
   private _handleMouseDown(e: MouseEvent): void {
-    this._dbg('mousedown', {
-      onGhost: ghostFromTarget(e.target) !== null,
-      onHandle: handleFromTarget(e.target) !== null,
-    });
     if (this._hoverGhost) {
       removeClass(this._hoverGhost, 'light');
       this._hoverGhost = null;
@@ -1170,7 +1140,6 @@ export class AnnotationSession {
   }
 
   private _commitMeasureDrag(): void {
-    this._dbg('commit:measure', {});
     if (!this._anchorMeasureKey) return;
 
     // Collect the currently dark measure ghosts in document order.
@@ -1288,7 +1257,6 @@ export class AnnotationSession {
   }
 
   private _commitBeatDrag(): void {
-    this._dbg('commit:beat', {});
     if (this._anchorBeatKey === null) return;
 
     const entries: BeatGhostEntry[] = [];
@@ -1413,7 +1381,6 @@ export class AnnotationSession {
   }
 
   private _commitSubBeatDrag(): void {
-    this._dbg('commit:subbeat', {});
     if (this._anchorSubBeatKey === null) return;
 
     const entries: SubBeatGhostEntry[] = [];
