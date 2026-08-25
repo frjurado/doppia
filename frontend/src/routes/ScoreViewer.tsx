@@ -41,7 +41,6 @@ import type {
 } from '../components/score/stages';
 import {
   chooseStageGrid,
-  computeResizeClamp,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -93,7 +92,12 @@ import type {
   FragmentUpdatePayload,
   SubPartPayload,
 } from '../services/fragmentApi';
-import { parseMeiKey, parseMeiMeter, parseMeiMeterParts } from '../utils/meiParsing';
+import {
+  parseMeiKey,
+  parseMeiMeter,
+  parseMeiMeterAtMc,
+  parseMeiMeterParts,
+} from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
 import { ApiError } from '../services/api';
 import { useStoredFragments } from '../hooks/useStoredFragments';
@@ -320,8 +324,13 @@ function computeAutoPrePopulate(
 ): { assignments: StageAssignment[]; grid: ResolutionMode; blocked: boolean } {
   const beatPositions: BeatSlot[] = [];
   const subBeatPositions: BeatSlot[] = [];
+  let measureSlots = selection.measureKeys?.length ?? selection.barEnd - selection.barStart + 1;
 
   if (ghostLayer) {
+    // Every tier's capacity is the frame's own slot count, so the grid chosen
+    // here is the grid the brackets will render on. The measure tier is not the
+    // key count: a beat-precise endpoint can leave its measure uncovered (M7).
+    measureSlots = buildStageSlots(selection, ghostLayer, 'measure').length;
     for (const s of buildStageSlots(selection, ghostLayer, 'beat')) {
       beatPositions.push({ barN: s.barN, beatFloat: s.beatFloat ?? 1.0, measureKey: s.measureKey });
     }
@@ -334,14 +343,12 @@ function computeAutoPrePopulate(
     }
   }
 
-  const grid = chooseStageGrid(
-    selection,
-    stages.length,
-    beatPositions.length,
-    subBeatPositions.length
-  );
+  const grid = chooseStageGrid(stages.length, {
+    measure: measureSlots,
+    beat: beatPositions.length,
+    subbeat: subBeatPositions.length,
+  });
 
-  const measureSlots = selection.measureKeys?.length ?? selection.barEnd - selection.barStart + 1;
   const blocked =
     stages.length > 0 &&
     measureSlots < stages.length &&
@@ -352,6 +359,12 @@ function computeAutoPrePopulate(
 
   let assignments: StageAssignment[];
   if (grid === 'measure') {
+    // Distributes over the selection's effective keys, which equal the frame's
+    // measure slots for every selection the annotator can commit (beat_end always
+    // names a covered measure — it is the endFloat of a ghost inside it). The one
+    // shape where the two counts differ, an endpoint measure the beat bounds leave
+    // uncovered, is unreachable from here; the frame drops it, and any later drag
+    // or resize re-derives bounds from the frame anyway.
     assignments = prePopulateStages(stages, selection);
   } else if (grid === 'beat') {
     assignments = prePopulateStagesAtGrid(stages, selection, beatPositions);
@@ -414,7 +427,8 @@ function buildStageAssignmentsFromSubParts(
       containmentMode: stage.containment_mode,
       defaultWeight: stage.default_weight,
       bounds,
-      // Treat restored stages as confirmed so they don't trigger "limbo" warnings.
+      // Treat restored stages as confirmed so they don't trigger "limbo"
+      // warnings — an annotator settled these bounds in an earlier session.
       confirmed: bounds !== null,
       absent: bounds === null && !stage.required,
       orphaned: false,
@@ -1531,8 +1545,19 @@ export default function ScoreViewer() {
     (formData: FormSubmitData, meiText: string): FragmentUpdatePayload | null => {
       if (!committedSelection) return null;
 
-      const key = parseMeiKey(meiText);
-      const meter = parseMeiMeter(meiText);
+      // summary.key comes from the movement record, not the MEI (M6, Component
+      // 11 Step 10): the MEI encodes `<keySig sig="4f"/>` with no mode, which is
+      // A♭ major and F minor alike — parsing it stamped every fragment in the
+      // corpus "C major". The MEI parse stays as the fallback for a movement
+      // whose curated metadata is missing.
+      const key = scoreTitle?.key_signature ?? parseMeiKey(meiText);
+      // summary.meter comes from the MEI instead, at this fragment's own first
+      // measure (M18). The curated value was wrong for 21 of 54 movements, and
+      // even when right it names the movement's *opening* meter — which is the
+      // wrong label for a fragment sitting after a mid-piece change.
+      const meter = committedSelection.mc_start
+        ? parseMeiMeterAtMc(meiText, committedSelection.mc_start)
+        : (scoreTitle?.meter ?? parseMeiMeter(meiText));
 
       // Serialize property values: omit nulls, booleans become "true"/"false".
       const properties: Record<string, string | string[]> = {};
@@ -1629,7 +1654,7 @@ export default function ScoreViewer() {
         sub_parts: subParts,
       };
     },
-    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc]
+    [committedSelection, stageAssignments, subPartTags, proseAnnotation, resolveBarToMc, scoreTitle]
   );
 
   /** Save the current annotation as a draft (incompleteness allowed). */
@@ -1787,15 +1812,6 @@ export default function ScoreViewer() {
     const complete = stageGridBlocked ? false : computeStagesComplete(stageAssignments);
     session.setStagesComplete(complete);
   }, [stageAssignments, stageGridBlocked]);
-
-  // Component 7 Step 3 — keep the annotator's hard-clamp in sync with the
-  // current confirmed stage bounds.  Fires whenever assignments change so
-  // the clamp is always up to date (e.g. after a split-handle drag confirms
-  // a stage or after an absent-toggle frees space).
-  useEffect(() => {
-    const clamp = computeResizeClamp(stageAssignments);
-    annotationSessionRef.current?.setMinBarRange(clamp);
-  }, [stageAssignments]);
 
   // When the committed selection changes, reconcile stage assignments with
   // the new main bracket bounds or (re-)attempt auto-grid pre-population.
@@ -2527,6 +2543,7 @@ export default function ScoreViewer() {
             <FragmentOverlay
               fragments={overlayFragments}
               ghostLayer={ghostLayer}
+              mcIndex={mcIndexRef.current}
               onBracketClick={setSelectedFragmentId}
             >
               <MainBracket
@@ -2591,6 +2608,8 @@ export default function ScoreViewer() {
             subPartResetKey={subPartResetKey}
             movementId={movementId}
             selectionRange={selectionRange}
+            selectionMcStart={committedSelection?.mc_start ?? null}
+            selectionMcEnd={committedSelection?.mc_end ?? null}
             proseAnnotation={proseAnnotation}
             onProseChange={setProseAnnotation}
             onSaveDraft={handleSaveDraft}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MovementResponse } from '../../types/browse';
+import { formatKeyName } from '../../utils/keyName';
 import Type from '../ui/Type';
 import BrowseItem from './BrowseItem';
 import IncipitImage from './IncipitImage';
@@ -18,7 +19,9 @@ interface MovementCardProps {
  */
 export default function MovementCard({ movement, isSelected, onClick }: MovementCardProps) {
   const { t } = useTranslation('common');
-  const subtitle = [movement.key_signature, movement.meter].filter(Boolean).join(' · ');
+  const subtitle = [formatKeyName(movement.key_signature), movement.meter]
+    .filter(Boolean)
+    .join(' · ');
   const [hovered, setHovered] = useState(false);
 
   return (

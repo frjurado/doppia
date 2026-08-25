@@ -222,7 +222,11 @@ def main() -> None:
         sys.exit(1)
 
     net.write_html(str(out_path))
-    print(f"[OK] {len(net.nodes)} nodes, {len(net.edges)} edges → {out_path.resolve()}")
+    # ASCII arrow: a Windows console defaults to cp1252, which cannot encode
+    # U+2192 and raises UnicodeEncodeError *after* the HTML has been written.
+    print(
+        f"[OK] {len(net.nodes)} nodes, {len(net.edges)} edges -> {out_path.resolve()}"
+    )
 
 
 if __name__ == "__main__":

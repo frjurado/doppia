@@ -132,14 +132,6 @@ export interface AnnotationSessionOptions {
     propertiesComplete?: boolean;
   };
   /**
-   * Component 7 Step 3 — minimum bar range derived from confirmed stage bounds
-   * (computeResizeClamp).  When set, the main-bracket drag is hard-clamped so
-   * the selection barStart cannot rise above minBarStart and barEnd cannot fall
-   * below maxBarEnd.  Update dynamically via setMinBarRange() when stage
-   * assignments change.
-   */
-  minBarRange?: { minBarStart: number; maxBarEnd: number } | null;
-  /**
    * Component 9 Step 20 — play-from-position. Called when the user Alt-clicks a
    * measure (or a beat / sub-beat ghost, resolved up to its enclosing measure)
    * instead of starting a selection drag. The handler arms that measure as the
@@ -629,14 +621,6 @@ export class AnnotationSession {
   private _handlesReady = false;
 
   /**
-   * Component 7 Step 3 — hard-clamp derived from confirmed stage bounds.
-   * Null when no confirmed stages exist (no minimum enforced).
-   * The selection barStart must stay ≤ minBarStart; barEnd must stay ≥ maxBarEnd.
-   * Set/updated via setMinBarRange(); the lock fires during live handle drags.
-   */
-  private _minBarRange: { minBarStart: number; maxBarEnd: number } | null = null;
-
-  /**
    * Component 7 Step 5 — modal lock while a stage split-handle drag is active.
    * When true, the main-ghost hover handler does not show the handle affordance
    * (the handles sit right next to stage brackets and the affordance is
@@ -674,7 +658,6 @@ export class AnnotationSession {
     this._volta = options.voltaIndex ?? voltaIndexFromLayer(layer.measureIndex);
 
     this._resolution = options.resolution ?? 'measure';
-    this._minBarRange = options.minBarRange ?? null;
     this._onPlayFromMeasure = options.onPlayFromMeasure ?? null;
 
     this._orderedMeasureKeys = [...layer.measureIndex.keys()];
@@ -746,18 +729,6 @@ export class AnnotationSession {
   /** Mark all required properties as filled (or unfilled). */
   setPropertiesComplete(value: boolean): void {
     this._setFlag('propertiesComplete', value);
-  }
-
-  /**
-   * Component 7 Step 3 — update the hard-clamp for the main-bracket drag.
-   *
-   * Pass the result of computeResizeClamp(stageAssignments) here whenever
-   * confirmed stage bounds change.  While a drag is in progress the new
-   * range takes effect on the next mouseover tick.  Passing null removes the
-   * clamp (e.g. when all stages are unconfirmed).
-   */
-  setMinBarRange(range: { minBarStart: number; maxBarEnd: number } | null): void {
-    this._minBarRange = range;
   }
 
   /**
@@ -936,89 +907,6 @@ export class AnnotationSession {
 
   // ── Private: min-bar-range clamp helpers (Component 7 Step 3) ───────────
 
-  /**
-   * Given a target measureKey being dragged toward, return the clamped key
-   * that respects _minBarRange.
-   *
-   * For a shrink-from-the-left drag (anchor is the rightmost key): the
-   * resulting barStart must stay ≤ minBarStart, so the current key cannot
-   * move to a barN > minBarStart.
-   *
-   * For a shrink-from-the-right drag (anchor is the leftmost key): the
-   * resulting barEnd must stay ≥ maxBarEnd, so the current key cannot move
-   * to a barN < maxBarEnd.
-   */
-  private _clampMeasureKey(currentKey: string, anchorKey: string): string {
-    if (!this._minBarRange) return currentKey;
-
-    const { minBarStart, maxBarEnd } = this._minBarRange;
-    const anchorEntry = this._layer.measureIndex.get(anchorKey);
-    const currentEntry = this._layer.measureIndex.get(currentKey);
-    if (!anchorEntry || !currentEntry) return currentKey;
-
-    // Dragging left (shrinking from the left): anchor is to the right.
-    if (currentEntry.barN < anchorEntry.barN) {
-      if (currentEntry.barN > minBarStart) {
-        // Clamp: find the key with barN = minBarStart.
-        for (const [k, e] of this._layer.measureIndex) {
-          if (e.barN === minBarStart) return k;
-        }
-      }
-      return currentKey;
-    }
-
-    // Dragging right (shrinking from the right): anchor is to the left.
-    if (currentEntry.barN > anchorEntry.barN) {
-      if (currentEntry.barN < maxBarEnd) {
-        // Clamp: find the key with barN = maxBarEnd.
-        for (const [k, e] of this._layer.measureIndex) {
-          if (e.barN === maxBarEnd) return k;
-        }
-      }
-      return currentKey;
-    }
-
-    return currentKey;
-  }
-
-  /**
-   * Clamp a beat/sub-beat key to respect _minBarRange.
-   * Uses the numeric key index to resolve bar membership.
-   */
-  private _clampBeatKey(
-    currentKey: number,
-    anchorKey: number,
-    index: Map<number, { barN: number }>
-  ): number {
-    if (!this._minBarRange) return currentKey;
-
-    const { minBarStart, maxBarEnd } = this._minBarRange;
-    const anchorEntry = index.get(anchorKey);
-    const currentEntry = index.get(currentKey);
-    if (!anchorEntry || !currentEntry) return currentKey;
-
-    // Dragging left (anchor barN > current barN): clamp barStart ≤ minBarStart.
-    if (currentEntry.barN < anchorEntry.barN && currentEntry.barN > minBarStart) {
-      // Find the numerically smallest key whose barN === minBarStart.
-      let bestKey: number | null = null;
-      for (const [k, e] of index) {
-        if (e.barN === minBarStart && (bestKey === null || k < bestKey)) bestKey = k;
-      }
-      if (bestKey !== null) return bestKey;
-    }
-
-    // Dragging right (anchor barN < current barN): clamp barEnd ≥ maxBarEnd.
-    if (currentEntry.barN > anchorEntry.barN && currentEntry.barN < maxBarEnd) {
-      // Find the numerically largest key whose barN === maxBarEnd.
-      let bestKey: number | null = null;
-      for (const [k, e] of index) {
-        if (e.barN === maxBarEnd && (bestKey === null || k > bestKey)) bestKey = k;
-      }
-      if (bestKey !== null) return bestKey;
-    }
-
-    return currentKey;
-  }
 
   // ── Private: listener attachment ──────────────────────────────────────────
 
@@ -1231,9 +1119,7 @@ export class AnnotationSession {
   private _updateMeasureDrag(currentKey: string): void {
     if (!this._anchorMeasureKey) return;
 
-    // Component 7 Step 3: hard-clamp the drag so confirmed stage bounds
-    // are never forced outside the resulting selection.
-    const effectiveKey = this._clampMeasureKey(currentKey, this._anchorMeasureKey);
+    const effectiveKey = currentKey;
 
     const range = computeSelectionKeys(
       this._anchorMeasureKey,
@@ -1330,12 +1216,7 @@ export class AnnotationSession {
   private _updateBeatDrag(currentKey: number): void {
     if (this._anchorBeatKey === null) return;
 
-    // Component 7 Step 3: clamp beat drag to the min-bar-range.
-    const effectiveBeatKey = this._clampBeatKey(
-      currentKey,
-      this._anchorBeatKey,
-      this._layer.beatIndex
-    );
+    const effectiveBeatKey = currentKey;
 
     // G2.3 / §6A.2: enforce measure-level boundaries at beat resolution —
     // directive barriers clamp, volta gates clamp, and excluded sibling
@@ -1463,12 +1344,7 @@ export class AnnotationSession {
   private _updateSubBeatDrag(currentKey: number): void {
     if (this._anchorSubBeatKey === null) return;
 
-    // Component 7 Step 3: clamp sub-beat drag to the min-bar-range.
-    const effectiveSubBeatKey = this._clampBeatKey(
-      currentKey,
-      this._anchorSubBeatKey,
-      this._layer.subBeatIndex
-    );
+    const effectiveSubBeatKey = currentKey;
 
     // G2.3 / §6A.2: same boundary enforcement as beat resolution.
     const anchorEntry = this._layer.subBeatIndex.get(this._anchorSubBeatKey);

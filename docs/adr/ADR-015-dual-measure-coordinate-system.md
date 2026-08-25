@@ -78,6 +78,42 @@ Considered for movements without DCML data. Rejected as premature: for Phase 1 a
 
 *Context: Component 9 Step 8 ingestion-warning triage. Decision taken with Francisco 2026-06-16.*
 
+> **Correction (2026-07-25, ADR-036).** The paragraph below is wrong about the
+> cause and the extent, and the volta claim in § Context is wrong about this
+> corpus. A survey of all 54 ingested movements
+> ([`step-9a-duplicate-bar-number-survey.md`](../reports/component-11-reports/step-9a-duplicate-bar-number-survey.md))
+> established: **K331/ii duplicates because the Trio restarts the count** — it
+> *is* the minuet+trio renumbering, the movement ends with `dir:Menuetto da
+> capo`, and no bars are written out twice. The runs are **1–48 (Menuetto,
+> mc 1–48) and 1–52 (Trio, mc 49–101)**, not "1–48 twice". And **no volta
+> endings share `@n` anywhere in the corpus**: every second ending carries an
+> X-prefixed `@n` (`X1`, `X2`, …), so § Context's "both endings share `@n="3"`"
+> describes a convention the data does not follow. The conclusion each of these
+> supports — that `mc` is the reliable coordinate — is unaffected.
+>
+> The claim below that duplicate `@n` "is never used as a join key, so no data
+> is at risk" is also **too broad**: it holds for rendering and fragment ranges,
+> but harmony events are keyed `(mn, volta, beat)` and the fragment harmony slice
+> filters on the `mn` range, so on a restarting movement both passes collide —
+> K331/ii renders all its harmony on the Menuetto and shows Menuetto harmonies
+> for a Trio fragment. Moving that filter to an `mc` range is the resolution of
+> the deferral this ADR notes in § Consequences (Component 11 Step 10).
+>
+> **Addendum (2026-07-27, Component 11 Step 13B).** A *second* movement now has
+> duplicate `@n`, and deliberately: **K282/ii** was renumbered to restart at
+> Menuetto II, because the NMA restarts there while the DCML encoding ran 0–72
+> straight through, so our bar labels disagreed with the edition a reader has open.
+> Its two runs are now **0–32 (Menuetto I, mc 1–34) and 0–40 (Menuetto II,
+> mc 35–76)**. This is the first case of these coordinates being used
+> *deliberately* rather than defensively: the renumbering moves `@n` and the
+> harmony `mn` together and leaves `mc` alone, which is exactly why it is safe —
+> rendering, fragment ranges, previews, and the mc-stability check are untouched by
+> construction. See `services.bar_renumber`. Two editorial rules worth recording:
+> an X-prefixed complement keeps its partner's `mn` across the restart, and the
+> measure a restart lands on takes the new first number outright even when it is
+> currently a complement (K282/ii's Menuetto II opens on the upbeat that completes
+> Menuetto I's final bar, and that upbeat is the new section's bar 0).
+
 Some staging movements carry **duplicate `@n` values outside `<ending>` elements** because the source MuseScore-to-MEI export writes a section out twice rather than expressing it as a repeat structure. The clearest case is **K.331/movement-2 (Menuetto)**, whose 48 bars are numbered 1–48 twice (a written-out repeat / multi-section restart — *not* the "minuet+trio renumbering" the issue backlog assumed). The same structure produces two unpaired `rptend` barlines.
 
 This ADR's machine coordinate (`mc` / position index) is **unaffected**: `mc` is a document-order rank and remains unique across the duplicated runs, so rendering, fragment ranges, and harmony alignment are all correct. The ambiguity is confined to the **human coordinate** (`bar_start`/`bar_end`, derived from `@n`): "m. 12" alone cannot distinguish the two passes.
@@ -89,3 +125,5 @@ This ADR's machine coordinate (`mc` / position index) is **unaffected**: `mc` is
 - `mc_start`/`mc_end` remain the sole machine identifiers; any consumer needing to disambiguate the human label must qualify it by section/pass, not by `@n` alone.
 
 **Deferred.** Display-time disambiguation of duplicate bar labels (e.g. a "Menuetto" vs. "Menuetto da capo" qualifier on the fragment viewer and bracket) is out of scope here and is carried to the Component 9 fragment-viewer / harmony-overlay work (Step 15). Until then the duplicate label is shown as-is; it is never used as a join key, so no data is at risk.
+
+**Resolved (2026-07-25) by [ADR-036](ADR-036-movement-sections-and-bar-label-disambiguation.md).** It did not land in Component 9 Step 15; it lands in Component 11 Step 9, where the glossary makes fragment labels public. Editorial `movement_section` spans — keyed on `mc`, named from the score's own `<dir>` text — qualify the label ("Trio, mm. 12–15"), and a validation script fails when a movement whose numbering restarts has no sections recorded. The qualifier "Menuetto da capo" this paragraph proposes is not the right one, per the correction above: the second run is the **Trio**.

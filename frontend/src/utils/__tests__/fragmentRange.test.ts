@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { formatBeat, formatFragmentRange } from '../fragmentRange';
+import { formatBarRange, formatBeat, formatFragmentRange, qualifyRange } from '../fragmentRange';
 
 describe('formatBeat', () => {
   it('formats a whole beat with no fraction', () => {
@@ -99,5 +99,72 @@ describe('formatFragmentRange — multiple measures with beats', () => {
 
   it('does not collapse when only one end is whole', () => {
     expect(formatFragmentRange(3, 8, 2, 1)).toBe('m. 3, beat 2 – m. 7');
+  });
+});
+
+/**
+ * formatBarRange / qualifyRange — the ADR-036 bar-label disambiguation.
+ *
+ * A movement whose bar numbers restart (K331/ii: the Trio renumbers from 1)
+ * has two bars called "m. 12". The API resolves which section a fragment sits
+ * in; these render it. Both sections are qualified, never only the second —
+ * an unqualified label in a sectioned movement is itself ambiguous.
+ */
+describe('formatBarRange', () => {
+  it('renders a single measure and a span', () => {
+    expect(formatBarRange(3, 3)).toBe('m. 3');
+    expect(formatBarRange(3, 7)).toBe('mm. 3–7');
+  });
+});
+
+describe('qualifyRange', () => {
+  const prose = (c: string) =>
+    ({ first_ending: '1st ending', second_ending: '2nd ending' })[c] ?? null;
+
+  it('passes an unsectioned range through untouched', () => {
+    // The ~52 corpus movements with no restart: nothing changes for them.
+    expect(qualifyRange('mm. 12–15')).toBe('mm. 12–15');
+    expect(qualifyRange('mm. 12–15', { sectionLabel: null, repeatContext: null })).toBe(
+      'mm. 12–15'
+    );
+  });
+
+  it('prefixes the section name', () => {
+    expect(qualifyRange('mm. 12–15', { sectionLabel: 'Trio' })).toBe('Trio, mm. 12–15');
+  });
+
+  it('qualifies the first section too, not only the second', () => {
+    // Otherwise the reader cannot tell "first section" from "not applicable".
+    expect(qualifyRange('mm. 12–15', { sectionLabel: 'Menuetto' })).toBe('Menuetto, mm. 12–15');
+  });
+
+  it('suffixes a volta as prose, never as the stored enum', () => {
+    expect(
+      qualifyRange('mm. 12–15', { repeatContext: 'first_ending', formatRepeatContext: prose })
+    ).toBe('mm. 12–15 (1st ending)');
+  });
+
+  it('combines section and volta', () => {
+    expect(
+      qualifyRange('mm. 12–15', {
+        sectionLabel: 'Trio',
+        repeatContext: 'second_ending',
+        formatRepeatContext: prose,
+      })
+    ).toBe('Trio, mm. 12–15 (2nd ending)');
+  });
+
+  it('drops an unrecognised repeat context rather than leaking it', () => {
+    expect(
+      qualifyRange('mm. 12–15', { repeatContext: 'fourth_ending', formatRepeatContext: prose })
+    ).toBe('mm. 12–15');
+    // No formatter supplied at all: same outcome, no enum on screen.
+    expect(qualifyRange('mm. 12–15', { repeatContext: 'first_ending' })).toBe('mm. 12–15');
+  });
+
+  it('qualifies a beat-precise range the same way', () => {
+    expect(qualifyRange(formatFragmentRange(12, 15, 3, 2), { sectionLabel: 'Trio' })).toBe(
+      'Trio, m. 12, beat 3 – m. 15, beat 1'
+    );
   });
 });

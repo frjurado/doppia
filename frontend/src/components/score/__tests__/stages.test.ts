@@ -40,7 +40,6 @@ import type { StageAssignment } from '../stages';
 import type { BeatSlot } from '../stages';
 import {
   chooseStageGrid,
-  computeResizeClamp,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -149,6 +148,48 @@ describe('prePopulateStages', () => {
       expect(a.bounds!.beatStart).toBeNull();
       expect(a.bounds!.beatEnd).toBeNull();
     }
+  });
+
+  // ── M7: outer-edge pinning at measure resolution (Component 11 Step 11) ────
+
+  it('pins the outer edges to a beat-precise selection, interiors measure-aligned', () => {
+    // The 279/ii shape: "m. 8 beat 3 – m. 10 beat 1" (beat_end is the exclusive
+    // bound, so 2.0) seating three stages on a measure-granular grid. The first
+    // stage must start at beat 3 and the last must end at the fragment's bound —
+    // not at their measures' edges, which is how they used to overflow.
+    const sel: SelectionRange = {
+      barStart: 8, barEnd: 10, beatStart: 3.0, beatEnd: 2.0, repeatContext: null,
+      measureKeys: ['m8', 'm9', 'm10'],
+    };
+    const stages = [makeStage('A', 1, 1), makeStage('B', 2, 1), makeStage('C', 3, 1)];
+    const result = prePopulateStages(stages, sel);
+
+    expect(result[0]!.bounds).toMatchObject({ barStart: 8, beatStart: 3.0, barEnd: 8 });
+    expect(result[0]!.bounds!.beatEnd).toBeNull();       // interior boundary
+    expect(result[1]!.bounds!.beatStart).toBeNull();     // interior boundary
+    expect(result[1]!.bounds!.beatEnd).toBeNull();
+    expect(result[2]!.bounds!.beatStart).toBeNull();     // interior boundary
+    expect(result[2]!.bounds).toMatchObject({ barEnd: 10, beatEnd: 2.0 });
+  });
+
+  it('a single stage over a beat-precise selection takes both of its bounds', () => {
+    const sel: SelectionRange = {
+      barStart: 8, barEnd: 10, beatStart: 3.0, beatEnd: 2.0, repeatContext: null,
+      measureKeys: ['m8', 'm9', 'm10'],
+    };
+    const result = prePopulateStages([makeStage('A', 1, 1)], sel);
+    expect(result[0]!.bounds).toMatchObject({
+      barStart: 8, beatStart: 3.0, barEnd: 10, beatEnd: 2.0,
+    });
+  });
+
+  it('pins outer beats on the bar-arithmetic fallback path too', () => {
+    const sel: SelectionRange = {
+      barStart: 8, barEnd: 10, beatStart: 3.0, beatEnd: 2.0, repeatContext: null,
+    };
+    const result = prePopulateStages([makeStage('A', 1, 1), makeStage('B', 2, 1)], sel);
+    expect(result[0]!.bounds!.beatStart).toBe(3.0);
+    expect(result[1]!.bounds!.beatEnd).toBe(2.0);
   });
 
   // ── Effective measure-key distribution (Component 9 Step 4, §6A.1) ────────
@@ -358,48 +399,41 @@ describe('reconcileWithNewConcept', () => {
 // ---------------------------------------------------------------------------
 
 describe('chooseStageGrid', () => {
-  it('returns measure when selection has enough bars', () => {
-    const sel = makeSelection(1, 4); // 4 bars, 4 stages
-    expect(chooseStageGrid(sel, 4)).toBe('measure');
+  it('returns measure when the frame has enough measure slots', () => {
+    expect(chooseStageGrid(4, { measure: 4, beat: 16, subbeat: 32 })).toBe('measure');
   });
 
-  it('returns measure when selection has more bars than stages', () => {
-    const sel = makeSelection(1, 8);
-    expect(chooseStageGrid(sel, 4)).toBe('measure');
+  it('returns measure when the frame has more measure slots than stages', () => {
+    expect(chooseStageGrid(4, { measure: 8, beat: 32, subbeat: 64 })).toBe('measure');
   });
 
-  it('returns beat when bars insufficient but beatSlots sufficient', () => {
-    const sel = makeSelection(1, 2); // 2 bars, 4 stages — too few at measure level
-    expect(chooseStageGrid(sel, 4, 8 /* 8 beats in 2 bars */)).toBe('beat');
+  it('returns beat when measure slots are insufficient but beats suffice', () => {
+    expect(chooseStageGrid(4, { measure: 2, beat: 8, subbeat: 16 })).toBe('beat');
   });
 
-  it('returns subbeat when beat insufficient but subBeatSlots sufficient', () => {
-    const sel = makeSelection(1, 1); // 1 bar, 4 stages
-    expect(chooseStageGrid(sel, 4, 2 /* only 2 beats */, 16 /* 16 sub-beats */)).toBe('subbeat');
+  it('returns subbeat when beats are insufficient but sub-beats suffice', () => {
+    expect(chooseStageGrid(4, { measure: 1, beat: 2, subbeat: 16 })).toBe('subbeat');
   });
 
   it('falls through to subbeat even when no resolution fits (blocking case)', () => {
-    const sel = makeSelection(1, 1); // 1 bar, 4 stages — none fit
-    expect(chooseStageGrid(sel, 4, 2, 3)).toBe('subbeat');
+    expect(chooseStageGrid(4, { measure: 1, beat: 2, subbeat: 3 })).toBe('subbeat');
   });
 
   it('returns measure for stageCount 0', () => {
-    expect(chooseStageGrid(makeSelection(1, 2), 0)).toBe('measure');
+    expect(chooseStageGrid(0, { measure: 0, beat: 0, subbeat: 0 })).toBe('measure');
   });
 
-  it('returns measure for stageCount 1 (single bar selection)', () => {
-    expect(chooseStageGrid(makeSelection(1, 1), 1)).toBe('measure');
+  it('returns measure for stageCount 1 on a single-slot frame', () => {
+    expect(chooseStageGrid(1, { measure: 1, beat: 4, subbeat: 8 })).toBe('measure');
   });
 
-  it('counts committed measure keys, not the bar-number span (§6A.1)', () => {
-    // Two distinct bar numbers but four physical measures: 4 stages fit at
-    // measure resolution.
-    const sel: SelectionRange = {
-      barStart: 2, barEnd: 3, beatStart: null, beatEnd: null,
-      repeatContext: null,
-      measureKeys: ['m2', 'm2#1', 'm3', 'm3#1'],
-    };
-    expect(chooseStageGrid(sel, 4)).toBe('measure');
+  it('takes the measure tier from the frame, not from a bar span', () => {
+    // Four physical measures behind two distinct bar numbers (split measures):
+    // the frame reports 4 measure slots, so 4 stages fit at measure resolution
+    // even though barEnd − barStart + 1 is 2 (§6A.1). The M7 case is the mirror
+    // image — a beat-precise endpoint leaves its measure uncovered, so the frame
+    // reports fewer slots than there are keys.
+    expect(chooseStageGrid(4, { measure: 4, beat: 16, subbeat: 32 })).toBe('measure');
   });
 });
 
@@ -521,58 +555,6 @@ describe('prePopulateStagesAtGrid', () => {
     // All assignments have non-null beat coords for internal stages
     expect(result[1]!.bounds!.beatStart).not.toBeNull();
     expect(result[2]!.bounds!.beatStart).not.toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// computeResizeClamp
-// ---------------------------------------------------------------------------
-
-describe('computeResizeClamp', () => {
-  it('returns null when no confirmed stages exist', () => {
-    const assignments = makePacAssignments(); // all confirmed=false
-    expect(computeResizeClamp(assignments)).toBeNull();
-  });
-
-  it('returns null for empty assignments', () => {
-    expect(computeResizeClamp([])).toBeNull();
-  });
-
-  it('single confirmed stage: minBarStart = barStart, maxBarEnd = barEnd', () => {
-    const assignments = makePacAssignments().map((a, i) =>
-      i === 1 ? { ...a, confirmed: true } : a,
-    );
-    const clamp = computeResizeClamp(assignments);
-    const stage = assignments.find(a => a.confirmed)!;
-    expect(clamp).not.toBeNull();
-    expect(clamp!.minBarStart).toBe(stage.bounds!.barStart);
-    expect(clamp!.maxBarEnd).toBe(stage.bounds!.barEnd);
-  });
-
-  it('multiple confirmed stages: min of barStarts and max of barEnds', () => {
-    const assignments = makePacAssignments().map(a =>
-      a.order === 1 || a.order === 4 ? { ...a, confirmed: true } : a,
-    );
-    const first = assignments.find(a => a.order === 1)!;
-    const last  = assignments.find(a => a.order === 4)!;
-    const clamp = computeResizeClamp(assignments);
-    expect(clamp!.minBarStart).toBe(first.bounds!.barStart);
-    expect(clamp!.maxBarEnd).toBe(last.bounds!.barEnd);
-  });
-
-  it('ignores absent confirmed stages', () => {
-    const assignments = makePacAssignments().map((a, i) =>
-      i === 0 ? { ...a, confirmed: true, absent: true, bounds: null } : a,
-    );
-    // Only the absent+confirmed stage exists → null (no non-absent confirmed)
-    expect(computeResizeClamp(assignments)).toBeNull();
-  });
-
-  it('ignores orphaned confirmed stages', () => {
-    const assignments = makePacAssignments().map((a, i) =>
-      i === 0 ? { ...a, confirmed: true, orphaned: true } : a,
-    );
-    expect(computeResizeClamp(assignments)).toBeNull();
   });
 });
 

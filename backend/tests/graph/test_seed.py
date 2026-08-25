@@ -426,6 +426,57 @@ def test_capture_extensions_persisted_as_json(neo4j_driver: Driver) -> None:
             session.run("MATCH (n) WHERE n.id = '_TestSeedExtConcept' DETACH DELETE n")
 
 
+def test_seed_persists_definition_reviewed(neo4j_driver: Driver) -> None:
+    """definition_reviewed round-trips through the seed layer (Component 11 Step 2).
+
+    A concept flagged ``definition_reviewed: true`` stores ``true``; one that
+    omits the flag defaults to ``false`` on the node.
+    """
+    reviewed_domain = DomainYAML(
+        domain=_DOMAIN_KEY,
+        concepts=[
+            ConceptYAML(
+                id="_TestSeedReviewedConcept",
+                name="Reviewed Concept",
+                definition="A concept whose definition has passed editorial review.",
+                domain=_DOMAIN_KEY,
+                type="CadenceType",
+                definition_reviewed=True,
+            ),
+            ConceptYAML(
+                id="_TestSeedUnreviewedConcept",
+                name="Unreviewed Concept",
+                definition="A concept whose definition is still annotator prose.",
+                domain=_DOMAIN_KEY,
+                type="CadenceType",
+            ),
+        ],
+        property_schemas=[],
+    )
+
+    from scripts.seed import SeedStats, _seed_domain  # noqa: PLC0415
+
+    _cleanup(neo4j_driver)
+    try:
+        with neo4j_driver.session() as session:
+            create_fulltext_index(session)
+            merge_domain_node(session, _DOMAIN_KEY)
+            existing = get_existing_concept_ids(session)
+            _seed_domain(session, reviewed_domain, existing, SeedStats())
+
+        with neo4j_driver.session() as session:
+            rows = session.run(
+                "MATCH (c:Concept) WHERE c.id STARTS WITH '_TestSeed' "
+                "RETURN c.id AS id, c.definition_reviewed AS reviewed"
+            ).data()
+
+        flags = {r["id"]: r["reviewed"] for r in rows}
+        assert flags["_TestSeedReviewedConcept"] is True
+        assert flags["_TestSeedUnreviewedConcept"] is False
+    finally:
+        _cleanup(neo4j_driver)
+
+
 def test_prerequisite_for_acyclicity_no_cycle(neo4j_driver: Driver) -> None:
     """check_prerequisite_for_acyclicity returns empty list when no cycle exists."""
     _cleanup(neo4j_driver)

@@ -20,6 +20,15 @@ const MeiUrlSchema = z.object({
   composer_name: z.string(),
   movement_number: z.number(),
   movement_title: z.string().nullable(),
+  /**
+   * The movement's curated notated key and meter, written into summary.key /
+   * summary.meter on every fragment tagged here. They come from the movement
+   * record rather than the MEI because the MEI cannot express the key: it
+   * encodes `<keySig sig="4f"/>` with no mode, which is A-flat major and F
+   * minor alike (M6).
+   */
+  key_signature: z.string().nullable().optional(),
+  meter: z.string().nullable().optional(),
 });
 
 type MeiUrlResponse = z.infer<typeof MeiUrlSchema>;
@@ -45,6 +54,6 @@ export async function fetchMeiUrl(movementId: string): Promise<MeiUrlResponse> {
   return apiFetch(
     `${BASE}/movements/${encodeURIComponent(movementId)}/mei-url`,
     undefined,
-    MeiUrlSchema,
+    MeiUrlSchema
   );
 }

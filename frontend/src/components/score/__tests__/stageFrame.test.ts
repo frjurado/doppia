@@ -31,7 +31,7 @@ import { encodeBeat, measureGhostKey } from '../ghosts';
 import type { SelectionRange } from '../annotator';
 import type { ContainsStage } from '../../../services/conceptApi';
 import type { StageAssignment } from '../stages';
-import { prePopulateStages } from '../stages';
+import { computeStagesComplete, prePopulateStages } from '../stages';
 import {
   buildStageSlots,
   projectBoundaries,
@@ -170,6 +170,89 @@ describe('buildStageSlots', () => {
       'measure',
     );
     expect(slots.map(s => s.measureKey)).toEqual(['m1', 'm2']);
+  });
+
+  // ── M7: the measure grid honours the selection's beat bounds (Step 11) ─────
+
+  it('measure grid: endpoint slots carry the selection beat bounds, interiors null', () => {
+    // The 279/ii shape at measure granularity: m1 beat 3 – m3 beat 1 (exclusive
+    // bound 2.0). Before this the frame's outer edges were the endpoint
+    // *measures*, so the first and last stage overflowed the fragment.
+    const slots = buildStageSlots(
+      sel({
+        barStart: 1, barEnd: 3, beatStart: 3.0, beatEnd: 2.0,
+        measureKeys: ['m1', 'm2', 'm3'],
+      }),
+      fourBarLayer(4),
+      'measure',
+    );
+    expect(slots.map(s => s.measureKey)).toEqual(['m1', 'm2', 'm3']);
+    expect(slots.map(s => s.beatFloat)).toEqual([3.0, null, null]);
+    expect(slots.map(s => s.endFloat)).toEqual([null, null, 2.0]);
+  });
+
+  it('measure grid: endpoint slot geometry is clipped to the covered beats', () => {
+    // Measures are 100px wide with 4 beats → 25px each. m1 from beat 3 starts at
+    // x=50 (not 0); m3 up to the exclusive bound 2.0 covers beat 1 only, so it
+    // ends at x=225 (not 300).
+    const slots = buildStageSlots(
+      sel({
+        barStart: 1, barEnd: 3, beatStart: 3.0, beatEnd: 2.0,
+        measureKeys: ['m1', 'm2', 'm3'],
+      }),
+      fourBarLayer(4),
+      'measure',
+    );
+    expect(slots[0]!.left).toBe(50);
+    expect(slots[0]!.right).toBe(100);  // unclipped end — interior boundary
+    expect(slots[1]!.left).toBe(100);   // untouched middle measure
+    expect(slots[1]!.right).toBe(200);
+    expect(slots[2]!.left).toBe(200);   // unclipped start — interior boundary
+    expect(slots[2]!.right).toBe(225);
+  });
+
+  it('measure grid: a single-measure selection clips both edges of the one slot', () => {
+    const slots = buildStageSlots(
+      sel({ barStart: 2, barEnd: 2, beatStart: 2.0, beatEnd: 4.0, measureKeys: ['m2'] }),
+      fourBarLayer(4),
+      'measure',
+    );
+    expect(slots).toHaveLength(1);
+    expect(slots[0]!).toMatchObject({ beatFloat: 2.0, endFloat: 4.0, left: 125, right: 175 });
+  });
+
+  it('measure grid: an endpoint measure the beat bounds leave uncovered gets no slot', () => {
+    // beatEnd 1.0 excludes every onset in m3 — the measure names the cut, it is
+    // not part of the fragment (cf. formatFragmentRange's same reduction).
+    const slots = buildStageSlots(
+      sel({
+        barStart: 1, barEnd: 3, beatStart: 1.0, beatEnd: 1.0,
+        measureKeys: ['m1', 'm2', 'm3'],
+      }),
+      fourBarLayer(4),
+      'measure',
+    );
+    expect(slots.map(s => s.measureKey)).toEqual(['m1', 'm2']);
+  });
+
+  it('measure grid: a measure with no fine ghosts keeps its whole extent', () => {
+    // No beat or sub-beat index at all: the clip cannot be computed, so the slot
+    // survives unrefined rather than dropping out of the frame.
+    const slots = buildStageSlots(
+      sel({ barStart: 1, barEnd: 2, beatStart: 3.0, beatEnd: 2.0, measureKeys: ['m1', 'm2'] }),
+      fourBarLayer(0),
+      'measure',
+    );
+    expect(slots).toHaveLength(2);
+    expect(slots[0]!).toMatchObject({ left: 0, right: 100 });
+    expect(slots[1]!).toMatchObject({ left: 100, right: 200 });
+  });
+
+  it('measure grid: a selection with no beat precision is untouched', () => {
+    const slots = buildStageSlots(fourBarSel(), fourBarLayer(4), 'measure');
+    expect(slots.map(s => s.beatFloat)).toEqual([null, null, null, null]);
+    expect(slots.map(s => s.left)).toEqual([0, 100, 200, 300]);
+    expect(slots.map(s => s.right)).toEqual([100, 200, 300, 400]);
   });
 
   it('beat grid: endpoint filters apply to the first/last key only', () => {
@@ -369,6 +452,23 @@ describe('frameToAssignments', () => {
     const out = frameToAssignments(assignments, assignments, slots, [2], new Set(['A']));
     expect(out.find(x => x.stageId === 'A')!.confirmed).toBe(true);
     expect(out.find(x => x.stageId === 'B')!.confirmed).toBe(false);
+  });
+
+  it('flags error on a required stage left with an empty run', () => {
+    // Degenerate frame: fewer slots than stages. The stage keeps its committed
+    // bounds so nothing is lost, but `error` blocks submission rather than
+    // writing a required sub-part that lies outside its parent fragment.
+    const slots = buildStageSlots(
+      sel({ barStart: 1, barEnd: 1, measureKeys: ['m1'] }),
+      fourBarLayer(),
+      'measure',
+    );
+    const assignments = makeAssignments([['A', true], ['B', true]]);
+    const out = frameToAssignments(assignments, assignments, slots, [1]);
+    const b = out.find(x => x.stageId === 'B')!;
+    expect(b.error).toBe(true);
+    expect(b.bounds).not.toBeNull();
+    expect(computeStagesComplete(out)).toBe(false);
   });
 });
 

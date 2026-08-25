@@ -119,25 +119,39 @@ export interface HarmonyEventConfirmPayload {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch harmony events for a movement, sliced by notated bar range.
+ * Fetch harmony events for a movement, sliced by measure range.
+ *
+ * **Pass the mc range whenever you have it.** `mn` does not reliably name a
+ * measure: on K331/ii the MEI's `@n` restarts at the Trio while the DCML
+ * annotation numbers straight through, so asking for "bars 29-30" of the Trio
+ * returns the *Menuetto's* harmony (M6). `mc` is document-order and unique
+ * (ADR-015); when supplied it overrides the bar bounds server-side.
  *
  * @param movementId UUID of the movement.
  * @param barStart Inclusive lower bound on notated bar number (mn).
  * @param barEnd Inclusive upper bound on notated bar number (mn).
+ * @param mcStart Inclusive lower bound on mc; preferred over the bar bounds.
+ * @param mcEnd Inclusive upper bound on mc; preferred over the bar bounds.
  */
 export async function getHarmonyEvents(
   movementId: string,
   barStart: number,
   barEnd: number,
+  mcStart?: number | null,
+  mcEnd?: number | null
 ): Promise<HarmonyEventOut[]> {
   const params = new URLSearchParams({
     bar_start: String(barStart),
     bar_end: String(barEnd),
   });
+  if (mcStart != null && mcEnd != null) {
+    params.set('mc_start', String(mcStart));
+    params.set('mc_end', String(mcEnd));
+  }
   return apiFetch(
     `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events?${params}`,
     undefined,
-    HarmonyEventListSchema,
+    HarmonyEventListSchema
   );
 }
 
@@ -147,12 +161,12 @@ export async function getHarmonyEvents(
  */
 export async function insertHarmonyEvent(
   movementId: string,
-  payload: HarmonyEventInsertPayload,
+  payload: HarmonyEventInsertPayload
 ): Promise<HarmonyEventOut> {
   return apiFetch(
     `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events`,
     { method: 'POST', body: JSON.stringify(payload) },
-    HarmonyEventOutSchema,
+    HarmonyEventOutSchema
   );
 }
 
@@ -162,12 +176,12 @@ export async function insertHarmonyEvent(
  */
 export async function deleteHarmonyEvent(
   movementId: string,
-  payload: HarmonyEventDeletePayload,
+  payload: HarmonyEventDeletePayload
 ): Promise<void> {
-  await apiFetch(
-    `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/delete`,
-    { method: 'POST', body: JSON.stringify(payload) },
-  );
+  await apiFetch(`${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/delete`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 /**
@@ -176,12 +190,12 @@ export async function deleteHarmonyEvent(
  */
 export async function moveHarmonyBoundary(
   movementId: string,
-  payload: HarmonyEventMoveBoundaryPayload,
+  payload: HarmonyEventMoveBoundaryPayload
 ): Promise<HarmonyEventOut> {
   return apiFetch(
     `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/boundary`,
     { method: 'PATCH', body: JSON.stringify(payload) },
-    HarmonyEventOutSchema,
+    HarmonyEventOutSchema
   );
 }
 
@@ -191,12 +205,12 @@ export async function moveHarmonyBoundary(
  */
 export async function editHarmonyChord(
   movementId: string,
-  payload: HarmonyEventEditChordPayload,
+  payload: HarmonyEventEditChordPayload
 ): Promise<HarmonyEventOut> {
   return apiFetch(
     `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/chord`,
     { method: 'PATCH', body: JSON.stringify(payload) },
-    HarmonyEventOutSchema,
+    HarmonyEventOutSchema
   );
 }
 
@@ -206,11 +220,33 @@ export async function editHarmonyChord(
  */
 export async function confirmHarmonyEvent(
   movementId: string,
-  payload: HarmonyEventConfirmPayload,
+  payload: HarmonyEventConfirmPayload
 ): Promise<HarmonyEventOut> {
   return apiFetch(
     `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/confirm`,
     { method: 'POST', body: JSON.stringify(payload) },
-    HarmonyEventOutSchema,
+    HarmonyEventOutSchema
+  );
+}
+
+/**
+ * Confirm several harmony events in one request.
+ *
+ * Must not be expressed as N parallel `confirmHarmonyEvent` calls: every write
+ * replaces the movement's whole `events` array, so concurrent writers overwrite
+ * each other and all but one confirmation is silently lost. That is what made
+ * "Confirm all" appear to confirm a single event.
+ *
+ * Entries the server can no longer match are skipped, so the returned list may
+ * be shorter than the payload.
+ */
+export async function confirmHarmonyEvents(
+  movementId: string,
+  events: HarmonyEventConfirmPayload[]
+): Promise<HarmonyEventOut[]> {
+  return apiFetch(
+    `${BASE}/movements/${encodeURIComponent(movementId)}/analysis/events/confirm-batch`,
+    { method: 'POST', body: JSON.stringify({ events }) },
+    HarmonyEventListSchema
   );
 }

@@ -1,0 +1,176 @@
+/* Isolated fragment notation + playback.
+   Moved verbatim from FragmentDetail.module.css when the notation surface was
+   extracted for reuse by the glossary example expand (Component 11 Step 6).
+   The caller owns the surrounding surface and its padding; this file styles
+   only the controls / score / overlay / transport stack. */
+
+.notation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+/* Scale toggle strip */
+.scoreControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Harmony-label toggle floats to the left of the staff-size group (which stays
+   right via the strip's flex-end). */
+.harmonyToggleGroup {
+  display: flex;
+  margin-right: auto;
+}
+
+.scaleGroup {
+  display: flex;
+  gap: 1px;
+}
+
+/* Mirrors ScoreViewer's .sizeButton treatment (Step 17 / F7): transparent
+   base, primary text on hover, solid primary when active. */
+.scaleBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px var(--spacing-3);
+  min-width: 28px;
+  text-align: center;
+  color: var(--color-on-surface-variant);
+}
+
+.scaleBtn:hover {
+  color: var(--color-primary);
+}
+
+.scaleBtnActive {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* Score + bracket overlay wrapper.
+   overflow: visible — brackets must never be clipped (Step 15); the SVG is
+   rendered at the measured container width, so nothing overflows horizontally.
+   padding-top reserves room for the main fragment bracket above the first
+   system. */
+.scoreContent {
+  position: relative;
+  overflow: visible;
+  padding-top: 16px;
+}
+
+/* Extra bottom padding reserves room for sub-part brackets below the last
+   system, so no vertical scrolling is needed to discover them. */
+.scoreContentWithSubParts {
+  padding-bottom: 56px;
+}
+
+/* Verovio SVG container */
+.svgPage {
+  line-height: 0;
+}
+
+.svgPage svg {
+  display: block;
+
+  /* Rendered at the measured container width (breaks:'smart'); cap at 100%
+     so a stale render never overflows the centered column while the resize
+     re-render is pending. */
+  max-width: 100%;
+  height: auto;
+}
+
+/* Loading / error state inside score area */
+.renderState {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-6);
+}
+
+/* Bracket overlay layers — absolutely positioned HTML above the SVG
+   (CLAUDE.md overlay rule); never clip brackets drawn outside the SVG box. */
+.bracketOverlayLayer,
+.subPartOverlayLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Main fragment bracket — above the score, one segment per system row.
+   Mirrors the tagging tool's MainBracket visual (primary, 0px radius). */
+.mainBracket {
+  position: absolute;
+  background-color: var(--color-primary);
+}
+
+/* Individual sub-part bracket bar */
+.subPartBracket {
+  position: absolute;
+  height: 4px;
+  background: var(--color-primary);
+  opacity: 0.55;
+}
+
+.subPartBracket[data-status='approved'] {
+  background: var(--color-primary);
+}
+
+.subPartBracket[data-status='submitted'] {
+  background: var(--color-secondary);
+}
+
+.subPartBracket[data-status='rejected'] {
+  background: var(--color-error);
+  opacity: 0.4;
+}
+
+/* Short label above the bracket bar */
+.subPartLabel {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-family: var(--font-label);
+  font-size: 10px;
+  color: var(--color-on-surface-variant);
+  white-space: nowrap;
+}
+
+/* ─── Playback bar ──────────────────────────────────────────────────────────── */
+
+.playbackBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding-top: var(--spacing-2);
+}
+
+.transportButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px var(--spacing-2);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--color-on-surface);
+  min-width: 28px;
+  text-align: center;
+}
+
+.transportButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.transportButton:not(:disabled):hover {
+  background: var(--color-surface-container-high);
+}
+
+.positionDisplay {
+  color: var(--color-on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}

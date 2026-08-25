@@ -15,8 +15,32 @@ from __future__ import annotations
 
 from typing import Any
 
+from graph.queries.relationships import (
+    CONTAINS,
+    CONTRASTS_WITH,
+    FOLLOWS,
+    IS_EQUIVALENT_TO,
+    PRECEDES,
+    PREREQUISITE_FOR,
+    RESOLVES_TO,
+)
 from neo4j import AsyncSession as _AsyncSession
 from neo4j import Session as _Session
+
+# Relationship types the public concept page renders as "typed relationships"
+# (§ Component 11 Step 1).  IS_SUBTYPE_OF is deliberately excluded — the
+# hierarchy (parent/children/path) is surfaced separately — as are the schema
+# structural edges (HAS_PROPERTY_SCHEMA/HAS_VALUE/VALUE_REFERENCES/BELONGS_TO),
+# which are not concept-to-concept navigation.
+DISPLAY_RELATIONSHIP_TYPES: list[str] = [
+    PRECEDES,
+    FOLLOWS,
+    RESOLVES_TO,
+    CONTRASTS_WITH,
+    IS_EQUIVALENT_TO,
+    PREREQUISITE_FOR,
+    CONTAINS,
+]
 
 # ---------------------------------------------------------------------------
 # Schema inheritance  (upward IS_SUBTYPE_OF traversal)
@@ -552,33 +576,53 @@ async def get_concept_subtree(
 _GET_DOMAIN_ROOTS = """\
 MATCH (c:Concept)
 WHERE NOT (c)-[:IS_SUBTYPE_OF]->(:Concept)
+  AND NOT (c)<-[:CONTAINS]-(:Concept)
   AND NOT c.stub
 RETURN c.id                       AS id,
        c.name                     AS name,
-       coalesce(c.aliases, [])    AS aliases
+       coalesce(c.aliases, [])    AS aliases,
+       c.domain                   AS domain
 ORDER BY c.name
 """
-"""Return all non-stub concept nodes that have no IS_SUBTYPE_OF parent.
+"""Return the browsable concept roots — the entry points for both the editor
+concept-tree navigator and the public glossary index.
 
-These are the domain roots (e.g. 'Cadence') — the natural entry points for
-the concept-tree navigator.  Stub concepts are excluded because the tree
-endpoint also excludes stubs, so a stub root would yield an empty tree.
+A **browsable root** is a non-stub concept that (a) has no ``IS_SUBTYPE_OF``
+parent *and* (b) is not the target of any ``CONTAINS`` edge (Component 11
+Step 4b, § Decisions 5). Condition (b) excludes stage concepts — e.g.
+``CadentialDominant``, which is a ``CONTAINS`` target of ``Cadence``, not a
+subtype — so a stage never floats up as a spurious root even though it has no
+``IS_SUBTYPE_OF`` parent. Stage concepts stay reachable as the ``CONTAINS``
+relationships surfaced on their parent's page.
+
+The rule is deliberately structural rather than keyed on ``top_level_taggable``:
+``Cadence`` itself is ``top_level_taggable: false`` (an abstract root), so a
+taggability filter would wrongly drop it.
+
+``domain`` is returned so the public index can group roots into a forest per
+domain (a domain can have several browsable roots — e.g. cadences has
+``Cadence`` plus the post-cadential ``ClosingSection`` / ``StandingOnTheDominant``).
+Stub concepts are excluded because the subtree endpoint also excludes them.
 """
 
 
 async def get_domain_roots(
     session: _AsyncSession,
 ) -> list[dict[str, Any]]:
-    """Return all non-stub concept nodes with no IS_SUBTYPE_OF parent.
+    """Return the browsable concept roots (no IS_SUBTYPE_OF parent, not a CONTAINS target).
 
-    Each dict has keys: ``id``, ``name``, ``aliases`` (list).
+    Each dict has keys: ``id``, ``name``, ``aliases`` (list), ``domain`` (str).
+
+    See :data:`_GET_DOMAIN_ROOTS` for the root-selection rule (Component 11
+    Step 4b): stage concepts (``CONTAINS`` targets) are excluded so they never
+    appear as spurious roots on either the editor tree or the public index.
 
     Args:
         session: An open async Neo4j session.
 
     Returns:
         List of root dicts ordered alphabetically by name; empty when the
-        graph contains no concepts or all roots are stubs.
+        graph contains no eligible roots.
     """
     result = await session.run(_GET_DOMAIN_ROOTS)
     return await result.data()
@@ -619,5 +663,141 @@ async def search_concepts(
         domain=domain,
         skip=skip,
         limit=limit,
+    )
+    return await result.data()
+
+
+# ---------------------------------------------------------------------------
+# Public concept detail  (async — used by GET /api/v1/public/concepts/{id})
+# ---------------------------------------------------------------------------
+
+_GET_CONCEPT_DETAIL = """\
+MATCH (c:Concept {id: $concept_id})
+CALL {
+  WITH c
+  MATCH p = (c)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
+  WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
+  WITH p ORDER BY length(p) DESC LIMIT 1
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+}
+OPTIONAL MATCH (c)-[:IS_SUBTYPE_OF]->(parent:Concept)
+CALL {
+  WITH c
+  OPTIONAL MATCH (child:Concept)-[:IS_SUBTYPE_OF]->(c)
+  WITH child WHERE child IS NOT NULL
+  ORDER BY child.name
+  RETURN collect({
+    id: child.id,
+    name: child.name,
+    stub: coalesce(child.stub, false)
+  }) AS children
+}
+RETURN c.id                              AS id,
+       c.name                            AS name,
+       coalesce(c.aliases, [])           AS aliases,
+       c.definition                      AS definition,
+       c.domain                          AS domain,
+       c.complexity                      AS complexity,
+       coalesce(c.stub, false)           AS stub,
+       coalesce(c.definition_reviewed, false) AS definition_reviewed,
+       coalesce(c.top_level_taggable, false)  AS top_level_taggable,
+       hierarchy_path,
+       CASE WHEN parent IS NULL THEN null
+            ELSE {id: parent.id, name: parent.name, stub: coalesce(parent.stub, false)}
+       END                               AS parent,
+       children
+"""
+"""Full public-page payload for one concept.
+
+Returns a single row with the concept's identity, the ``stub`` /
+``definition_reviewed`` / ``top_level_taggable`` flags (each coalesced to a
+default so concepts predating a flag still return a boolean), the
+IS_SUBTYPE_OF hierarchy path (root → concept inclusive), the direct
+IS_SUBTYPE_OF parent, and the direct IS_SUBTYPE_OF children (stub children
+included but flagged, so an inbound link resolves to an honest stub page).
+
+Returns zero rows when the concept id is unknown.
+
+Parameters:
+    concept_id — the immutable concept id string
+"""
+
+_GET_CONCEPT_RELATIONSHIPS = """\
+MATCH (c:Concept {id: $concept_id})-[r]->(other:Concept)
+WHERE type(r) IN $rel_types
+RETURN type(r)                       AS rel_type,
+       'outgoing'                    AS direction,
+       other.id                      AS target_id,
+       other.name                    AS target_name,
+       coalesce(other.stub, false)   AS target_stub
+UNION
+MATCH (other:Concept)-[r]->(c:Concept {id: $concept_id})
+WHERE type(r) IN $rel_types
+RETURN type(r)                       AS rel_type,
+       'incoming'                    AS direction,
+       other.id                      AS target_id,
+       other.name                    AS target_name,
+       coalesce(other.stub, false)   AS target_stub
+"""
+"""Typed concept-to-concept relationships for the public concept page.
+
+Both directions are returned (``outgoing`` = this concept is the edge source,
+``incoming`` = the edge target), each row carrying the edge type, the other
+concept's id/name, and its ``stub`` flag.  The caller filters ``$rel_types``
+to :data:`DISPLAY_RELATIONSHIP_TYPES`; IS_SUBTYPE_OF is excluded there because
+the hierarchy is surfaced by ``_GET_CONCEPT_DETAIL``.
+
+Parameters:
+    concept_id — the immutable concept id string
+    rel_types  — list of relationship-type strings to include
+"""
+
+
+async def get_concept_detail(
+    session: _AsyncSession,
+    concept_id: str,
+) -> dict[str, Any] | None:
+    """Return the full public-page payload for one concept, or ``None`` if unknown.
+
+    The returned dict has keys: ``id``, ``name``, ``aliases`` (list),
+    ``definition`` (str or None), ``domain`` (str or None), ``complexity``
+    (str or None), ``stub`` (bool), ``definition_reviewed`` (bool),
+    ``top_level_taggable`` (bool), ``hierarchy_path`` (list of names, root →
+    concept inclusive), ``parent`` (``{id, name, stub}`` or None), and
+    ``children`` (list of ``{id, name, stub}``, ordered by name).
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The immutable concept id to resolve.
+
+    Returns:
+        The payload dict, or ``None`` when no Concept with ``concept_id`` exists.
+    """
+    result = await session.run(_GET_CONCEPT_DETAIL, concept_id=concept_id)
+    row = await result.single()
+    return dict(row) if row is not None else None
+
+
+async def get_concept_relationships(
+    session: _AsyncSession,
+    concept_id: str,
+) -> list[dict[str, Any]]:
+    """Return typed concept-to-concept relationships for the public concept page.
+
+    Each dict has keys: ``rel_type``, ``direction`` (``"outgoing"`` /
+    ``"incoming"``), ``target_id``, ``target_name``, ``target_stub`` (bool).
+    Only edges whose type is in :data:`DISPLAY_RELATIONSHIP_TYPES` are returned.
+
+    Args:
+        session: An open async Neo4j session.
+        concept_id: The immutable concept id.
+
+    Returns:
+        List of relationship dicts (unordered; the caller sorts for display).
+    """
+    result = await session.run(
+        _GET_CONCEPT_RELATIONSHIPS,
+        concept_id=concept_id,
+        rel_types=DISPLAY_RELATIONSHIP_TYPES,
     )
     return await result.data()

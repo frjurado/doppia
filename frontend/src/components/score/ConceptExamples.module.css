@@ -1,0 +1,125 @@
+/* Inline example fragments on the concept page — Component 11 Step 6.
+   Design system (DESIGN.md): tonal layering only, 0px radius, no borders/
+   dividers; spacing separates. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.headingRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+}
+
+.heading {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Tertiary control: underlined primary text, no box (matches the browse link
+   treatment on the concept page). */
+.shuffleButton {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-family: inherit;
+}
+
+.shuffleButton:hover {
+  text-decoration-thickness: 2px;
+}
+
+.emptyNote {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  font-style: italic;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+/* One example card. Tonal well, no border (same token as the browse card). */
+.card {
+  background: var(--color-surface-container-lowest);
+}
+
+/* Header is the expand toggle: preview + metadata + hint, full-width button. */
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+  width: 100%;
+  padding: var(--spacing-3) var(--spacing-4);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cardHeader:hover {
+  background: var(--color-surface-container-low);
+}
+
+/* SVG preview well — same size token as the browse card's preview area. */
+.previewArea {
+  flex-shrink: 0;
+  width: 140px;
+  height: 90px;
+  background: var(--color-surface-container-low);
+  overflow: hidden;
+}
+
+.previewImage {
+  height: 100%;
+  width: auto;
+  display: block;
+}
+
+.previewPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: var(--spacing-2);
+}
+
+.cardMeta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 0;
+}
+
+/* Expand/collapse affordance at the trailing edge of the header. */
+.expandHint {
+  flex-shrink: 0;
+  align-self: center;
+  color: var(--color-primary);
+}
+
+/* Expanded body — hosts the full FragmentNotation render. Sits on a slightly
+   higher tonal layer than the header well so the render reads as a distinct
+   surface without a divider. */
+.cardBody {
+  padding: var(--spacing-4);
+  background: var(--color-surface-container-low);
+}

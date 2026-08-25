@@ -13,5 +13,80 @@
   "detail": {
     "pageTitle": "Fragmento — Doppia",
     "back": "← Volver a fragmentos"
+  },
+  "glossary": {
+    "pageTitle": "{{concept}} — Doppia",
+    "pageTitleFallback": "Concepto — Doppia",
+    "loading": "Cargando concepto…",
+    "loadError": "No se pudo cargar este concepto.",
+    "notFound": "No existe ningún concepto con ese identificador en el glosario.",
+    "index": {
+      "pageTitle": "Glosario de conceptos — Doppia",
+      "heading": "Glosario de conceptos",
+      "intro": "Explora los conceptos que Doppia ha modelado, agrupados por dominio. Abre uno para leer su definición, ver su lugar en la jerarquía y estudiar ejemplos aprobados del corpus.",
+      "loading": "Cargando el glosario…",
+      "loadError": "No se pudo cargar el glosario.",
+      "empty": "Todavía no se ha publicado ningún concepto en el glosario."
+    },
+    "breadcrumbLabel": "Jerarquía de conceptos",
+    "aliases": "También conocido como {{aliases}}",
+    "definitionHeading": "Definición",
+    "definitionUnderReview": "Esta definición está en revisión editorial y todavía no se ha publicado.",
+    "definitionMissing": "Todavía no se ha redactado una definición para este concepto.",
+    "stubBanner": "Doppia aún no ha modelado el dominio de este concepto. Aparece en el glosario porque otros conceptos se refieren a él; su definición y sus ejemplos llegarán cuando se cubra el dominio.",
+    "stubTag": "aún sin cubrir",
+    "childrenHeading": "Tipos más específicos",
+    "relationshipsHeading": "Conceptos relacionados",
+    "examples": {
+      "heading": "Ejemplos",
+      "loading": "Extrayendo ejemplos…",
+      "loadError": "No se pudieron cargar los ejemplos.",
+      "empty": "Todavía no hay ejemplos aprobados: los fragmentos de este concepto aún se están etiquetando.",
+      "shuffle": "Barajar ↺",
+      "expand": "Abrir partitura",
+      "collapse": "Cerrar partitura",
+      "expandLoading": "Cargando partitura…",
+      "expandError": "No se pudo cargar este ejemplo."
+    },
+    "browseFragments": "Explorar fragmentos etiquetados con {{concept}} →",
+    "domains": {
+      "cadences": "Cadencias",
+      "formal-function": "Función formal",
+      "harmonic-functions": "Función armónica",
+      "prolongation": "Prolongación"
+    },
+    "complexities": {
+      "foundational": "Fundamental",
+      "intermediate": "Intermedio",
+      "advanced": "Avanzado"
+    },
+    "relationships": {
+      "CONTAINS": {
+        "outgoing": "Contiene",
+        "incoming": "Forma parte de"
+      },
+      "PRECEDES": {
+        "outgoing": "Conduce a",
+        "incoming": "Precedido por"
+      },
+      "FOLLOWS": {
+        "outgoing": "Prolonga",
+        "incoming": "Prolongado por"
+      },
+      "RESOLVES_TO": {
+        "outgoing": "Resuelve en",
+        "incoming": "Resolución de"
+      },
+      "CONTRASTS_WITH": {
+        "symmetric": "Contrasta con"
+      },
+      "IS_EQUIVALENT_TO": {
+        "symmetric": "Equivalente a"
+      },
+      "PREREQUISITE_FOR": {
+        "outgoing": "Requisito previo para",
+        "incoming": "Se apoya en"
+      }
+    }
   }
 }

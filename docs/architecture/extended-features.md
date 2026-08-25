@@ -10,7 +10,11 @@ These features extend the platform beyond the core blog, collections, and multip
 
 ### Concept Glossary with Inline Examples
 
-A browsable reference where every concept node in the knowledge graph becomes a page. Each page surfaces the concept's prose definition, its position in the type hierarchy, its typed relationships to other concepts (`RESOLVES_TO`, `CONTRASTS_WITH`, `IMPLIES`, and so on), and a curated set of corpus fragments tagged with that concept rendered inline via Verovio with MIDI playback. The glossary requires no bespoke content authoring: it is generated automatically from the graph and fragment database. The `APPEARS_IN` edges do the curation work; the fragment rendering infrastructure handles display.
+> **✅ Built — Component 11 (2026-07/08).** Live on staging at `/glossary`. This entry is kept as the original design idea; the as-built plan, decisions, and deviations are in [`../roadmap/component-11-concept-glossary.md`](../roadmap/component-11-concept-glossary.md).
+
+A browsable reference where every concept node in the knowledge graph becomes a page. Each page surfaces the concept's prose definition, its position in the type hierarchy, its typed relationships to other concepts (`RESOLVES_TO`, `CONTRASTS_WITH`, `IMPLIES`, and so on), and a curated set of corpus fragments tagged with that concept rendered inline via Verovio with MIDI playback. The glossary requires no bespoke content authoring: it is generated automatically from the graph and fragment database; the fragment rendering infrastructure handles display.
+
+**As built, the curation comes from PostgreSQL, not from graph edges.** This entry originally said "the `APPEARS_IN` edges do the curation work" — there are no such edges, and there never were. A fragment's concept tags live in the PostgreSQL `fragment_concept_tag` table, which is the join surface between the two databases (`CLAUDE.md` § Invariants: concept `id` values are immutable precisely because they are that join key). The example draw is therefore a PostgreSQL query filtered to `approved`, top-level fragments over the concept's `IS_SUBTYPE_OF` subtree, with the ADR-009 NonCommercial exclusion applied — not a graph traversal. The graph supplies the subtree; the relational side supplies the fragments.
 
 ### Prerequisite Map
 

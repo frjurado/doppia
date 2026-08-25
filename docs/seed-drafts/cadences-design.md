@@ -200,6 +200,7 @@ For each concept: `id`, parent (`IS_SUBTYPE_OF`), `CONTAINS` edges if any, schem
 
 **StandingOnTheDominant**
 *Edges:* `FOLLOWS` → `HalfCadence`.
+*Note:* `FOLLOWS` targets the abstract `HalfCadence`, not only `HalfCadenceRealised` — dominant prolongations can also follow Dominant Arrivals in transitional contexts. Deliberately the opposite choice from `ClosingSection` above, whose target is narrowed to the *realised* form because a closing section prolongs a tonic that was actually reached.
 *Capture extensions:* `prior_cadence_pointer` (type `fragment_pointer`; the prior HC fragment id; pre-populated).
 *top_level_taggable:* true.
 *Definition seed:* "A post-cadential section that follows a half cadence, prolonging the dominant — typically as the close of a transition or at the end of the development."
@@ -398,6 +399,22 @@ The post-cadential and cross-fragment concepts (`ClosingSection`, `StandingOnThe
 
 ---
 
+## Terminology and prose conventions
+
+Settled in the editorial review pass over `cadences.yaml` (2026-07-29), when the definitions were rewritten as public-facing prose for the glossary — Component 11 Step 13E, the `definition_reviewed` gate.
+
+**The YAML's `definition` values are authoritative, not the *Definition seed* lines in the concept inventory above.** Those record the original design draft and are kept as a record of it. The reviewed prose diverges from them deliberately: shorter, addressed to a reader rather than an annotator, and with the graph-modelling rationale removed. Read `backend/seed/domains/cadences.yaml` for current text.
+
+**Modelling rationale does not belong in `definition`.** A definition is one paragraph of musical content aimed at a glossary reader. Why something is a concept rather than a property, why a `FOLLOWS` edge targets one node rather than another, how an annotator should choose between two labels — that belongs in this document or the relevant ADR, and was stripped out of the prose in the review pass. Property-schema `description` fields are exempt: they never reach the public payload (`ConceptDetailResponse` carries no property schemas) and are read only inside the tagging tool, so they may keep the editorial register.
+
+**Spelling: "pre-dominant", capitalised "Pre-dominant"**, following Caplin — not "predominant", not "Pre-Dominant". Applies to concept `name` values, property and value labels, and running prose, in this domain and in `harmonic-functions.yaml`. Concept and value **ids** are untouched, since `id` values are immutable (`CLAUDE.md` § Invariants): `CadentialPreDominant`, `SD4Predominant`, and `SDSharp4Predominant` keep their existing spelling and must not be "corrected".
+
+**Stage numbering belongs to the stage concepts.** Initial Tonic, Pre-dominant, Dominant, and Final Tonic open their definitions with "Stage N of a cadence:" and own the numbering. Cadence-branch definitions refer to stages by function name instead — "the cadential dominant", "the final tonic" — so a reader meeting a stage number always meets it on the page that glosses it.
+
+**"Not to be confused with X"** is the standing formula for separating easily-confused concepts. Used in `DeceptiveCadence`, `EvadedCadence`, and `HalfCadenceRealised`.
+
+---
+
 ## Open items
 
 The following are deferred to the appropriate later step or to community / peer review; they are not blockers for the YAML pass.
@@ -408,6 +425,8 @@ The following are deferred to the appropriate later step or to community / peer 
 - **WayStation fulfilment not modelled.** A `WayStation` cadence implies an eventual terminal cadence, but the relationship is deliberately not modelled: a WayStation may be unfulfilled, and any cadence can serve as the terminal, so a dedicated terminal-cadence concept would over-fit. Fulfilment is observed via fragment chronology at query time. (Contrast the Reopened HC case, which *is* modelled — see departures above — because the reopening HC's identity is constituted by its relationship to the prior AC.)
 - **Formal Function vocabulary.** Only a stable subset of closure values is seeded now (see "Seeding strategy for formal-function closure"); the full intended vocabulary is captured in `formal-function-design-notes.md` and will be authored when the Formal Function domain is modelled. Adding values then is non-breaking; a one-time enrichment pass over cadences tagged in the interim fills blanks and adds finer values.
 - **`Premature` nuance.** Currently a BOOL on `DominantArrival`. If Caplin or repertoire study suggests intermediate timing categories (early / on-time / late), switching to a `ONE_OF` with named values is non-breaking.
+- **Bibliographic references as their own field.** `Cadence` carries its Caplin citation inline in the definition prose — the only citation in the domain. A dedicated `references` field on `ConceptYAML`, rendered as its own block on the concept page, is the better shape, but promoting it now would mean designing a convention against a single instance. Deferred until the next domain arrives, so one pass settles the format for every definition at once.
+- **Capitalisation of property and value labels.** Concept names are title-cased in running prose ("Authentic Cadence"), but property values are not: `ImperfectAuthenticCadence` says "a way station" where `CadenceFunction`'s value is labelled "Way Station". Agreed in the review pass that the value should be capitalised so the link to the property is visible, and deferred to a single batch pass over all property and value labels — the criterion affects more than this one occurrence.
 - **Adding `CadenceType` typed structured fields back to the design reference.** The current design-reference table lists "approach function, resolution function" as typed structured fields for `CadenceType`, which doesn't reflect the present design (function is a property, approach is captured by stage CONTAINS + properties). Worth a small update to the design reference to either drop the row or replace it with a more honest minimal set.
 
 ---

@@ -23,6 +23,7 @@ import hashlib
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -43,6 +44,7 @@ from models.analysis import MovementAnalysis
 from models.fragment import (
     ConceptBrowseItem,
     ConceptBrowseResponse,
+    ConceptExamplesResponse,
     ConceptTagDetail,
     Fragment,
     FragmentConceptTag,
@@ -57,7 +59,7 @@ from models.fragment import (
     ReviewQueueResponse,
     SubPartFragmentCreate,
 )
-from models.music import Composer, Corpus, Movement, Work
+from models.music import Composer, Corpus, Movement, MovementSection, Work
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.cache import get_subtree_cache, set_subtree_cache
@@ -172,13 +174,106 @@ def _licence_excludes_public(licence: str | None) -> bool:
     return "nc" in re.split(r"[^a-z0-9]+", licence.lower())
 
 
+def _normalise_setseed(seed: int) -> float:
+    """Map an arbitrary integer seed to the ``[-1, 1]`` domain of PG ``setseed``.
+
+    PostgreSQL's ``setseed`` accepts a double in ``[-1, 1]``; the glossary
+    example endpoint exposes an opaque integer seed instead. A stable modulo maps
+    any int deterministically into ``[0, 1)`` (well within domain), so the same
+    seed always yields the same reproducible draw.
+
+    Args:
+        seed: Any integer (may be negative).
+
+    Returns:
+        A float in ``[0, 1)`` derived deterministically from ``seed``.
+    """
+    return (seed % 1_000_000) / 1_000_000.0
+
+
+def _event_in_range(
+    ev: dict,
+    mc_start: int,
+    mc_end: int,
+    bar_start: int,
+    bar_end: int,
+    volta_filter: int | None,
+    beat_start: float | None = None,
+    beat_end: float | None = None,
+) -> bool:
+    """Return whether a harmony event falls inside a fragment's range.
+
+    **Prefers the machine coordinate** (ADR-015/ADR-036): when the event carries
+    an ``mc``, measure membership is ``mc_start <= mc <= mc_end``, which is
+    unambiguous by construction. The notated-bar path was not: on a movement
+    whose bar numbers restart, ``bar_start <= mn <= bar_end`` matches *both*
+    passes, so a K331/ii Trio fragment picked up the Menuetto's harmonies as
+    well as its own. The ``(mn, volta)`` test remains the fallback for an event
+    with no ``mc`` — it is optional on the harmony API payloads, so a manually
+    inserted event may lack it.
+
+    **Beat bounds clip the boundary measures** (M6). A sub-measure fragment
+    covers part of its first and last bars, and ``fragment-schema.md`` § approval
+    gate defines the range as ``[bar_start, beat_start] .. [bar_end, beat_end)``
+    — onset-based inclusion, exclusive at the end, the same rule the ghost layer
+    and the tagging-side harmony panel apply. Without this the read sidebar
+    showed every chord in the boundary measures rather than the ones the fragment
+    actually spans, and the approval gate demanded review of events outside the
+    fragment. Middle measures are unconstrained.
+
+    Args:
+        ev: One ``movement_analysis.events`` entry.
+        mc_start: Inclusive lower bound, document-order index.
+        mc_end: Inclusive upper bound, document-order index.
+        bar_start: Inclusive lower bound, notated bar number (fallback path).
+        bar_end: Inclusive upper bound, notated bar number (fallback path).
+        volta_filter: Volta number to restrict to, or ``None`` (fallback path).
+        beat_start: Onset at or after which events in the first measure are
+            included; ``None`` for a whole-measure start.
+        beat_end: Exclusive onset bound in the last measure; ``None`` for a
+            whole-measure end.
+
+    Returns:
+        ``True`` when the event belongs to the fragment's range.
+    """
+    mc = ev.get("mc")
+    if mc is not None:
+        if not (mc_start <= int(mc) <= mc_end):
+            return False
+        at_first = int(mc) == mc_start
+        at_last = int(mc) == mc_end
+    else:
+        mn = ev.get("mn")
+        if mn is None:
+            return False
+        if not (bar_start <= int(mn) <= bar_end):
+            return False
+        if volta_filter is not None and ev.get("volta") != volta_filter:
+            return False
+        at_first = int(mn) == bar_start
+        at_last = int(mn) == bar_end
+
+    beat = ev.get("beat")
+    if beat is None:
+        return True
+    if beat_start is not None and at_first and beat < beat_start:
+        return False
+    if beat_end is not None and at_last and beat >= beat_end:
+        return False
+    return True
+
+
 def _sources_in_range(
     events: list[dict],
+    mc_start: int,
+    mc_end: int,
     bar_start: int,
     bar_end: int,
     repeat_context: str | None,
+    beat_start: float | None = None,
+    beat_end: float | None = None,
 ) -> list[str]:
-    """Return sorted distinct source values for events in a fragment's bar range.
+    """Return sorted distinct source values for events in a fragment's range.
 
     Mirrors the filtering logic of :meth:`FragmentService._slice_harmony_events`
     but collects ``source`` values rather than full event dicts.  Used to
@@ -186,8 +281,10 @@ def _sources_in_range(
 
     Args:
         events: The full ``movement_analysis.events`` array for a movement.
-        bar_start: Inclusive lower bound (notated bar number).
-        bar_end: Inclusive upper bound (notated bar number).
+        mc_start: Inclusive lower bound, document-order index.
+        mc_end: Inclusive upper bound, document-order index.
+        bar_start: Inclusive lower bound, notated bar number (fallback path).
+        bar_end: Inclusive upper bound, notated bar number (fallback path).
         repeat_context: Fragment repeat context string, or ``None``.
 
     Returns:
@@ -197,17 +294,56 @@ def _sources_in_range(
     volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(repeat_context or "", None)
     sources: set[str] = set()
     for ev in events:
-        mn = ev.get("mn")
-        if mn is None:
-            continue
-        if not (bar_start <= int(mn) <= bar_end):
-            continue
-        if volta_filter is not None and ev.get("volta") != volta_filter:
+        if not _event_in_range(
+            ev,
+            mc_start,
+            mc_end,
+            bar_start,
+            bar_end,
+            volta_filter,
+            beat_start,
+            beat_end,
+        ):
             continue
         src = ev.get("source")
         if src:
             sources.add(src)
     return sorted(sources)
+
+
+def _section_label(
+    sections: list[tuple[int, int, str]] | None,
+    mc_start: int,
+) -> str | None:
+    """Return the name of the movement section a fragment begins in (ADR-036).
+
+    Movements whose notated bar numbers restart partway through — K331/ii's Trio
+    renumbers from 1 — carry editorial ``movement_section`` spans so a display
+    label can be qualified ("Trio, mm. 12-15"). Movements without the ambiguity
+    have no spans, and this returns ``None``: no qualifier is rendered.
+
+    Resolution is by the fragment's **start**. A fragment that spanned a section
+    boundary would be labelled with the section it begins in; that is a
+    theoretical case (selection gates at D.C./D.S. markers keep a selection
+    inside its section, ADR-025) and labelling by the start is the honest reading
+    of "where is this fragment".
+
+    Args:
+        sections: Ordered ``(mc_start, mc_end, name)`` spans for the fragment's
+            movement, or ``None``/empty for an unsectioned movement.
+        mc_start: The fragment's first measure as a document-order index.
+
+    Returns:
+        The section name, or ``None`` when the movement is unsectioned or no
+        span contains ``mc_start`` (defensive — the validator enforces full
+        coverage).
+    """
+    if not sections:
+        return None
+    for start, end, name in sections:
+        if start <= mc_start <= end:
+            return name
+    return None
 
 
 def _encode_cursor(mc_start: int, fragment_id: uuid.UUID) -> str:
@@ -869,9 +1005,13 @@ class FragmentService:
         # Slice harmony events from movement_analysis.
         harmony_events = await self._slice_harmony_events(
             fragment.movement_id,
+            fragment.mc_start,
+            fragment.mc_end,
             fragment.bar_start,
             fragment.bar_end,
             fragment.repeat_context,
+            fragment.beat_start,
+            fragment.beat_end,
         )
 
         # Derive licence fields from harmony events and the stored licence string.
@@ -911,6 +1051,12 @@ class FragmentService:
         if self._storage is not None and fragment.preview_object_key:
             preview_url = await self._storage.signed_url(fragment.preview_object_key)
 
+        # Editorial section spans for this movement, so the detail range and each
+        # stage sub-range carry the same qualifier the cards do (ADR-036).
+        sections = (await self._fetch_movement_sections([fragment.movement_id])).get(
+            fragment.movement_id
+        )
+
         # Assemble sub-part responses (no harmony events on sub-parts;
         # two-level limit means sub-parts have no further sub_parts).
         sub_part_responses = [
@@ -925,6 +1071,7 @@ class FragmentService:
                 beat_start=sp.beat_start,
                 beat_end=sp.beat_end,
                 repeat_context=sp.repeat_context,
+                section_label=_section_label(sections, sp.mc_start),
                 summary=sp.summary,
                 prose_annotation=sp.prose_annotation,
                 data_licence=sp.data_licence,
@@ -956,6 +1103,7 @@ class FragmentService:
             beat_start=fragment.beat_start,
             beat_end=fragment.beat_end,
             repeat_context=fragment.repeat_context,
+            section_label=_section_label(sections, fragment.mc_start),
             summary=fragment.summary,
             prose_annotation=fragment.prose_annotation,
             data_licence=fragment.data_licence,
@@ -1117,6 +1265,10 @@ class FragmentService:
                     )
             return None, None, None
 
+        # Every fragment in this listing belongs to one movement, so a single
+        # spans lookup covers the page (ADR-036).
+        sections = (await self._fetch_movement_sections([movement_id])).get(movement_id)
+
         def _list_item(f: Fragment, tmap: dict, sp_tmap: dict) -> FragmentListItem:
             p_id, p_alias, p_name = _primary(f.id, tmap)
             return FragmentListItem(
@@ -1130,6 +1282,7 @@ class FragmentService:
                 beat_start=f.beat_start,
                 beat_end=f.beat_end,
                 repeat_context=f.repeat_context,
+                section_label=_section_label(sections, f.mc_start),
                 status=f.status,
                 primary_concept_id=p_id,
                 primary_concept_alias=p_alias,
@@ -1146,6 +1299,7 @@ class FragmentService:
                         beat_start=sp.beat_start,
                         beat_end=sp.beat_end,
                         repeat_context=sp.repeat_context,
+                        section_label=_section_label(sections, sp.mc_start),
                         status=sp.status,
                         primary_concept_id=_primary(sp.id, sp_tmap)[0],
                         primary_concept_alias=_primary(sp.id, sp_tmap)[1],
@@ -1283,6 +1437,10 @@ class FragmentService:
         for row in ctx_result.mappings().all():
             movement_ctx[row["movement_id"]] = dict(row)
 
+        # Editorial section spans, so a queue row on a movement whose bar numbers
+        # restart reads "Trio, mm. 12-15" like every other surface (ADR-036).
+        sections_by_movement = await self._fetch_movement_sections(movement_ids)
+
         def _primary_for(frag_id: uuid.UUID) -> tuple[str | None, str | None]:
             for tag in tags_by_frag.get(frag_id, []):
                 if tag.is_primary:
@@ -1304,6 +1462,9 @@ class FragmentService:
                     beat_start=f.beat_start,
                     beat_end=f.beat_end,
                     repeat_context=f.repeat_context,
+                    section_label=_section_label(
+                        sections_by_movement.get(f.movement_id), f.mc_start
+                    ),
                     status=f.status,
                     primary_concept_id=p_id,
                     primary_concept_alias=p_alias,
@@ -1474,6 +1635,40 @@ class FragmentService:
                 include_subtypes=include_subtypes,
             )
 
+        items = await self._hydrate_browse_items(page)
+
+        next_cursor = (
+            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+        )
+        return ConceptBrowseResponse(
+            items=items,
+            next_cursor=next_cursor,
+            concept_id=concept_id,
+            include_subtypes=include_subtypes,
+        )
+
+    async def _hydrate_browse_items(
+        self, page: list[Fragment]
+    ) -> list[ConceptBrowseItem]:
+        """Turn a list of Fragment rows into browse-card items.
+
+        Batches the four hydration reads shared by the concept-scoped browse and
+        the glossary example draw: primary concept tags, Neo4j concept
+        name/alias, movement context, and in-range harmony sources — plus the
+        concurrent preview signed-URL resolution. Preserves the input order, so
+        the caller controls ordering (time-ordered for browse, random for
+        examples).
+
+        Args:
+            page: The Fragment rows to render; may be empty (returns ``[]``).
+
+        Returns:
+            One :class:`~models.fragment.ConceptBrowseItem` per input fragment,
+            in the same order.
+        """
+        if not page:
+            return []
+
         page_ids = [f.id for f in page]
         movement_ids = list({f.movement_id for f in page})
 
@@ -1528,6 +1723,10 @@ class FragmentService:
             row.movement_id: row.events or [] for row in analysis_result
         }
 
+        # Batch editorial section spans so a card on a movement whose bar numbers
+        # restart can qualify its label ("Trio, mm. 12-15") — ADR-036.
+        sections_by_movement = await self._fetch_movement_sections(movement_ids)
+
         # Resolve preview signed URLs concurrently for all fragments that have
         # a stored preview_object_key (ADR-008: null until Celery task completes).
         async def _resolve_preview(
@@ -1549,7 +1748,16 @@ class FragmentService:
             p_concept_id = ptag.concept_id if ptag else None
             ctx = movement_ctx.get(f.movement_id, {})
             evs = movement_events.get(f.movement_id, [])
-            h_sources = _sources_in_range(evs, f.bar_start, f.bar_end, f.repeat_context)
+            h_sources = _sources_in_range(
+                evs,
+                f.mc_start,
+                f.mc_end,
+                f.bar_start,
+                f.bar_end,
+                f.repeat_context,
+                f.beat_start,
+                f.beat_end,
+            )
             dl_url = _LICENCE_URL_MAP.get(f.data_licence) if f.data_licence else None
             items.append(
                 ConceptBrowseItem(
@@ -1560,6 +1768,9 @@ class FragmentService:
                     beat_start=f.beat_start,
                     beat_end=f.beat_end,
                     repeat_context=f.repeat_context,
+                    section_label=_section_label(
+                        sections_by_movement.get(f.movement_id), f.mc_start
+                    ),
                     status=f.status,
                     primary_concept_id=p_concept_id,
                     primary_concept_alias=(
@@ -1581,13 +1792,95 @@ class FragmentService:
                     movement_title=ctx.get("movement_title"),
                 )
             )
+        return items
 
-        next_cursor = (
-            _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
+    async def list_examples_by_concept(
+        self,
+        concept_id: str,
+        *,
+        include_subtypes: bool = True,
+        limit: int = 3,
+        seed: int | None = None,
+    ) -> ConceptExamplesResponse:
+        """Draw up to ``limit`` random approved example fragments for a concept.
+
+        The glossary's inline examples (Component 11 Step 3). Public-only: the
+        pool is always ``approved`` and always excludes NonCommercial corpora
+        (ADR-009 § 2), so this needs no caller identity — it mirrors exactly what
+        the anonymous browse would return for the same concept, but randomly
+        sampled and capped instead of time-ordered and paginated.
+
+        Randomness is server-side per request. When ``seed`` is provided the draw
+        is made reproducible by seeding PostgreSQL's RNG (``setseed``) on the same
+        session before the ``ORDER BY random()`` select; otherwise each call
+        re-draws freshly (the "shuffle" affordance). Reproducibility is only as
+        stable as the underlying pool — approving a new fragment reshuffles it.
+
+        Args:
+            concept_id: Neo4j Concept id whose examples to draw (subtree root
+                when ``include_subtypes``).
+            include_subtypes: Include fragments tagged with non-stub subtypes of
+                the concept, not only exact-concept matches (default True, as the
+                public browse).
+            limit: Maximum number of examples to return (default 3).
+            seed: Optional integer to make the draw reproducible; ``None`` (the
+                default) draws freshly each call.
+
+        Returns:
+            :class:`~models.fragment.ConceptExamplesResponse` with up to
+            ``limit`` approved example fragments (fewer, or empty, when the pool
+            is smaller).
+        """
+        concept_ids = await self._resolve_subtree(concept_id, include_subtypes)
+        if not concept_ids:
+            return ConceptExamplesResponse(
+                examples=[],
+                concept_id=concept_id,
+                include_subtypes=include_subtypes,
+            )
+
+        # Distinct fragment_ids carrying any matching concept tag (not only
+        # is_primary) — the same pool rule as list_by_concept.
+        matching_ids_sq = (
+            select(FragmentConceptTag.fragment_id)
+            .where(FragmentConceptTag.concept_id.in_(concept_ids))
+            .distinct()
+            .subquery()
         )
-        return ConceptBrowseResponse(
-            items=items,
-            next_cursor=next_cursor,
+
+        # ADR-009 § 2: exclude NonCommercial corpora (ABC) from the public draw,
+        # keyed on the corpus licence via a movement subquery.
+        nc_movements = (
+            select(Movement.id)
+            .join(Work, Movement.work_id == Work.id)
+            .join(Corpus, Work.corpus_id == Corpus.id)
+            .where(Corpus.licence.op("~*")(_NC_LICENCE_REGEX))
+        )
+
+        stmt = (
+            select(Fragment)
+            .where(
+                Fragment.parent_fragment_id.is_(None),
+                Fragment.id.in_(select(matching_ids_sq.c.fragment_id)),
+                Fragment.status == "approved",
+                Fragment.movement_id.not_in(nc_movements),
+            )
+            .order_by(func.random())
+            .limit(limit)
+        )
+
+        # Optional deterministic draw: seed the session RNG before the select.
+        if seed is not None:
+            await self._db.execute(
+                text("SELECT setseed(:s)"), {"s": _normalise_setseed(seed)}
+            )
+
+        result = await self._db.execute(stmt)
+        page = list(result.scalars().all())
+
+        examples = await self._hydrate_browse_items(page)
+        return ConceptExamplesResponse(
+            examples=examples,
             concept_id=concept_id,
             include_subtypes=include_subtypes,
         )
@@ -1984,27 +2277,73 @@ class FragmentService:
         result = await self._db.execute(stmt)
         return result.scalar_one()
 
+    async def _fetch_movement_sections(
+        self, movement_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[tuple[int, int, str]]]:
+        """Return editorial section spans keyed by movement id (ADR-036).
+
+        One indexed read covering every movement on the page, so a browse listing
+        resolves its section labels without a query per row. Movements with no
+        sections — the overwhelming majority — simply have no key in the result,
+        and :func:`_section_label` renders no qualifier for them.
+
+        Args:
+            movement_ids: The movements to fetch spans for; duplicates are fine.
+
+        Returns:
+            ``{movement_id: [(mc_start, mc_end, name), …]}`` ordered by
+            ``ordinal``. Empty when no listed movement is sectioned.
+        """
+        if not movement_ids:
+            return {}
+        result = await self._db.execute(
+            select(
+                MovementSection.movement_id,
+                MovementSection.mc_start,
+                MovementSection.mc_end,
+                MovementSection.name,
+            )
+            .where(MovementSection.movement_id.in_(set(movement_ids)))
+            .order_by(MovementSection.movement_id, MovementSection.ordinal)
+        )
+        sections: dict[uuid.UUID, list[tuple[int, int, str]]] = {}
+        for row in result:
+            sections.setdefault(row.movement_id, []).append(
+                (row.mc_start, row.mc_end, row.name)
+            )
+        return sections
+
     async def _slice_harmony_events(
         self,
         movement_id: uuid.UUID,
+        mc_start: int,
+        mc_end: int,
         bar_start: int,
         bar_end: int,
         repeat_context: str | None,
+        beat_start: float | None = None,
+        beat_end: float | None = None,
     ) -> list[dict]:
-        """Slice harmony events from movement_analysis for a fragment's bar range.
+        """Slice harmony events from movement_analysis for a fragment's range.
 
-        Applies volta filtering when ``repeat_context`` names a specific ending.
-        Events with a null ``mn`` are skipped.
+        Membership is decided by :func:`_event_in_range`: the machine coordinate
+        (``mc``) where the event has one, the notated bar plus volta filter where
+        it does not, with the beat bounds clipping the boundary measures. See
+        that function for both rules.
 
         Args:
             movement_id: The movement whose analysis to query.
-            bar_start: Inclusive lower bound (notated bar number).
-            bar_end: Inclusive upper bound (notated bar number).
+            mc_start: Inclusive lower bound, document-order index.
+            mc_end: Inclusive upper bound, document-order index.
+            bar_start: Inclusive lower bound, notated bar number (fallback path).
+            bar_end: Inclusive upper bound, notated bar number (fallback path).
             repeat_context: Fragment repeat context string (e.g. ``"first_ending"``),
                 or ``None`` for no volta filter.
+            beat_start: Onset at or after which first-measure events count.
+            beat_end: Exclusive onset bound in the last measure.
 
         Returns:
-            Subset of event dicts in the fragment's bar range, in their original
+            Subset of event dicts in the fragment's range, in their original
             ``movement_analysis.events`` array order.
         """
         result = await self._db.execute(
@@ -2016,17 +2355,20 @@ class FragmentService:
         if not events:
             return []
         volta_filter = _REPEAT_CONTEXT_TO_VOLTA.get(repeat_context or "", None)
-        sliced: list[dict] = []
-        for ev in events:
-            mn = ev.get("mn")
-            if mn is None:
-                continue
-            if not (bar_start <= int(mn) <= bar_end):
-                continue
-            if volta_filter is not None and ev.get("volta") != volta_filter:
-                continue
-            sliced.append(ev)
-        return sliced
+        return [
+            ev
+            for ev in events
+            if _event_in_range(
+                ev,
+                mc_start,
+                mc_end,
+                bar_start,
+                bar_end,
+                volta_filter,
+                beat_start,
+                beat_end,
+            )
+        ]
 
     async def _run_approval_gate(self, fragment: Fragment) -> dict:
         """Check all approval gate conditions and return a dict of failures.
@@ -2070,9 +2412,13 @@ class FragmentService:
         if has_gate:
             in_range = await self._slice_harmony_events(
                 fragment.movement_id,
+                fragment.mc_start,
+                fragment.mc_end,
                 fragment.bar_start,
                 fragment.bar_end,
                 fragment.repeat_context,
+                fragment.beat_start,
+                fragment.beat_end,
             )
             unreviewed = [ev for ev in in_range if not ev.get("reviewed")]
             if unreviewed:
@@ -2500,27 +2846,14 @@ def _check_not_creator(fragment: Fragment, reviewer_id: str) -> None:
 
 
 def validate_containment_for_update(payload: FragmentUpdate) -> None:
-    """Run bar-range containment check on a FragmentUpdate payload.
+    """Run the containment check on a FragmentUpdate payload.
 
     Mirrors :func:`~services.fragment_validation.validate_containment` but
     accepts a :class:`~models.fragment.FragmentUpdate` instead of
     :class:`~models.fragment.FragmentCreate`, since the two share sub-part
-    semantics but differ at the top-level type.
+    semantics but differ at the top-level type.  Both delegate to the same
+    comparison so create and update can never diverge.
     """
-    from errors import FragmentValidationError
+    from services.fragment_validation import _assert_contained
 
-    for idx, child in enumerate(payload.sub_parts):
-        if child.bar_start < payload.bar_start or child.bar_end > payload.bar_end:
-            raise FragmentValidationError(
-                f"Sub-part {idx} bar range [{child.bar_start}, {child.bar_end}] "
-                f"falls outside the parent fragment's range "
-                f"[{payload.bar_start}, {payload.bar_end}]. "
-                "Every sub-part must be contained within its parent.",
-                detail={
-                    "sub_part_index": idx,
-                    "child_bar_start": child.bar_start,
-                    "child_bar_end": child.bar_end,
-                    "parent_bar_start": payload.bar_start,
-                    "parent_bar_end": payload.bar_end,
-                },
-            )
+    _assert_contained(payload, payload.sub_parts)

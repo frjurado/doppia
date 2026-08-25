@@ -229,6 +229,18 @@ def test_stub_true_overrides_default() -> None:
     assert concept.top_level_taggable is False
 
 
+def test_definition_reviewed_defaults_to_false() -> None:
+    """Component 11 Step 2: definitions are unreviewed until an editorial pass."""
+    concept = ConceptYAML.model_validate(MINIMAL_CONCEPT)
+    assert concept.definition_reviewed is False
+
+
+def test_definition_reviewed_true_overrides_default() -> None:
+    reviewed = {**MINIMAL_CONCEPT, "definition_reviewed": True}
+    concept = ConceptYAML.model_validate(reviewed)
+    assert concept.definition_reviewed is True
+
+
 # ---------------------------------------------------------------------------
 # 6. ContainsEntryYAML defaults
 # ---------------------------------------------------------------------------

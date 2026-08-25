@@ -132,8 +132,15 @@ export interface FormPanelProps {
 
   /** UUID of the movement currently displayed. Needed to fetch harmony events. */
   movementId?: string | null;
-  /** Committed selection range; used to slice harmony events by bar range. */
+  /** Committed selection range; supplies the bar range and beat bounds. */
   selectionRange?: SelectionRange | null;
+  /**
+   * The committed selection's machine measure bounds (ADR-015). Passed straight
+   * through to HarmonyPanel, which scopes its event query by them rather than by
+   * bar numbers — see there for why (M6).
+   */
+  selectionMcStart?: number | null;
+  selectionMcEnd?: number | null;
   /**
    * Called after any successful harmony mutation so the in-score overlay
    * (Step 16 / G6.3) can refresh its cached event list.
@@ -291,6 +298,8 @@ export default function FormPanel({
   subPartResetKey,
   movementId,
   selectionRange,
+  selectionMcStart,
+  selectionMcEnd,
   proseAnnotation = '',
   onProseChange,
   onSaveDraft,
@@ -618,6 +627,8 @@ export default function FormPanel({
           <HarmonyPanel
             movementId={movementId}
             selectionRange={selectionRange ?? null}
+            mcStart={selectionMcStart}
+            mcEnd={selectionMcEnd}
             onHarmonyUpdated={onHarmonyUpdated}
             focusedEventKey={harmonyFocusKey}
           />

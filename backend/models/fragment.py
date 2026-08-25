@@ -183,8 +183,9 @@ class SubPartFragmentCreate(_FragmentWriteBase):
     """Write model for a sub-part (child) fragment.
 
     Sub-parts share the same coordinate and content fields as the parent.
-    The service layer checks containment: every sub-part's bar range must
-    fall within the parent's range before the atomic write proceeds.
+    The service layer checks containment: every sub-part's extent, as an
+    ``(mc, beat)`` position pair, must fall within the parent's before the
+    atomic write proceeds.
     """
 
 
@@ -312,6 +313,9 @@ class FragmentDetailResponse(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    # Movement section this fragment begins in; non-null only where bar numbers
+    # restart and the qualifier is needed to disambiguate a label (ADR-036).
+    section_label: str | None = None
     summary: dict
     prose_annotation: str | None
     data_licence: str | None
@@ -355,6 +359,9 @@ class FragmentListItem(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    # Movement section this fragment begins in (ADR-036); null unless the
+    # movement's bar numbers restart.
+    section_label: str | None = None
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
@@ -392,6 +399,9 @@ class ReviewQueueItem(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    # Movement section this fragment begins in (ADR-036); null unless the
+    # movement's bar numbers restart.
+    section_label: str | None = None
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
@@ -456,6 +466,12 @@ class ConceptBrowseItem(BaseModel):
     ADR-009).  ``data_licence_url`` is the canonical URL for that licence.
     ``harmony_sources`` is the sorted set of distinct ``source`` values from
     in-range ``movement_analysis`` events, for transparency (ADR-009).
+
+    ``section_label`` names the movement section the fragment begins in, and is
+    non-null only for movements whose bar numbers restart (ADR-036) — the card
+    renders "Trio, mm. 12-15" instead of an ambiguous "mm. 12-15". It is resolved
+    server-side because this model carries no machine coordinate to resolve it
+    from.
     """
 
     model_config = ConfigDict(from_attributes=False)
@@ -467,6 +483,7 @@ class ConceptBrowseItem(BaseModel):
     beat_start: float | None
     beat_end: float | None
     repeat_context: str | None
+    section_label: str | None = None
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
@@ -495,6 +512,34 @@ class ConceptBrowseResponse(BaseModel):
 
     items: list[ConceptBrowseItem]
     next_cursor: str | None
+    concept_id: str
+    include_subtypes: bool
+
+
+class ConceptExamplesResponse(BaseModel):
+    """A small random draw of approved example fragments for a concept.
+
+    Returned by ``GET /api/v1/public/concepts/{id}/examples`` — the glossary's
+    inline examples (Component 11 Step 3). Unlike the browse response this is
+    **not** paginated: it is a fixed-size (default 3) random sample re-drawn on
+    each call, so the frontend "shuffle" control simply re-requests. Items reuse
+    :class:`ConceptBrowseItem`, so the glossary can render them with the same
+    preview card as the public browse.
+
+    The pool is ``approved`` fragments tagged with the concept (any tag, not
+    only ``is_primary``; subtypes included when ``include_subtypes``), minus the
+    ADR-009 NonCommercial exclusion — identical to what the anonymous browse
+    would return for the same concept.
+
+    Attributes:
+        examples: Up to ``limit`` randomly-drawn approved fragments; fewer when
+            the pool is smaller, empty when the concept has no eligible
+            fragments.
+        concept_id: The queried concept id, echoed back.
+        include_subtypes: Whether subtype fragments were included in the pool.
+    """
+
+    examples: list[ConceptBrowseItem]
     concept_id: str
     include_subtypes: bool
 

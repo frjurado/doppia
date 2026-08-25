@@ -48,6 +48,7 @@ import { resolveSegments } from './MainBracket';
 import type { BracketSegment } from './MainBracket';
 import type { FragmentListItem } from '../../services/fragmentApi';
 import type { SelectionRange } from './annotator';
+import { measureKeysForMcRange } from './selection';
 import styles from './FragmentOverlay.module.css';
 import bracketStyles from './StoredBrackets.module.css';
 
@@ -121,6 +122,13 @@ export interface FragmentOverlayProps {
    */
   ghostLayer?: GhostLayer | null;
   /**
+   * measureKey → mc, from buildMcIndex(). Used to resolve each stored
+   * fragment's measures from its `mc` interval rather than by scanning bar
+   * numbers, which are not unique on a movement whose numbering restarts (see
+   * toSelectionRange). Omitting it falls back to the bar-number scan.
+   */
+  mcIndex?: Map<string, number> | null;
+  /**
    * Called when a stored bracket's click target is activated (Step 12 side
    * panel).  id is the fragment UUID.  When provided, clicking the bracket
    * both toggles collapse (if the fragment has sub-parts) and opens the panel.
@@ -137,14 +145,31 @@ export interface FragmentOverlayProps {
 /**
  * Convert a FragmentListItem's coordinate fields to the SelectionRange shape
  * expected by resolveSegments.
+ *
+ * **Supplies `measureKeys` from the fragment's stored `mc` interval whenever an
+ * mc index is available**, because that list is authoritative and short-circuits
+ * `effectiveMeasureKeys`. Without it that helper falls back to scanning the
+ * ghost layer for `barN` within `[barStart, barEnd]` — and a bar number is not
+ * unique. On K331/ii, whose Trio renumbers from 1, a Trio fragment at "mm.
+ * 29–30" matched the Menuetto's bars 29–30 as well, so the bracket was painted
+ * over **both** passes and the interactive one was whichever came first in the
+ * index (M6 / ADR-036). `mc` is document-order and unique, so keying on it
+ * paints exactly the measures the fragment occupies.
  */
-function toSelectionRange(item: FragmentListItem): SelectionRange {
+function toSelectionRange(
+  item: FragmentListItem,
+  mcIndex?: Map<string, number> | null
+): SelectionRange {
+  const repeatContext = item.repeat_context as SelectionRange['repeatContext'];
   return {
     barStart: item.bar_start,
     barEnd: item.bar_end,
     beatStart: item.beat_start,
     beatEnd: item.beat_end,
-    repeatContext: item.repeat_context as SelectionRange['repeatContext'],
+    repeatContext,
+    measureKeys: mcIndex
+      ? measureKeysForMcRange(mcIndex, item.mc_start, item.mc_end, repeatContext)
+      : undefined,
   };
 }
 
@@ -157,11 +182,14 @@ function toSelectionRange(item: FragmentListItem): SelectionRange {
  * sharing a measure collapse to the same beat extent and overlap. Integer-beat
  * coordinates use 'beat'; measure-only fragments use 'measure'.
  */
-function storedResolution(
-  beatStart: number | null,
-  beatEnd: number | null,
-): ResolutionMode {
-  if (beatStart === null) return 'measure';
+function storedResolution(beatStart: number | null, beatEnd: number | null): ResolutionMode {
+  // Only a fragment with *neither* endpoint constrained is a measure-level one.
+  // Keying this off beatStart alone painted a stage with a null start and a
+  // beat-precise end — the ordinary shape of a last stage, since
+  // prePopulateStages pins beats on the outer edges only — across both of its
+  // whole measures, so a Final Tonic ran to the end of its bar and adjacent
+  // stages overlapped (Component 11 triage item 5).
+  if (beatStart === null && beatEnd === null) return 'measure';
   const isSubBeat = (v: number | null): boolean => v !== null && !Number.isInteger(v);
   return isSubBeat(beatStart) || isSubBeat(beatEnd) ? 'subbeat' : 'beat';
 }
@@ -180,10 +208,14 @@ function subPartLabel(item: FragmentListItem, index: number): string {
  */
 function statusClass(status: FragmentListItem['status']): string {
   switch (status) {
-    case 'draft':     return bracketStyles.statusDraft;
-    case 'submitted': return bracketStyles.statusSubmitted;
-    case 'approved':  return bracketStyles.statusApproved;
-    case 'rejected':  return bracketStyles.statusRejected;
+    case 'draft':
+      return bracketStyles.statusDraft;
+    case 'submitted':
+      return bracketStyles.statusSubmitted;
+    case 'approved':
+      return bracketStyles.statusApproved;
+    case 'rejected':
+      return bracketStyles.statusRejected;
   }
 }
 
@@ -218,6 +250,7 @@ export default function FragmentOverlay({
   children,
   fragments = [],
   ghostLayer,
+  mcIndex,
   onBracketClick,
   'data-testid': testId,
 }: FragmentOverlayProps) {
@@ -229,15 +262,15 @@ export default function FragmentOverlay({
   // (collapse toggle; Phase 2 filter panel).  Missing entries fall back to
   // the default below, so newly fetched fragments are always visible without
   // an initialisation step.
-  const [displayState, setDisplayState] =
-    useState<Map<string, StoredFragmentDisplayState>>(new Map());
+  const [displayState, setDisplayState] = useState<Map<string, StoredFragmentDisplayState>>(
+    new Map()
+  );
 
   // ── Collapse toggle ───────────────────────────────────────────────────────
 
   const toggleCollapsed = (id: string) => {
-    setDisplayState(prev => {
-      const current = prev.get(id) ??
-        { show: true, category_filter: [], collapsed: true };
+    setDisplayState((prev) => {
+      const current = prev.get(id) ?? { show: true, category_filter: [], collapsed: true };
       const next = new Map(prev);
       next.set(id, { ...current, collapsed: !current.collapsed });
       return next;
@@ -289,7 +322,7 @@ export default function FragmentOverlay({
       const state = displayState.get(frag.id);
       if (state !== undefined && !state.show) continue;
 
-      const sel = toSelectionRange(frag);
+      const sel = toSelectionRange(frag, mcIndex);
       // Project at the finest resolution the stored beat coordinates require so
       // the bracket aligns with the matching ghost bounds — matching the live
       // selection bracket at the same precision (G3.2). Sub-beat endpoints must
@@ -304,12 +337,12 @@ export default function FragmentOverlay({
       // the display is flattened at one visible level.
       const subPartProjections = frag.sub_parts
         .map((sp, idx) => {
-          const spSel = toSelectionRange(sp);
+          const spSel = toSelectionRange(sp, mcIndex);
           const spRes = storedResolution(sp.beat_start, sp.beat_end);
           const spSegments = resolveSegments(spSel, ghostLayer, spRes);
           if (!spSegments) return null;
           // Augment with systemBottom so sub-parts can be placed below the staff.
-          const augmented: SubPartSegment[] = spSegments.map(seg => ({
+          const augmented: SubPartSegment[] = spSegments.map((seg) => ({
             ...seg,
             systemBottom: getSystemBottom(seg.systemTop, ghostLayer),
           }));
@@ -333,16 +366,12 @@ export default function FragmentOverlay({
     }
 
     return result;
-  }, [fragments, ghostLayer, displayState]);
+  }, [fragments, ghostLayer, mcIndex, displayState]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div
-      className={styles.overlay}
-      aria-hidden="true"
-      data-testid={testId ?? 'fragment-overlay'}
-    >
+    <div className={styles.overlay} aria-hidden="true" data-testid={testId ?? 'fragment-overlay'}>
       {/* Layer 1+2: live annotation overlays (MainBracket, StageBrackets). */}
       {children}
 
@@ -368,10 +397,7 @@ export default function FragmentOverlay({
             >
               {/* Alias label at the left edge of the first segment. */}
               {seg.isFirst && alias !== null && (
-                <span
-                  className={bracketStyles.aliasLabel}
-                  aria-hidden="true"
-                >
+                <span className={bracketStyles.aliasLabel} aria-hidden="true">
                   {alias}
                 </span>
               )}
@@ -380,8 +406,15 @@ export default function FragmentOverlay({
                   toggle) OR when a side-panel handler is wired (Step 12).
                   Covers the full bracket width for easy targeting of the thin bar.
                   A single click both toggles collapse (if sub-parts exist) and
-                  opens the side panel (if onBracketClick is provided). */}
-              {seg.isFirst && (hasSubParts || onBracketClick !== undefined) && (
+                  opens the side panel (if onBracketClick is provided).
+
+                  On *every* segment, not just the first: a fragment crossing a
+                  system break used to be clickable only on its opening system,
+                  so the rest of its own bracket did nothing. Continuation
+                  segments are hidden from assistive tech and skipped by the tab
+                  order — one fragment should reach the keyboard once, however
+                  many systems it happens to span. */}
+              {(hasSubParts || onBracketClick !== undefined) && (
                 <button
                   type="button"
                   className={bracketStyles.clickTarget}
@@ -390,6 +423,7 @@ export default function FragmentOverlay({
                     if (hasSubParts) toggleCollapsed(id);
                     if (onBracketClick !== undefined) onBracketClick(id);
                   }}
+                  {...(seg.isFirst ? {} : { tabIndex: -1, 'aria-hidden': true })}
                   aria-label={
                     hasSubParts
                       ? collapsed
@@ -422,22 +456,17 @@ export default function FragmentOverlay({
                       style={{ left: seg.left, top, width, height: SUB_BRACKET_H }}
                       data-fragment-id={spId}
                       data-testid={
-                        i === 0
-                          ? `stored-bracket-${spId}`
-                          : `stored-bracket-${spId}-${i}`
+                        i === 0 ? `stored-bracket-${spId}` : `stored-bracket-${spId}-${i}`
                       }
                     >
                       {seg.isFirst && (
-                        <span
-                          className={bracketStyles.aliasLabel}
-                          aria-hidden="true"
-                        >
+                        <span className={bracketStyles.aliasLabel} aria-hidden="true">
                           {spLabel}
                         </span>
                       )}
                     </div>
                   );
-                }),
+                })
             );
 
         return [...parentElements, ...subPartElements];

@@ -54,6 +54,14 @@
   display: none;
 }
 
+/* …except on a BOOL, which is the one control with no placeholder to fall back
+   on: its ✓/✗ toggle carries no text at all, so suppressing the label left the
+   Dominant stage's "Cadential 6-4" as a bare unlabelled tick. The name is also
+   not redundant there — it names something other than the stage. */
+.form[data-hide-labels='true'] .boolInlineField .fieldMeta {
+  display: flex;
+}
+
 /* Schema name line — bold label with optional required marker and inline ⓘ.
    Inline (not flex) so the ⓘ trails after the last word when the name wraps. */
 .fieldLabel {

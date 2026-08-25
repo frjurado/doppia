@@ -596,11 +596,21 @@ class TestContainmentValidation:
     """validate_containment: sub-part bar ranges must be within the parent."""
 
     def _make_parent(self, bar_start: int = 1, bar_end: int = 8) -> Any:
-        """Return a FragmentCreate with given parent bar range."""
+        """Return a FragmentCreate with given parent range.
+
+        ``mc`` tracks ``bar`` here: containment compares document-order measure
+        positions, so a fixture whose two coordinate systems disagree describes a
+        movement that does not exist and tests nothing real.
+        """
         from models.fragment import FragmentCreate
 
         return FragmentCreate.model_validate(
-            _min_fragment(bar_start=bar_start, bar_end=bar_end)
+            _min_fragment(
+                bar_start=bar_start,
+                bar_end=bar_end,
+                mc_start=bar_start,
+                mc_end=bar_end,
+            )
         )
 
     def _make_child(self, bar_start: int, bar_end: int) -> Any:
@@ -684,3 +694,146 @@ class TestContainmentValidation:
             validate_containment(parent, [child_ok, child_bad])
 
         assert exc_info.value.detail["sub_part_index"] == 1
+
+    # ── Beat-level containment (M7, Component 11 Step 11) ────────────────────
+    #
+    # The check compared bar numbers only, so a whole-measure stage under a
+    # beat-precise fragment passed. That is exactly the shape M7 wrote to the DB
+    # on 279/ii: parent "m. 8 beat 3 – m. 10 beat 1", stages spanning whole bars.
+
+    def _beat_parent(
+        self,
+        bar_start: int = 8,
+        bar_end: int = 10,
+        beat_start: float | None = 3.0,
+        beat_end: float | None = 2.0,
+    ) -> Any:
+        """A beat-precise parent: the 279/ii mm. 8-10 fragment."""
+        from models.fragment import FragmentCreate
+
+        return FragmentCreate.model_validate(
+            _min_fragment(
+                bar_start=bar_start,
+                bar_end=bar_end,
+                mc_start=bar_start,
+                mc_end=bar_end,
+                beat_start=beat_start,
+                beat_end=beat_end,
+            )
+        )
+
+    def _beat_child(
+        self,
+        bar_start: int,
+        bar_end: int,
+        beat_start: float | None = None,
+        beat_end: float | None = None,
+    ) -> Any:
+        """A sub-part with optional beat precision."""
+        from models.fragment import SubPartFragmentCreate
+
+        return SubPartFragmentCreate.model_validate(
+            {
+                "bar_start": bar_start,
+                "bar_end": bar_end,
+                "mc_start": bar_start,
+                "mc_end": bar_end,
+                "beat_start": beat_start,
+                "beat_end": beat_end,
+                "summary": _min_summary(),
+                "concept_tags": [_min_tag()],
+            }
+        )
+
+    def test_whole_measure_child_before_a_beat_precise_start_raises(self) -> None:
+        """A stage covering all of m. 8 starts before a parent that starts at beat 3."""
+        from errors import FragmentValidationError
+        from services.fragment_validation import validate_containment
+
+        parent = self._beat_parent()
+        child = self._beat_child(bar_start=8, bar_end=8)  # whole measure 8
+
+        with pytest.raises(FragmentValidationError) as exc_info:
+            validate_containment(parent, [child])
+
+        assert exc_info.value.detail["parent_beat_start"] == 3.0
+        assert exc_info.value.detail["child_beat_start"] is None
+
+    def test_whole_measure_child_past_a_beat_precise_end_raises(self) -> None:
+        """A stage running to the end of m. 10 exceeds a parent ending at beat 1."""
+        from errors import FragmentValidationError
+        from services.fragment_validation import validate_containment
+
+        parent = self._beat_parent()
+        child = self._beat_child(bar_start=10, bar_end=10)  # whole measure 10
+
+        with pytest.raises(FragmentValidationError):
+            validate_containment(parent, [child])
+
+    def test_beat_precise_child_inside_the_parent_passes(self) -> None:
+        """The bounds the fixed frame produces are accepted."""
+        from services.fragment_validation import validate_containment
+
+        parent = self._beat_parent()
+        children = [
+            self._beat_child(8, 8, beat_start=3.0, beat_end=4.0),  # m8 from beat 3
+            self._beat_child(9, 9),  # whole middle measure
+            self._beat_child(10, 10, beat_start=1.0, beat_end=2.0),  # m10 beat 1
+        ]
+        validate_containment(parent, children)  # must not raise
+
+    def test_child_sharing_the_parents_exact_edges_passes(self) -> None:
+        """Equal bounds are contained — the check is inclusive."""
+        from services.fragment_validation import validate_containment
+
+        parent = self._beat_parent()
+        child = self._beat_child(8, 10, beat_start=3.0, beat_end=2.0)
+        validate_containment(parent, [child])  # must not raise
+
+    def test_measure_level_child_in_a_measure_level_parent_passes(self) -> None:
+        """Null beats on both sides need no meter to compare."""
+        from services.fragment_validation import validate_containment
+
+        parent = self._beat_parent(beat_start=None, beat_end=None)
+        child = self._beat_child(8, 10)
+        validate_containment(parent, [child])  # must not raise
+
+    def test_beat_precise_child_in_a_measure_level_parent_passes(self) -> None:
+        """A stage narrower than its whole-measure parent is fine."""
+        from services.fragment_validation import validate_containment
+
+        parent = self._beat_parent(beat_start=None, beat_end=None)
+        child = self._beat_child(9, 9, beat_start=2.0, beat_end=3.0)
+        validate_containment(parent, [child])  # must not raise
+
+    def test_containment_follows_mc_not_bar_numbers(self) -> None:
+        """Duplicate bar numbers cannot smuggle a sub-part past the check.
+
+        K331/ii restarts ``@n`` at the Trio, so bar 4 exists twice: once at mc 4
+        in the Menuetto and once at mc 52 in the Trio. A sub-part at the Trio's
+        bar 4 is nowhere near a parent in the Menuetto's mm. 1-4, and a bar-only
+        comparison would have called it contained.
+        """
+        from errors import FragmentValidationError
+        from models.fragment import FragmentCreate, SubPartFragmentCreate
+        from services.fragment_validation import validate_containment
+
+        parent = FragmentCreate.model_validate(
+            _min_fragment(bar_start=1, bar_end=4, mc_start=1, mc_end=4)
+        )
+        child = SubPartFragmentCreate.model_validate(
+            {
+                "bar_start": 3,
+                "bar_end": 4,  # inside the parent's *bar* range
+                "mc_start": 51,
+                "mc_end": 52,  # but in the Trio
+                "summary": _min_summary(),
+                "concept_tags": [_min_tag()],
+            }
+        )
+
+        with pytest.raises(FragmentValidationError) as exc_info:
+            validate_containment(parent, [child])
+
+        assert exc_info.value.detail["child_mc_start"] == 51
+        assert exc_info.value.detail["parent_mc_end"] == 4

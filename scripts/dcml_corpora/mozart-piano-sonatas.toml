@@ -10,6 +10,13 @@
 #
 # mscx_filename values use the DCML Mozart repo naming convention:
 #   K{number}-{movement}.mscx
+#
+# Movement `meter` is NOT carried here: it is derived from each movement's MEI
+# during preparation (`services.mei_meter.starting_meter`). It was hand-entered
+# once and disagreed with the notation for 21 of 54 movements (Track M18), which
+# put a wrong meter on 76 fragments. `key_signature` IS carried here, and must
+# be: MEI records no mode, so `sig="4f"` is A-flat major and F minor alike and
+# cannot be derived from the score at all.
 
 [composer]
 slug = "mozart"
@@ -44,21 +51,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K279-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante"
-meter = "3/4"
 mscx_filename = "K279-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegro"
-meter = "3/8"
 mscx_filename = "K279-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -77,21 +81,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro assai"
-meter = "3/4"
 mscx_filename = "K280-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "6/8"
 mscx_filename = "K280-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Presto"
-meter = "3/8"
 mscx_filename = "K280-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -110,21 +111,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K281-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante amoroso"
-meter = "6/8"
 mscx_filename = "K281-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Rondeau. Allegro"
-meter = "2/4"
 mscx_filename = "K281-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -143,21 +141,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Adagio"
-meter = "4/4"
 mscx_filename = "K282-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Menuetto I & II"
-meter = "3/4"
 mscx_filename = "K282-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegro"
-meter = "2/4"
 mscx_filename = "K282-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -176,21 +171,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "3/4"
 mscx_filename = "K283-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante"
-meter = "4/4"
 mscx_filename = "K283-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Presto"
-meter = "3/8"
 mscx_filename = "K283-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -209,21 +201,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K284-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Rondeau en Polonaise. Andante"
-meter = "3/4"
 mscx_filename = "K284-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Thema con variazioni. Andante"
-meter = "2/4"
 mscx_filename = "K284-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -242,21 +231,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro con spirito"
-meter = "4/4"
 mscx_filename = "K309-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante un poco adagio"
-meter = "3/4"
 mscx_filename = "K309-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Rondeau. Allegretto grazioso"
-meter = "2/4"
 mscx_filename = "K309-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -275,21 +261,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro maestoso"
-meter = "4/4"
 mscx_filename = "K310-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante cantabile con espressione"
-meter = "3/4"
 mscx_filename = "K310-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Presto"
-meter = "2/4"
 mscx_filename = "K310-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -308,21 +291,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro con spirito"
-meter = "3/4"
 mscx_filename = "K311-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante con espressione"
-meter = "3/4"
 mscx_filename = "K311-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Rondeau. Allegro"
-meter = "6/8"
 mscx_filename = "K311-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -341,21 +321,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro moderato"
-meter = "4/4"
 mscx_filename = "K330-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante cantabile"
-meter = "3/4"
 mscx_filename = "K330-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegretto"
-meter = "2/4"
 mscx_filename = "K330-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -374,21 +351,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Andante grazioso"
-meter = "6/8"
 mscx_filename = "K331-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Menuetto"
-meter = "3/4"
 mscx_filename = "K331-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Alla Turca. Allegretto"
-meter = "2/4"
 mscx_filename = "K331-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -407,21 +381,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "3/4"
 mscx_filename = "K332-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "3/4"
 mscx_filename = "K332-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegro assai"
-meter = "2/4"
 mscx_filename = "K332-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -440,21 +411,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K333-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante cantabile"
-meter = "6/8"
 mscx_filename = "K333-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegretto grazioso"
-meter = "3/4"
 mscx_filename = "K333-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -473,21 +441,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Molto allegro"
-meter = "4/4"
 mscx_filename = "K457-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "6/8"
 mscx_filename = "K457-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegro assai"
-meter = "4/4"
 mscx_filename = "K457-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -506,21 +471,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K533-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante"
-meter = "3/4"
 mscx_filename = "K533-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Rondo. Allegretto"
-meter = "6/8"
 mscx_filename = "K533-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -539,21 +501,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K545-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Andante"
-meter = "3/4"
 mscx_filename = "K545-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Rondo. Allegretto"
-meter = "2/4"
 mscx_filename = "K545-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -572,21 +531,18 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K570-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "3/4"
 mscx_filename = "K570-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegretto"
-meter = "2/4"
 mscx_filename = "K570-3.mscx"
 
 # ---------------------------------------------------------------------------
@@ -605,19 +561,16 @@ instrumentation = "piano"
 slug = "movement-1"
 movement_number = 1
 title = "Allegro"
-meter = "4/4"
 mscx_filename = "K576-1.mscx"
 
 [[works.movements]]
 slug = "movement-2"
 movement_number = 2
 title = "Adagio"
-meter = "3/4"
 mscx_filename = "K576-2.mscx"
 
 [[works.movements]]
 slug = "movement-3"
 movement_number = 3
 title = "Allegretto"
-meter = "6/8"
 mscx_filename = "K576-3.mscx"

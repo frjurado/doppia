@@ -253,3 +253,109 @@ describe('resolveSegments — sub-beat endpoint exactness', () => {
     expect(segments![0]).toMatchObject({ left: 0, right: 125 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Independent endpoints (Component 11 triage item 5)
+// ---------------------------------------------------------------------------
+
+describe('resolveSegments — the two endpoints constrain independently', () => {
+  /**
+   * One 4/4 measure with bounds [0, 200] whose eight sub-beat ghosts span only
+   * [8, 200]: the 8px indent stands for the barline and clef area, which
+   * carries no ghost. The indent is what makes "pin an unconstrained end to the
+   * measure" and "start at the first notehead" tell apart — without it both
+   * readings land on 0 and the test proves nothing.
+   */
+  function makeIndentedLayer(): GhostLayer {
+    const measureIndex = new Map<string, MeasureGhostEntry>();
+    const subBeatIndex = new Map<number, SubBeatGhostEntry>();
+    const key = measureGhostKey(1, null);
+    measureIndex.set(key, {
+      el: document.createElement('div'),
+      barN: 1,
+      endingN: null,
+      key,
+      bounds: { left: 0, top: 4, width: 200, height: 40 },
+      systemTop: 0,
+      renderOrder: 0,
+    });
+    for (let i = 0; i < 8; i++) {
+      const encKey = encodeSubBeat(0, Math.floor(i / 2), i % 2);
+      subBeatIndex.set(encKey, {
+        el: document.createElement('div'),
+        barN: 1,
+        endingN: null,
+        measureKey: key,
+        beatIdx: Math.floor(i / 2),
+        subBeatIdx: i % 2,
+        encodedKey: encKey,
+        beatFloat: 1 + i * 0.5,
+        endFloat: 1.5 + i * 0.5,
+        bounds: { left: 8 + i * 24, top: 4, width: 24, height: 40 },
+      });
+    }
+    return { measureIndex, beatIndex: new Map(), subBeatIndex } as unknown as GhostLayer;
+  }
+
+  it('honours a beat-precise end when the start is unconstrained', () => {
+    // The ordinary shape of a last stage: prePopulateStages pins beats on the
+    // selection's outer edges only, so an inner endpoint is null. Keying
+    // beat-precision off beatStart alone made this whole-measure, which is why
+    // a Final Tonic ran to the end of its bar.
+    const segments = resolveSegments(
+      sel({ barStart: 1, barEnd: 1, beatStart: null, beatEnd: 3.0, measureKeys: ['m1'] }),
+      makeIndentedLayer(),
+      'subbeat'
+    );
+    expect(segments).toHaveLength(1);
+    // Ghosts 1.0–2.5 (3.0 excluded) end at x=104 — not the measure's 200.
+    expect(segments![0]!.right).toBe(104);
+  });
+
+  it('pins an unconstrained start to the barline, not to the first notehead', () => {
+    // Taking the ghost span would start the bracket at x=8 and leave a visible
+    // gap after whatever stage ends on that barline.
+    const segments = resolveSegments(
+      sel({ barStart: 1, barEnd: 1, beatStart: null, beatEnd: 3.0, measureKeys: ['m1'] }),
+      makeIndentedLayer(),
+      'subbeat'
+    );
+    expect(segments![0]!.left).toBe(0);
+  });
+
+  it('pins an unconstrained end to the barline, not to the last notehead', () => {
+    const segments = resolveSegments(
+      sel({ barStart: 1, barEnd: 1, beatStart: 3.0, beatEnd: null, measureKeys: ['m1'] }),
+      makeIndentedLayer(),
+      'subbeat'
+    );
+    expect(segments).toHaveLength(1);
+    expect(segments![0]).toMatchObject({ left: 104, right: 200 });
+  });
+
+  it('lets adjacent stages tile exactly, with no overlap at the shared beat', () => {
+    // The reported symptom: two stages meeting at beat 3 drew over each other,
+    // because the one with a null start covered its whole measure.
+    const layer = makeIndentedLayer();
+    const before = resolveSegments(
+      sel({ barStart: 1, barEnd: 1, beatStart: null, beatEnd: 3.0, measureKeys: ['m1'] }),
+      layer,
+      'subbeat'
+    );
+    const after = resolveSegments(
+      sel({ barStart: 1, barEnd: 1, beatStart: 3.0, beatEnd: null, measureKeys: ['m1'] }),
+      layer,
+      'subbeat'
+    );
+    expect(before![0]!.right).toBe(after![0]!.left);
+  });
+
+  it('still spans whole measures when neither endpoint is constrained', () => {
+    const segments = resolveSegments(
+      sel({ barStart: 1, barEnd: 1, beatStart: null, beatEnd: null, measureKeys: ['m1'] }),
+      makeIndentedLayer(),
+      'subbeat'
+    );
+    expect(segments![0]).toMatchObject({ left: 0, right: 200 });
+  });
+});

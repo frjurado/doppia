@@ -107,7 +107,7 @@ property_schemas:
     name: "Expanded Cadential Progression"
     description: >-
       True when the cadence features an Expanded Cadential Progression: one or
-      more of the cadential stages 1 to 3 are expanded, creating a cadential 
+      more of the cadential stages 1 to 3 are expanded, creating a cadential
       progression larger than the expected size of a cadence in a given context.
     cardinality: BOOL
     required: false
@@ -123,7 +123,7 @@ property_schemas:
   - id: Unison
     name: "Unison"
     description: >-
-      True when the cadential progression is expressed through a unison or 
+      True when the cadential progression is expressed through a unison or
       octave doubling, the harmonic content being implicit by context.
     cardinality: BOOL
     required: false
@@ -177,7 +177,7 @@ property_schemas:
   - id: Premature
     name: "Premature"
     description: >-
-      True when a cadential or non-cadential dominant is reached prematurely 
+      True when a cadential or non-cadential dominant is reached prematurely
       — before the expected cadential progression is complete.
     cardinality: BOOL
     required: false
@@ -197,24 +197,24 @@ property_schemas:
         order: 1
         references: Tonic
       - id: Stage1AppliedDominant
-        name: "Applied Dominant of Pre-Dominant"
+        name: "Applied Dominant of Pre-dominant"
         order: 2
         references: AppliedDominant
 
   - id: Stage2Components
     name: "Stage 2 Components"
     description: >-
-      The harmonic entities present in Stage 2 (Pre-Dominant) of the cadence.
+      The harmonic entities present in Stage 2 (Pre-dominant) of the cadence.
       Multiple values permitted. Each value references a Harmonic Function stub.
     cardinality: MANY_OF
     required: false
     values:
       - id: Stage2SD4
-        name: "Predominant on Scale Degree 4 (IV, ii, ii6, …)"
+        name: "Pre-dominant on Scale Degree 4 (IV, ii, ii6, …)"
         order: 1
         references: SD4Predominant
       - id: Stage2SDSharp4
-        name: "Predominant on Raised Scale Degree 4 (applied V, +6, …)"
+        name: "Pre-dominant on Raised Scale Degree 4 (applied V, +6, …)"
         order: 2
         references: SDSharp4Predominant
 
@@ -247,6 +247,18 @@ property_schemas:
 # in prose definitions, not in structural required-ness (hard-locked decision 4
 # in cadences-design.md).
 #
+# definition_reviewed (default false): set to true on a concept once its
+# `definition` prose has passed the editorial review pass and may be shown
+# verbatim on the public glossary page. While false, the glossary substitutes an
+# "under editorial review" placeholder (Component 11 Step 2). Flipping the flag
+# is editorial content work (Track M / Component 11 Part 4), not a code change.
+#
+# Bibliographic references are carried inline in the definition prose; only
+# Cadence has one. A dedicated `references` field is the better shape, but the
+# convention is deferred until a second domain needs it, so that one pass can
+# settle it for the whole corpus of definitions at once. See cadences-design.md
+# § "Terminology and prose conventions".
+#
 # Reference: docs/seed-drafts/cadences-design.md
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -263,9 +275,10 @@ concepts:
       A close marking the end of a phrase, theme, or section in tonal music.
       A cadence typically proceeds through a sequence of harmonic stages
       (initial tonic, pre-dominant, dominant) toward an arrival point. The
-      specific morphology and outcome of the close determines the cadence
-      subtype. Reference: Caplin, W. (2024). Cadence: A Study of Closure in 
+      specific morphology and outcome of the close determine the cadence
+      subtype. Reference: Caplin, W. (2024). Cadence: A Study of Closure in
       Tonal Music. Oxford University Press.
+    definition_reviewed: true
     contains:
       - target: CadentialInitialTonic
         order: 1
@@ -301,6 +314,21 @@ concepts:
         order: 12
       - schema: Unison
         order: 13
+    capture_extensions:
+      # A review gate, not stored data: nothing lands in
+      # summary.concept_extensions, because the harmony already lives in
+      # movement_analysis. Its only effect is that approving a cadence fragment
+      # requires every event in the fragment's range to carry reviewed: true.
+      #
+      # Declared once on the abstract root: check_concepts_have_harmony_gate
+      # walks IS_SUBTYPE_OF ancestors, so every subtype inherits it — including
+      # the evaded / abandoned / dominant-arrival family (§ 13A).
+      - field: harmony
+        type: harmony_gate
+        required: true
+        description: >-
+          Harmony events in the fragment's range must be reviewed before
+          approval.
 
   # ── Authentic-cadence branch ───────────────────────────────────────────────
 
@@ -313,7 +341,8 @@ concepts:
     definition: >-
       A cadence whose dominant moves toward a final tonic event. Includes both
       realised forms (PAC, IAC) and deviations from the expected resolution
-      (deceptive, evaded, abandoned).
+      (Deceptive, Evaded, Abandoned).
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: Cadence
@@ -332,10 +361,10 @@ concepts:
     complexity: foundational
     top_level_taggable: false
     definition: >-
-      An authentic cadence in which the expected final tonic is actually
+      An Authentic Cadence in which the expected final tonic is actually
       delivered. The differentia from the deviation subtypes is morphological:
-      the cadence reaches its Stage 4 root-position tonic on the metric arrival
-      point.
+      the cadence reaches a root-position tonic on the arrival point.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadence
@@ -360,9 +389,10 @@ concepts:
     complexity: foundational
     top_level_taggable: true
     definition: >-
-      A realised authentic cadence in which the soprano voice arrives on scale
+      A realised Authentic Cadence in which the soprano voice arrives on scale
       degree 1 and both V and I are in root position. The strongest cadential
       close in the tonal system.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadenceRealised
@@ -378,10 +408,11 @@ concepts:
     complexity: foundational
     top_level_taggable: true
     definition: >-
-      A realised authentic cadence whose soprano does not arrive on scale degree
+      A realised Authentic Cadence whose soprano does not arrive on scale degree
       1 — most commonly on scale degree 3, less commonly on scale degree 5.
-      Weaker than a PAC; characteristic of antecedent phrases of periods and as
-      a way station to a subsequent PAC.
+      Weaker than a PAC; characteristic of the antecedent of a period, or
+      of a way station towards a subsequent PAC.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadenceRealised
@@ -398,10 +429,14 @@ concepts:
     complexity: intermediate
     top_level_taggable: true
     definition: >-
-      An authentic cadence whose dominant resolves to a substitute chord (most
-      commonly VI) in place of the expected tonic. The cadential gesture is
-      morphologically complete through Stage 3; the substitution occurs at the
-      resolution point.
+      An Authentic Cadence whose dominant resolves to a substitute chord (most
+      commonly VI, but others are possible) in place of the expected tonic.
+      The cadential gesture is morphologically complete up to the dominant;
+      the substitution occurs at the cadential arrival. Not to be confused with
+      an Evaded Cadence: the Deceptive Cadence's arrival is the last event of
+      the gesture, whereas the Evaded Cadence's would-be arrival is interrupted
+      by a new beginning.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadence
@@ -413,9 +448,12 @@ concepts:
     complexity: intermediate
     top_level_taggable: true
     definition: >-
-      An authentic cadence whose dominant fails to resolve: the expected Stage 4
+      An Authentic Cadence whose dominant fails to resolve: the expected final tonic
       is replaced mid-stream by an unrelated harmony, typically launching a new
-      phrase or repetition, as in the "one-more-time" technique.
+      phrase or repetition, as in the "one-more-time" technique. Not to be confused
+      with a Deceptive Cadence, in which the arrival is heard as the last event
+      of the cadence.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadence
@@ -432,10 +470,12 @@ concepts:
     complexity: advanced
     top_level_taggable: true
     definition: >-
-      An authentic cadence whose progression breaks before any cadential
-      arrival, typically by inverting the dominant or interrupting before Stage
-      3 happens. Where the evaded cadence fails at the cadential arrival, the
-      abandoned cadence undermines or avoids altogether the cadential dominant.
+      An Authentic Cadence whose progression breaks before the cadence proper
+      is formed, typically by inverting the dominant, or by interrupting
+      the progression before the dominant arrives. Where the Evaded Cadence
+      fails at the cadential arrival, the Abandoned Cadence undermines
+      or avoids altogether the cadential dominant.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: AuthenticCadence
@@ -450,9 +490,10 @@ concepts:
     top_level_taggable: false
     definition: >-
       A cadence that arrives on the dominant rather than the tonic. The
-      cadential gesture closes on Stage 3 — the dominant is the arrival point,
-      not a preparation for further resolution. Includes the realised form and
-      Dominant Arrival as a deviation.
+      cadential gesture closes on the cadential dominant, which is the arrival
+      point and not a preparation for further resolution. Includes the realised
+      form and Dominant Arrival as a cadential deviation.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: Cadence
@@ -466,12 +507,11 @@ concepts:
     complexity: foundational
     top_level_taggable: true
     definition: >-
-      A half cadence whose dominant is reached through a cadential progression
-      — i.e. preceded by an initial tonic or pre-dominant function. Unlike
-      AuthenticCadenceRealised, HalfCadenceRealised is itself directly taggable:
-      it has only one specialisation (ReopeningHalfCadence, a cross-fragment
-      special case) and is fully meaningful tagged on its own. Variants are
-      captured by the HalfCadenceShape property.
+      A Half Cadence in which the dominant is in root position, without 7th,
+      and is reached through a cadential progression — i.e. preceded by
+      an initial tonic or pre-dominant function. Not to be confused with
+      a Dominant Arrival, in which some of these traits are not present.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: HalfCadence
@@ -488,16 +528,11 @@ concepts:
     complexity: advanced
     top_level_taggable: true
     definition: >-
-      A realised half cadence that retrospectively undoes the closure of a
-      preceding authentic cadence: the AC appears to close, but a subsequent
+      A realised Half Cadence that retrospectively undoes the closure of a
+      preceding Authentic Cadence: the AC appears to close, but a subsequent
       arrival on the dominant reopens the cadential process and assumes the
-      cadential weight. Modelled as a distinct concept (rather than a property
-      on the AC) so the cross-fragment relationship can be captured by a backward
-      pointer at tagging time — mirroring the post-cadential FOLLOWS pattern,
-      where the pointer lives on the later fragment tagged after the earlier one
-      already exists. The single-event case (where the AC is retrospectively
-      heard as an HC in the same moment) is modelled instead as the
-      ReinterpretedAsHC property on AuthenticCadenceRealised.
+      cadential weight.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: HalfCadenceRealised
@@ -521,6 +556,7 @@ concepts:
       but through non-cadential means — for example by direct prolongation of V
       from a prior dominant region, or as the goal of a sequence that simply
       lands on V.
+    definition_reviewed: true
     relationships:
       - type: IS_SUBTYPE_OF
         target: HalfCadence
@@ -543,19 +579,21 @@ concepts:
       Stage 1 of a cadence: the opening tonic region from which the cadential
       motion departs. May consist of a tonic harmony alone, an applied dominant
       of the pre-dominant, or both in succession.
+    definition_reviewed: true
     property_schemas:
       - schema: Stage1Components
         order: 1
 
   - id: CadentialPreDominant
-    name: "Pre-Dominant"
+    name: "Pre-dominant"
     domain: cadences
     top_level_taggable: false
     definition: >-
-      Stage 2 of a cadence: the predominant function preceding the cadential
+      Stage 2 of a cadence: the pre-dominant function preceding the cadential
       dominant. May include scale degree 4, frequently in the bass (subdominant
       family: IV, ii, ii6, …), raised scale degree 4 (applied dominants of V,
       augmented sixths), or both in succession.
+    definition_reviewed: true
     property_schemas:
       - schema: Stage2Components
         order: 1
@@ -566,9 +604,10 @@ concepts:
     top_level_taggable: false
     definition: >-
       Stage 3 of a cadence: the cadential dominant. In Caplinian theory must be
-      a root-position V or V7, optionally preceded by a cadential 6-4
-      elaboration. The dominant of a half cadence is the arrival point and must
-      be a triad; the dominant of an authentic cadence prepares Stage 4.
+      a root-position V or V7, optionally preceded by a cadential 6-4.
+      The dominant of a Half Cadence is the arrival point and must be a triad;
+      the dominant of an Authentic Cadence prepares the final tonic (Stage 4).
+    definition_reviewed: true
     property_schemas:
       - schema: Cadential64
         order: 1
@@ -578,9 +617,10 @@ concepts:
     domain: cadences
     top_level_taggable: false
     definition: >-
-      Stage 4 of a cadence: the tonic arrival in an authentic cadence (or the
-      substitute chord in a deceptive cadence). Absent in half cadences and in
-      evaded or abandoned authentic cadences.
+      Stage 4 of a cadence: the tonic arrival in an Authentic Cadence (or the
+      substitute chord in a Deceptive Cadence). Absent in Half Cadences and in
+      Evaded or Abandoned Authentic Cadences.
+    definition_reviewed: true
 
   # ── Post-cadential concepts ────────────────────────────────────────────────
   # Top-level concepts in the cadence domain. Not IS_SUBTYPE_OF any cadence;
@@ -595,13 +635,12 @@ concepts:
     complexity: intermediate
     top_level_taggable: true
     definition: >-
-      A post-cadential section that follows a realised authentic cadence,
+      A post-cadential section that follows a realised Authentic Cadence,
       prolonging the tonic with closing material before the next phrase or theme
       begins. Distinguished from a new theme by its rhetorical and harmonic
-      dependence on the prior cadence. FOLLOWS targets AuthenticCadenceRealised
-      (not the abstract AuthenticCadence): a closing section prolongs a tonic
-      that was actually reached, which the deceptive, evaded, and abandoned
-      deviation subtypes never deliver.
+      dependence on the prior cadence: it is heard as coming after an ending
+      rather than as a new beginning, and its harmony prolongs the tonic just reached.
+    definition_reviewed: true
     relationships:
       - type: FOLLOWS
         target: AuthenticCadenceRealised
@@ -620,11 +659,10 @@ concepts:
     complexity: intermediate
     top_level_taggable: true
     definition: >-
-      A post-cadential section that follows a half cadence, prolonging the
+      A post-cadential section that follows a Half Cadence, prolonging the
       dominant — typically as the close of a transition or at the end of the
-      development section. FOLLOWS targets the abstract HalfCadence (not only
-      HalfCadenceRealised), because dominant prolongations can also follow
-      Dominant Arrivals in transitional contexts.
+      development section.
+    definition_reviewed: true
     relationships:
       - type: FOLLOWS
         target: HalfCadence

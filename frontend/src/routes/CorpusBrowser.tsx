@@ -9,6 +9,7 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { useBrowseSelection } from '../hooks/useBrowseSelection';
+import { formatKeyName } from '../utils/keyName';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './CorpusBrowser.module.css';
 
@@ -206,7 +207,9 @@ export default function CorpusBrowser() {
                   as="span"
                   style={{ color: 'var(--color-on-surface-variant)' }}
                 >
-                  {[selectedMovement.key_signature, selectedMovement.meter]
+                  {/* Display only — the ?key= parameter just below keeps the
+                      raw stored spelling, which is what the filter matches. */}
+                  {[formatKeyName(selectedMovement.key_signature), selectedMovement.meter]
                     .filter(Boolean)
                     .join(' · ')}
                 </Type>

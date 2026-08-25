@@ -294,10 +294,44 @@ describe('getMeterForMeasure', () => {
     const measures = doc.getElementsByTagName('measure');
     // Measure 1: local 4/4
     expect(getMeterForMeasure(measures[0]!, 3, 4)).toEqual([4, 4]);
-    // Measure 2: no local sig → global 3/4
+    // Measure 2: no local sig → the pair it was given, unchanged
     expect(getMeterForMeasure(measures[1]!, 3, 4)).toEqual([3, 4]);
     // Measure 3: local 6/8
     expect(getMeterForMeasure(measures[2]!, 3, 4)).toEqual([6, 8]);
+  });
+
+  // ── The fallback must be the *running* meter, not the global one (M18) ─────
+
+  it('carries a meter change forward when the caller threads the result', () => {
+    // The normalizer writes <meterSig> only where the meter changes, so measure
+    // 2 below is in 4/4 even though it says nothing. A caller that passes the
+    // movement's opening 3/4 every time silently reverts there — which is what
+    // buildGhosts did, and would have mis-slotted every beat after a change in
+    // K331/i (mc 111) and K284/iii (mc 248).
+    const doc = new DOMParser().parseFromString(
+      `<section>
+        <measure n="1"><meterSig count="4" unit="4"/></measure>
+        <measure n="2"></measure>
+        <measure n="3"></measure>
+        <measure n="4"><meterSig count="6" unit="8"/></measure>
+        <measure n="5"></measure>
+      </section>`,
+      'text/xml',
+    );
+    const measures = doc.getElementsByTagName('measure');
+    const seen: Array<[number, number]> = [];
+    let running: [number, number] = [3, 4]; // the movement's opening meter
+    for (let i = 0; i < measures.length; i++) {
+      running = getMeterForMeasure(measures[i]!, running[0], running[1]);
+      seen.push(running);
+    }
+    expect(seen).toEqual([
+      [4, 4],
+      [4, 4],
+      [4, 4],
+      [6, 8],
+      [6, 8],
+    ]);
   });
 });
 

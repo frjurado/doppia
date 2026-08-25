@@ -35,6 +35,7 @@ import {
   deleteHarmonyEvent,
   editHarmonyChord,
   getHarmonyEvents,
+  confirmHarmonyEvents,
   insertHarmonyEvent,
   moveHarmonyBoundary,
 } from '../../services/analysisApi';
@@ -51,33 +52,33 @@ import styles from './HarmonyPanel.module.css';
 // ---------------------------------------------------------------------------
 
 const QUALITY_OPTIONS: { value: HarmonyQuality; labelKey: string }[] = [
-  { value: 'major',            labelKey: 'harmony.quality.major'           },
-  { value: 'minor',            labelKey: 'harmony.quality.minor'           },
-  { value: 'diminished',       labelKey: 'harmony.quality.diminished'      },
-  { value: 'augmented',        labelKey: 'harmony.quality.augmented'       },
-  { value: 'half-diminished',  labelKey: 'harmony.quality.halfDiminished'  },
+  { value: 'major', labelKey: 'harmony.quality.major' },
+  { value: 'minor', labelKey: 'harmony.quality.minor' },
+  { value: 'diminished', labelKey: 'harmony.quality.diminished' },
+  { value: 'augmented', labelKey: 'harmony.quality.augmented' },
+  { value: 'half-diminished', labelKey: 'harmony.quality.halfDiminished' },
   { value: 'dominant-seventh', labelKey: 'harmony.quality.dominantSeventh' },
 ];
 
 const INVERSION_OPTIONS = [
-  { value: '0', labelKey: 'harmony.inversion.root'   },
-  { value: '1', labelKey: 'harmony.inversion.first'  },
+  { value: '0', labelKey: 'harmony.inversion.root' },
+  { value: '1', labelKey: 'harmony.inversion.first' },
   { value: '2', labelKey: 'harmony.inversion.second' },
-  { value: '3', labelKey: 'harmony.inversion.third'  },
+  { value: '3', labelKey: 'harmony.inversion.third' },
 ];
 
 const ROOT_ACCIDENTAL_OPTIONS = [
-  { value: '',      labelKey: 'harmony.rootAccidental.none'  },
-  { value: 'flat',  labelKey: 'harmony.rootAccidental.flat'  },
+  { value: '', labelKey: 'harmony.rootAccidental.none' },
+  { value: 'flat', labelKey: 'harmony.rootAccidental.flat' },
   { value: 'sharp', labelKey: 'harmony.rootAccidental.sharp' },
 ];
 
 // Display maps for secondary detail (G6.2) — same vocabulary as the in-score labels (Step 16)
 const QUALITY_DISPLAY: Record<string, string> = {
-  'major': 'major',
-  'minor': 'minor',
-  'diminished': 'dim',
-  'augmented': 'aug',
+  major: 'major',
+  minor: 'minor',
+  diminished: 'dim',
+  augmented: 'aug',
   'half-diminished': 'ø',
   'dominant-seventh': 'dom7',
 };
@@ -130,6 +131,17 @@ export interface HarmonyPanelProps {
   movementId: string;
   selectionRange: SelectionRange | null;
   /**
+   * The selection's machine measure bounds (ADR-015), when it has been
+   * committed. **These, not the bar numbers, scope the event query.** `mn` does
+   * not reliably name a measure: on K331/ii the MEI's `@n` restarts at the Trio
+   * while the DCML annotation numbers straight through, so a Trio selection
+   * asking for "bars 29–30" was served the *Menuetto's* harmony (M6). Null
+   * falls back to the bar range, which is correct for every movement whose
+   * numbering does not restart.
+   */
+  mcStart?: number | null;
+  mcEnd?: number | null;
+  /**
    * Called after any successful mutation (confirm, edit, insert, delete) so
    * the in-score overlay can refresh its cached event list (Step 16 / G6.3).
    */
@@ -151,9 +163,7 @@ function eventKey(e: HarmonyEventOut): string {
 }
 
 function beatLabel(e: HarmonyEventOut): string {
-  const beatStr = e.beat % 1 === 0
-    ? String(e.beat)
-    : e.beat.toFixed(2).replace(/\.?0+$/, '');
+  const beatStr = e.beat % 1 === 0 ? String(e.beat) : e.beat.toFixed(2).replace(/\.?0+$/, '');
   return `b${beatStr}`;
 }
 
@@ -162,7 +172,7 @@ function primaryLabel(e: HarmonyEventOut): string {
   let chord = e.numeral ?? '';
   if (e.applied_to) chord += `/${e.applied_to}`;
   const key = e.local_key ? ` (${e.local_key})` : '';
-  return (chord + key) || '—';
+  return chord + key || '—';
 }
 
 // Secondary detail: "root 5 · dim · 1st inv · ext 7"
@@ -218,6 +228,8 @@ function emptyInsertForm(defaultMn?: number): InsertForm {
 export default function HarmonyPanel({
   movementId,
   selectionRange,
+  mcStart,
+  mcEnd,
   onHarmonyUpdated,
   focusedEventKey,
 }: HarmonyPanelProps) {
@@ -233,7 +245,7 @@ export default function HarmonyPanel({
 
   const [insertOpen, setInsertOpen] = useState(false);
   const [insertForm, setInsertForm] = useState<InsertForm>(() =>
-    emptyInsertForm(selectionRange?.barStart),
+    emptyInsertForm(selectionRange?.barStart)
   );
   const [insertSaving, setInsertSaving] = useState(false);
   const [insertError, setInsertError] = useState<string | null>(null);
@@ -248,9 +260,7 @@ export default function HarmonyPanel({
   // scroll the matching event card into view and apply a brief highlight.
   useEffect(() => {
     if (!focusedEventKey || !panelRef.current) return;
-    const el = panelRef.current.querySelector<HTMLElement>(
-      `[data-event-key="${focusedEventKey}"]`,
-    );
+    const el = panelRef.current.querySelector<HTMLElement>(`[data-event-key="${focusedEventKey}"]`);
     if (!el) return;
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     el.classList.add(styles.eventCardFocused!);
@@ -269,10 +279,7 @@ export default function HarmonyPanel({
     // §6A.1 I2 — the client validates coordinates before emitting any API
     // request. A non-finite bar number can no longer be committed, but no
     // request may ever carry one regardless.
-    if (
-      !Number.isFinite(selectionRange.barStart) ||
-      !Number.isFinite(selectionRange.barEnd)
-    ) {
+    if (!Number.isFinite(selectionRange.barStart) || !Number.isFinite(selectionRange.barEnd)) {
       setEvents([]);
       setLoadState('error');
       setLoadError(t('score:harmony.msg.noBarRange'));
@@ -285,18 +292,28 @@ export default function HarmonyPanel({
         movementId,
         selectionRange.barStart,
         selectionRange.barEnd,
+        mcStart,
+        mcEnd
       );
-      // The events endpoint slices by measure (mn) range only, so a
-      // beat-precise fragment whose boundary falls mid-measure still pulls
-      // every event in the boundary measures. Apply the same beat clip the
-      // ghost/selection layer uses (annotator.ts _highlightSelection): drop
-      // events before beatStart in the first measure, and at/after the
-      // exclusive beatEnd in the last measure. Middle measures are
-      // unconstrained (Component 9 H1).
+      // The events endpoint slices by measure range only, so a beat-precise
+      // fragment whose boundary falls mid-measure still pulls every event in
+      // the boundary measures. Apply the same beat clip the ghost/selection
+      // layer uses (annotator.ts _highlightSelection): drop events before
+      // beatStart in the first measure, and at/after the exclusive beatEnd in
+      // the last measure. Middle measures are unconstrained (Component 9 H1).
+      //
+      // The boundary test keys on mc when the selection is committed, for the
+      // same reason the query does (M6): matching `e.mn === barStart` clips the
+      // wrong measure on a movement whose bar numbers restart, and would clip
+      // *two* measures where a bar number occurs twice.
       const { barStart, barEnd, beatStart, beatEnd } = selectionRange;
+      const useMc = mcStart != null && mcEnd != null;
+      const isFirst = (e: HarmonyEventOut): boolean =>
+        useMc ? e.mc === mcStart : e.mn === barStart;
+      const isLast = (e: HarmonyEventOut): boolean => (useMc ? e.mc === mcEnd : e.mn === barEnd);
       const clipped = evs.filter((e) => {
-        if (beatStart !== null && e.mn === barStart && e.beat < beatStart) return false;
-        if (beatEnd !== null && e.mn === barEnd && e.beat >= beatEnd) return false;
+        if (beatStart !== null && isFirst(e) && e.beat < beatStart) return false;
+        if (beatEnd !== null && isLast(e) && e.beat >= beatEnd) return false;
         return true;
       });
       setEvents(clipped);
@@ -305,7 +322,7 @@ export default function HarmonyPanel({
       setLoadState('error');
       setLoadError(err instanceof Error ? err.message : t('score:harmony.msg.loadFailed'));
     }
-  }, [movementId, selectionRange, t]);
+  }, [movementId, selectionRange, mcStart, mcEnd, t]);
 
   useEffect(() => {
     fetchEvents();
@@ -314,7 +331,7 @@ export default function HarmonyPanel({
     setEditForm(null);
     setInsertOpen(false);
     setInsertForm(emptyInsertForm(selectionRange?.barStart));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchEvents]);
 
   // ── Confirm ──────────────────────────────────────────────────────────────
@@ -322,7 +339,7 @@ export default function HarmonyPanel({
   const handleConfirm = useCallback(
     async (event: HarmonyEventOut) => {
       const key = eventKey(event);
-      setBusyKeys(prev => new Set([...prev, key]));
+      setBusyKeys((prev) => new Set([...prev, key]));
       try {
         const updated = await confirmHarmonyEvent(movementId, {
           mn: event.mn,
@@ -330,46 +347,84 @@ export default function HarmonyPanel({
           beat: event.beat,
           mc: event.mc ?? null,
         });
-        setEvents(prev => prev.map(e => eventKey(e) === key ? updated : e));
+        setEvents((prev) => prev.map((e) => (eventKey(e) === key ? updated : e)));
         onHarmonyUpdated?.();
       } catch {
         // Fall back to full refetch on failure
         await fetchEvents();
       } finally {
-        setBusyKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+        setBusyKeys((prev) => {
+          const s = new Set(prev);
+          s.delete(key);
+          return s;
+        });
       }
     },
-    [movementId, fetchEvents, onHarmonyUpdated],
+    [movementId, fetchEvents, onHarmonyUpdated]
+  );
+
+  /**
+   * The machine measure coordinate (ADR-015) for a notated bar number, resolved
+   * from the events already loaded for this panel's range.
+   *
+   * Exact when the bar already holds an event. Otherwise interpolated from the
+   * nearest neighbour that does — correct wherever mc and mn advance together,
+   * which is everywhere except across a split-measure complement. Returns null
+   * when nothing in range can place the bar, which is the honest answer: better
+   * a null the backfill can repair later than a confident wrong mc.
+   */
+  const resolveMcForBar = useCallback(
+    (mn: number): number | null => {
+      const placed = events.filter(
+        (e): e is HarmonyEventOut & { mc: number } => e.mc != null
+      );
+      if (placed.length === 0) return null;
+      const exact = placed.find((e) => e.mn === mn);
+      if (exact) return exact.mc;
+      const nearest = placed.reduce((best, e) =>
+        Math.abs(e.mn - mn) < Math.abs(best.mn - mn) ? e : best
+      );
+      const guess = nearest.mc + (mn - nearest.mn);
+      if (mcStart != null && guess < mcStart) return null;
+      if (mcEnd != null && guess > mcEnd) return null;
+      return guess;
+    },
+    [events, mcStart, mcEnd]
   );
 
   const handleConfirmAll = useCallback(async () => {
-    const unreviewed = events.filter(e => !e.reviewed);
+    const unreviewed = events.filter((e) => !e.reviewed);
     if (unreviewed.length === 0) return;
 
     const keys = new Set(unreviewed.map(eventKey));
     setBusyKeys(keys);
 
-    const results = await Promise.allSettled(
-      unreviewed.map(event =>
-        confirmHarmonyEvent(movementId, {
+    // One request for the whole batch, never one per event. Each write replaces
+    // the movement's entire `events` array, so N parallel confirms overwrite one
+    // another and only the last survives — which is why this used to report
+    // success and then show a single confirmed event.
+    let updates: HarmonyEventOut[] = [];
+    try {
+      updates = await confirmHarmonyEvents(
+        movementId,
+        unreviewed.map((event) => ({
           mn: event.mn,
           volta: event.volta ?? null,
           beat: event.beat,
           mc: event.mc ?? null,
-        }),
-      ),
-    );
+        }))
+      );
+    } catch {
+      // Fall through to the refetch below, which shows whatever actually stuck.
+    }
 
-    const updates: HarmonyEventOut[] = results
-      .filter((r): r is PromiseFulfilledResult<HarmonyEventOut> => r.status === 'fulfilled')
-      .map(r => r.value);
-
-    setEvents(prev =>
-      prev.map(e => updates.find(u => eventKey(u) === eventKey(e)) ?? e),
-    );
+    setEvents((prev) => prev.map((e) => updates.find((u) => eventKey(u) === eventKey(e)) ?? e));
     setBusyKeys(new Set());
+    // Re-read rather than trusting the optimistic merge: the panel's idea of
+    // what is confirmed is exactly what was wrong before.
+    await fetchEvents();
     onHarmonyUpdated?.();
-  }, [events, movementId, onHarmonyUpdated]);
+  }, [events, movementId, fetchEvents, onHarmonyUpdated]);
 
   // ── Edit ─────────────────────────────────────────────────────────────────
 
@@ -413,7 +468,10 @@ export default function HarmonyPanel({
     }
 
     const extensions = editForm.extensions
-      ? editForm.extensions.split(',').map(s => s.trim()).filter(Boolean)
+      ? editForm.extensions
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
       : [];
 
     const chordPayload = {
@@ -463,7 +521,7 @@ export default function HarmonyPanel({
   const handleDelete = useCallback(
     async (event: HarmonyEventOut) => {
       const key = eventKey(event);
-      setBusyKeys(prev => new Set([...prev, key]));
+      setBusyKeys((prev) => new Set([...prev, key]));
       try {
         await deleteHarmonyEvent(movementId, {
           mn: event.mn,
@@ -476,34 +534,60 @@ export default function HarmonyPanel({
       } catch {
         // Keep event in list on failure
       } finally {
-        setBusyKeys(prev => { const s = new Set(prev); s.delete(key); return s; });
+        setBusyKeys((prev) => {
+          const s = new Set(prev);
+          s.delete(key);
+          return s;
+        });
       }
     },
-    [movementId, fetchEvents, onHarmonyUpdated],
+    [movementId, fetchEvents, onHarmonyUpdated]
   );
 
   // ── Insert ────────────────────────────────────────────────────────────────
 
   const handleInsertSave = useCallback(async () => {
     const mnInt = parseInt(insertForm.mn, 10);
-    if (isNaN(mnInt) || mnInt < 0) { setInsertError(t('score:harmony.msg.barRequired')); return; }
+    if (isNaN(mnInt) || mnInt < 0) {
+      setInsertError(t('score:harmony.msg.barRequired'));
+      return;
+    }
 
     const beatFloat = parseFloat(insertForm.beat);
-    if (isNaN(beatFloat) || beatFloat <= 0) { setInsertError(t('score:harmony.msg.beatGtZero')); return; }
+    if (isNaN(beatFloat) || beatFloat <= 0) {
+      setInsertError(t('score:harmony.msg.beatGtZero'));
+      return;
+    }
 
     const rootInt = parseInt(insertForm.root, 10);
     if (!insertForm.root || isNaN(rootInt) || rootInt < 1 || rootInt > 7) {
       setInsertError(t('score:harmony.msg.rootRangeShort'));
       return;
     }
-    if (!insertForm.quality) { setInsertError(t('score:harmony.msg.qualityRequiredShort')); return; }
-    if (!insertForm.numeral.trim()) { setInsertError(t('score:harmony.msg.numeralRequiredShort')); return; }
+    if (!insertForm.quality) {
+      setInsertError(t('score:harmony.msg.qualityRequiredShort'));
+      return;
+    }
+    if (!insertForm.numeral.trim()) {
+      setInsertError(t('score:harmony.msg.numeralRequiredShort'));
+      return;
+    }
 
     const invInt = parseInt(insertForm.inversion || '0', 10);
+
+    // Record the machine coordinate, not only the bar number. An event written
+    // without `mc` is invisible to every mc-scoped query — including this panel,
+    // which is the one place it could be corrected (M6 follow-up, found on
+    // 279/i m. 10). The bar being inserted into is inside the panel's own range,
+    // so its mc is already known from the events loaded here; when the bar holds
+    // no events yet, it is derived from a neighbour, and only a bar with no
+    // neighbour in range falls back to null.
+    const mcForInsert = resolveMcForBar(mnInt);
 
     const payload: HarmonyEventInsertPayload = {
       mn: mnInt,
       beat: beatFloat,
+      mc: mcForInsert,
       numeral: insertForm.numeral.trim(),
       local_key: insertForm.localKey || null,
       root: rootInt,
@@ -512,7 +596,10 @@ export default function HarmonyPanel({
       root_accidental: (insertForm.rootAccidental as 'flat' | 'sharp') || null,
       applied_to: insertForm.appliedTo || null,
       extensions: insertForm.extensions
-        ? insertForm.extensions.split(',').map(s => s.trim()).filter(Boolean)
+        ? insertForm.extensions
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
         : [],
     };
 
@@ -530,17 +617,28 @@ export default function HarmonyPanel({
     } finally {
       setInsertSaving(false);
     }
-  }, [insertForm, movementId, selectionRange, fetchEvents, onHarmonyUpdated, t]);
+  }, [
+    insertForm,
+    movementId,
+    selectionRange,
+    fetchEvents,
+    resolveMcForBar,
+    onHarmonyUpdated,
+    t,
+  ]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  const unreviewedCount = events.filter(e => !e.reviewed).length;
+  const unreviewedCount = events.filter((e) => !e.reviewed).length;
   // Inferred key: first event's local_key seeds actual_key.value in the summary
   const inferredKey = events.length > 0 ? (events[0].local_key ?? null) : null;
 
   // Events grouped by (mn, volta) for measure-level scannability (G6.2)
   const eventsByMeasure = useMemo(() => {
-    const groups = new Map<string, { mn: number; volta: number | null; items: HarmonyEventOut[] }>();
+    const groups = new Map<
+      string,
+      { mn: number; volta: number | null; items: HarmonyEventOut[] }
+    >();
     for (const event of events) {
       const groupKey = `${event.mn}:${event.volta ?? ''}`;
       const existing = groups.get(groupKey);
@@ -588,8 +686,7 @@ export default function HarmonyPanel({
       )}
       {loadState === 'error' && (
         <Type variant="label-sm" as="p" className={styles.errorText} role="alert">
-          {loadError ?? t('score:harmony.loadFailed')}
-          {' '}
+          {loadError ?? t('score:harmony.loadFailed')}{' '}
           <button type="button" className={styles.retryLink} onClick={fetchEvents}>
             {t('common:retry')}
           </button>
@@ -615,7 +712,7 @@ export default function HarmonyPanel({
                 </Type>
               </div>
               <ul className={styles.eventList} role="list">
-                {items.map(event => {
+                {items.map((event) => {
                   const key = eventKey(event);
                   const isEditing = editingKey === key;
                   const isBusy = busyKeys.has(key);
@@ -626,15 +723,21 @@ export default function HarmonyPanel({
                       {/* ── Event row ────────────────────────────────── */}
                       <div className={styles.eventRow}>
                         <span className={styles.beat}>
-                          <Type variant="label-sm" as="span">{beatLabel(event)}</Type>
+                          <Type variant="label-sm" as="span">
+                            {beatLabel(event)}
+                          </Type>
                         </span>
                         <div className={styles.chordBlock}>
                           <span className={styles.eventPrimary}>
-                            <Type variant="label-sm" as="span">{primaryLabel(event)}</Type>
+                            <Type variant="label-sm" as="span">
+                              {primaryLabel(event)}
+                            </Type>
                           </span>
                           {secondary && (
                             <span className={styles.eventSecondary}>
-                              <Type variant="label-sm" as="span">{secondary}</Type>
+                              <Type variant="label-sm" as="span">
+                                {secondary}
+                              </Type>
                             </span>
                           )}
                         </div>
@@ -647,7 +750,9 @@ export default function HarmonyPanel({
                         )}
                         {event.reviewed && (
                           <span className={styles.badgeReviewed}>
-                            <Type variant="label-sm" as="span">{event.source}</Type>
+                            <Type variant="label-sm" as="span">
+                              {event.source}
+                            </Type>
                           </span>
                         )}
                         <div className={styles.actions}>
@@ -665,9 +770,13 @@ export default function HarmonyPanel({
                           <button
                             type="button"
                             className={styles.actionEdit}
-                            title={isEditing ? t('score:harmony.closeEditorTitle') : t('score:harmony.editEventTitle')}
+                            title={
+                              isEditing
+                                ? t('score:harmony.closeEditorTitle')
+                                : t('score:harmony.editEventTitle')
+                            }
                             disabled={isBusy}
-                            onClick={() => isEditing ? handleEditCancel() : handleEditOpen(event)}
+                            onClick={() => (isEditing ? handleEditCancel() : handleEditOpen(event))}
                             aria-pressed={isEditing}
                           >
                             ✎
@@ -689,107 +798,154 @@ export default function HarmonyPanel({
                         <div className={styles.editForm}>
                           <div className={styles.formGrid}>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.beat')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.beat')}
+                              </Type>
                               <input
                                 type="number"
                                 step="0.5"
                                 min="0.5"
                                 className={styles.textInput}
                                 value={editForm.beat}
-                                onChange={e => setEditForm(f => f && { ...f, beat: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, beat: e.target.value })
+                                }
                               />
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.numeral')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.numeral')}
+                              </Type>
                               <input
                                 type="text"
                                 className={styles.textInput}
                                 value={editForm.numeral}
-                                onChange={e => setEditForm(f => f && { ...f, numeral: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, numeral: e.target.value })
+                                }
                               />
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.localKey')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.localKey')}
+                              </Type>
                               <input
                                 type="text"
                                 className={styles.textInput}
                                 placeholder={t('score:harmony.placeholder.localKey')}
                                 value={editForm.localKey}
-                                onChange={e => setEditForm(f => f && { ...f, localKey: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, localKey: e.target.value })
+                                }
                               />
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.root')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.root')}
+                              </Type>
                               <input
                                 type="number"
                                 min="1"
                                 max="7"
                                 className={styles.textInput}
                                 value={editForm.root}
-                                onChange={e => setEditForm(f => f && { ...f, root: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, root: e.target.value })
+                                }
                               />
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.quality')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.quality')}
+                              </Type>
                               <select
                                 className={styles.selectInput}
                                 value={editForm.quality}
-                                onChange={e => setEditForm(f => f && { ...f, quality: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, quality: e.target.value })
+                                }
                               >
                                 <option value="">{t('score:harmony.selectOption')}</option>
-                                {QUALITY_OPTIONS.map(o => (
-                                  <option key={o.value} value={o.value}>{t(`score:${o.labelKey}`)}</option>
+                                {QUALITY_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {t(`score:${o.labelKey}`)}
+                                  </option>
                                 ))}
                               </select>
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.inversion')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.inversion')}
+                              </Type>
                               <select
                                 className={styles.selectInput}
                                 value={editForm.inversion}
-                                onChange={e => setEditForm(f => f && { ...f, inversion: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, inversion: e.target.value })
+                                }
                               >
-                                {INVERSION_OPTIONS.map(o => (
-                                  <option key={o.value} value={o.value}>{t(`score:${o.labelKey}`)}</option>
+                                {INVERSION_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {t(`score:${o.labelKey}`)}
+                                  </option>
                                 ))}
                               </select>
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.rootAcc')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.rootAcc')}
+                              </Type>
                               <select
                                 className={styles.selectInput}
                                 value={editForm.rootAccidental}
-                                onChange={e => setEditForm(f => f && { ...f, rootAccidental: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, rootAccidental: e.target.value })
+                                }
                               >
-                                {ROOT_ACCIDENTAL_OPTIONS.map(o => (
-                                  <option key={o.value} value={o.value}>{t(`score:${o.labelKey}`)}</option>
+                                {ROOT_ACCIDENTAL_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {t(`score:${o.labelKey}`)}
+                                  </option>
                                 ))}
                               </select>
                             </label>
                             <label className={styles.fieldLabel}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.appliedTo')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.appliedTo')}
+                              </Type>
                               <input
                                 type="text"
                                 className={styles.textInput}
                                 placeholder={t('score:harmony.placeholder.appliedTo')}
                                 value={editForm.appliedTo}
-                                onChange={e => setEditForm(f => f && { ...f, appliedTo: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, appliedTo: e.target.value })
+                                }
                               />
                             </label>
                             <label className={`${styles.fieldLabel} ${styles.fieldFull}`}>
-                              <Type variant="label-sm" as="span">{t('score:harmony.field.extensions')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('score:harmony.field.extensions')}
+                              </Type>
                               <input
                                 type="text"
                                 className={styles.textInput}
                                 placeholder={t('score:harmony.placeholder.extensions')}
                                 value={editForm.extensions}
-                                onChange={e => setEditForm(f => f && { ...f, extensions: e.target.value })}
+                                onChange={(e) =>
+                                  setEditForm((f) => f && { ...f, extensions: e.target.value })
+                                }
                               />
                             </label>
                           </div>
 
                           {editError && (
-                            <Type variant="label-sm" as="p" className={styles.formError} role="alert">
+                            <Type
+                              variant="label-sm"
+                              as="p"
+                              className={styles.formError}
+                              role="alert"
+                            >
                               {editError}
                             </Type>
                           )}
@@ -811,7 +967,9 @@ export default function HarmonyPanel({
                               onClick={handleEditCancel}
                               disabled={editSaving}
                             >
-                              <Type variant="label-sm" as="span">{t('common:cancel')}</Type>
+                              <Type variant="label-sm" as="span">
+                                {t('common:cancel')}
+                              </Type>
                             </button>
                           </div>
                         </div>
@@ -833,112 +991,138 @@ export default function HarmonyPanel({
           </Type>
           <div className={styles.formGrid}>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.barMn')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.barMn')}
+              </Type>
               <input
                 type="number"
                 min="0"
                 className={styles.textInput}
                 value={insertForm.mn}
-                onChange={e => setInsertForm(f => ({ ...f, mn: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, mn: e.target.value }))}
               />
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.beat')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.beat')}
+              </Type>
               <input
                 type="number"
                 step="0.5"
                 min="0.5"
                 className={styles.textInput}
                 value={insertForm.beat}
-                onChange={e => setInsertForm(f => ({ ...f, beat: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, beat: e.target.value }))}
               />
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.numeralRequired')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.numeralRequired')}
+              </Type>
               <input
                 type="text"
                 className={styles.textInput}
                 placeholder={t('score:harmony.placeholder.appliedTo')}
                 value={insertForm.numeral}
-                onChange={e => setInsertForm(f => ({ ...f, numeral: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, numeral: e.target.value }))}
               />
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.localKey')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.localKey')}
+              </Type>
               <input
                 type="text"
                 className={styles.textInput}
                 placeholder={t('score:harmony.placeholder.localKeyShort')}
                 value={insertForm.localKey}
-                onChange={e => setInsertForm(f => ({ ...f, localKey: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, localKey: e.target.value }))}
               />
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.rootRequired')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.rootRequired')}
+              </Type>
               <input
                 type="number"
                 min="1"
                 max="7"
                 className={styles.textInput}
                 value={insertForm.root}
-                onChange={e => setInsertForm(f => ({ ...f, root: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, root: e.target.value }))}
               />
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.qualityRequired')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.qualityRequired')}
+              </Type>
               <select
                 className={styles.selectInput}
                 value={insertForm.quality}
-                onChange={e => setInsertForm(f => ({ ...f, quality: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, quality: e.target.value }))}
               >
                 <option value="">{t('score:harmony.selectOption')}</option>
-                {QUALITY_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{t(`score:${o.labelKey}`)}</option>
+                {QUALITY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {t(`score:${o.labelKey}`)}
+                  </option>
                 ))}
               </select>
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.inversion')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.inversion')}
+              </Type>
               <select
                 className={styles.selectInput}
                 value={insertForm.inversion}
-                onChange={e => setInsertForm(f => ({ ...f, inversion: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, inversion: e.target.value }))}
               >
-                {INVERSION_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{t(`score:${o.labelKey}`)}</option>
+                {INVERSION_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {t(`score:${o.labelKey}`)}
+                  </option>
                 ))}
               </select>
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.rootAcc')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.rootAcc')}
+              </Type>
               <select
                 className={styles.selectInput}
                 value={insertForm.rootAccidental}
-                onChange={e => setInsertForm(f => ({ ...f, rootAccidental: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, rootAccidental: e.target.value }))}
               >
-                {ROOT_ACCIDENTAL_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{t(`score:${o.labelKey}`)}</option>
+                {ROOT_ACCIDENTAL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {t(`score:${o.labelKey}`)}
+                  </option>
                 ))}
               </select>
             </label>
             <label className={styles.fieldLabel}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.appliedTo')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.appliedTo')}
+              </Type>
               <input
                 type="text"
                 className={styles.textInput}
                 placeholder={t('score:harmony.placeholder.appliedTo')}
                 value={insertForm.appliedTo}
-                onChange={e => setInsertForm(f => ({ ...f, appliedTo: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, appliedTo: e.target.value }))}
               />
             </label>
             <label className={`${styles.fieldLabel} ${styles.fieldFull}`}>
-              <Type variant="label-sm" as="span">{t('score:harmony.field.extensions')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('score:harmony.field.extensions')}
+              </Type>
               <input
                 type="text"
                 className={styles.textInput}
                 placeholder={t('score:harmony.placeholder.extensions')}
                 value={insertForm.extensions}
-                onChange={e => setInsertForm(f => ({ ...f, extensions: e.target.value }))}
+                onChange={(e) => setInsertForm((f) => ({ ...f, extensions: e.target.value }))}
               />
             </label>
           </div>
@@ -963,10 +1147,15 @@ export default function HarmonyPanel({
             <button
               type="button"
               className={styles.cancelButton}
-              onClick={() => { setInsertOpen(false); setInsertError(null); }}
+              onClick={() => {
+                setInsertOpen(false);
+                setInsertError(null);
+              }}
               disabled={insertSaving}
             >
-              <Type variant="label-sm" as="span">{t('common:cancel')}</Type>
+              <Type variant="label-sm" as="span">
+                {t('common:cancel')}
+              </Type>
             </button>
           </div>
         </div>
@@ -979,7 +1168,9 @@ export default function HarmonyPanel({
             setInsertOpen(true);
           }}
         >
-          <Type variant="label-sm" as="span">{t('score:harmony.addEvent')}</Type>
+          <Type variant="label-sm" as="span">
+            {t('score:harmony.addEvent')}
+          </Type>
         </button>
       )}
 

@@ -34,7 +34,13 @@ import {
 } from '../../services/fragmentApi';
 import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
-import { formatFragmentRange, formatBeat } from '../../utils/fragmentRange';
+import {
+  formatBeat,
+  formatFragmentRange,
+  makeRepeatContextFormatter,
+  qualifyRange,
+} from '../../utils/fragmentRange';
+import { formatKeyName } from '../../utils/keyName';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -155,11 +161,20 @@ function toHarmonyRow(e: Record<string, unknown>): HarmonyRow {
   };
 }
 
-function harmonyChordLabel(e: HarmonyRow): string {
+/**
+ * Chord label for one harmony row.
+ *
+ * `includeKey` carries the score convention (M6): the local key is written
+ * where it is established and where it changes, not on every chord. Repeating
+ * "(C major)" down a column of eight events is noise a musician does not expect
+ * — the harmony panel and the in-score overlay both already suppress it, and
+ * this brings the read sidebar into line. See harmonyRows for the run detection.
+ */
+function harmonyChordLabel(e: HarmonyRow, includeKey = true): string {
   const parts: string[] = [];
   if (e.numeral) parts.push(e.numeral);
   if (e.applied_to) parts.push(`/${e.applied_to}`);
-  if (e.local_key) parts.push(`(${e.local_key})`);
+  if (includeKey && e.local_key) parts.push(`(${e.local_key})`);
   return parts.join(' ') || '—';
 }
 
@@ -289,6 +304,16 @@ export default function FragmentDetailPanel({
     standalone && initialFragment ? initialFragment : null
   );
   const [schemas, setSchemas] = useState<PropertySchema[] | null>(null);
+  /**
+   * Property schemas per stage concept, for the sub-parts section (M6).
+   *
+   * A stage's properties belong to the *stage's* concept, not the parent's, so
+   * they need their own schema tree — the same fetch SubPartForm makes on the
+   * write side. Fetched separately from the parent's so a stage failure cannot
+   * cost the parent its labels, and skipped entirely on the public path where
+   * the endpoint is editor-only.
+   */
+  const [stageSchemas, setStageSchemas] = useState<Map<string, PropertySchema[]>>(() => new Map());
   const [loading, setLoading] = useState(!(standalone && initialFragment));
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -384,6 +409,45 @@ export default function FragmentDetailPanel({
     // we only re-run when fragmentId changes (standalone props don't change).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fragmentId]);
+
+  // ── Fetch stage property schemas (M6) ──────────────────────────────────────
+  // One tree per distinct stage concept on this fragment. Runs after the
+  // fragment resolves, in parallel, and degrades to raw ids on failure.
+  useEffect(() => {
+    if (disableSchemaFetch || !fragment || fragment.sub_parts.length === 0) {
+      setStageSchemas(new Map());
+      return;
+    }
+    const conceptIds = [
+      ...new Set(
+        fragment.sub_parts
+          .map((sp) => sp.concept_tags.find((tag) => tag.is_primary)?.concept_id)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+    if (conceptIds.length === 0) {
+      setStageSchemas(new Map());
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(
+      conceptIds.map((id) =>
+        getConceptSchemas(id)
+          .then((tree) => [id, tree.schemas] as const)
+          .catch(() => null)
+      )
+    ).then((results) => {
+      if (cancelled) return;
+      setStageSchemas(
+        new Map(results.filter((r): r is readonly [string, PropertySchema[]] => r !== null))
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fragment, disableSchemaFetch]);
 
   // ── Delete handlers ────────────────────────────────────────────────────────
 
@@ -484,9 +548,62 @@ export default function FragmentDetailPanel({
   // Map schema id → human name; falls back to the raw id when schemas unavailable.
   const schemaMap = new Map(schemas?.map((s) => [s.id, s.name]) ?? []);
 
+  /**
+   * Order stored property entries the way the create/edit form shows them (M6).
+   *
+   * The server returns schemas already sorted by (grouped-first, order, name)
+   * per ADR-023, and PropertyForm simply renders that sequence — so following
+   * the schema list here is what makes the two agree. Iterating the stored
+   * object instead, as this did, exposed JSONB insertion order: whatever
+   * sequence the tagging session happened to write.
+   *
+   * Properties with no matching schema keep their relative order and go last,
+   * so a value can never disappear from the sidebar just because its schema is
+   * unavailable (the public path skips the editor-only schema fetch entirely,
+   * and then this is a no-op that leaves the stored order intact).
+   */
+  function orderedProperties(
+    properties: Record<string, string | string[]>,
+    schemaList: PropertySchema[] | null
+  ): Array<[string, string | string[]]> {
+    const entries = Object.entries(properties);
+    if (!schemaList || schemaList.length === 0) return entries;
+    const rank = new Map(schemaList.map((s, i) => [s.id, i]));
+    const known = entries.filter(([id]) => rank.has(id));
+    const unknown = entries.filter(([id]) => !rank.has(id));
+    known.sort(([a], [b]) => rank.get(a)! - rank.get(b)!);
+    return [...known, ...unknown];
+  }
+
+  /** Render a stored property value: lists join, booleans read as yes/no. */
+  function propertyValueLabel(val: string | string[]): string {
+    if (Array.isArray(val)) return val.join(', ');
+    if (val === 'true') return t('common:yes');
+    if (val === 'false') return t('common:no');
+    return val;
+  }
+
   const harmonyRows = (fragment?.harmony_events ?? []).map((e) =>
     toHarmonyRow(e as Record<string, unknown>)
   );
+
+  /**
+   * Which rows print their local key (M6 — score convention).
+   *
+   * A key is written where it is established and wherever it changes, not on
+   * every chord; a column of eight events all reading "(C major)" is noise a
+   * musician does not expect. The harmony panel and the in-score overlay
+   * already suppress the repeats — this is the read sidebar catching up.
+   *
+   * Initialised to `undefined` rather than null so the first row always prints,
+   * including when its key is null: no string or null equals `undefined`.
+   */
+  const showKeyAt: boolean[] = [];
+  let previousKey: string | null | undefined = undefined;
+  for (const row of harmonyRows) {
+    showKeyAt.push(row.local_key !== previousKey);
+    previousKey = row.local_key;
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -571,20 +688,24 @@ export default function FragmentDetailPanel({
               </Type>
               {/* Measure/beat display rule (Component 9 Step 15): beats render
                   only within their measure's context, and not at all when the
-                  fragment spans complete measures. */}
+                  fragment spans complete measures. The section and volta
+                  qualifiers (ADR-036) are folded into the same line — a range
+                  and its qualifiers are one label, not two facts. */}
               <Type variant="body-sm" as="p" className={styles.rangeText}>
-                {formatFragmentRange(
-                  fragment.bar_start,
-                  fragment.bar_end,
-                  fragment.beat_start,
-                  fragment.beat_end
+                {qualifyRange(
+                  formatFragmentRange(
+                    fragment.bar_start,
+                    fragment.bar_end,
+                    fragment.beat_start,
+                    fragment.beat_end
+                  ),
+                  {
+                    sectionLabel: fragment.section_label,
+                    repeatContext: fragment.repeat_context,
+                    formatRepeatContext: makeRepeatContextFormatter(t),
+                  }
                 )}
               </Type>
-              {fragment.repeat_context && (
-                <Type variant="label-sm" as="p" className={styles.repeatContext}>
-                  {t('score:detailPanel.repeatContext', { context: fragment.repeat_context })}
-                </Type>
-              )}
             </section>
           )}
 
@@ -603,7 +724,7 @@ export default function FragmentDetailPanel({
                   </dt>
                   <dd>
                     <Type variant="body-sm" as="span">
-                      {summary.key}
+                      {formatKeyName(summary.key as string | null | undefined)}
                     </Type>
                   </dd>
                 </div>
@@ -660,7 +781,7 @@ export default function FragmentDetailPanel({
                 {t('score:detailPanel.sectionProperties')}
               </Type>
               <dl className={styles.dataList}>
-                {Object.entries(summary.properties).map(([id, val]) => (
+                {orderedProperties(summary.properties, schemas).map(([id, val]) => (
                   <div key={id} className={styles.dataRow}>
                     <dt>
                       <Type variant="label-sm" as="span">
@@ -669,13 +790,7 @@ export default function FragmentDetailPanel({
                     </dt>
                     <dd>
                       <Type variant="body-sm" as="span">
-                        {Array.isArray(val)
-                          ? val.join(', ')
-                          : val === 'true'
-                            ? t('common:yes')
-                            : val === 'false'
-                              ? t('common:no')
-                              : val}
+                        {propertyValueLabel(val)}
                       </Type>
                     </dd>
                   </div>
@@ -703,7 +818,7 @@ export default function FragmentDetailPanel({
                     </span>
                     <span className={styles.harmonyChord}>
                       <Type variant="body-sm" as="span">
-                        {harmonyChordLabel(row)}
+                        {harmonyChordLabel(row, showKeyAt[i])}
                       </Type>
                     </span>
                     {row.reviewed !== null && (
@@ -754,6 +869,14 @@ export default function FragmentDetailPanel({
               <ol className={styles.subPartsList}>
                 {fragment.sub_parts.map((sp) => {
                   const spPrimary = sp.concept_tags.find((tag) => tag.is_primary);
+                  const spSummary = isSummaryV1(sp.summary) ? sp.summary : null;
+                  const spSchemas = spPrimary
+                    ? (stageSchemas.get(spPrimary.concept_id) ?? null)
+                    : null;
+                  const spSchemaMap = new Map(spSchemas?.map((s) => [s.id, s.name]) ?? []);
+                  const spProperties = spSummary?.properties
+                    ? orderedProperties(spSummary.properties, spSchemas)
+                    : [];
                   return (
                     <li key={sp.id} className={styles.subPartItem}>
                       <Type variant="label-sm" as="span" className={styles.subPartName}>
@@ -761,8 +884,35 @@ export default function FragmentDetailPanel({
                       </Type>
                       <Type variant="body-sm" as="span" className={styles.subPartRange}>
                         {' '}
+                        {/* Deliberately unqualified (ADR-036): a stage sits
+                            inside its parent fragment, whose range above already
+                            carries the section, so repeating "Trio," on every
+                            stage would be noise, not clarity. */}
                         {formatFragmentRange(sp.bar_start, sp.bar_end, sp.beat_start, sp.beat_end)}
                       </Type>
+                      {/* Stage properties (M6): the read sidebar showed a
+                          stage's name and range but never what was recorded
+                          about it, so half of what an annotator entered was
+                          invisible on review. Labels come from the stage
+                          concept's own schema tree. */}
+                      {spProperties.length > 0 && (
+                        <dl className={styles.subPartProperties}>
+                          {spProperties.map(([id, val]) => (
+                            <div key={id} className={styles.dataRow}>
+                              <dt>
+                                <Type variant="label-sm" as="span">
+                                  {spSchemaMap.get(id) ?? id}
+                                </Type>
+                              </dt>
+                              <dd>
+                                <Type variant="body-sm" as="span">
+                                  {propertyValueLabel(val)}
+                                </Type>
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
                     </li>
                   );
                 })}
@@ -928,6 +1078,10 @@ export default function FragmentDetailPanel({
                               <Type variant="label-sm" as="span" className={styles.harmonyPosition}>
                                 {harmonyPositionLabel(row)}
                               </Type>
+                              {/* Keys print on every row here, unlike the
+                                  harmony list above: this is a list of events
+                                  needing attention, each read on its own, not a
+                                  running harmonic reading down the fragment. */}
                               <Type variant="body-sm" as="span">
                                 {harmonyChordLabel(row)}
                               </Type>

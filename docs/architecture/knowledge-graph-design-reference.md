@@ -34,14 +34,18 @@ Each node represents a musical concept — anything from abstract categories lik
 - A prose definition
 - Domain and complexity metadata
 - A set of typed edges to other nodes and to corpus fragments
-- Two boolean fields that govern tagging tool behaviour:
+- Three informational boolean fields that govern tagging tool and public
+  glossary behaviour:
 
 | Field | Default | Meaning |
 |---|---|---|
 | `stub` | `false` | When `true`, the node exists in the graph as a placeholder — referenced by other edges but not yet fully modelled (no definition, no `HAS_PROPERTY_SCHEMA`, no `CONTAINS` edges). Stub nodes are excluded from all tagging UI. Set to `false` when the node is promoted to full status. |
 | `top_level_taggable` | `true` | When `false`, the node does not appear in the concept picker as a direct fragment tag. Use this for abstract category nodes (`Cadence`, `AuthenticCadence`) whose instances are always better described by a specific subtype, and for structural sub-components that are only ever meaningful within their parent's stage structure. Nodes that can legitimately be tagged independently — even if they also appear as stages in other concepts — should remain `true`. |
+| `definition_reviewed` | `false` | When `false`, the `definition` prose has not passed the editorial review pass that makes it fit for a public reader — it was written for annotators. The public concept page then renders the concept's hierarchy, relationships, and example fragments but substitutes an "under editorial review" placeholder for the prose; the page and its links stay stable either way. Set to `true` per concept as prose is revised. Purely editorial: nothing in the tagging tool or in traversal reads it. |
 
 The concept picker in the tagging tool filters to `stub: false AND top_level_taggable: true`.
+The public glossary (Component 11) reads `stub` and `definition_reviewed`; both
+are seeded from the domain YAML and `MERGE`d like any other node property.
 
 #### What earns a concept node
 
@@ -206,6 +210,16 @@ The tagging UI renders `CONTAINS` targets as either a separate bracket row (`dis
 **The two-level constraint:** at most two levels of bracket rows are rendered. A concept may have `CONTAINS` edges with `display_mode: 'stage'` (level 1), and those stage concepts may have `CONTAINS` edges with `display_mode: 'segment'` (rendered within level 1, not as a third row). `CONTAINS` edges with `display_mode: 'stage'` on a stage concept that is itself a `display_mode: 'stage'` child are not permitted — the seeding script enforces this.
 
 In practice: for a compound structural slot (e.g. `CompoundPredominant` with two sub-stages), set `display_mode: 'segment'` on the sub-stage `CONTAINS` edges. The two sub-stages appear as segments within the Pre-Dominant bracket, not as a third row of brackets. The hierarchy in the data is preserved; only the visual display is flattened.
+
+#### A `CONTAINS` target is not a browsable root
+
+The concept-browse surfaces — the editor concept tree (`/api/v1/concepts/roots` + `/tree`) and the public glossary index (`/api/v1/public/concepts`) — enumerate **browsable roots**, and the rule is structural (Component 11 Step 4b):
+
+> A concept is a browsable root iff it has **no `IS_SUBTYPE_OF` parent** *and* is **not the target of any `CONTAINS` edge**. Browse groups roots by their `domain`, not by taxonomic orphanhood — a domain is a *forest* of roots, not a single tree.
+
+The `CONTAINS` clause is what keeps stage concepts (e.g. `CadentialDominant`, a `CONTAINS` target of `Cadence`) out of the root list: a stage has no `IS_SUBTYPE_OF` parent, so without it a stage would float up as a spurious top-level "domain". Stage concepts remain reachable as the `CONTAINS` relationships listed on their parent concept's page.
+
+The rule is deliberately **not** keyed on `top_level_taggable`: an abstract root like `Cadence` is `top_level_taggable: false`, so a taggability filter would wrongly drop it. Conversely, a domain can hold several legitimate roots — e.g. the cadences domain has `Cadence` plus the post-cadential `ClosingSection` / `StandingOnTheDominant`, which are subtypes of nothing and structural targets of nothing, so they are genuine roots that browse renders as siblings under the one **Cadences** heading.
 
 ---
 

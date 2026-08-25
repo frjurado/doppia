@@ -1,0 +1,112 @@
+/* Public glossary index — Component 11 Step 7.
+   Depth through tonal layering only: no borders, no dividers, 0px radius.
+   Domains and nodes are separated by spacing (DESIGN.md § 6). */
+
+.page {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--spacing-12) var(--spacing-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-10);
+}
+
+/* --- Header --------------------------------------------------------------- */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.title {
+  margin: 0;
+  color: var(--color-on-background);
+}
+
+.intro {
+  margin: 0;
+  max-width: 62ch;
+  line-height: 1.7;
+  color: var(--color-on-surface-variant);
+}
+
+/* --- Domains -------------------------------------------------------------- */
+
+.domains {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-10);
+}
+
+.domain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.domainHeading {
+  margin: 0;
+  color: var(--color-primary);
+}
+
+/* --- Forest --------------------------------------------------------------- */
+
+.forest,
+.nodeChildren {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+/* A row is a link, hover surfaced by a tonal wash rather than a rule. */
+.nodeLink {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  padding: var(--spacing-2) var(--spacing-3);
+  text-decoration: none;
+  color: var(--color-primary);
+}
+
+.nodeLink:hover {
+  background: var(--color-surface-container-low);
+}
+
+.nodeLabel {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.nodeAlias {
+  color: var(--color-on-surface-variant);
+}
+
+.nodeCount {
+  flex-shrink: 0;
+  color: var(--color-on-surface-variant);
+}
+
+/* --- Notices -------------------------------------------------------------- */
+
+.notice {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+}

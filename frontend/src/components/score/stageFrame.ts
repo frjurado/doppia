@@ -28,7 +28,8 @@
 
 import type { GhostLayer, ResolutionMode } from './ghosts';
 import type { SelectionRange } from './annotator';
-import type { StageAssignment, StageBounds } from './stages';
+import type { StageAssignment, StageBounds, StageSlotCounts } from './stages';
+import { chooseStageGrid } from './stages';
 import { effectiveMeasureKeys } from './selection';
 
 /** Tolerance for matching beatFloat values (float comparison). */
@@ -62,6 +63,47 @@ export interface StageSlot {
   systemBottom: number;
 }
 
+/** Pixel span of a measure or of part of one. */
+interface Extent {
+  left: number;
+  right: number;
+}
+
+/**
+ * Pixel extent of the part of `measureKey` the beat window [start, end) covers,
+ * or null when the window excludes the measure entirely.
+ *
+ * Read off the sub-beat index, falling back to the beat index — finest first, so
+ * the clip lands exactly on a fractional bound as well as a whole-beat one.
+ * Onset-based and end-exclusive, the same inclusion rule as the ghosts, the main
+ * bracket, and the server-side harmony slice (ADR-005). A measure with no fine
+ * ghosts in either index cannot be refined, so it keeps `fallback` (its whole
+ * extent) rather than vanishing from the frame.
+ */
+function clipMeasureExtent(
+  layer: GhostLayer,
+  measureKey: string,
+  start: number,
+  end: number,
+  fallback: Extent,
+): Extent | null {
+  for (const index of [layer.subBeatIndex, layer.beatIndex]) {
+    let left = Infinity;
+    let right = -Infinity;
+    let present = false;
+    for (const entry of index.values()) {
+      if (entry.measureKey !== measureKey) continue;
+      present = true;
+      if (entry.beatFloat < start - BEAT_FLOAT_EPS) continue;
+      if (entry.beatFloat >= end - BEAT_FLOAT_EPS) continue;
+      left  = Math.min(left,  entry.bounds.left);
+      right = Math.max(right, entry.bounds.left + entry.bounds.width);
+    }
+    if (present) return right > left ? { left, right } : null;
+  }
+  return fallback;
+}
+
 /**
  * Build the stage layout frame's slot list for a committed selection.
  *
@@ -70,6 +112,17 @@ export interface StageSlot {
  * numbers elsewhere in the movement contribute nothing (STG-10), and
  * excluded sibling endings leave a document-position gap that rendering
  * folds into segmented brackets (§6A.3).
+ *
+ * The frame's outer edges are the selection's endpoints at **every** resolution
+ * (I7). At measure resolution that means the two endpoint slots are clipped to
+ * the selection's beat bounds — in geometry and in beat coordinates — rather
+ * than spanning their whole measure; an endpoint measure the bounds leave
+ * uncovered contributes no slot at all, exactly as it contributes no segment to
+ * the main bracket. A measure-granular grid under a beat-precise fragment is the
+ * normal case (the grid only has to be coarse enough to seat the stages), and
+ * before this the first and last stage of "m. 8 beat 3 – m. 10 beat 1" silently
+ * grew to whole measures and overflowed their parent fragment (M7, Component 11
+ * Step 11).
  */
 export function buildStageSlots(
   sel: SelectionRange,
@@ -86,19 +139,41 @@ export function buildStageSlots(
   }
 
   if (resolution === 'measure') {
+    const firstKey = keys[0]!;
+    const lastKey  = keys[keys.length - 1]!;
     const slots: StageSlot[] = [];
     for (const k of keys) {
       const entry = layer.measureIndex.get(k);
       const p = pos.get(k);
       if (!entry || p === undefined) continue;
+
+      // Beat bounds apply only to the endpoint measures (by key, not barN —
+      // the same filter as the finer branch below and MainBracket).
+      const beatFloat = k === firstKey ? sel.beatStart : null;
+      const endFloat  = k === lastKey  ? sel.beatEnd   : null;
+      let left  = entry.bounds.left;
+      let right = entry.bounds.left + entry.bounds.width;
+      if (beatFloat !== null || endFloat !== null) {
+        const clipped = clipMeasureExtent(
+          layer,
+          k,
+          beatFloat ?? -Infinity,
+          endFloat ?? Infinity,
+          { left, right },
+        );
+        if (clipped === null) continue;  // uncovered endpoint measure
+        if (beatFloat !== null) left  = clipped.left;
+        if (endFloat  !== null) right = clipped.right;
+      }
+
       slots.push({
         measureKey: k,
         barN: entry.barN,
-        beatFloat: null,
-        endFloat: null,
+        beatFloat,
+        endFloat,
         pos: p,
-        left: entry.bounds.left,
-        right: entry.bounds.left + entry.bounds.width,
+        left,
+        right,
         systemTop: entry.systemTop,
         systemBottom: entry.bounds.top + entry.bounds.height,
       });
@@ -330,7 +405,7 @@ function boundsFromRun(slots: StageSlot[], lo: number, hi: number): StageBounds 
  * the physical measure keys, so geometry and mc resolution never fall back to
  * `@n` lookups); an empty run collapses an optional stage to absent. Absent
  * and orphaned assignments pass through unchanged. Stages whose id is in
- * `confirmIds` are marked confirmed (explicitly positioned by the annotator).
+ * `confirmIds` are marked confirmed — the annotator positioned them here.
  *
  * Containment (I8) and outer-edge pinning (I7) hold by construction: runs
  * partition the frame, whose ends are the selection's exact endpoints.
@@ -355,9 +430,11 @@ export function frameToAssignments(
     if (bounds === null) {
       // Zero-width run: optional stages collapse to absent (I10). A required
       // stage can only reach here through a degenerate frame (fewer slots
-      // than stages); keep its committed bounds so nothing is silently lost.
+      // than stages); keep its committed bounds so nothing is silently lost,
+      // but flag the error so submission blocks (computeStagesComplete) rather
+      // than writing a required sub-part that lies outside its parent.
       derived.set(a.stageId, a.required
-        ? { ...a, confirmed }
+        ? { ...a, confirmed, error: true }
         : { ...a, absent: true, bounds: null, confirmed });
     } else {
       derived.set(a.stageId, { ...a, bounds, absent: false, error: false, confirmed });
@@ -459,8 +536,14 @@ const GRID_RANK: Record<ResolutionMode, number> = { measure: 0, beat: 1, subbeat
  *  - The frame's outer edges are the new selection's exact endpoints, so I7
  *    holds at every resolution with no drift (STG-06, STG-07).
  *  - Required stages keep at least one slot (the normalisation pass shifts
- *    pinned anchors minimally when the hard-clamp escape valve forces it);
+ *    pinned anchors minimally when the escape valve forces it);
  *    optional stages left without space collapse to absent.
+ *
+ * Pinning is keyed on `confirmed`: a stage whose slot survives the resize stays
+ * exactly where its annotator put it, and only boundaries the shrink actually
+ * crosses redistribute. There is no longer a hard clamp on top of this — the
+ * main bracket moves freely and this function absorbs the consequence, which is
+ * what "redistribute like creation" was always supposed to mean (Step 12).
  */
 export function respondToMainResize(
   assignments: StageAssignment[],
@@ -480,16 +563,17 @@ export function respondToMainResize(
   const slotsAt = (g: ResolutionMode): StageSlot[] =>
     (slotsByGrid[g] ??= buildStageSlots(newSelection, layer, g));
 
-  const mCount  = slotsAt('measure').length;
-  const bCount  = slotsAt('beat').length;
-  const sbCount = slotsAt('subbeat').length;
+  const counts: StageSlotCounts = {
+    measure: slotsAt('measure').length,
+    beat:    slotsAt('beat').length,
+    subbeat: slotsAt('subbeat').length,
+  };
 
-  if (K > mCount && K > bCount && K > sbCount) {
+  if (K > counts.measure && K > counts.beat && K > counts.subbeat) {
     return { assignments, droppedGrid: null, blocked: true };
   }
 
-  const chosenGrid: ResolutionMode =
-    mCount >= K ? 'measure' : bCount >= K ? 'beat' : 'subbeat';
+  const chosenGrid = chooseStageGrid(K, counts);
   const droppedGrid =
     GRID_RANK[chosenGrid] > GRID_RANK[currentResolution] ? chosenGrid : null;
   const effectiveGrid: ResolutionMode =

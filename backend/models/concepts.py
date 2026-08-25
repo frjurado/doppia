@@ -301,3 +301,174 @@ class ConceptRootsResponse(BaseModel):
     """
 
     roots: list[ConceptRootItem]
+
+
+# ---------------------------------------------------------------------------
+# Public concept-detail response models  (GET /api/v1/public/concepts/{id})
+# ---------------------------------------------------------------------------
+
+
+class ConceptRef(BaseModel):
+    """A lightweight reference to a concept (hierarchy neighbour or edge target).
+
+    Attributes:
+        id: Immutable concept identifier — the stable link target for the
+            public concept page.
+        name: Human-readable concept name.
+        stub: ``True`` when the referenced concept belongs to a not-yet-modelled
+            domain. The glossary renders stub targets as flagged non-links
+            ("not yet covered") rather than hiding them, keeping inbound links
+            stable (``phase-2.md`` Component 11 § Stubs).
+    """
+
+    id: str
+    name: str
+    stub: bool = False
+
+
+class ConceptRelationship(BaseModel):
+    """One typed relationship from the concept page's controlled vocabulary.
+
+    Excludes ``IS_SUBTYPE_OF`` (surfaced separately as the hierarchy) and the
+    schema structural edges. The vocabulary is defined by
+    ``graph.queries.concepts.DISPLAY_RELATIONSHIP_TYPES``.
+
+    Attributes:
+        type: Relationship-type string (e.g. ``"RESOLVES_TO"``,
+            ``"CONTRASTS_WITH"``) — a value from the edge vocabulary.
+        direction: ``"outgoing"`` when this concept is the edge source,
+            ``"incoming"`` when it is the target.
+        target: The concept at the other end of the edge.
+    """
+
+    type: str
+    direction: str
+    target: ConceptRef
+
+
+class ConceptDetailResponse(BaseModel):
+    """Full public concept-page payload (GET /api/v1/public/concepts/{id}).
+
+    Everything the glossary concept page renders in one call: the concept's
+    identity and prose, its place in the ``IS_SUBTYPE_OF`` hierarchy (path,
+    parent, children), and its typed relationships to other concepts. Example
+    fragments are a separate, cheaply re-drawable call (Step 3).
+
+    ``definition`` is the raw definition prose; the ``definition_reviewed`` flag
+    tells the frontend whether that prose has passed editorial review or a
+    placeholder should be shown in its place (Step 2). ``stub`` marks a concept
+    whose domain is not yet modelled — its page states so honestly and omits the
+    example section.
+
+    Attributes:
+        id: Immutable concept identifier (the join key and public URL key).
+        name: Human-readable concept name.
+        aliases: Alternative names / abbreviations (e.g. ``["PAC"]``).
+        definition: Long-form definition prose, or ``None`` if unset.
+        domain: The concept's domain (e.g. ``"cadences"``), or ``None``.
+        complexity: Pedagogical band (``"foundational"`` / ``"intermediate"`` /
+            ``"advanced"``), or ``None`` if unset.
+        stub: ``True`` for a not-yet-modelled concept.
+        definition_reviewed: ``True`` once the definition prose has passed the
+            editorial review gate; ``False`` (the default) means the frontend
+            should show the "under editorial review" placeholder (Step 2).
+        top_level_taggable: Whether the concept is itself directly taggable
+            (informational; sub-part-only concepts are ``False``).
+        hierarchy_path: Ancestor names from the domain root to this concept,
+            inclusive.
+        parent: The direct ``IS_SUBTYPE_OF`` parent, or ``None`` for a domain
+            root.
+        children: Direct ``IS_SUBTYPE_OF`` children, ordered by name; stub
+            children are included but flagged.
+        relationships: Typed concept-to-concept relationships (both directions).
+    """
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    definition: str | None = None
+    domain: str | None = None
+    complexity: str | None = None
+    stub: bool = False
+    definition_reviewed: bool = False
+    top_level_taggable: bool = False
+    hierarchy_path: list[str] = Field(default_factory=list)
+    parent: ConceptRef | None = None
+    children: list[ConceptRef] = Field(default_factory=list)
+    relationships: list[ConceptRelationship] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Public concept-index response models  (GET /api/v1/public/concepts)
+# ---------------------------------------------------------------------------
+
+
+class ConceptIndexNode(BaseModel):
+    """One concept in the public browse-by-domain index.
+
+    A flat node in a domain's ``IS_SUBTYPE_OF`` subtree; the frontend assembles
+    the nested display by keying on ``parent_id`` (the same shape as the editor
+    tree, minus the schema/CONTAINS detail a public reader does not need).
+
+    Attributes:
+        id: Immutable concept identifier (the link target for the concept page).
+        name: Human-readable concept name.
+        aliases: Alternative names / abbreviations (e.g. ``["PAC"]``).
+        hierarchy_path: Ancestor names from the domain root to this concept,
+            inclusive.
+        parent_id: The id of this node's direct ``IS_SUBTYPE_OF`` parent within
+            the domain subtree, or ``None`` for the domain root.
+        fragment_count: Number of ``approved`` fragments whose concept tags
+            include this concept (any tag, not only ``is_primary``) — the count
+            the browse surface shows. Reads the same source as the editor tree,
+            so the M11 count-cache fix (Step 8) de-stales both at once.
+    """
+
+    id: str
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    hierarchy_path: list[str] = Field(default_factory=list)
+    parent_id: str | None = None
+    fragment_count: int = 0
+
+
+class ConceptIndexDomain(BaseModel):
+    """One domain in the index — a **forest** of its browsable roots' subtrees.
+
+    A domain can contain several browsable roots (Component 11 Step 4b): the
+    cadences domain has ``Cadence`` (a 12-node ``IS_SUBTYPE_OF`` tree) plus the
+    post-cadential ``ClosingSection`` and ``StandingOnTheDominant``, which are
+    top-level in the domain but subtypes of nothing. So ``nodes`` is a flat
+    forest — several entries carry ``parent_id = None`` — and the frontend
+    assembles it by grouping on ``parent_id`` exactly as the editor tree does.
+
+    Attributes:
+        domain: The machine-readable domain key (e.g. ``"cadences"``), from the
+            concepts' ``domain`` field / ``BELONGS_TO`` edge.
+        label: A display string for the domain heading, derived from ``domain``
+            (e.g. ``"cadences"`` → ``"Cadences"``). A ``Domain`` node property
+            can supply a nicer label later without changing this shape.
+        nodes: Every non-stub concept across all the domain's browsable roots'
+            subtrees, ordered by name; each browsable root has ``parent_id =
+            None``.
+    """
+
+    domain: str
+    label: str
+    nodes: list[ConceptIndexNode] = Field(default_factory=list)
+
+
+class ConceptIndexResponse(BaseModel):
+    """The public concept glossary index — every domain, browsable anonymously.
+
+    Returned by ``GET /api/v1/public/concepts``. Stub concepts are not listed
+    here (a domain's browsable tree is its non-stub subtree); a stub concept
+    remains reachable through the marked stub links on a concept page (Step 1),
+    which keeps inbound links stable without cluttering the browse index.
+
+    Attributes:
+        domains: One entry per domain, ordered by domain key; each carries the
+            forest of its browsable roots' subtrees.
+    """
+
+    domains: list[ConceptIndexDomain] = Field(default_factory=list)

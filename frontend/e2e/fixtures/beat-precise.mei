@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.0">
+<!--
+  Beat-precise bracket fixture (Component 11 Step 11 / M7).
+
+  This comment sits *inside* the root element deliberately: Verovio identifies the
+  input format from the head of the string, and a comment ahead of <mei> makes it
+  give up with "unknown XML data" / "no root found" — a silent blank render.
+
+  Unlike sample.mei this carries the three attributes bracket geometry actually
+  depends on, all of which the normalised corpus MEI has and whose absence fails
+  *silently* rather than loudly:
+
+    xml:id on <measure>  — buildFragmentGeometry matches MEI measures to SVG
+                           elements by id; without it no measure rects are found
+                           and no bracket renders at all.
+    xml:id on <note>     — collectLayerNotes looks up each note's SVG counterpart
+                           by id to get its x position.
+    dur.ppq on <note>    — the onset accumulator; a note without it is treated as
+                           a grace note, so a measure of them contributes no
+                           onsets and the ghost layer falls back to one synthetic
+                           whole-measure ghost (§6A.7). Beat and sub-beat ghosts
+                           then do not exist, and every beat-precise bracket
+                           silently degrades to whole measures — which is exactly
+                           the bug this fixture exists to guard against, so a
+                           fixture missing it would pass for the wrong reason.
+
+  3/4 at ppq=480 (quarter = 480, eighth = 240): a simple meter with three
+  unambiguous beats, matching the meter of the movement M7 was reported on. Six
+  eighths per bar give two sub-beats per beat, so a bracket can be clipped at a
+  beat boundary and be visibly inside its measure. Five measures is enough for a
+  fragment with clipped measures at both ends and a whole one between.
+
+  Deliberately not 3/8: the ghost layer and the analysis ingest disagree on
+  whether that is compound (Track M17), and a fixture should not encode a meter
+  whose beat count is under dispute.
+-->
+  <meiHead>
+    <fileDesc>
+      <titleStmt><title>Beat-precise bracket geometry — e2e fixture</title></titleStmt>
+      <pubStmt/>
+    </fileDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef ppq="480" meter.count="3" meter.unit="4">
+            <staffGrp>
+              <staffDef n="1" clef.shape="G" clef.line="2" lines="5"/>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure xml:id="m1" n="1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="m1n1" dur="8" dur.ppq="240" oct="4" pname="c"/>
+                  <note xml:id="m1n2" dur="8" dur.ppq="240" oct="4" pname="d"/>
+                  <note xml:id="m1n3" dur="8" dur.ppq="240" oct="4" pname="e"/>
+                  <note xml:id="m1n4" dur="8" dur.ppq="240" oct="4" pname="f"/>
+                  <note xml:id="m1n5" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                  <note xml:id="m1n6" dur="8" dur.ppq="240" oct="4" pname="a"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure xml:id="m2" n="2">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="m2n1" dur="8" dur.ppq="240" oct="4" pname="e"/>
+                  <note xml:id="m2n2" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                  <note xml:id="m2n3" dur="8" dur.ppq="240" oct="4" pname="b"/>
+                  <note xml:id="m2n4" dur="8" dur.ppq="240" oct="5" pname="d"/>
+                  <note xml:id="m2n5" dur="8" dur.ppq="240" oct="4" pname="b"/>
+                  <note xml:id="m2n6" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure xml:id="m3" n="3">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="m3n1" dur="8" dur.ppq="240" oct="4" pname="a"/>
+                  <note xml:id="m3n2" dur="8" dur.ppq="240" oct="5" pname="c"/>
+                  <note xml:id="m3n3" dur="8" dur.ppq="240" oct="5" pname="e"/>
+                  <note xml:id="m3n4" dur="8" dur.ppq="240" oct="5" pname="c"/>
+                  <note xml:id="m3n5" dur="8" dur.ppq="240" oct="4" pname="a"/>
+                  <note xml:id="m3n6" dur="8" dur.ppq="240" oct="4" pname="f"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure xml:id="m4" n="4">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="m4n1" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                  <note xml:id="m4n2" dur="8" dur.ppq="240" oct="4" pname="b"/>
+                  <note xml:id="m4n3" dur="8" dur.ppq="240" oct="5" pname="d"/>
+                  <note xml:id="m4n4" dur="8" dur.ppq="240" oct="4" pname="b"/>
+                  <note xml:id="m4n5" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                  <note xml:id="m4n6" dur="8" dur.ppq="240" oct="4" pname="d"/>
+                </layer>
+              </staff>
+            </measure>
+            <measure xml:id="m5" n="5">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="m5n1" dur="8" dur.ppq="240" oct="4" pname="c"/>
+                  <note xml:id="m5n2" dur="8" dur.ppq="240" oct="4" pname="e"/>
+                  <note xml:id="m5n3" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                  <note xml:id="m5n4" dur="8" dur.ppq="240" oct="5" pname="c"/>
+                  <note xml:id="m5n5" dur="8" dur.ppq="240" oct="4" pname="g"/>
+                  <note xml:id="m5n6" dur="8" dur.ppq="240" oct="4" pname="e"/>
+                </layer>
+              </staff>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

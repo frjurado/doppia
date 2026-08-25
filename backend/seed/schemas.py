@@ -185,6 +185,12 @@ class ConceptYAML(BaseModel):
     complexity: Literal["foundational", "intermediate", "advanced"] | None = None
     stub: bool = False
     """When True the node exists as a placeholder; excluded from the tagging UI."""
+    definition_reviewed: bool = False
+    """When True the ``definition`` prose has passed an editorial review pass and
+    may be shown on the public glossary concept page. When False (the default),
+    the definition was written for annotators and the glossary substitutes an
+    "under editorial review" placeholder (Component 11 Step 2). An informational
+    flag like ``stub`` — it gates public display, not seeding or tagging."""
     top_level_taggable: bool = True
     """When False the concept does not appear in the concept picker as a direct tag."""
     relationships: list[RelationshipYAML] = []

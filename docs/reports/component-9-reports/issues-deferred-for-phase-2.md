@@ -11,7 +11,7 @@ I'm dumping here a set of issues and questions already identified but not yet ta
 
 ## Fragment browser
 
-- What's the update schedule of the numbers in the concept tree? Right now it seems to get stuck on cache.
+- ~~What's the update schedule of the numbers in the concept tree? Right now it seems to get stuck on cache.~~ **Fixed (M11 — Component 11 Step 8, 2026-07-25).** They were genuinely stuck: the Redis concept-tree cache stored the whole response with `fragment_count` baked in, on a 1-hour TTL that only a re-seed invalidated — so an approve/reject/delete/re-tag was invisible until the entry expired. The counts are no longer cached at all (only the graph structure is, which changes only on a re-seed); every request reads them live from PostgreSQL. Answer to the original question: **immediately, on every load.**
 
 
 ## Fragment editor
@@ -76,7 +76,7 @@ The cadence editor doesn't work properly:
 
 ## Real bugs
 
-- 279/ii, m. 8-10 (also m. 48-50): main bracket & info show real fragment ("m. 8, beat 3 – m. 10, beat 1"), but stages show whole measures, so first & last overflow the actual fragment size (seen both in stage brackets & sidebar info).
+- ~~279/ii, m. 8-10 (also m. 48-50): main bracket & info show real fragment ("m. 8, beat 3 – m. 10, beat 1"), but stages show whole measures, so first & last overflow the actual fragment size (seen both in stage brackets & sidebar info).~~ **✅ Fixed — M7, Component 11 Step 11 (2026-07-27).** The stage layout frame applied the selection's beat-precision endpoint filters at beat/sub-beat resolution only; at measure resolution every slot spanned its whole measure. Since the stage grid is chosen from the *stage count*, a beat-precise fragment whose stages fit measure-granularly is the ordinary case — so invariant I7 ("first stage start ≡ main bracket start, exactly, at all resolutions") was quietly false exactly there, and the overflow was written into the sub-part rows, not merely rendered. `buildStageSlots` now clips both endpoint slots and `prePopulateStages` pins its outer edges; stored rows repaired by `backend/data_migrations/clamp_subpart_bounds.py`.
 
 
 ---
@@ -85,12 +85,19 @@ The cadence editor doesn't work properly:
 
 These are just small errors on the fragments recorded. As I can barely use the fragment editor, they are documented here. To be edited at some point:
 
-- General: harmonies are not confirmed in any places - check all.
-- 279/i m. 9-10: V = 64 (no comma), then V7 (grade, type major).
-- 279/i m. 11-12: Final Tonic harmony is not confirmed, an extra one is shown?
-- 279/i m. 77: commentary has a typo.
-- 279/i m. 81: delete the IV6?
-- 279/i m. 93: stages are not ok.
-- 279/ii, m. 3: evaded no text, summary is generic (C major + 4/4)
-- 279/ii, m. 15: wrong stages
-- 279/ii, m. 22: mistake on commentary (3 failed attemps).
+All items below were worked through in **Component 11 Steps 13C/13D
+(2026-07-30)**, directly on staging — the system of record for campaign
+fragments. Struck items are done; the two that were not simple fixes are
+annotated with where they went.
+
+- ~~General: harmonies are not confirmed in any places - check all.~~ **Done for the movements in scope** — K279 and K280, all six movements, at **465/465 in-fragment harmony events confirmed**. Two bugs surfaced mid-sweep and were fixed (`288edd7`): "Confirm all" fired N parallel read-modify-writes of a single `events` array and lost all but the last (279/i had reached only 102/163), and manually inserted harmonies recorded no `mc`, so after Step 10's mc-scoped query they vanished from the editor while the score and details still showed them. Corpus-wide, 14 of 383 fragments still hold unreviewed harmony in range (K281/i, K331/i–iii) — **none of them approved**, and all now blocked from approval by the `harmony_gate` seeded in Step 13F, so the gap cannot reach the public glossary.
+- ~~279/i m. 9-10: V = 64 (no comma), then V7 (grade, type major).~~ **Fixed.**
+- ~~279/i m. 11-12: Final Tonic harmony is not confirmed, an extra one is shown?~~ **Fixed.**
+- ~~279/i m. 77: commentary has a typo.~~ **Fixed.**
+- ~~279/i m. 81: delete the IV6?~~ **Closed by decision** — Francisco changed his mind and kept it. Not a defect.
+- ~~279/i m. 93: stages are not ok.~~ **Fixed** — one of the two corrections that only became editable once Step 12 freed the main-bracket resize.
+- **279/ii, m. 3: evaded no text, summary is generic (C major + 4/4)** — not editorial, as recorded. **Two separate bugs; one fixed, one still open.**
+    - ~~*summary is generic*~~ **Fixed — M6 (Step 10).** `summary.key`/`summary.meter` were parsed from the MEI, which encodes `<keySig sig="4f"/>` with no mode, so every fragment in the corpus was stamped "C major". Both now derive from the movement record, and `fix_summary_key_meter.py` repaired 290 of 372 stored summaries. This fragment now reads F major, 3/4.
+    - *evaded no text* — **still open; deferred to Component 12.** The bracket carries no label because `EvadedCadence` declares no alias, and the parent-bracket label renders only when one exists. Not the missing `post_evasion_harmony` capture extension — a different issue, tracked separately as triage item 13. See `../component-11-reports/component-11-triage.md` § 14.
+- ~~279/ii, m. 15: wrong stages~~ **Fixed** — the second Step 12-dependent correction.
+- ~~279/ii, m. 22: mistake on commentary (3 failed attemps).~~ **Fixed.**

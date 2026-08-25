@@ -17,7 +17,8 @@ time, not here, because it requires a PostgreSQL query against movement_analysis
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 from errors import FragmentValidationError
 from graph.queries.concepts import check_concept_exists
@@ -159,42 +160,99 @@ def validate_summary_properties(
         # BOOL: no value list; any string value (or absence) is accepted.
 
 
+class _Bounded(Protocol):
+    """The position fields every fragment write payload carries (ADR-005/015)."""
+
+    bar_start: int
+    bar_end: int
+    mc_start: int
+    mc_end: int
+    beat_start: float | None
+    beat_end: float | None
+
+
+def _start_position(b: _Bounded) -> tuple[int, float]:
+    """Sortable start position: document-order measure, then beat onset.
+
+    A null ``beat_start`` means the bound sits at its measure's start, which is
+    below every beat in that measure — so ``-inf`` orders it correctly without
+    needing to know the meter.
+    """
+    return (b.mc_start, b.beat_start if b.beat_start is not None else float("-inf"))
+
+
+def _end_position(b: _Bounded) -> tuple[int, float]:
+    """Sortable end position; a null ``beat_end`` means the measure's end."""
+    return (b.mc_end, b.beat_end if b.beat_end is not None else float("inf"))
+
+
+def _assert_contained(parent: _Bounded, children: Sequence[_Bounded]) -> None:
+    """Assert every sub-part's extent falls within the parent fragment's.
+
+    Compared on ``(mc, beat)`` pairs. ``mc`` is the ADR-015 document-order index,
+    the only unambiguous measure coordinate — bar numbers repeat across sections
+    and endings, so ``bar_start`` alone cannot order two positions in K331/ii.
+    Within one measure the beats then order the pair, and a null beat is that
+    measure's own edge, so no meter is needed to compare them: the objection that
+    kept beats out of this check ("beat values are measure-local") only applies to
+    comparing beats *stripped of* their measure.
+
+    Beat-level containment matters: the M7 defect (Component 11 Step 11) wrote
+    whole-measure stage bounds under a fragment starting at beat 3, and a
+    bar-only check saw nothing wrong with it.
+
+    Args:
+        parent: The top-level fragment write payload.
+        children: Sub-part payloads.
+
+    Raises:
+        FragmentValidationError: For the first sub-part whose extent exceeds the
+            parent's, with the index and both coordinate systems in ``detail``.
+    """
+    p_start, p_end = _start_position(parent), _end_position(parent)
+
+    for idx, child in enumerate(children):
+        if _start_position(child) >= p_start and _end_position(child) <= p_end:
+            continue
+        raise FragmentValidationError(
+            f"Sub-part {idx} range [mc {child.mc_start}, mc {child.mc_end}] "
+            f"(beats {child.beat_start}–{child.beat_end}) falls outside the "
+            f"parent fragment's range [mc {parent.mc_start}, mc {parent.mc_end}] "
+            f"(beats {parent.beat_start}–{parent.beat_end}). "
+            "Every sub-part must be contained within its parent.",
+            detail={
+                "sub_part_index": idx,
+                "child_bar_start": child.bar_start,
+                "child_bar_end": child.bar_end,
+                "parent_bar_start": parent.bar_start,
+                "parent_bar_end": parent.bar_end,
+                "child_mc_start": child.mc_start,
+                "child_mc_end": child.mc_end,
+                "parent_mc_start": parent.mc_start,
+                "parent_mc_end": parent.mc_end,
+                "child_beat_start": child.beat_start,
+                "child_beat_end": child.beat_end,
+                "parent_beat_start": parent.beat_start,
+                "parent_beat_end": parent.beat_end,
+            },
+        )
+
+
 def validate_containment(
     parent: FragmentCreate,
     children: list[SubPartFragmentCreate],
 ) -> None:
-    """Assert each sub-part's bar range falls within the parent fragment's range.
+    """Assert each sub-part's extent falls within the parent fragment's.
 
     Service-layer containment check per tagging-tool-design.md § 9.  The
     database has no constraint enforcing this; the service layer is the only
-    guard.
-
-    Beat-level containment is not checked here because beat values are
-    measure-local (1-indexed within their respective measure) and their
-    comparison across different measures is not meaningful without knowing the
-    meter at each position.  The tagging UI enforces beat containment at the
-    ghost-overlay layer.
+    guard.  See :func:`_assert_contained` for the comparison rule.
 
     Args:
         parent: The top-level fragment write payload.
         children: Sub-part payloads from ``parent.sub_parts``.
 
     Raises:
-        FragmentValidationError: For the first sub-part whose bar range
-            exceeds the parent's, with the index and ranges in ``detail``.
+        FragmentValidationError: For the first sub-part outside the parent.
     """
-    for idx, child in enumerate(children):
-        if child.bar_start < parent.bar_start or child.bar_end > parent.bar_end:
-            raise FragmentValidationError(
-                f"Sub-part {idx} bar range [{child.bar_start}, {child.bar_end}] "
-                f"falls outside the parent fragment's range "
-                f"[{parent.bar_start}, {parent.bar_end}]. "
-                "Every sub-part must be contained within its parent.",
-                detail={
-                    "sub_part_index": idx,
-                    "child_bar_start": child.bar_start,
-                    "child_bar_end": child.bar_end,
-                    "parent_bar_start": parent.bar_start,
-                    "parent_bar_end": parent.bar_end,
-                },
-            )
+    _assert_contained(parent, children)

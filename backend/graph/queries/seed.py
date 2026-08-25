@@ -103,24 +103,26 @@ ON MATCH SET  r.order = $order
 
 _MERGE_CONCEPT = """\
 MERGE (c:Concept {id: $id})
-ON CREATE SET c.name               = $name,
-              c.aliases            = $aliases,
-              c.type               = $type,
-              c.definition         = $definition,
-              c.domain             = $domain,
-              c.complexity         = $complexity,
-              c.stub               = $stub,
-              c.top_level_taggable = $top_level_taggable,
-              c.capture_extensions = $capture_extensions
-ON MATCH SET  c.name               = $name,
-              c.aliases            = $aliases,
-              c.type               = $type,
-              c.definition         = $definition,
-              c.domain             = $domain,
-              c.complexity         = $complexity,
-              c.stub               = $stub,
-              c.top_level_taggable = $top_level_taggable,
-              c.capture_extensions = $capture_extensions
+ON CREATE SET c.name                = $name,
+              c.aliases             = $aliases,
+              c.type                = $type,
+              c.definition          = $definition,
+              c.domain              = $domain,
+              c.complexity          = $complexity,
+              c.stub                = $stub,
+              c.definition_reviewed = $definition_reviewed,
+              c.top_level_taggable  = $top_level_taggable,
+              c.capture_extensions  = $capture_extensions
+ON MATCH SET  c.name                = $name,
+              c.aliases             = $aliases,
+              c.type                = $type,
+              c.definition          = $definition,
+              c.domain              = $domain,
+              c.complexity          = $complexity,
+              c.stub                = $stub,
+              c.definition_reviewed = $definition_reviewed,
+              c.top_level_taggable  = $top_level_taggable,
+              c.capture_extensions  = $capture_extensions
 """
 
 # ---------------------------------------------------------------------------
@@ -294,6 +296,7 @@ def merge_concept(session: _Session, concept: ConceptYAML) -> None:
         domain=concept.domain,
         complexity=concept.complexity,
         stub=concept.stub,
+        definition_reviewed=concept.definition_reviewed,
         top_level_taggable=concept.top_level_taggable,
         capture_extensions=json.dumps(
             [ext.model_dump() for ext in concept.capture_extensions]

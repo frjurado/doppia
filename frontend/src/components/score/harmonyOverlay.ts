@@ -33,7 +33,20 @@ const LABEL_FONT_BASE_SCALE = 35;
 /** Resolve the label font size (px) for a given Verovio staff-size scale. */
 function labelFontPx(scale: number | undefined): number {
   if (!scale || scale <= 0) return LABEL_FONT_BASE_PX;
-  return Math.round((LABEL_FONT_BASE_PX * scale) / LABEL_FONT_BASE_SCALE * 10) / 10;
+  return Math.round(((LABEL_FONT_BASE_PX * scale) / LABEL_FONT_BASE_SCALE) * 10) / 10;
+}
+
+/**
+ * Invert `measureKey → mc` into `mc → measureKey`.
+ *
+ * `mc` is unique per measure by construction (ADR-015: document-order rank), so
+ * the inversion is lossless. It is what lets an event be placed by its machine
+ * coordinate rather than by a bar number that may name two different measures.
+ */
+function invertMcIndex(mcIndex: Map<string, number>): Map<number, string> {
+  const inverted = new Map<number, string>();
+  for (const [key, mc] of mcIndex) inverted.set(mc, key);
+  return inverted;
 }
 
 export interface HarmonyOverlayOptions {
@@ -67,8 +80,7 @@ export interface HarmonyOverlayOptions {
 const FIGBASS_FIGURES = new Set(['6', '7', '2', '65', '43', '64']);
 
 /** Roman-numeral base + trailing figbass digits (e.g. "V65", "bVII6", "I"). */
-const NUMERAL_FIGURE_RE =
-  /^([#b]?(?:VII|VI|IV|V|III|II|I|vii|vi|iv|v|iii|ii|i))(\d*)$/;
+const NUMERAL_FIGURE_RE = /^([#b]?(?:VII|VI|IV|V|III|II|I|vii|vi|iv|v|iii|ii|i))(\d*)$/;
 
 /**
  * Split a built numeral into its Roman-numeral base and a list of stacked figure
@@ -78,9 +90,7 @@ const NUMERAL_FIGURE_RE =
  * recognised figbass value — in which case the numeral renders as plain linear
  * text (Step 22 fallback grammar).
  */
-function splitNumeralFigure(
-  numeral: string,
-): { base: string; rows: string[] } | null {
+function splitNumeralFigure(numeral: string): { base: string; rows: string[] } | null {
   const m = NUMERAL_FIGURE_RE.exec(numeral);
   if (!m) return null;
   const base = m[1]!;
@@ -119,7 +129,7 @@ function renderLabelInto(
   e: HarmonyEventOut,
   includeKey: boolean,
   figureCls: string,
-  figureRowCls: string,
+  figureRowCls: string
 ): void {
   const { base, rows } = resolveFigure(e);
 
@@ -166,6 +176,7 @@ function renderLabelInto(
 export class HarmonyOverlay {
   private _ghostLayer: GhostLayer;
   private _events: HarmonyEventOut[];
+  private _mcToMeasureKey: Map<number, string>;
   private readonly _onLabelClick:
     | ((mn: number, volta: number | null, beat: number) => void)
     | undefined;
@@ -175,6 +186,7 @@ export class HarmonyOverlay {
   constructor(options: HarmonyOverlayOptions) {
     this._ghostLayer = options.ghostLayer;
     this._events = options.events;
+    this._mcToMeasureKey = invertMcIndex(options.mcIndex);
     this._onLabelClick = options.onLabelClick;
     this._fontPx = labelFontPx(options.scale);
 
@@ -190,10 +202,34 @@ export class HarmonyOverlay {
    * Rebuild all label positions from a fresh ghost layer and mcIndex.
    * Called by ScoreViewer on every reproject() signal (Verovio re-render).
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  reproject(ghostLayer: GhostLayer, _mcIndex: Map<string, number>): void {
+  reproject(ghostLayer: GhostLayer, mcIndex: Map<string, number>): void {
     this._ghostLayer = ghostLayer;
+    this._mcToMeasureKey = invertMcIndex(mcIndex);
     this._buildLabels();
+  }
+
+  /**
+   * Resolve the measure ghost key an event's label belongs on — ADR-036.
+   *
+   * Prefers the event's `mc` (document-order, unique) over recomputing the key
+   * from `mn`. On a movement whose bar numbers restart, `measureGhostKey(mn,
+   * volta)` yields the *same* base key for both passes, so every Trio event
+   * resolved onto the Menuetto's ghost: K331/ii rendered all its harmony on the
+   * Menuetto and none on the Trio. The ghost layer already distinguishes them —
+   * `walkMeasureKeys` suffixes a repeated key as `m12#1` — so the fix is to look
+   * the key up by `mc` rather than rebuild it from an ambiguous coordinate.
+   *
+   * Falls back to the `mn`-derived key when an event carries no `mc` (a
+   * manually inserted event; `mc` is optional on the harmony API payloads).
+   * That path is exactly as ambiguous as it was before, and only for events the
+   * editor created by hand.
+   */
+  private _resolveMeasureKey(event: HarmonyEventOut): string {
+    if (event.mc != null) {
+      const key = this._mcToMeasureKey.get(event.mc);
+      if (key !== undefined) return key;
+    }
+    return measureGhostKey(event.mn, event.volta ?? null);
   }
 
   /**
@@ -230,8 +266,9 @@ export class HarmonyOverlay {
     for (const event of this._events) {
       const volta = event.volta ?? null;
 
-      // Step 1 — resolve measure ghost (volta-aware key)
-      const measureKey = measureGhostKey(event.mn, volta);
+      // Step 1 — resolve measure ghost by mc, falling back to the volta-aware
+      // key derived from mn (ADR-036; see _resolveMeasureKey).
+      const measureKey = this._resolveMeasureKey(event);
       const measureEntry = this._ghostLayer.measureIndex.get(measureKey);
       if (!measureEntry) continue; // system not yet rendered or ending not visible
 
@@ -254,7 +291,7 @@ export class HarmonyOverlay {
         let bestDist = Infinity;
         for (let sb = 1; sb <= 2; sb++) {
           const sbEntry = this._ghostLayer.subBeatIndex.get(
-            encodeSubBeat(renderOrder, beatIdx, sb),
+            encodeSubBeat(renderOrder, beatIdx, sb)
           );
           if (sbEntry) {
             const dist = Math.abs(sbEntry.beatFloat - event.beat);
@@ -290,13 +327,7 @@ export class HarmonyOverlay {
       span.style.left = `${x}px`;
       span.style.top = `${y}px`;
       span.style.fontSize = `${this._fontPx}px`;
-      renderLabelInto(
-        span,
-        event,
-        event.local_key !== lastKey,
-        figureCls,
-        figureRowCls,
-      );
+      renderLabelInto(span, event, event.local_key !== lastKey, figureCls, figureRowCls);
       lastKey = event.local_key;
 
       if (clickable && this._onLabelClick) {

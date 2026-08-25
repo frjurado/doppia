@@ -20,13 +20,13 @@ The overlay surfaces on **two surfaces, gated differently** (Step 23 decision, c
 | Surface | Gate | Rationale |
 |---|---|---|
 | **Score viewer** (`ScoreViewer.tsx`) | Tag mode only | The score viewer is a reading/annotation surface; in-score labels are an annotator aid. View mode stays clean (score + MIDI only). |
-| **Fragment viewer** (`FragmentDetail.tsx`) | On by default, user toggle | A fragment *is* a study object — the tagged harmony is part of what it teaches. Labels render on load; a "Harmony" toggle in the score controls lets the reader hide them. |
+| **Fragment viewer** (`FragmentNotation.tsx`) | On by default, user toggle | A fragment *is* a study object — the tagged harmony is part of what it teaches. Labels render on load; a "Harmony" toggle in the score controls lets the reader hide them. |
 
 This resolves the Step 23 asymmetry deliberately as **option (b)**: show labels in the fragment viewer (with a toggle defaulting to on), keep the score-viewer tag-mode gate. The roadmap's two other options — keep the asymmetry, or add a toggle to *both* surfaces — were not taken: the score viewer's view mode has no fragment-study purpose to justify the labels.
 
 **Score viewer.** The tag-mode gate is checked in `ScoreViewer.tsx` before mounting `harmonyOverlay.ts`; the module itself has no knowledge of view mode.
 
-**Fragment viewer.** `FragmentDetail.tsx` mounts the same `HarmonyOverlay` in a `showHarmony`-gated effect. Differences from the score-viewer mount:
+**Fragment viewer.** `FragmentNotation.tsx` — the notation surface extracted from `FragmentDetail.tsx` (Component 11 Step 6) and shared with the glossary's inline example expand — mounts the same `HarmonyOverlay` in a `showHarmony`-gated effect. Differences from the score-viewer mount:
 - **Data**: reuses the `harmony_events` already sliced into the fragment detail response over the rendered bar range (`toOverlayHarmonyEvents()` coerces the loosely-typed records into `HarmonyEventOut`), so there is no second analysis request.
 - **Ghost layer**: reuses the layer built once per render for bracket geometry (`readFragmentGeometry()` takes it as a parameter), so the bracket and label surfaces share one coordinate origin.
 - **Non-interactive**: no `onLabelClick` is passed — the viewer is read-only, so labels stay `pointer-events: none` (there is no `HarmonyPanel` to focus).
@@ -56,12 +56,15 @@ The ghost layer already computes exact pixel x-positions for every beat. The map
 ### Step 1 — resolve the measure ghost
 
 ```ts
-const measureKey = measureGhostKey(mn, volta);             // e.g. "m12-e1"
+// Prefer the machine coordinate; fall back to the mn-derived key.
+const measureKey = mcToMeasureKey.get(event.mc) ?? measureGhostKey(mn, volta);
 const measureEntry = ghostLayer.measureIndex.get(measureKey);
 if (!measureEntry) return;                                   // system not yet rendered
 ```
 
-`measureGhostKey` is the canonical deduplication key (handles volta collision and section-reset numbering). The `measureIndex` is populated by `buildGhosts()` after each Verovio render.
+**Corrected 2026-07-25 (Component 11 § 9F, ADR-036).** This step originally read `measureGhostKey(mn, volta)` and nothing else, on the belief — stated in the sentence below — that the key handles section-reset numbering. **It does not.** `measureGhostKey` returns a *base* key (`m12`); it is `walkMeasureKeys()` that disambiguates a repeated key by suffixing the later occurrence (`m12#1`). Recomputing the key from `mn` therefore always resolves to the **first** measure with that number, so on K331/ii every Trio event landed on the Menuetto's ghost: the score showed all its harmony on the Menuetto and none on the Trio.
+
+The overlay now resolves the key from the event's `mc` (unique by construction, ADR-015) via the inverted `mcIndex` it already receives, falling back to `measureGhostKey(mn, volta)` for an event with no `mc` — `mc` is optional on the harmony API payloads, so a manually inserted event may lack it. `measureGhostKey` remains the canonical key *format*, and handles the volta collision correctly; it is the *section-reset* case it cannot handle on its own. The `measureIndex` is populated by `buildGhosts()` after each Verovio render.
 
 ### Step 2 — resolve the beat ghost
 
@@ -115,6 +118,8 @@ const y = systemBottom + LANE_OFFSET_PX;
 An event with `volta = 1` belongs to the first ending only; it must not render at the same notated position as `volta = 2`. The `measureGhostKey(mn, volta)` key already disambiguates: if a measure ghost for `m12-e1` is visible and one for `m12-e2` is not (because only one ending is rendered on this pass), only the visible ghost has a `measureIndex` entry. The lookup in Step 1 naturally returns `undefined` for the absent ending, and the event is silently skipped.
 
 This mirrors the approval-gate logic in `fragment-schema.md` § "Fragment approval and harmony review": `repeat_context = "first_ending"` restricts the gate check to events with `volta = 1`. The overlay uses the same `(mn, volta)` identity to determine which events to show, so the visual and analytical surfaces are consistent.
+
+**Amended 2026-07-25 (Component 11 § 9F).** Both surfaces have since moved to `mc` where the event carries one, and the consistency claim still holds because they moved together: the fragment harmony slice (`_slice_harmony_events` / `_sources_in_range`) matches on `mc_start <= mc <= mc_end`, and the overlay resolves its measure ghost by `mc`. `mc` *is* the ending-aware coordinate — a first-ending measure and a second-ending measure have different `mc` values — so the volta filter is redundant on that path and is applied only on the `mn` fallback. Note also that in the ingested corpus no two sibling endings share an `@n` at all (see the Step 9A survey), so the collision this section describes does not arise in practice; the handling stays because it costs nothing and the convention may return.
 
 For Verovio renders that expand both endings (some score layouts render both passes in full), both `m12-e1` and `m12-e2` will have ghost entries, and both sets of events will be shown — one label set per ending. This is correct: the annotator can see which events belong to which pass.
 

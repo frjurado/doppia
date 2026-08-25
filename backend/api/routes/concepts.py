@@ -126,8 +126,9 @@ async def search_concepts(
     summary="Get the IS_SUBTYPE_OF subtree for a concept",
     response_description=(
         "Flat list of all non-stub concepts in the subtree rooted at "
-        "``root``, with parent_id linkage and approved fragment counts. "
-        "Cached in Redis with a 1-hour TTL; invalidated on re-seed."
+        "``root``, with parent_id linkage and approved fragment counts. The "
+        "tree structure is cached in Redis with a 1-hour TTL (invalidated on "
+        "re-seed); the fragment counts are read live on every request."
     ),
 )
 @limiter.limit(GRAPH_AUTHENTICATED)
@@ -150,9 +151,11 @@ async def get_concept_tree(
     ``approved`` fragments tagged with that concept.  The frontend assembles
     the nested tree UI by keying on ``parent_id``.
 
-    Responses are cached in Redis (invalidated when the seed script runs).
-    Fragment counts reflect the current database state on every cache miss;
-    counts in a cached response may be up to 1 hour stale.
+    The tree *structure* is cached in Redis (invalidated when the seed script
+    runs, the only event that can change it). Fragment counts are **not**
+    cached: they are read from PostgreSQL on every request, so approving,
+    rejecting, deleting, or re-tagging a fragment is reflected on the next
+    load (Component 11 Step 8 / M11).
 
     Returns HTTP 404 when ``root`` is unknown or refers to a stub concept.
 

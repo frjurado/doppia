@@ -146,8 +146,10 @@ export function resolveSegments(
     for (const k of layer.measureIndex.keys()) pos.set(k, i++);
   }
 
-  // Measure resolution or no beat-precision coords: full-measure bounds.
-  if (resolution === 'measure' || sel.beatStart === null) {
+  // Measure resolution or no beat-precision coords at either end: full-measure
+  // bounds. The endpoints are independent — a range may constrain one and not
+  // the other — so this must not short-circuit on beatStart alone.
+  if (resolution === 'measure' || (sel.beatStart === null && sel.beatEnd === null)) {
     const extents: MeasureExtent[] = [];
     for (const k of keys) {
       const entry = layer.measureIndex.get(k);
@@ -168,7 +170,7 @@ export function resolveSegments(
   const keySet = new Set(keys);
   const firstKey  = keys[0]!;
   const lastKey   = keys[keys.length - 1]!;
-  const beatStart = sel.beatStart;
+  const beatStart = sel.beatStart ?? -Infinity;
   const beatEnd   = sel.beatEnd ?? Infinity;
 
   const byMeasure = new Map<string, MeasureExtent>();
@@ -196,6 +198,22 @@ export function resolveSegments(
       existing.left  = Math.min(existing.left, eLeft);
       existing.right = Math.max(existing.right, eRight);
     }
+  }
+
+  // An unconstrained endpoint keeps its whole measure, exactly as it would at
+  // measure resolution. Without this it would start at the measure's first
+  // notehead instead of its barline, leaving a gap after the stage before it —
+  // the ghost span is narrower than the measure. Mirrors stageFrame's
+  // clipMeasureExtent, which likewise overrides only the constrained side.
+  if (sel.beatStart === null) {
+    const ext = byMeasure.get(firstKey);
+    const m = layer.measureIndex.get(firstKey);
+    if (ext && m) ext.left = m.bounds.left;
+  }
+  if (sel.beatEnd === null) {
+    const ext = byMeasure.get(lastKey);
+    const m = layer.measureIndex.get(lastKey);
+    if (ext && m) ext.right = m.bounds.left + m.bounds.width;
   }
 
   const extents = [...byMeasure.values()].sort((a, b) => a.pos - b.pos);

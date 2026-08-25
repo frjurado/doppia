@@ -645,3 +645,119 @@ class TestAbcExclusion:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["id"] == abc_id
+
+
+# ---------------------------------------------------------------------------
+# TestPublicConceptExamples — GET /api/v1/public/concepts/{id}/examples
+# ---------------------------------------------------------------------------
+
+
+async def _insert_n_approved(
+    db: AsyncSession, movement_id: str, n: int, concept_id: str = _PAC
+) -> set[str]:
+    """Insert ``n`` approved fragments (distinct bar ranges) tagged ``concept_id``."""
+    ids: set[str] = set()
+    for i in range(n):
+        ids.add(
+            await _insert_fragment(
+                db,
+                movement_id=movement_id,
+                concept_id=concept_id,
+                status="approved",
+                bar_start=1 + 2 * i,
+                bar_end=2 + 2 * i,
+            )
+        )
+    return ids
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestPublicConceptExamples:
+    """The glossary example draw: approved-only, capped, ADR-009 excluded."""
+
+    async def test_examples_are_approved_and_capped(
+        self,
+        public_client: AsyncClient,
+        seeded_movement: dict,
+        db_session: AsyncSession,
+    ) -> None:
+        # A concept id no campaign data uses, so the pool is exactly this test's
+        # inserts (the shared DB carries real AC/PAC fragments — file header).
+        # include_subtypes=false resolves the subtree to just this id.
+        ex_concept = f"GlossaryExampleTest_{uuid.uuid4().hex[:8]}"
+        mid = seeded_movement["movement_id"]
+        approved = await _insert_n_approved(db_session, mid, 5, concept_id=ex_concept)
+        draft = await _insert_fragment(
+            db_session, movement_id=mid, concept_id=ex_concept, status="draft"
+        )
+
+        resp = await public_client.get(
+            f"/api/v1/public/concepts/{ex_concept}/examples"
+            "?limit=3&include_subtypes=false"
+        )
+
+        assert resp.status_code == 200, resp.text
+        examples = resp.json()["examples"]
+        assert len(examples) == 3, "expected exactly the capped 3 from a pool of 5"
+        assert all(e["status"] == "approved" for e in examples)
+        returned = {e["id"] for e in examples}
+        assert returned <= approved, "an example was drawn from outside the pool"
+        assert draft not in returned
+
+    async def test_same_seed_is_reproducible(
+        self,
+        public_client: AsyncClient,
+        seeded_movement: dict,
+        db_session: AsyncSession,
+    ) -> None:
+        ex_concept = f"GlossaryExampleTest_{uuid.uuid4().hex[:8]}"
+        mid = seeded_movement["movement_id"]
+        await _insert_n_approved(db_session, mid, 6, concept_id=ex_concept)
+
+        url = (
+            f"/api/v1/public/concepts/{ex_concept}/examples"
+            "?limit=3&include_subtypes=false&seed=12345"
+        )
+        first = await public_client.get(url)
+        second = await public_client.get(url)
+
+        assert first.status_code == second.status_code == 200
+        ids_first = [e["id"] for e in first.json()["examples"]]
+        ids_second = [e["id"] for e in second.json()["examples"]]
+        assert ids_first == ids_second, "same seed produced a different draw"
+
+    async def test_empty_pool_returns_no_examples(
+        self,
+        public_client: AsyncClient,
+    ) -> None:
+        # A concept with no tagged fragments resolves to an empty pool, not 404.
+        resp = await public_client.get(
+            f"/api/v1/public/concepts/{_PAC}/examples?include_subtypes=false&seed=1"
+        )
+        # There may be real campaign PAC fragments; scope the assertion to the
+        # contract, not to emptiness: a 200 with a well-formed (possibly empty)
+        # list, never an error.
+        assert resp.status_code == 200
+        body = resp.json()
+        assert isinstance(body["examples"], list)
+        assert body["concept_id"] == _PAC
+
+    async def test_abc_fragment_absent_from_examples(
+        self,
+        public_client: AsyncClient,
+        seeded_abc_movement: dict,
+        db_session: AsyncSession,
+    ) -> None:
+        abc_mid = seeded_abc_movement["movement_id"]
+        abc_id = await _insert_fragment(
+            db_session, movement_id=abc_mid, status="approved"
+        )
+
+        # Draw generously so the single ABC fragment would surface if not excluded.
+        resp = await public_client.get(
+            f"/api/v1/public/concepts/{_AC}/examples?limit=12"
+        )
+
+        assert resp.status_code == 200
+        returned = {e["id"] for e in resp.json()["examples"]}
+        assert abc_id not in returned, "NonCommercial fragment leaked into examples"

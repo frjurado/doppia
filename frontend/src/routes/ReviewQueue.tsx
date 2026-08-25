@@ -8,6 +8,7 @@ import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import { ReviewQueueItem, ReviewQueueResponse, listReviewQueue } from '../services/fragmentApi';
+import { makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './ReviewQueue.module.css';
 
@@ -67,7 +68,13 @@ export default function ReviewQueue() {
   }
 
   function formatBarRange(item: ReviewQueueItem): string {
-    return t('review:barRange', { start: item.bar_start, end: item.bar_end });
+    // Wording stays the queue's own ("bars 3–7"); only the ADR-036 qualifiers
+    // are shared, so a reviewer sees the same disambiguation the public does.
+    return qualifyRange(t('review:barRange', { start: item.bar_start, end: item.bar_end }), {
+      sectionLabel: item.section_label,
+      repeatContext: item.repeat_context,
+      formatRepeatContext: makeRepeatContextFormatter(t),
+    });
   }
 
   function formatMovementLabel(item: ReviewQueueItem): string {

@@ -29,14 +29,14 @@ concepts:
     definition: "Stub: defined in the harmonic-functions domain."
 
   - id: SD4Predominant
-    name: "Pre-Dominant on Scale Degree 4"
+    name: "Pre-dominant on Scale Degree 4"
     domain: harmonic-functions
     stub: true
     top_level_taggable: false
     definition: "Stub: defined in the harmonic-functions domain."
 
   - id: SDSharp4Predominant
-    name: "Pre-Dominant on Raised Scale Degree 4"
+    name: "Pre-dominant on Raised Scale Degree 4"
     domain: harmonic-functions
     stub: true
     top_level_taggable: false

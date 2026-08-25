@@ -185,6 +185,12 @@ export interface FragmentDetailResponse {
   beat_start: number | null;
   beat_end: number | null;
   repeat_context: string | null;
+  /**
+   * Movement section this fragment begins in (ADR-036), e.g. "Trio".
+   * Non-null only where a movement's bar numbers restart and the label
+   * would otherwise be ambiguous; resolved server-side.
+   */
+  section_label: string | null;
   summary: Record<string, unknown>;
   prose_annotation: string | null;
   /** Effective per-fragment data licence (ADR-009), e.g. "CC BY-SA 4.0". */
@@ -228,6 +234,12 @@ export interface FragmentListItem {
   beat_start: number | null;
   beat_end: number | null;
   repeat_context: string | null;
+  /**
+   * Movement section this fragment begins in (ADR-036), e.g. "Trio".
+   * Non-null only where a movement's bar numbers restart and the label
+   * would otherwise be ambiguous; resolved server-side.
+   */
+  section_label: string | null;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
   /** Concept id of the primary concept tag, or null if none. */
   primary_concept_id: string | null;
@@ -262,6 +274,12 @@ export interface ReviewQueueItem {
   beat_start: number | null;
   beat_end: number | null;
   repeat_context: string | null;
+  /**
+   * Movement section this fragment begins in (ADR-036), e.g. "Trio".
+   * Non-null only where a movement's bar numbers restart and the label
+   * would otherwise be ambiguous; resolved server-side.
+   */
+  section_label: string | null;
   status: 'submitted';
   primary_concept_id: string | null;
   /** Abbreviated concept label, e.g. "PAC". Null when no alias is set. */
@@ -291,9 +309,7 @@ export interface ReviewQueueResponse {
  *
  * @throws ApiError on validation failure, auth error, or network error.
  */
-export async function createFragment(
-  payload: FragmentCreatePayload,
-): Promise<FragmentApiResponse> {
+export async function createFragment(payload: FragmentCreatePayload): Promise<FragmentApiResponse> {
   return apiFetch<FragmentApiResponse>('/api/v1/fragments', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -319,7 +335,7 @@ export async function createFragment(
  */
 export async function updateFragment(
   id: string,
-  payload: FragmentUpdatePayload,
+  payload: FragmentUpdatePayload
 ): Promise<FragmentUpdateApiResponse> {
   return apiFetch<FragmentUpdateApiResponse>(`/api/v1/fragments/${id}`, {
     method: 'PATCH',
@@ -336,9 +352,7 @@ export async function updateFragment(
  * @throws ApiError when the fragment is not in draft status or server
  *         validation fails (e.g. concept ID vanished from the graph).
  */
-export async function submitFragment(
-  id: string,
-): Promise<FragmentApiResponse> {
+export async function submitFragment(id: string): Promise<FragmentApiResponse> {
   return apiFetch<FragmentApiResponse>(`/api/v1/fragments/${id}/submit`, {
     method: 'POST',
   });
@@ -374,15 +388,13 @@ export async function getFragment(id: string): Promise<FragmentDetailResponse> {
 export async function listMovementFragments(
   movementId: string,
   cursor?: string,
-  pageSize?: number,
+  pageSize?: number
 ): Promise<FragmentListResponse> {
   const params = new URLSearchParams();
   if (cursor !== undefined) params.set('cursor', cursor);
   if (pageSize !== undefined) params.set('page_size', String(pageSize));
   const qs = params.size > 0 ? `?${params}` : '';
-  return apiFetch<FragmentListResponse>(
-    `/api/v1/movements/${movementId}/fragments${qs}`,
-  );
+  return apiFetch<FragmentListResponse>(`/api/v1/movements/${movementId}/fragments${qs}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -407,6 +419,12 @@ export interface ConceptBrowseItem {
   beat_start: number | null;
   beat_end: number | null;
   repeat_context: string | null;
+  /**
+   * Movement section this fragment begins in (ADR-036), e.g. "Trio".
+   * Non-null only where a movement's bar numbers restart and the label
+   * would otherwise be ambiguous; resolved server-side.
+   */
+  section_label: string | null;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
   primary_concept_id: string | null;
   /** First alias of the primary concept (e.g. "PAC"), or null. */
@@ -467,14 +485,9 @@ export async function listByConcept(
     status?: 'draft' | 'submitted' | 'approved' | 'rejected';
     cursor?: string;
     pageSize?: number;
-  } = {},
+  } = {}
 ): Promise<ConceptBrowseResponse> {
-  const {
-    includeSubtypes = true,
-    status = 'approved',
-    cursor,
-    pageSize,
-  } = options;
+  const { includeSubtypes = true, status = 'approved', cursor, pageSize } = options;
   const params = new URLSearchParams({ concept_id: conceptId });
   params.set('include_subtypes', String(includeSubtypes));
   params.set('status', status);
@@ -509,13 +522,10 @@ export interface FragmentDeleteResponse {
  * @param id UUID of the fragment to preview.
  * @throws ApiError on auth errors or permission failure.
  */
-export async function previewFragmentDelete(
-  id: string,
-): Promise<FragmentDeleteResponse> {
-  return apiFetch<FragmentDeleteResponse>(
-    `/api/v1/fragments/${id}?dry_run=true`,
-    { method: 'DELETE' },
-  );
+export async function previewFragmentDelete(id: string): Promise<FragmentDeleteResponse> {
+  return apiFetch<FragmentDeleteResponse>(`/api/v1/fragments/${id}?dry_run=true`, {
+    method: 'DELETE',
+  });
 }
 
 /**
@@ -538,7 +548,7 @@ export async function previewFragmentDelete(
  */
 export async function deleteFragment(
   id: string,
-  confirmCascade = false,
+  confirmCascade = false
 ): Promise<FragmentDeleteResponse> {
   const params = new URLSearchParams();
   if (confirmCascade) params.set('confirm_cascade', 'true');
@@ -559,7 +569,7 @@ export async function deleteFragment(
  */
 export async function listReviewQueue(
   cursor?: string,
-  pageSize = 50,
+  pageSize = 50
 ): Promise<ReviewQueueResponse> {
   const params = new URLSearchParams();
   if (cursor) params.set('cursor', cursor);
@@ -610,10 +620,7 @@ export interface ApprovalGateDetail {
  * @throws ApiError (HARMONY_NOT_REVIEWED) when gate items block approval.
  * @throws ApiError (SELF_REVIEW_FORBIDDEN) when the caller is the creator.
  */
-export async function approveFragment(
-  id: string,
-  comment?: string,
-): Promise<FragmentApiResponse> {
+export async function approveFragment(id: string, comment?: string): Promise<FragmentApiResponse> {
   return apiFetch<FragmentApiResponse>(`/api/v1/fragments/${id}/approve`, {
     method: 'POST',
     body: JSON.stringify({ comment: comment ?? null }),
@@ -631,10 +638,7 @@ export async function approveFragment(
  * @param comment Optional comment explaining the rejection.
  * @throws ApiError (SELF_REVIEW_FORBIDDEN) when the caller is the creator.
  */
-export async function rejectFragment(
-  id: string,
-  comment?: string,
-): Promise<FragmentApiResponse> {
+export async function rejectFragment(id: string, comment?: string): Promise<FragmentApiResponse> {
   return apiFetch<FragmentApiResponse>(`/api/v1/fragments/${id}/reject`, {
     method: 'POST',
     body: JSON.stringify({ comment: comment ?? null }),

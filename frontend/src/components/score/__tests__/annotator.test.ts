@@ -1702,3 +1702,63 @@ describe('AnnotationSession — play-from-position (Step 20)', () => {
     container.remove();
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Endpoint re-anchor: shrinking a committed selection (Step 12 follow-up)
+// ---------------------------------------------------------------------------
+
+describe('AnnotationSession — shrinking a committed selection', () => {
+  let container: HTMLDivElement;
+  let layer: GhostLayer;
+  let els: HTMLDivElement[];
+  let session: AnnotationSession;
+
+  beforeEach(() => {
+    ({ container, layer, els } = makeLayerWithMeasures([1, 2, 3, 4, 5]));
+    session = new AnnotationSession(layer, { resolution: 'measure' });
+  });
+
+  afterEach(() => {
+    session.destroy();
+    container.remove();
+  });
+
+  it('REPRO: grabbing the last ghost and dragging inward shrinks the range', () => {
+    measureDrag(els, 0, [1, 2, 3]);          // commit mm. 1-4
+    expect(session.selection?.barEnd).toBe(4);
+
+    // Grab the current LAST endpoint and drag to m.3 -> expect mm. 1-3.
+    els[3]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    els[2]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    expect(session.selection?.barStart).toBe(1);
+    expect(session.selection?.barEnd).toBe(3);
+  });
+
+  it('REPRO: grabbing the first ghost and dragging inward shrinks from the left', () => {
+    measureDrag(els, 0, [1, 2, 3]);          // commit mm. 1-4
+    els[0]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    els[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+    expect(session.selection?.barStart).toBe(2);
+    expect(session.selection?.barEnd).toBe(4);
+  });
+
+  it('REPRO: shrink still works after growing the selection first', () => {
+    measureDrag(els, 0, [1]);                // mm. 1-2
+    // Grow: grab the last ghost, drag out to m.4.
+    els[1]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    els[3]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    expect(session.selection?.barEnd).toBe(4);
+
+    // Shrink back to m.2 — the reported failure.
+    els[3]!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    els[1]!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    expect(session.selection?.barEnd).toBe(2);
+  });
+});

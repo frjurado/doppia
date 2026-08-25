@@ -278,19 +278,28 @@
 
 /* ── Sub-parts list ─────────────────────────────────────────────────────────── */
 
+/* Stages separate by more than the gap inside a stage, so a property list reads
+   as belonging to the stage above it rather than to the one below (M6). */
 .subPartsList {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-1);
+  gap: var(--spacing-3);
 }
 
 .subPartItem {
   display: flex;
   align-items: baseline;
-  gap: var(--spacing-2);
+
+  /* Wraps so the stage's property list drops to its own line below the
+     name + range, which stay together on the first. row-gap is zero because
+     the wrapped row's own margin sets that distance — a gap here would add to
+     it, which is what pushed a stage's properties further from their stage
+     than from the next one. */
+  flex-wrap: wrap;
+  gap: 0 var(--spacing-2);
 }
 
 .subPartName {
@@ -299,6 +308,18 @@
 
 .subPartRange {
   color: var(--color-on-surface-variant);
+}
+
+/* Stage properties (M6). Nesting under the stage is carried by indentation
+   alone — no rule, no border (DESIGN.md: depth through tonal layering, never
+   1px dividers). */
+.subPartProperties {
+  flex-basis: 100%;
+  margin: var(--spacing-1) 0 0;
+  padding: 0 0 0 var(--spacing-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
 }
 
 /* ── Data licence / harmony sources (Component 8 Step 12) ──────────────────── */
