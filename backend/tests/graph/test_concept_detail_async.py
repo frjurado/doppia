@@ -129,10 +129,12 @@ class TestConceptDetail:
         assert "PAC" in row["aliases"]
         assert row["definition"]
         assert row["domain"] == "cadences"
-        # Flags come back as booleans even though definition_reviewed is not yet
-        # seeded (coalesced default false).
+        # Flags come back as real booleans, never null: the query coalesces each
+        # one. definition_reviewed is True because Step 13E reviewed the whole
+        # cadence domain for the public glossary; see the stub case below for a
+        # concept where it is still false.
         assert row["stub"] is False
-        assert row["definition_reviewed"] is False
+        assert row["definition_reviewed"] is True
         assert row["top_level_taggable"] is True
         # Direct parent and root→leaf hierarchy.
         assert row["parent"]["id"] == "AuthenticCadenceRealised"
@@ -146,6 +148,19 @@ class TestConceptDetail:
         assert row["parent"] is None
         child_ids = {c["id"] for c in row["children"]}
         assert "AuthenticCadence" in child_ids
+
+    def test_unreviewed_concept_reports_the_flag_false(self) -> None:
+        """A concept whose prose has not passed editorial review reads False.
+
+        This is the state the public concept page turns into the "under editorial
+        review" placeholder (Component 11 Step 2), so it needs cover of its own
+        now that the whole cadence domain is reviewed and reads True.
+        """
+        row = _detail("Tonic")  # harmonic-functions stub, definition unwritten
+
+        assert row is not None
+        assert row["stub"] is True
+        assert row["definition_reviewed"] is False
 
     def test_unknown_concept_returns_none(self) -> None:
         assert _detail("NoSuchConcept") is None
