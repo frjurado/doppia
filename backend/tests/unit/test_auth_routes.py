@@ -31,6 +31,7 @@ from services.supabase_auth import SupabaseAuthError, SupabaseSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 _REFRESH_COOKIE = "doppia_refresh"
+_USER_SUB = "11111111-1111-4111-8111-111111111111"
 
 
 @asynccontextmanager
@@ -50,6 +51,8 @@ def _build_app() -> FastAPI:
     )
     from api.router import router as api_router
     from errors import DoppiaError
+    from models.base import get_db
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     app = FastAPI(lifespan=_noop_lifespan)
     app.add_exception_handler(DoppiaError, doppia_error_handler)
@@ -61,6 +64,14 @@ def _build_app() -> FastAPI:
         PathScopedCORSMiddleware, allowed_origins=["http://localhost:5173"]
     )
     app.include_router(api_router)
+
+    # Login and refresh resolve the caller's roles from PostgreSQL (ADR-037);
+    # these tests run without a database, so the session is a mock and the two
+    # user-service calls are stubbed in the fixture.
+    async def _mock_db() -> AsyncGenerator[AsyncMock, None]:
+        yield AsyncMock(spec=AsyncSession)
+
+    app.dependency_overrides[get_db] = _mock_db
     return app
 
 
@@ -72,9 +83,8 @@ def _session(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=3600,
-        user_id="user-uuid-1",
+        user_id=_USER_SUB,
         email="editor@test.com",
-        role="editor",
     )
 
 
@@ -85,6 +95,10 @@ async def auth_client(
     """Async client over the auth router. ``ENVIRONMENT=local`` so the refresh
     cookie is set without the ``Secure`` flag (the test transport is plain HTTP)."""
     monkeypatch.setenv("ENVIRONMENT", "local")
+    monkeypatch.setattr("api.routes.auth.ensure_app_user", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "api.routes.auth.load_roles", AsyncMock(return_value=frozenset({"editor"}))
+    )
     app = _build_app()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -128,9 +142,10 @@ class TestLogin:
         assert body["token_type"] == "bearer"
         assert body["expires_in"] == 3600
         assert body["user"] == {
-            "id": "user-uuid-1",
+            "id": _USER_SUB,
             "email": "editor@test.com",
-            "role": "editor",
+            # Roles come from user_role, not from the Supabase grant (ADR-037).
+            "roles": ["editor"],
         }
         # The refresh token is never in the body.
         assert "refresh_token" not in body

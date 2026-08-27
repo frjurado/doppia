@@ -60,6 +60,7 @@ from models.fragment import (
     SubPartFragmentCreate,
 )
 from models.music import Composer, Corpus, Movement, MovementSection, Work
+from models.roles import ADMIN
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.cache import get_subtree_cache, set_subtree_cache
@@ -527,7 +528,7 @@ class FragmentService:
         fragment_id: uuid.UUID,
         payload: FragmentUpdate,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
     ) -> Fragment:
         """Replace all mutable fields of a draft or rejected fragment atomically.
 
@@ -543,8 +544,7 @@ class FragmentService:
             fragment_id: UUID of the fragment to update.
             payload: Validated ``FragmentUpdate`` payload.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller (``"editor"`` or
-                ``"admin"``).
+            caller_roles: Roles held by the authenticated caller.
 
         Returns:
             The updated :class:`~models.fragment.Fragment` ORM row.
@@ -560,7 +560,7 @@ class FragmentService:
         try:
             async with self._db.begin():
                 fragment = await self._get_editable(fragment_id)
-                self._check_edit_permission(fragment, caller_id, caller_role)
+                self._check_edit_permission(fragment, caller_id, caller_roles)
 
                 data_licence = await self._derive_data_licence(
                     fragment.movement_id, payload.bar_start, payload.bar_end
@@ -620,7 +620,7 @@ class FragmentService:
         fragment_id: uuid.UUID,
         payload: FragmentUpdate,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
     ) -> FragmentUpdateResult:
         """Update a fragment at any status with revision semantics.
 
@@ -646,8 +646,7 @@ class FragmentService:
             fragment_id: UUID of the fragment to update.
             payload: Validated :class:`~models.fragment.FragmentUpdate` payload.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller (``"editor"`` or
-                ``"admin"``).
+            caller_roles: Roles held by the authenticated caller.
 
         Returns:
             :class:`FragmentUpdateResult` with the updated fragment and the
@@ -675,7 +674,7 @@ class FragmentService:
                         detail={"fragment_id": str(fragment_id)},
                     )
 
-                self._check_edit_permission(fragment, caller_id, caller_role)
+                self._check_edit_permission(fragment, caller_id, caller_roles)
                 previous_status = fragment.status
 
                 # Load existing concept tags for analytic comparison.
@@ -874,7 +873,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         caller_id: str | None,
-        caller_role: str,
+        caller_roles: frozenset[str],
     ) -> FragmentDetailResponse:
         """Return the full fragment record with hydrated concept tags, harmony
         events, and nested sub-parts.
@@ -891,8 +890,8 @@ class FragmentService:
             fragment_id: UUID of the fragment to read.
             caller_id: String UUID of the authenticated caller, or ``None``
                 for the anonymous public read path.
-            caller_role: Role of the authenticated caller (``"anonymous"``
-                when unauthenticated).
+            caller_roles: Roles held by the caller; empty for an anonymous
+                reader (``registered`` is implicit and grants no extra visibility).
 
         Returns:
             :class:`~models.fragment.FragmentDetailResponse` with concept tags
@@ -918,7 +917,7 @@ class FragmentService:
 
         # Draft visibility: only the creator or an admin may read a draft.
         # Anonymous callers (caller_id=None) are never the creator.
-        if fragment.status == "draft" and caller_role != "admin":
+        if fragment.status == "draft" and ADMIN not in caller_roles:
             is_creator = (
                 caller_id is not None
                 and fragment.created_by is not None
@@ -1129,7 +1128,7 @@ class FragmentService:
         self,
         movement_id: uuid.UUID,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 100,
     ) -> FragmentListResponse:
@@ -1149,7 +1148,7 @@ class FragmentService:
         Args:
             movement_id: UUID of the movement to query.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_roles: Roles held by the authenticated caller.
             cursor: Opaque pagination cursor from a prior response.
             page_size: Maximum top-level fragments per page (1–500).
 
@@ -1170,7 +1169,7 @@ class FragmentService:
         )
 
         # Status visibility — enforced at the service layer, not in the route.
-        if caller_role != "admin":
+        if ADMIN not in caller_roles:
             caller_uuid = uuid.UUID(caller_id)
             stmt = stmt.where(
                 or_(
@@ -1320,7 +1319,7 @@ class FragmentService:
     async def list_for_review(
         self,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 50,
     ) -> ReviewQueueResponse:
@@ -1347,7 +1346,7 @@ class FragmentService:
 
         Args:
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_roles: Roles held by the authenticated caller.
             cursor: Opaque pagination cursor from a prior response.
             page_size: Maximum fragments per page (1–200).
 
@@ -1368,7 +1367,7 @@ class FragmentService:
         )
 
         # Creator exclusion: editors do not see their own submitted fragments.
-        if caller_role != "admin":
+        if ADMIN not in caller_roles:
             caller_uuid = uuid.UUID(caller_id)
             stmt = stmt.where(Fragment.created_by != caller_uuid)
 
@@ -1489,7 +1488,7 @@ class FragmentService:
         include_subtypes: bool,
         status_filter: str,
         caller_id: str | None,
-        caller_role: str,
+        caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 50,
     ) -> ConceptBrowseResponse:
@@ -1533,8 +1532,8 @@ class FragmentService:
                 to ``approved`` when an invalid value is supplied.
             caller_id: String UUID of the authenticated caller, or ``None``
                 for the anonymous public read path (``approved``-only).
-            caller_role: Role of the authenticated caller (``"anonymous"``
-                when unauthenticated).
+            caller_roles: Roles held by the caller; empty for an anonymous
+                reader (``registered`` is implicit and grants no extra visibility).
             cursor: Opaque time-ordered pagination cursor from a prior response.
             page_size: Maximum items per page (1–200).
 
@@ -1592,7 +1591,7 @@ class FragmentService:
                 .where(Corpus.licence.op("~*")(_NC_LICENCE_REGEX))
             )
             stmt = stmt.where(Fragment.movement_id.not_in(nc_movements))
-        elif caller_role != "admin":
+        elif ADMIN not in caller_roles:
             caller_uuid = uuid.UUID(caller_id)
             # Base visibility: own drafts + all non-draft.
             stmt = stmt.where(
@@ -1893,7 +1892,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
         confirm_cascade: bool = False,
         dry_run: bool = False,
     ) -> FragmentDeleteResult:
@@ -1920,7 +1919,7 @@ class FragmentService:
         Args:
             fragment_id: UUID of the fragment to delete.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_roles: Roles held by the authenticated caller.
             confirm_cascade: Set ``True`` to authorise deleting parent + all
                 sub-parts when sub-parts exist.
             dry_run: If ``True``, return the cascade child count without
@@ -1946,7 +1945,7 @@ class FragmentService:
                 detail={"fragment_id": str(fragment_id)},
             )
 
-        self._check_delete_permission(fragment, caller_id, caller_role)
+        self._check_delete_permission(fragment, caller_id, caller_roles)
 
         count_result = await self._db.execute(
             select(func.count()).where(Fragment.parent_fragment_id == fragment_id)
@@ -1987,7 +1986,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         reviewer_id: str,
-        reviewer_role: str,
+        reviewer_roles: frozenset[str],
         comment: str | None = None,
     ) -> Fragment:
         """Record an approval and transition to ``approved`` if all gates pass.
@@ -2009,7 +2008,7 @@ class FragmentService:
         Args:
             fragment_id: UUID of the submitted fragment.
             reviewer_id: String UUID of the authenticated reviewer.
-            reviewer_role: Role of the reviewer (``"editor"`` or ``"admin"``).
+            reviewer_roles: Roles held by the reviewer.
             comment: Optional comment to record alongside the review decision.
 
         Returns:
@@ -2031,12 +2030,12 @@ class FragmentService:
         # Phase 1: validate and record the review.
         async with self._db.begin():
             fragment = await self._get_submitted(fragment_id)
-            if reviewer_role != "admin":
+            if ADMIN not in reviewer_roles:
                 _check_not_creator(fragment, reviewer_id)
             await self._upsert_review(fragment_id, reviewer_uuid, "approved", comment)
 
         # Phase 2: threshold + gate check (reads only; no active transaction).
-        if reviewer_role == "admin":
+        if ADMIN in reviewer_roles:
             meets_threshold = True
         else:
             approval_count = await self._count_approvals(
@@ -2081,7 +2080,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         reviewer_id: str,
-        reviewer_role: str,
+        reviewer_roles: frozenset[str],
         comment: str | None = None,
     ) -> Fragment:
         """Record a rejection and transition the fragment to ``rejected``.
@@ -2096,7 +2095,7 @@ class FragmentService:
         Args:
             fragment_id: UUID of the submitted fragment.
             reviewer_id: String UUID of the authenticated reviewer.
-            reviewer_role: Role of the reviewer (``"editor"`` or ``"admin"``).
+            reviewer_roles: Roles held by the reviewer.
             comment: Optional comment to record alongside the review decision.
 
         Returns:
@@ -2111,7 +2110,7 @@ class FragmentService:
 
         async with self._db.begin():
             fragment = await self._get_submitted(fragment_id)
-            if reviewer_role != "admin":
+            if ADMIN not in reviewer_roles:
                 _check_not_creator(fragment, reviewer_id)
             await self._upsert_review(fragment_id, reviewer_uuid, "rejected", comment)
             fragment.status = "rejected"
@@ -2432,7 +2431,7 @@ class FragmentService:
 
     @staticmethod
     def _check_delete_permission(
-        fragment: Fragment, caller_id: str, caller_role: str
+        fragment: Fragment, caller_id: str, caller_roles: frozenset[str]
     ) -> None:
         """Assert that the caller may delete this fragment.
 
@@ -2440,7 +2439,7 @@ class FragmentService:
             FragmentValidationError: Caller is not the creator and not an admin,
                 or caller is the creator but the fragment is ``approved``.
         """
-        if caller_role == "admin":
+        if ADMIN in caller_roles:
             return
         is_creator = (
             fragment.created_by is not None and str(fragment.created_by) == caller_id
@@ -2468,7 +2467,7 @@ class FragmentService:
 
     @staticmethod
     def _check_edit_permission(
-        fragment: Fragment, caller_id: str, caller_role: str
+        fragment: Fragment, caller_id: str, caller_roles: frozenset[str]
     ) -> None:
         """Assert that the caller may edit this draft.
 
@@ -2478,7 +2477,7 @@ class FragmentService:
         is_creator = (
             fragment.created_by is not None and str(fragment.created_by) == caller_id
         )
-        if not is_creator and caller_role != "admin":
+        if not is_creator and ADMIN not in caller_roles:
             raise FragmentValidationError(
                 "Only the creating annotator or an admin may update a draft.",
                 detail={

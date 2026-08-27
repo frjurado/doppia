@@ -13,7 +13,7 @@ const _SESSION = {
   access_token: 'access-1',
   token_type: 'bearer',
   expires_in: 3600,
-  user: { id: 'u1', email: 'editor@test.com', role: 'editor' },
+  user: { id: 'u1', email: 'editor@test.com', roles: ['editor'] },
 };
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -39,7 +39,7 @@ describe('login', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, _SESSION));
     const session = await login('editor@test.com', 'pw');
     expect(session.access_token).toBe('access-1');
-    expect(session.user.role).toBe('editor');
+    expect(session.user.roles).toEqual(['editor']);
 
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('/api/v1/auth/login');

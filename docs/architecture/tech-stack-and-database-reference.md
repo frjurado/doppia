@@ -203,7 +203,12 @@ This sketch shows the MEI-pointer columns (`movement_id`) and the JSONB summary 
 
 #### User infrastructure tables
 
-Phase 1 creates only `app_user`. The other user-facing tables (`collection`, `collection_fragment`, `exercise_result`, `reading_history`) are deferred to Phase 2, when their consumers exist and their schemas can be designed against real use cases. Drafting them now risks locking in shapes that will need to change once the feature work begins.
+Phase 1 created only `app_user`. Component 12 added `user_role` (migration
+`0010`, ADR-037) and dropped `app_user.role`. The remaining user-facing tables
+(`collection`, `collection_fragment`, `exercise_*`, `reading_history`) are
+deferred to the Phase 2 component that consumes them, so their schemas can be
+designed against real use cases; the collection DDL specifically waits for
+Component 13.
 
 ```sql
 -- Named app_user, not user, because USER is a SQL keyword (alias for CURRENT_USER).
@@ -212,8 +217,18 @@ CREATE TABLE app_user (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email         TEXT UNIQUE NOT NULL,
     display_name  TEXT,
-    role          TEXT NOT NULL DEFAULT 'user',  -- user | editor | admin
     created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+-- One row per role grant. A user holds a *set* of roles; 'registered' is implicit
+-- in having an account and is never stored, so a new registration has no rows at
+-- all and default-deny falls out of the schema (ADR-037).
+CREATE TABLE user_role (
+    user_id     UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL,          -- 'editor' | 'author' | 'admin'
+    granted_by  UUID REFERENCES app_user(id),
+    granted_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, role)
 );
 
 -- TODO (Phase 2): add self_declared_role with a CHECK-constrained vocabulary.

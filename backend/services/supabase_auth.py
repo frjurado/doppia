@@ -59,8 +59,8 @@ class SupabaseSession:
             returned to the client so it can schedule a silent refresh.
         user_id: The Supabase user id (``sub``).
         email: The user's email.
-        role: The application role read from ``app_metadata.role`` (``editor``
-            or ``admin``); empty string if unset.
+        Roles are deliberately absent: they live in ``user_role`` and are read
+            from PostgreSQL by the route, never from Supabase metadata (ADR-037).
     """
 
     access_token: str
@@ -68,7 +68,6 @@ class SupabaseSession:
     expires_in: int
     user_id: str
     email: str
-    role: str
 
 
 def _auth_base_url() -> str:
@@ -134,14 +133,12 @@ def _session_from_payload(payload: dict) -> SupabaseSession:
             message="Supabase Auth returned no tokens.",
         )
     user = payload.get("user") or {}
-    app_metadata = user.get("app_metadata") or {}
     return SupabaseSession(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=int(payload.get("expires_in", 3600)),
         user_id=user.get("id", ""),
         email=user.get("email", ""),
-        role=app_metadata.get("role", ""),
     )
 
 

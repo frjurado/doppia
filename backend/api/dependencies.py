@@ -1,19 +1,20 @@
 """FastAPI dependency functions for authentication and authorisation.
 
-The sole permitted role enforcement mechanism is ``require_role()``.
-No inline role checks in route handlers or service functions.
+``require_role()`` is one of the two permitted permission mechanisms; the other
+is ``require_owner_or_role()`` in ``services/permissions.py``. No inline role or
+ownership checks anywhere else.
 See CONTRIBUTING.md § Invariants and docs/architecture/security-model.md.
 
 Authentication is handled upstream by ``api.middleware.auth.AuthMiddleware``,
 which validates the JWT and attaches the user to ``request.state.user``.
-``get_current_user`` reads from that state; ``require_role`` enforces the
-minimum role level.
+``get_current_user`` reads from that state, loads the caller's role set from
+PostgreSQL, and ``require_role`` checks it.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Query, Request, status
@@ -22,10 +23,8 @@ from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.i18n import normalize_language, parse_accept_language
 from services.object_storage import StorageClient, make_storage_client
-from sqlalchemy import text
+from services.users import ensure_app_user, load_roles
 from sqlalchemy.ext.asyncio import AsyncSession
-
-_ROLE_HIERARCHY: dict[str, int] = {"editor": 1, "admin": 2}
 
 
 @dataclass(frozen=True)
@@ -34,12 +33,14 @@ class AppUser:
 
     Attributes:
         id: The user's UUID (from Supabase Auth JWT ``sub`` claim, or synthetic in dev).
-        role: One of ``editor`` or ``admin`` in Phase 1.
+        roles: The roles granted to the user in ``user_role``. Empty for a plain
+            registered account — ``registered`` is implicit in authenticating and
+            is never stored as a grant (ADR-037).
         email: The user's email address.
     """
 
     id: str
-    role: str
+    roles: frozenset[str]
     email: str
 
 
@@ -49,23 +50,22 @@ async def get_current_user(
 ) -> AppUser:
     """FastAPI dependency that returns the authenticated user for the current request.
 
-    Reads the user attached to ``request.state.user`` by ``AuthMiddleware``.
-    Raises HTTP 401 if no user is present (i.e. the request carried no
-    ``Authorization`` header).
+    Reads the user attached to ``request.state.user`` by ``AuthMiddleware`` and
+    resolves its role set from ``user_role``. The JWT is not consulted for roles:
+    PostgreSQL is the sole source of truth (ADR-037).
 
     When ``AUTH_MODE=supabase`` (staging/production), also upserts a row into
     ``app_user`` so that ``fragment.created_by`` FK constraints pass without
-    requiring a separate provisioning step. The upsert is idempotent and also
-    keeps ``email`` and ``role`` current with the Supabase JWT claims. In
-    ``AUTH_MODE=local`` the dev users are seeded separately via
-    ``scripts/seed_dev_users.py``.
+    requiring a separate provisioning step. The upsert carries no role — grants
+    are made by an admin, never inferred from a token claim. In ``AUTH_MODE=local``
+    the dev users and their grants are seeded by ``scripts/seed_dev_users.py``.
 
     Args:
         request: The incoming FastAPI request.
         db: Async database session (injected).
 
     Returns:
-        The authenticated user.
+        The authenticated user, with ``roles`` populated.
 
     Raises:
         HTTPException: 401 if no user is attached to the request state.
@@ -77,56 +77,58 @@ async def get_current_user(
             detail="Authentication required.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if os.environ.get("AUTH_MODE", "supabase") == "supabase" and user.role:
-        await db.execute(
-            text(
-                "INSERT INTO app_user (id, email, role) "
-                "VALUES (:id, :email, :role) "
-                "ON CONFLICT (id) DO UPDATE "
-                "SET email = EXCLUDED.email, role = EXCLUDED.role"
-            ),
-            {"id": user.id, "email": user.email, "role": user.role},
-        )
-        await db.commit()
-    return user
+    if os.environ.get("AUTH_MODE", "supabase") == "supabase" and user.email:
+        await ensure_app_user(db, user.id, user.email)
+    roles = await load_roles(db, user.id)
+    # The role lookup autobegins a transaction on the request-scoped session.
+    # Close it: service functions that own a unit of work open their own
+    # ``async with db.begin()`` block, which raises if a transaction is already
+    # open. Nothing can be lost here — dependencies resolve before the route
+    # handler runs, and ``ensure_app_user`` has already committed its upsert.
+    await db.rollback()
+    return replace(user, roles=roles)
 
 
-def require_role(role: str) -> Annotated[AppUser, Depends]:
-    """Dependency factory that enforces a minimum role requirement.
+def require_role(*roles: str) -> Annotated[AppUser, Depends]:
+    """Dependency factory enforcing that the caller holds any of ``roles``.
 
-    This is the **only** permitted way to enforce roles in route handlers.
-    Do not perform inline role checks in route handlers or service functions.
+    This is the only permitted way to enforce roles in route handlers; ownership
+    checks go through ``services.permissions.require_owner_or_role``. Do not
+    perform inline role checks in route handlers or service functions.
+
+    The check is **any-of**, not a hierarchy: ``require_role(EDITOR)`` admits an
+    editor only. Where the permission matrix
+    (``docs/architecture/roles-and-permissions.md`` § 2) gives a capability to
+    several roles, every one of them is named — ``require_role(EDITOR, ADMIN)``.
+    An implicit "admin passes everything" rule is deliberately absent: it would
+    also hand admin the author-only capabilities the matrix withholds.
 
     Usage::
 
-        @router.post("/fragments/{id}/approve")
-        async def approve_fragment(
-            id: UUID,
-            db: AsyncSession = Depends(get_db),
-        ) -> Fragment:
-            ...
-
-        # Register the role check via the router decorator:
         @router.post(
             "/fragments/{id}/approve",
-            dependencies=[require_role("editor")],
+            dependencies=[require_role(EDITOR, ADMIN)],
         )
 
     Args:
-        role: The minimum role required. Currently ``"editor"`` or ``"admin"``.
+        *roles: The accepted role names, from :mod:`models.roles`.
 
     Returns:
         A FastAPI Depends that resolves to the authenticated user if authorised,
         or raises HTTP 403 Forbidden.
     """
 
+    accepted = frozenset(roles)
+
     async def _check(user: Annotated[AppUser, Depends(get_current_user)]) -> AppUser:
-        required_level = _ROLE_HIERARCHY.get(role, 0)
-        user_level = _ROLE_HIERARCHY.get(user.role, 0)
-        if user_level < required_level:
+        if not accepted & user.roles:
+            held = ", ".join(sorted(user.roles)) or "none"
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Role '{role}' required; caller has role '{user.role}'.",
+                detail=(
+                    f"One of the roles [{', '.join(sorted(accepted))}] is required; "
+                    f"caller holds [{held}]."
+                ),
             )
         return user
 

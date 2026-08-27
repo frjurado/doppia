@@ -447,11 +447,13 @@ async def validate_auth(request: Request) -> AppUser:
                 "This configuration is invalid and the application will not start. "
                 f"ENVIRONMENT={environment!r}"
             )
-        # Extract the token and assign a synthetic dev user.
+        # Extract the token and assign a synthetic dev identity. Roles are not
+        # assigned here: since ADR-037 they are resolved from user_role in
+        # get_current_user, on the bypass path exactly as in staging.
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if token != _DEV_TOKEN:
             raise HTTPException(status_code=401, detail="Invalid dev token.")
-        return AppUser(id="dev-user", role="admin", email="dev@local")
+        return AppUser(id="dev-user", roles=frozenset(), email="dev@local")
 
     # Normal path: validate the JWT against Supabase.
     return await validate_supabase_jwt(request)
@@ -473,18 +475,20 @@ The `deployment.md` note that "`ENVIRONMENT=production` disables the local auth 
 
 The specific string `"dev-token"` has no special significance in production. Even if the bypass check were somehow defeated, a production user would need to know the exact value. It is not a secret — it is in the README — but it is also not meaningful without the environment preconditions. Changing it periodically provides no additional security; the environment checks are the actual controls.
 
-### Dev-user rows in `app_user`
+### Dev-user rows in `app_user` and their grants in `user_role`
 
-The bypass assigns synthetic UUIDs to each token:
+The bypass assigns synthetic UUIDs to each token, and the role each one is *expected* to hold:
 
-| Token | UUID | Role |
+| Token | UUID | Role granted in `user_role` |
 |---|---|---|
 | `dev-token` | `00000000-0000-0000-0000-000000000001` | `editor` |
 | `admin-token` | `00000000-0000-0000-0000-000000000002` | `admin` |
 
-These UUIDs are written into `fragment.created_by` and `fragment_review.reviewer_id`, both of which carry `ForeignKey("app_user.id")`. On a fresh local database the `app_user` table is empty, so any fragment write fails with `ForeignKeyViolationError` before the application can return a response.
+The right-hand column is not a property of the token. Since ADR-037 the bypass supplies an identity only; `get_current_user` resolves roles from `user_role` on the local path exactly as it does in staging, so **the dev tokens are useless without their grants** — the dev editor authenticates and is then refused by every `require_role` check. This is a deliberate consequence: there is one authorisation path, not a production one and a development one that could drift apart.
 
-**Fix:** `backend/scripts/seed_dev_users.py` inserts both rows idempotently (`ON CONFLICT (id) DO NOTHING`). Run it once after `alembic upgrade head` when setting up a local development database:
+The UUIDs are also written into `fragment.created_by` and `fragment_review.reviewer_id`, both of which carry `ForeignKey("app_user.id")`. On a fresh local database the `app_user` table is empty, so any fragment write fails with `ForeignKeyViolationError` before the application can return a response.
+
+**Fix:** `backend/scripts/seed_dev_users.py` inserts both the `app_user` rows and their `user_role` grants idempotently (`ON CONFLICT ... DO NOTHING`). Run it once after `alembic upgrade head` when setting up a local development database:
 
 ```bash
 cd backend

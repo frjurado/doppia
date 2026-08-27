@@ -123,7 +123,7 @@ React 18 + TypeScript + Vite + React Router v6. All `.js` files are forbidden in
 ### Invariants (never violate)
 - **Concept `id` values are immutable** once seeded — they are the join key between PostgreSQL `fragment_concept_tag.concept_id` and Neo4j `Concept.id`. Rename by changing `name`, never `id`.
 - **`summary` JSONB is versioned** — increment `version` and write a migration script before any field name/type/structure change. See `docs/architecture/fragment-schema.md`.
-- **`require_role()` is the only permitted role enforcement mechanism** — no inline role checks in route handlers or service functions.
+- **`require_role()` and `require_owner_or_role()` are the only permitted permission mechanisms** — no inline role or ownership checks anywhere else. `require_role(*roles)` is any-of over the caller's role set (a route dependency); `require_owner_or_role()` lives in `backend/services/permissions.py` because it needs the loaded resource. Roles come from the `user_role` table, never from a JWT claim (ADR-037).
 - **Pydantic validates before every database write** — no payload reaches any database without passing through a Pydantic model.
 - **Seed scripts use `MERGE`, never `CREATE`** — bare `CREATE` in a seed script is a bug.
 - **MEI files are stored by S3 object key** (e.g. `mozart-piano-sonatas/k331/movement-1.mei`), never absolute path or URL. Signed URLs are resolved at request time.

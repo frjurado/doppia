@@ -38,12 +38,15 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Cookie, Response, status
+from fastapi import APIRouter, Cookie, Depends, Response, status
 from fastapi.responses import JSONResponse
 from models.auth import AuthUser, LoginRequest, SessionResponse
+from models.base import get_db
 from models.errors import ErrorCode, ErrorResponse
 from services import supabase_auth
 from services.supabase_auth import SupabaseAuthError, SupabaseSession
+from services.users import ensure_app_user, load_roles
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -105,19 +108,28 @@ def _clear_refresh_cookie(response: Response) -> None:
     )
 
 
-def _session_body(session: SupabaseSession) -> dict:
+async def _session_body(session: SupabaseSession, db: AsyncSession) -> dict:
     """Serialise a Supabase session into the ``SessionResponse`` envelope.
+
+    The caller's roles come from ``user_role``, not from the Supabase grant —
+    the same source ``get_current_user`` reads on every subsequent request, so
+    the SPA's view of its own permissions can never drift from the API's
+    (ADR-037). The ``app_user`` mirror row is ensured first, so a first-ever
+    login resolves against a row that exists.
 
     Args:
         session: The session from a Supabase grant.
+        db: Async database session.
 
     Returns:
         A JSON-serialisable dict (the refresh token is deliberately omitted).
     """
+    await ensure_app_user(db, session.user_id, session.email)
+    roles = await load_roles(db, session.user_id)
     return SessionResponse(
         access_token=session.access_token,
         expires_in=session.expires_in,
-        user=AuthUser(id=session.user_id, email=session.email, role=session.role),
+        user=AuthUser(id=session.user_id, email=session.email, roles=sorted(roles)),
     ).model_dump()
 
 
@@ -153,13 +165,18 @@ def _auth_error(exc: SupabaseAuthError, *, on_login: bool) -> JSONResponse:
     response_description="A short-lived access token; the refresh token is set "
     "as an HttpOnly cookie.",
 )
-async def login(payload: LoginRequest, response: Response) -> dict | JSONResponse:
+async def login(
+    payload: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> dict | JSONResponse:
     """Exchange credentials for a session, setting the refresh cookie.
 
     Args:
         payload: The email/password credentials.
         response: The response FastAPI injects so the cookie can be attached
             alongside the returned body.
+        db: Async database session, for the caller's role set.
 
     Returns:
         The ``SessionResponse`` body on success, or an error envelope on failure.
@@ -169,7 +186,7 @@ async def login(payload: LoginRequest, response: Response) -> dict | JSONRespons
     except SupabaseAuthError as exc:
         return _auth_error(exc, on_login=True)
     _set_refresh_cookie(response, session.refresh_token)
-    return _session_body(session)
+    return await _session_body(session, db)
 
 
 @router.post(
@@ -182,6 +199,7 @@ async def login(payload: LoginRequest, response: Response) -> dict | JSONRespons
 async def refresh(
     response: Response,
     doppia_refresh: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_db),
 ) -> dict | JSONResponse:
     """Rotate the refresh token and issue a new access token.
 
@@ -189,6 +207,7 @@ async def refresh(
         response: The injected response, for setting/clearing the cookie.
         doppia_refresh: The refresh token from the HttpOnly cookie (``None`` if
             no cookie is present — i.e. no active session).
+        db: Async database session, for the caller's role set.
 
     Returns:
         The ``SessionResponse`` body on success; a 401 envelope (with the cookie
@@ -218,7 +237,7 @@ async def refresh(
         return err
 
     _set_refresh_cookie(response, session.refresh_token)
-    return _session_body(session)
+    return await _session_body(session, db)
 
 
 @router.post(

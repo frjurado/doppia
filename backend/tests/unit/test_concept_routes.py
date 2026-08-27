@@ -94,7 +94,7 @@ async def concept_client() -> AsyncGenerator[tuple[AsyncClient, Any], None]:
     mock_service.search.return_value = ConceptSearchResponse(items=[], next_cursor=None)
 
     dev_user_obj = __import__("api.dependencies", fromlist=["AppUser"]).AppUser(
-        id="test-user", role="editor", email="test@example.com"
+        id="test-user", roles=frozenset({"editor"}), email="test@example.com"
     )
 
     app.dependency_overrides[get_concept_service] = lambda: mock_service

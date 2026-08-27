@@ -28,12 +28,14 @@ class AuthUser(BaseModel):
     Attributes:
         id: The Supabase user id (``sub``).
         email: The user's email.
-        role: The application role (``editor`` or ``admin``); empty if unset.
+        roles: The roles granted to the account in ``user_role``. Empty for a
+            plain registered user — ``registered`` is implicit in holding an
+            account and is never stored as a grant (ADR-037).
     """
 
     id: str
     email: str
-    role: str
+    roles: list[str]
 
 
 class SessionResponse(BaseModel):

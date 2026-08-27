@@ -13,7 +13,11 @@
 export interface SessionUser {
   id: string;
   email: string;
-  role: string;
+  /**
+   * Roles granted in `user_role`. Empty for a plain registered account —
+   * `registered` is implicit in holding one and is never stored (ADR-037).
+   */
+  roles: string[];
 }
 
 export interface SessionResponse {

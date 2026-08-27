@@ -189,7 +189,7 @@ class TestPublicBrowse:
             include_subtypes=True,
             status_filter="approved",
             caller_id=None,
-            caller_role="anonymous",
+            caller_roles=frozenset(),
             cursor=None,
             page_size=50,
         )
@@ -270,7 +270,7 @@ class TestPublicDetail:
         assert body["status"] == "approved"
         assert body["data_licence"] == "CC BY-SA 4.0"
         service.get.assert_awaited_once_with(
-            detail.id, caller_id=None, caller_role="anonymous"
+            detail.id, caller_id=None, caller_roles=frozenset()
         )
 
     @pytest.mark.asyncio

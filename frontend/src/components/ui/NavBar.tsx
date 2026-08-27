@@ -12,7 +12,7 @@ import styles from './NavBar.module.css';
  * Layout: Doppia wordmark (left) · primary nav links · user slot (right).
  * The user slot is driven by AuthContext (Component 10 Step 7): while the
  * bootstrap refresh is in flight it stays empty; when authenticated it shows a
- * dropdown (email · role · sign out); when anonymous it shows the login button.
+ * dropdown (email · roles · sign out); when anonymous it shows the login button.
  *
  * Design system: container-low tonal background, 0px border-radius,
  * Public Sans labels, Newsreader wordmark. No 1px borders; the dropdown gains
@@ -104,7 +104,9 @@ export default function NavBar() {
               <div className={styles.menu} role="menu">
                 <div className={styles.menuInfo}>
                   <span className={styles.menuEmail}>{user.email}</span>
-                  {user.role && <span className={styles.menuRole}>{user.role}</span>}
+                  {user.roles.length > 0 && (
+                    <span className={styles.menuRole}>{user.roles.join(' · ')}</span>
+                  )}
                 </div>
                 <button
                   type="button"

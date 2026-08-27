@@ -19,6 +19,7 @@ import uuid
 from api.dependencies import require_role
 from fastapi import APIRouter, Depends
 from models.base import get_db
+from models.roles import ADMIN
 from pydantic import BaseModel
 from services.task_dispatch import dispatch_task
 from services.tasks.ingest_analysis import ingest_movement_analysis
@@ -48,7 +49,7 @@ class DispatchPendingAnalysisReport(BaseModel):
     "/dispatch-pending-analysis",
     status_code=200,
     response_model=DispatchPendingAnalysisReport,
-    dependencies=[require_role("admin")],
+    dependencies=[require_role(ADMIN)],
     summary="Re-dispatch analysis tasks for all pending movements",
     response_description="Count of dispatched tasks and list of any dispatch failures.",
 )

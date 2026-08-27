@@ -22,7 +22,6 @@ _TOKEN_BODY = {
     "user": {
         "id": "user-1",
         "email": "editor@test.com",
-        "app_metadata": {"role": "editor"},
     },
 }
 
@@ -58,7 +57,6 @@ async def test_password_grant_parses_session(
     assert session.refresh_token == "refresh-xyz"
     assert session.expires_in == 3600
     assert session.user_id == "user-1"
-    assert session.role == "editor"
 
 
 async def test_password_grant_bad_credentials_maps_to_401(

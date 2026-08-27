@@ -57,10 +57,20 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const REFRESH_LEAD_MS = 60_000;
 const MIN_REFRESH_DELAY_MS = 5_000;
 
-/** Derive a placeholder user for the dev-token bypass (dev builds only). */
+/**
+ * Derive a placeholder user for the dev-token bypass (dev builds only).
+ *
+ * The roles here mirror what `scripts/seed_dev_users.py` grants the two dev
+ * identities in `user_role`; the backend resolves the real set per request and
+ * would refuse a request this placeholder disagreed with.
+ */
 function devUser(token: string): SessionUser {
   const role = token === 'admin-token' ? 'admin' : 'editor';
-  return { id: `dev-${role}`, email: `${role}@local`, role };
+  return {
+    id: `dev-${role}`,
+    email: `${role}@local`,
+    roles: [role],
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

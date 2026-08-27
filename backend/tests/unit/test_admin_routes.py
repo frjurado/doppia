@@ -72,7 +72,7 @@ def _make_admin_client(
     from models.base import get_db
     from services.object_storage import StorageClient
 
-    dev_user = AppUser(id="admin-user", role=role, email="admin@test.com")
+    dev_user = AppUser(id="admin-user", roles=frozenset({role}), email="admin@test.com")
 
     async def _get_db() -> AsyncGenerator[Any, None]:
         yield mock_db  # type: ignore[misc]

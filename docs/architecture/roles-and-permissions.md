@@ -1,7 +1,10 @@
 # Roles & Permissions — Phase 2 Design Reference
 
-**Status:** decisions agreed 2026-07-14 (Phase 2 planning); to be implemented
-in Phase 2 Component 12 (see `../roadmap/phase-2.md`). This document is the
+**Status:** decisions agreed 2026-07-14 (Phase 2 planning); implementation
+under way in Phase 2 Component 12 (see `../roadmap/phase-2.md`). **§ 1 is
+implemented** — `user_role`, the role constants, any-of `require_role`,
+`require_owner_or_role`, and the § 3 verification gate all landed in Part 1
+(migration `0010`, ADR-037), with one recorded delta noted below. This document is the
 authoritative reference for the role model, permission patterns, registration
 flow, moderation, and data rights. The Phase 1 auth mechanics (Supabase JWT
 validation, dev bypass, RLS posture) remain documented in
@@ -51,9 +54,18 @@ admin). This replaces Phase 1's single `role` column on `app_user`.
   `user_role` rows and drop the column. Record as an ADR (extending ADR-001)
   when implemented.
 
-- **`require_role()` semantics become any-of:** `require_role("editor",
-  "admin")` passes if the user holds *any* listed role. Existing call sites
-  keep working (single-argument calls are unchanged in behaviour).
+- **`require_role()` semantics become any-of:** `require_role(EDITOR, ADMIN)`
+  passes if the user holds *any* listed role.
+
+  **Delta recorded at implementation (2026-08-27):** "single-argument calls are
+  unchanged in behaviour" was not accurate. Phase 1's `require_role` was a
+  *hierarchy* (`_ROLE_HIERARCHY = {"editor": 1, "admin": 2}`), so
+  `require_role("editor")` admitted an admin; under any-of it does not. Rather
+  than restore an implicit admin-passes-everything rule — which would also hand
+  admin the author-only capabilities § 2 withholds — every call site was audited
+  and enumerated explicitly against the matrix: `require_role(EDITOR, ADMIN)`
+  across the tagging surface, `require_role(ADMIN)` for corpus and admin
+  operations. See ADR-037.
 
 ### Ownership: the second — and only other — permission mechanism
 

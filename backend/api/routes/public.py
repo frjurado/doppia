@@ -115,7 +115,7 @@ async def public_list_fragments_by_concept(
         include_subtypes=include_subtypes,
         status_filter="approved",
         caller_id=None,
-        caller_role="anonymous",
+        caller_roles=frozenset(),
         cursor=cursor,
         page_size=page_size,
     )
@@ -156,7 +156,7 @@ async def public_get_fragment(
         404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist or is not
             ``approved``.
     """
-    result = await service.get(fragment_id, caller_id=None, caller_role="anonymous")
+    result = await service.get(fragment_id, caller_id=None, caller_roles=frozenset())
     if result.status != "approved":
         # Same message and detail as the service's nonexistent-id error so the
         # two cases are indistinguishable to an anonymous caller.

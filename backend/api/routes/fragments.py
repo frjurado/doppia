@@ -45,6 +45,7 @@ from models.fragment import (
     FragmentUpdateResponse,
     ReviewRequest,
 )
+from models.roles import ADMIN, EDITOR
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.fragments import FragmentService
@@ -81,7 +82,7 @@ def get_fragment_service(
 @router.get(
     "",
     response_model=ConceptBrowseResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Browse fragments by concept tag",
     response_description=(
         "Cursor-paginated list of top-level fragments whose concept tags include "
@@ -175,7 +176,7 @@ async def list_fragments_by_concept(
         include_subtypes=include_subtypes,
         status_filter=status,
         caller_id=user.id,
-        caller_role=user.role,
+        caller_roles=user.roles,
         cursor=cursor,
         page_size=page_size,
     )
@@ -184,7 +185,7 @@ async def list_fragments_by_concept(
 @router.get(
     "/{fragment_id}",
     response_model=FragmentDetailResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Read one fragment (full detail)",
     response_description=(
         "Full fragment record: coordinates, concept tags hydrated with Neo4j "
@@ -274,14 +275,14 @@ async def get_fragment(
     # Phase 1 implements only mode=none; non-default modes are ignored here.
     # The _ prefix silences linters for the intentionally unused parameters.
     _ = context_mode, context_before, context_after
-    return await service.get(fragment_id, caller_id=user.id, caller_role=user.role)
+    return await service.get(fragment_id, caller_id=user.id, caller_roles=user.roles)
 
 
 @router.post(
     "",
     response_model=FragmentResponse,
     status_code=201,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Create a draft fragment",
     response_description=(
         "The newly created fragment in ``draft`` status, with its assigned UUID."
@@ -321,7 +322,7 @@ async def create_fragment(
 @router.patch(
     "/{fragment_id}",
     response_model=FragmentUpdateResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Update a fragment (draft, submitted, or approved)",
     response_description=(
         "The updated fragment with revision metadata. "
@@ -381,7 +382,7 @@ async def update_fragment(
         fragment_id=fragment_id,
         payload=payload,
         caller_id=user.id,
-        caller_role=user.role,
+        caller_roles=user.roles,
     )
     base = FragmentResponse.model_validate(result.fragment)
     return FragmentUpdateResponse(
@@ -394,7 +395,7 @@ async def update_fragment(
 @router.delete(
     "/{fragment_id}",
     response_model=FragmentDeleteResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Delete a fragment with permission checks and cascade to sub-parts",
     response_description=(
         "The deleted fragment's UUID, the number of sub-part children removed "
@@ -461,7 +462,7 @@ async def delete_fragment(
     result = await service.delete(
         fragment_id=fragment_id,
         caller_id=user.id,
-        caller_role=user.role,
+        caller_roles=user.roles,
         confirm_cascade=confirm_cascade,
         dry_run=dry_run,
     )
@@ -475,7 +476,7 @@ async def delete_fragment(
 @router.post(
     "/{fragment_id}/submit",
     response_model=FragmentResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Submit a draft fragment for review",
     response_description="The fragment in ``submitted`` status.",
 )
@@ -505,7 +506,7 @@ async def submit_fragment(
 @router.post(
     "/{fragment_id}/approve",
     response_model=FragmentResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Approve a submitted fragment",
     response_description=(
         "The fragment after processing the approval. Status is ``approved`` "
@@ -552,7 +553,7 @@ async def approve_fragment(
     fragment = await service.approve(
         fragment_id=fragment_id,
         reviewer_id=user.id,
-        reviewer_role=user.role,
+        reviewer_roles=user.roles,
         comment=payload.comment,
     )
     return FragmentResponse.model_validate(fragment)
@@ -561,7 +562,7 @@ async def approve_fragment(
 @router.post(
     "/{fragment_id}/reject",
     response_model=FragmentResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Reject a submitted fragment",
     response_description="The fragment in ``rejected`` status.",
 )
@@ -596,7 +597,7 @@ async def reject_fragment(
     fragment = await service.reject(
         fragment_id=fragment_id,
         reviewer_id=user.id,
-        reviewer_role=user.role,
+        reviewer_roles=user.roles,
         comment=payload.comment,
     )
     return FragmentResponse.model_validate(fragment)

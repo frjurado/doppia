@@ -1,11 +1,18 @@
-"""Seed synthetic dev users into app_user for local development.
+"""Seed synthetic dev users and their role grants for local development.
 
 Inserts the two hardcoded dev identities from ``api/middleware/auth.py``
 into ``app_user`` so that ``fragment.created_by`` and
 ``fragment_review.reviewer_id`` FK constraints pass without a real Supabase
-Auth user.
+Auth user, and grants each one its role in ``user_role``.
 
-Safe to re-run: uses ``ON CONFLICT (id) DO NOTHING``.
+The grants are not optional decoration: since ADR-037 the dev bypass supplies
+an identity only, and ``get_current_user`` resolves roles from ``user_role`` on
+the local path exactly as it does in staging. Without this script the dev
+editor authenticates and is then refused by every ``require_role`` check.
+
+``granted_by`` is NULL — these are system grants with no granting admin.
+
+Safe to re-run: both inserts use ``ON CONFLICT ... DO NOTHING``.
 
 Usage::
 
@@ -39,7 +46,7 @@ _DEV_USERS = [
 
 
 async def seed() -> None:
-    """Insert dev users into app_user, skipping rows that already exist."""
+    """Insert dev users and their role grants, skipping rows that already exist."""
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         print("ERROR: DATABASE_URL is not set.", file=sys.stderr)
@@ -56,22 +63,34 @@ async def seed() -> None:
         async with factory() as session:
             await session.execute(
                 text(
-                    "INSERT INTO app_user (id, email, role) VALUES "
-                    "(:id1, :email1, :role1), "
-                    "(:id2, :email2, :role2) "
+                    "INSERT INTO app_user (id, email) VALUES "
+                    "(:id1, :email1), "
+                    "(:id2, :email2) "
                     "ON CONFLICT (id) DO NOTHING"
                 ),
                 {
                     "id1": _DEV_USERS[0][0],
                     "email1": _DEV_USERS[0][1],
-                    "role1": _DEV_USERS[0][2],
                     "id2": _DEV_USERS[1][0],
                     "email2": _DEV_USERS[1][1],
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO user_role (user_id, role) VALUES "
+                    "(:id1, :role1), "
+                    "(:id2, :role2) "
+                    "ON CONFLICT (user_id, role) DO NOTHING"
+                ),
+                {
+                    "id1": _DEV_USERS[0][0],
+                    "role1": _DEV_USERS[0][2],
+                    "id2": _DEV_USERS[1][0],
                     "role2": _DEV_USERS[1][2],
                 },
             )
             await session.commit()
-        print("Dev users seeded (or already present).")
+        print("Dev users and role grants seeded (or already present).")
     finally:
         await engine.dispose()
 
