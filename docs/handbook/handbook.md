@@ -94,9 +94,10 @@ Note the boundary: concept→fragment (`APPEARS_IN`) is **not** a Neo4j edge —
 via the PostgreSQL tag table. Seeding = version-controlled YAML → idempotent Cypher `MERGE`
 (`scripts/seed.py`); that *is* the migration strategy for the graph.
 
-**Redis 7** — two hats: cache for graph-structure reads (invalidated on seed — never cache
-anything that changes on fragment lifecycle events) and Celery broker when bulk-ingest mode
-is on.
+**Redis 7** — three hats: cache for graph-structure reads (invalidated on seed — never cache
+anything that changes on fragment lifecycle events); Celery broker when bulk-ingest mode is on;
+and rate-limit counters (`api/rate_limiting.py`, `RATELIMIT_STORAGE_URI` — Upstash in prod,
+`memory://` locally, so dev and tests need no Redis).
 
 **Object storage (S3 API)** — MinIO locally, Cloudflare R2 in production. MEI files
 (original + normalized), incipit/preview SVGs — private, fetched via 15-minute presigned

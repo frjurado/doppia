@@ -22,7 +22,7 @@ re-reading the same comfortable material.
 5. **Capture (the closing move):** if the topic has no guide in [`guides/`](guides/), or its
    guide proved stale, write or refresh one *now* — Claude drafts it from the session's
    corrected understanding, Francisco reviews it (which is itself one more retrieval pass).
-   New guides continue the numbering (next free: 019). If there's no time, add the idea to
+   New guides continue the numbering (next free: 020). If there's no time, add the idea to
    the **Guide backlog** below instead. Concepts that surfaced mid-session without a guide
    also go to the backlog.
 6. If the session revealed the handbook is wrong or stale, fix `handbook.md` too.
@@ -42,7 +42,7 @@ ideas for any new tech to the backlog below.
 
 | Topic | Start from | Conf | Last session | Notes |
 |---|---|---|---|---|
-| The system map: layers and how data flows | handbook §1; project-architecture.md | 0 | — | |
+| The system map: layers and how data flows | handbook §1; project-architecture.md; guide 019 | 2 | 2026-08-26 | Read path was the gap: assumed server-side Verovio slicing (it is a presigned URL + client-side render). Also: tags live in the `fragment_concept_tag` join table, not a fragment column; and cross-DB integrity is a live Neo4j check in `services/fragment_validation.py`, not Pydantic. Redis and the translation overlay were absent from the recalled map. Next time start at the write path (submission → validation → preview task). |
 | Repo layout: what lives where and why | handbook §2 | 0 | — | |
 | ADR workflow and the decision clusters | handbook §8 | 0 | — | |
 
@@ -126,4 +126,6 @@ drafting is the fallback, not the default.
 | Playwright & e2e testing vs Vitest | CI job 1a; stubbed-backend pattern | — |
 | GitHub Actions anatomy (jobs, services, caching) | Reading/modifying `ci.yml` | — |
 | Redis caching patterns & invalidation | The cache-boundary rule; `services/cache.py` | — |
+| Rate limiting with slowapi | Redis' third hat; `api/rate_limiting.py`, security-model §2 | — |
+| The translation overlay (Neo4j English + PostgreSQL locales) | ADR-006 §3; `services/translation.py`; es data lands at Step 26 | — |
 | pgvector, embeddings & RAG *(park until Phase 3)* | Dormant `prose_chunk` table | — |
