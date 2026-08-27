@@ -85,6 +85,7 @@ def _session(
         expires_in=3600,
         user_id=_USER_SUB,
         email="editor@test.com",
+        email_verified=True,
     )
 
 
@@ -146,6 +147,7 @@ class TestLogin:
             "email": "editor@test.com",
             # Roles come from user_role, not from the Supabase grant (ADR-037).
             "roles": ["editor"],
+            "email_verified": True,
         }
         # The refresh token is never in the body.
         assert "refresh_token" not in body

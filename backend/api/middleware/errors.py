@@ -51,6 +51,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         ComposerNotFoundError,
         ConceptNotFoundError,
         CorpusNotFoundError,
+        EmailNotVerifiedError,
         FragmentAlreadyApprovedError,
         FragmentNotFoundError,
         FragmentValidationError,
@@ -91,6 +92,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         SelfReviewForbiddenError: 422,
         # Auth — 403
         AuthorizationError: 403,
+        EmailNotVerifiedError: 403,
         # Integrity — 500
         GraphIntegrityError: 500,
     }

@@ -53,11 +53,13 @@ _DEV_TOKENS: dict[str, AppUser] = {
         id="00000000-0000-0000-0000-000000000001",
         roles=frozenset(),
         email="dev@local",
+        email_verified=True,
     ),
     "admin-token": AppUser(
         id="00000000-0000-0000-0000-000000000002",
         roles=frozenset(),
         email="admin@local",
+        email_verified=True,
     ),
 }
 
@@ -178,8 +180,35 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Roles are deliberately not read from the token. Supabase's
         # ``app_metadata.role`` was the Phase 1 source of truth; since ADR-037 the
         # ``user_role`` table is, and ``get_current_user`` loads it per request.
-        request.state.user = AppUser(id=sub, roles=frozenset(), email=email)
+        request.state.user = AppUser(
+            id=sub,
+            roles=frozenset(),
+            email=email,
+            email_verified=_email_verified(payload),
+        )
         return await call_next(request)
+
+
+def _email_verified(payload: dict) -> bool:
+    """Return whether the token says the caller's email address is confirmed.
+
+    Supabase surfaces confirmation two ways depending on project age and grant
+    type: ``user_metadata.email_verified`` (set by the auth system on email
+    signups) and an ``email_confirmed_at`` timestamp. Either is accepted; a token
+    carrying neither is treated as unverified, which is the safe default — the
+    only consequence is that content creation is refused until the address is
+    confirmed (``services.permissions.require_verified``).
+
+    Args:
+        payload: The decoded JWT claims.
+
+    Returns:
+        ``True`` if the token attests a confirmed address.
+    """
+    if payload.get("email_confirmed_at"):
+        return True
+    user_metadata = payload.get("user_metadata") or {}
+    return bool(user_metadata.get("email_verified"))
 
 
 def _resolve_jwk(jwks: dict, token: str) -> object:

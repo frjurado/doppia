@@ -18,6 +18,8 @@ export interface SessionUser {
    * `registered` is implicit in holding one and is never stored (ADR-037).
    */
   roles: string[];
+  /** Unverified accounts can sign in and read, but not create content. */
+  email_verified: boolean;
 }
 
 export interface SessionResponse {

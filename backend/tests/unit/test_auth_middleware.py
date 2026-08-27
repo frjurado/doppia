@@ -92,6 +92,7 @@ def _make_token(
     payload: dict = {
         "sub": sub,
         "email": email,
+        "user_metadata": {"email_verified": True},
         "exp": int(time.time()) + exp_offset,
     }
     if iss is not None:
@@ -145,6 +146,7 @@ def _make_es256_token(
     payload: dict = {
         "sub": sub,
         "email": email,
+        "user_metadata": {"email_verified": True},
         "exp": int(time.time()) + exp_offset,
     }
     if iss is not None:

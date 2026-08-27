@@ -37,11 +37,15 @@ class AppUser:
             registered account — ``registered`` is implicit in authenticating and
             is never stored as a grant (ADR-037).
         email: The user's email address.
+        email_verified: Whether Supabase has confirmed the address
+            (``email_confirmed_at`` on the token). Unverified accounts may log
+            in but not create content — see ``services.permissions.require_verified``.
     """
 
     id: str
     roles: frozenset[str]
     email: str
+    email_verified: bool = False
 
 
 async def get_current_user(

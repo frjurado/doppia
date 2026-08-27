@@ -31,11 +31,15 @@ class AuthUser(BaseModel):
         roles: The roles granted to the account in ``user_role``. Empty for a
             plain registered user — ``registered`` is implicit in holding an
             account and is never stored as a grant (ADR-037).
+        email_verified: Whether the address is confirmed. Unverified accounts
+            can sign in but cannot create content, so the SPA shows the
+            resend-verification banner on this flag.
     """
 
     id: str
     email: str
     roles: list[str]
+    email_verified: bool
 
 
 class SessionResponse(BaseModel):

@@ -1,8 +1,9 @@
-"""Unit tests for the service-layer permission helpers (Component 12 Step 2).
+"""Unit tests for the service-layer permission helpers (Component 12 Steps 2-3).
 
 ``require_owner_or_role`` is the second — and only other — sanctioned permission
 mechanism alongside ``require_role`` (``docs/architecture/roles-and-permissions.md``
-§ 1). It is a pure function over a caller and a resource, so it needs no database.
+§ 1); ``require_verified`` is the content-creation precondition from § 3. Both are
+pure functions over a caller and a resource, so they need no database.
 
 Its first production consumers arrive with collections in Component 13; these
 tests pin the semantics before anything depends on them.
@@ -13,9 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from errors import AuthorizationError
+from errors import AuthorizationError, EmailNotVerifiedError
 from models.roles import ADMIN, EDITOR
-from services.permissions import require_owner_or_role
+from services.permissions import require_owner_or_role, require_verified
 
 _OWNER_ID = "11111111-1111-4111-8111-111111111111"
 _OTHER_ID = "22222222-2222-4222-8222-222222222222"
@@ -28,6 +29,7 @@ class _Caller:
     id: str
     roles: frozenset[str] = frozenset()
     email: str = "user@test.com"
+    email_verified: bool = True
 
 
 @dataclass
@@ -99,4 +101,22 @@ class TestRequireOwnerOrRole:
         with pytest.raises(AuthorizationError):
             require_owner_or_role(
                 _Caller(id=_OTHER_ID, roles=frozenset({ADMIN})), _Collection(_OWNER_ID)
+            )
+
+
+class TestRequireVerified:
+    def test_verified_caller_passes(self) -> None:
+        require_verified(_Caller(id=_OWNER_ID, email_verified=True))
+
+    def test_unverified_caller_is_refused(self) -> None:
+        """An unverified account may sign in and read, but not create content."""
+        with pytest.raises(EmailNotVerifiedError) as exc:
+            require_verified(_Caller(id=_OWNER_ID, email_verified=False))
+        assert exc.value.code == "EMAIL_NOT_VERIFIED"
+
+    def test_roles_do_not_substitute_for_verification(self) -> None:
+        """The gate is a precondition, not a permission: an admin is not exempt."""
+        with pytest.raises(EmailNotVerifiedError):
+            require_verified(
+                _Caller(id=_OWNER_ID, roles=frozenset({ADMIN}), email_verified=False)
             )

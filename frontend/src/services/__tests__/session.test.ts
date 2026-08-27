@@ -13,7 +13,7 @@ const _SESSION = {
   access_token: 'access-1',
   token_type: 'bearer',
   expires_in: 3600,
-  user: { id: 'u1', email: 'editor@test.com', roles: ['editor'] },
+  user: { id: 'u1', email: 'editor@test.com', roles: ['editor'], email_verified: true },
 };
 
 function jsonResponse(status: number, body: unknown): Response {

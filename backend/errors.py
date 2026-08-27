@@ -163,6 +163,19 @@ class AuthorizationError(DoppiaError):
     code = ErrorCode.FORBIDDEN
 
 
+class EmailNotVerifiedError(DoppiaError):
+    """The caller's email address has not been confirmed.
+
+    Distinct from ``AuthorizationError``: the caller may hold every role the
+    action needs, but an unverified account cannot create content at all
+    (``docs/architecture/roles-and-permissions.md`` § 3). Maps to HTTP 403 with
+    its own code so the frontend can offer "resend verification" rather than a
+    generic permission message.
+    """
+
+    code = ErrorCode.EMAIL_NOT_VERIFIED
+
+
 # ── Integrity errors ──────────────────────────────────────────────────────────
 
 

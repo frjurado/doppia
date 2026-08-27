@@ -129,7 +129,12 @@ async def _session_body(session: SupabaseSession, db: AsyncSession) -> dict:
     return SessionResponse(
         access_token=session.access_token,
         expires_in=session.expires_in,
-        user=AuthUser(id=session.user_id, email=session.email, roles=sorted(roles)),
+        user=AuthUser(
+            id=session.user_id,
+            email=session.email,
+            roles=sorted(roles),
+            email_verified=session.email_verified,
+        ),
     ).model_dump()
 
 

@@ -70,6 +70,7 @@ function devUser(token: string): SessionUser {
     id: `dev-${role}`,
     email: `${role}@local`,
     roles: [role],
+    email_verified: true,
   };
 }
 

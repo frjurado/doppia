@@ -8,7 +8,9 @@ Two mechanisms enforce permissions in this codebase and no others:
   ownership check needs the loaded resource, which routes do not have.
 
 The split is by design, not by accident (``docs/architecture/roles-and-permissions.md``
-§ 1).
+§ 1). ``require_verified()`` joins them as a *precondition* rather than a third
+mechanism: it asks whether the account may create content at all, before the
+question of which roles it holds.
 
 No inline role or ownership checks anywhere else. See CONTRIBUTING.md § Invariants.
 """
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from errors import AuthorizationError
+from errors import AuthorizationError, EmailNotVerifiedError
 
 
 class _Caller(Protocol):
@@ -28,6 +30,7 @@ class _Caller(Protocol):
 
     id: str
     roles: frozenset[str]
+    email_verified: bool
 
 
 def require_owner_or_role(
@@ -69,3 +72,23 @@ def require_owner_or_role(
             "caller_roles": sorted(user.roles),
         },
     )
+
+
+def require_verified(user: _Caller) -> None:
+    """Assert that the caller's email address is confirmed.
+
+    Checked alongside role checks for every content-creating action: an
+    unverified account can log in and read, but cannot write
+    (``roles-and-permissions.md`` § 3).
+
+    Args:
+        user: The authenticated caller.
+
+    Raises:
+        EmailNotVerifiedError: If the address has not been confirmed.
+    """
+    if not user.email_verified:
+        raise EmailNotVerifiedError(
+            "Confirm your email address before creating content.",
+            detail={"email": getattr(user, "email", "")},
+        )
