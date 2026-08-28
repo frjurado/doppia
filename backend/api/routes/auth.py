@@ -42,6 +42,7 @@ from fastapi import APIRouter, Cookie, Depends, Path, Request, Response, status
 from fastapi.responses import JSONResponse
 from models.auth import (
     AuthUser,
+    EmailLinkRequest,
     EmailRequest,
     LoginRequest,
     OAuthCallbackRequest,
@@ -566,3 +567,51 @@ async def update_password(
     except SupabaseAuthError as exc:
         return _auth_error(exc, on_login=False)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/verify-link",
+    response_model=SessionResponse,
+    summary="Redeem an emailed one-time token for a session",
+    response_description="A session, exactly as password login returns.",
+)
+async def verify_link(
+    payload: EmailLinkRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> dict | JSONResponse:
+    """Establish a session from a recovery, invite, or confirmation link.
+
+    The email-link counterpart to the OAuth callback, and server-side for the
+    same reason: Supabase's own verify endpoint redirects back with the session
+    in the URL, which would hand a refresh token to JavaScript. Here the browser
+    carries only an opaque single-use hash and receives only the cookie.
+
+    Args:
+        payload: The ``token_hash`` and link type from the link's query string.
+        response: The injected response, for setting the refresh cookie.
+        db: Async database session, for the caller's role set.
+
+    Returns:
+        The ``SessionResponse`` body on success; 404 for an unknown link type;
+        401 if the link is expired or already redeemed; 503 if Auth is
+        unreachable.
+    """
+    if payload.type not in supabase_auth.VERIFIABLE_LINK_TYPES:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=ErrorResponse.make(
+                code=ErrorCode.NOT_FOUND,
+                message=f"Link type '{payload.type}' is not supported.",
+                detail={"supported": sorted(supabase_auth.VERIFIABLE_LINK_TYPES)},
+            ).model_dump(),
+        )
+    try:
+        session = await supabase_auth.verify_email_link(
+            payload.token_hash, payload.type
+        )
+    except SupabaseAuthError as exc:
+        return _auth_error(exc, on_login=False)
+
+    _set_refresh_cookie(response, session.refresh_token)
+    return await _session_body(session, db)

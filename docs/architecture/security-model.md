@@ -139,6 +139,21 @@ Supabase.
   callback. A caller-supplied return URL would therefore have made the start
   endpoint an open redirect, so it comes from `PUBLIC_APP_URL` and the endpoint
   accepts no redirect parameter.
+- **Email links are redeemed server-side.** Supabase's default
+  `{{ .ConfirmationURL }}` points at *its* `/auth/v1/verify` endpoint, which
+  redirects back with the session in the URL — a refresh token in the fragment
+  (i.e. in JavaScript) or a `?code=` our proxy cannot exchange, because an email
+  link never had a PKCE verifier. Neither is acceptable under ADR-035, so the
+  templates link to our own routes carrying `{{ .TokenHash }}`, and
+  `POST /api/v1/auth/verify-link` redeems it. The browser carries an opaque,
+  single-use hash and receives only the cookie. **This makes the email templates
+  part of the security posture, not cosmetic**: reverting one to
+  `{{ .ConfirmationURL }}` silently reintroduces the token-in-URL problem.
+- **The Supabase Redirect URLs allowlist is the enforcement point** for where a
+  link may return to. When a `redirect_to` is not on it, Supabase does not
+  error — it silently substitutes the project's Site URL, so a missing entry
+  presents as "the link went to the wrong page" rather than as a refusal. Every
+  route that terminates an email or OAuth flow needs an entry, per environment.
 - **Password changes carry no role check**: Supabase authorises the write with
   the caller's own bearer token, so holding the token *is* the authorisation.
   The same endpoint serves a recovery-link session and a deliberate change.

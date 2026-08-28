@@ -6,6 +6,10 @@ import PublicLayout from './components/ui/PublicLayout';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
 import AuthCallback from './routes/AuthCallback';
+import Register from './routes/Register';
+import VerifyEmail from './routes/VerifyEmail';
+import ForgotPassword from './routes/ForgotPassword';
+import ResetPassword from './routes/ResetPassword';
 import ConceptPage from './routes/ConceptPage';
 import GlossaryIndex from './routes/GlossaryIndex';
 import CorpusBrowser from './routes/CorpusBrowser';
@@ -33,6 +37,10 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/auth/verify-email" element={<VerifyEmail />} />
+          <Route path="/auth/forgot-password" element={<ForgotPassword />} />
+          <Route path="/auth/reset-password" element={<ResetPassword />} />
 
           {/* Public (anonymous) read path — Component 10 Step 5. No RequireAuth;
             a minimal public shell (no editor nav). The corpus browser and

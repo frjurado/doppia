@@ -520,7 +520,7 @@ async def request_password_reset(email: str) -> None:
     await _auth_post(
         "/recover",
         {"email": email},
-        params={"redirect_to": f"{public_app_url()}/auth/callback"},
+        params={"redirect_to": f"{public_app_url()}/auth/reset-password"},
     )
 
 
@@ -570,3 +570,77 @@ async def update_password(access_token: str, password: str) -> None:
             code="invalid_request",
             message="The password could not be updated.",
         )
+
+
+# ── Email links (recovery, invite, confirmation) ──────────────────────────────
+
+#: Link types this proxy will verify. A closed set: the value is forwarded to
+#: Supabase as the kind of token being redeemed, and only these four have a
+#: surface in this product.
+VERIFIABLE_LINK_TYPES: Final[frozenset[str]] = frozenset(
+    {"recovery", "invite", "signup", "email_change"}
+)
+
+
+async def verify_email_link(token_hash: str, link_type: str) -> SupabaseSession:
+    """Redeem an emailed one-time token for a session, server-side.
+
+    This is the email-link counterpart to :func:`pkce_grant`, and it exists for
+    the same ADR-035 reason. Supabase's default ``{{ .ConfirmationURL }}`` links
+    point at *its* ``/auth/v1/verify`` endpoint, which redirects back with the
+    session in the URL — putting a refresh token either in the fragment (the
+    implicit flow, i.e. straight into JavaScript) or in a ``?code=`` that our
+    proxy cannot exchange, because an email link never had a PKCE verifier.
+    Neither is acceptable.
+
+    Redeeming the ``{{ .TokenHash }}`` here instead keeps the credential
+    server-side on this path too: the browser carries an opaque, single-use hash
+    and gets back only the cookie. It requires the email templates to link to our
+    own routes rather than to Supabase's verify endpoint — see
+    ``docs/architecture/security-model.md``.
+
+    Args:
+        token_hash: The ``token_hash`` query parameter from the link.
+        link_type: One of :data:`VERIFIABLE_LINK_TYPES`.
+
+    Returns:
+        The established :class:`SupabaseSession`.
+
+    Raises:
+        SupabaseAuthError: 401 if the link is expired or already redeemed (they
+            are single-use), 503 if Auth is unreachable.
+        ValueError: If ``link_type`` is not verifiable — a programming error;
+            the route validates the caller's input before reaching here.
+    """
+    if link_type not in VERIFIABLE_LINK_TYPES:
+        raise ValueError(f"'{link_type}' is not a verifiable link type.")
+
+    base = _auth_base_url()
+    headers = {"apikey": _anon_key(), "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.post(
+                f"{base}/verify",
+                headers=headers,
+                json={"type": link_type, "token_hash": token_hash},
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=401,
+            code="invalid_grant",
+            message="This link has expired or has already been used.",
+        )
+    return _session_from_payload(response.json())

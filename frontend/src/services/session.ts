@@ -161,3 +161,77 @@ export async function completeOAuth(code: string): Promise<SessionResponse> {
   if (!response.ok) throw await parseError(response);
   return response.json();
 }
+
+/**
+ * Redeem a Supabase email link (recovery, invite, confirmation) for a session.
+ *
+ * The link lands on one of our own routes carrying an opaque `token_hash`; the
+ * backend redeems it and establishes the session, so no token ever appears in
+ * the URL or in JavaScript.
+ *
+ * @throws AuthError with 401 if the link is expired or already used — they are
+ *   single-use, so a reload of a consumed link fails here.
+ */
+export async function verifyEmailLink(tokenHash: string, type: string): Promise<SessionResponse> {
+  let response: Response;
+  try {
+    response = await fetch('/api/v1/auth/verify-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ token_hash: tokenHash, type }),
+    });
+  } catch {
+    throw new AuthError('NETWORK_ERROR', 'Could not reach the sign-in service.');
+  }
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+/**
+ * Register an account. The backend refuses this while registration is
+ * invite-only, surfacing `REGISTRATION_CLOSED`.
+ *
+ * No session is returned: the account exists but is unverified until the
+ * confirmation email is followed.
+ *
+ * @throws AuthError with code `REGISTRATION_CLOSED` while invite-only.
+ */
+export async function signUp(email: string, password: string): Promise<void> {
+  await postJson('/api/v1/auth/signup', { email, password });
+}
+
+/** Ask for the confirmation email to be sent again. Always succeeds. */
+export async function resendVerification(email: string): Promise<void> {
+  await postJson('/api/v1/auth/resend-verification', { email });
+}
+
+/**
+ * Ask for a password-recovery email.
+ *
+ * Resolves whether or not the address is registered — the backend deliberately
+ * does not distinguish, so this cannot be used to probe for accounts.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  await postJson('/api/v1/auth/password-reset', { email });
+}
+
+/**
+ * POST a JSON body to an auth endpoint that answers with no content.
+ *
+ * @throws AuthError on a non-2xx response or a network failure.
+ */
+async function postJson(path: string, body: unknown): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new AuthError('NETWORK_ERROR', 'Could not reach the sign-in service.');
+  }
+  if (!response.ok) throw await parseError(response);
+}

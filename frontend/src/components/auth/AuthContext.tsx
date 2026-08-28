@@ -35,6 +35,7 @@ import {
 } from '../../services/auth';
 import {
   completeOAuth as sessionCompleteOAuth,
+  verifyEmailLink as sessionVerifyEmailLink,
   login as sessionLogin,
   logout as sessionLogout,
   refresh as sessionRefresh,
@@ -50,6 +51,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   /** Finish an OAuth round trip from the code on the callback URL. */
   completeOAuthLogin: (code: string) => Promise<void>;
+  /** Establish a session from a recovery / invite / confirmation link. */
+  redeemEmailLink: (tokenHash: string, type: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -189,6 +192,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applySession]
   );
 
+  const redeemEmailLink = useCallback(
+    async (tokenHash: string, type: string) => {
+      applySession(await sessionVerifyEmailLink(tokenHash, type));
+    },
+    [applySession]
+  );
+
   const logout = useCallback(async () => {
     clearTimer();
     await sessionLogout();
@@ -196,7 +206,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearTimer, goAnonymous]);
 
   return (
-    <AuthContext.Provider value={{ status, user, login, completeOAuthLogin, logout }}>
+    <AuthContext.Provider
+      value={{ status, user, login, completeOAuthLogin, redeemEmailLink, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );

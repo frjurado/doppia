@@ -182,3 +182,42 @@ endpoint takes no redirect parameter at all. Outside local development an unset
 - The SPA's `/auth/callback` route must guard against React StrictMode's
   double-invoked effects — the authorization code is single-use, and a second
   exchange fails against a consumed code.
+
+---
+
+## Amendment — email links (2026-08-29, Component 12 Step 5)
+
+The same question the OAuth amendment answered, in its email form: a recovery,
+invitation or confirmation link has to end in a session, and Supabase's default
+way of delivering one puts the credential in the URL.
+
+Supabase's `{{ .ConfirmationURL }}` points at its own `/auth/v1/verify`
+endpoint, which redirects to `redirect_to` carrying the result — as
+`#access_token=…&refresh_token=…` under the implicit flow, or as `?code=` under
+PKCE. The first hands a refresh token to JavaScript, which is what this ADR
+exists to prevent. The second cannot be exchanged by our proxy at all: a PKCE
+code needs the verifier minted when the flow started, and an email link starts
+in an inbox, not in our browser.
+
+**Decision: the email templates link to our own routes carrying
+`{{ .TokenHash }}`, and the backend redeems it.** The SPA route reads
+`token_hash` and `type` from its query string and posts them to
+`POST /api/v1/auth/verify-link`, which calls Supabase's `POST /auth/v1/verify`
+server-side and sets the refresh cookie exactly as password login does. The
+browser carries an opaque, single-use hash; the credential never exists in
+JavaScript on this path either.
+
+### Consequences
+
+- **The email templates become part of the security posture.** A template
+  reverted to `{{ .ConfirmationURL }}` silently reintroduces the token-in-URL
+  problem, with no code change and no test failure to catch it. Recorded in
+  `security-model.md` for that reason.
+- Accepting an invitation *is* choosing a first password, so it shares the
+  reset route (`type=invite`) rather than getting a page of its own.
+- Redemption is single-use: the route guards against React StrictMode's
+  double-invoked effects, as the OAuth callback does, and a reload of a consumed
+  link correctly reports an expired link.
+- Every route terminating a link needs an entry in Supabase's Redirect URLs
+  allowlist, per environment. A missing entry is silent — Supabase substitutes
+  the Site URL rather than refusing.

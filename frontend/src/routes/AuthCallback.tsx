@@ -6,45 +6,59 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 
 /**
- * OAuth return address (`/auth/callback`).
+ * Where sign-in flows come back to (`/auth/callback`).
  *
- * The last leg of the brokered dance: Supabase sends the browser back here with
- * `?code=`, and this route hands that code to the backend, which exchanges it
- * against the PKCE verifier in its HttpOnly cookie. No token is ever parsed
- * here — the page only carries a code across, then gets out of the way.
+ * Two kinds of arrival, one destination:
  *
- * Presentation is deliberately minimal: Component 12 Step 5 owns the
- * registration UI and will dress this (and the provider button on /login)
- * properly. What matters now is that the round trip completes.
+ *  - **OAuth** — Supabase appends `?code=`, which the backend exchanges against
+ *    the PKCE verifier in its HttpOnly cookie.
+ *  - **Email confirmation** — the template appends `?token_hash=…&type=signup`,
+ *    which the backend redeems server-side.
+ *
+ * Neither hands a token to this page: it carries an opaque value across and
+ * gets out of the way. Presentation is deliberately minimal — this screen
+ * exists for the half-second before the redirect.
  */
 export default function AuthCallback() {
   const { t } = useTranslation(['auth', 'errors']);
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { completeOAuthLogin } = useAuth();
+  const { completeOAuthLogin, redeemEmailLink } = useAuth();
   const [error, setError] = useState<string | null>(null);
-  // StrictMode double-invokes effects in development; the authorization code is
-  // single-use, so a second exchange would fail against a consumed code.
+  // StrictMode double-invokes effects in development; both an authorization
+  // code and a token hash are single-use, so a second attempt would fail
+  // against a value the first one consumed.
   const attempted = useRef(false);
 
   useEffect(() => {
     if (attempted.current) return;
     attempted.current = true;
 
-    const code = params.get('code');
     const providerError = params.get('error_description') ?? params.get('error');
     if (providerError) {
       setError(providerError);
       return;
     }
-    if (!code) {
+
+    const code = params.get('code');
+    const tokenHash = params.get('token_hash');
+    const linkType = params.get('type') ?? 'signup';
+
+    const establish = tokenHash
+      ? redeemEmailLink(tokenHash, linkType)
+      : code
+        ? completeOAuthLogin(code)
+        : null;
+
+    if (establish === null) {
       setError(t('errors:unexpected'));
       return;
     }
-    completeOAuthLogin(code)
+
+    establish
       .then(() => navigate('/', { replace: true }))
       .catch(() => setError(t('auth:oauthFailed')));
-  }, [params, completeOAuthLogin, navigate, t]);
+  }, [params, completeOAuthLogin, redeemEmailLink, navigate, t]);
 
   return (
     <Surface layer="base">

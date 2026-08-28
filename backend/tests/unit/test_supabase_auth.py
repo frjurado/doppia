@@ -238,3 +238,67 @@ async def test_pkce_grant_bad_code_maps_to_401_invalid_grant(
         await supabase_auth.pkce_grant("stale-code", "verifier-1")
     assert exc.value.status_code == 401
     assert exc.value.code == "invalid_grant"
+
+
+async def test_password_reset_link_returns_to_the_page_that_can_act_on_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recovery email must land on /auth/reset-password, not the generic
+    callback: the SPA route is what renders the set-a-new-password form, and
+    the redirect target is the only thing that tells it why the user arrived.
+    """
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["redirect_to"] = request.url.params.get("redirect_to")
+        return httpx.Response(200, json={})
+
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia-staging.fly.dev")
+    _mock_httpx(monkeypatch, handler)
+    await supabase_auth.request_password_reset("someone@test.com")
+
+    assert seen["path"] == "/auth/v1/recover"
+    assert seen["redirect_to"] == "https://doppia-staging.fly.dev/auth/reset-password"
+
+
+async def test_verify_email_link_redeems_the_token_hash_server_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The browser carries an opaque hash; the session is established here.
+
+    This is what keeps ADR-035 intact on the email-link path: Supabase's own
+    verify endpoint would redirect back with the session in the URL.
+    """
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json=_TOKEN_BODY)
+
+    _mock_httpx(monkeypatch, handler)
+    session = await supabase_auth.verify_email_link("hash-abc", "recovery")
+
+    assert seen["path"] == "/auth/v1/verify"
+    assert seen["body"] == {"type": "recovery", "token_hash": "hash-abc"}
+    assert session.refresh_token == "refresh-xyz"
+
+
+async def test_verify_email_link_rejects_an_unknown_type() -> None:
+    """The type is forwarded to Supabase as the kind of token being redeemed."""
+    with pytest.raises(ValueError):
+        await supabase_auth.verify_email_link("hash-abc", "magiclink")
+
+
+async def test_verify_email_link_maps_a_used_link_to_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Email links are single-use, so a reload of a consumed one must fail."""
+    _mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(401, json={"error": "invalid_token"}),
+    )
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.verify_email_link("stale-hash", "invite")
+    assert exc.value.status_code == 401

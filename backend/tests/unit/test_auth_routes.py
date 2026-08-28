@@ -630,3 +630,51 @@ class TestUpdatePassword:
             headers={"Authorization": "Bearer dev-token"},
         )
         assert response.status_code == 401
+
+
+class TestVerifyLink:
+    async def test_redeems_a_link_and_sets_the_session_cookie(
+        self, auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An invite or recovery link ends in a session, cookie and all."""
+        verify = AsyncMock(return_value=_session(refresh_token="rt-invite"))
+        monkeypatch.setattr("services.supabase_auth.verify_email_link", verify)
+
+        response = await auth_client.post(
+            "/api/v1/auth/verify-link",
+            json={"token_hash": "hash-abc", "type": "invite"},
+        )
+        assert response.status_code == 200
+        verify.assert_awaited_once_with("hash-abc", "invite")
+
+        body = response.json()
+        assert body["access_token"] == "access-1"
+        assert "refresh_token" not in body
+        cookie = _refresh_set_cookie(response)
+        assert cookie is not None and "rt-invite" in cookie and "HttpOnly" in cookie
+
+    async def test_unknown_link_type_returns_404(
+        self, auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        verify = AsyncMock()
+        monkeypatch.setattr("services.supabase_auth.verify_email_link", verify)
+        response = await auth_client.post(
+            "/api/v1/auth/verify-link",
+            json={"token_hash": "hash-abc", "type": "magiclink"},
+        )
+        assert response.status_code == 404
+        verify.assert_not_awaited()
+
+    async def test_expired_link_returns_401_without_a_session(
+        self, auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "services.supabase_auth.verify_email_link",
+            AsyncMock(side_effect=SupabaseAuthError(401, "invalid_grant", "used")),
+        )
+        response = await auth_client.post(
+            "/api/v1/auth/verify-link",
+            json={"token_hash": "stale", "type": "recovery"},
+        )
+        assert response.status_code == 401
+        assert _refresh_set_cookie(response) is None

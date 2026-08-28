@@ -116,3 +116,16 @@ class PasswordUpdateRequest(BaseModel):
     """
 
     password: str
+
+
+class EmailLinkRequest(BaseModel):
+    """The one-time token carried by a Supabase email link.
+
+    Attributes:
+        token_hash: The ``token_hash`` query parameter — opaque and single-use.
+        type: The link kind (``recovery``, ``invite``, ``signup``,
+            ``email_change``), which tells Supabase what is being redeemed.
+    """
+
+    token_hash: str
+    type: str

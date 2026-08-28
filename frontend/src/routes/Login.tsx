@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../components/auth/AuthContext';
+import AuthCard from '../components/auth/AuthCard';
 import { AuthError, startOAuth } from '../services/session';
-import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
-import styles from './Login.module.css';
+import styles from '../components/auth/AuthCard.module.css';
 
 /**
  * Login page.
@@ -15,11 +15,13 @@ import styles from './Login.module.css';
  * refresh token in an HttpOnly cookie) and the user is navigated to the corpus
  * browser.
  *
- * Registration and password reset arrive with Component 12 Step 5; the Google
- * button below is provisional scaffolding for Step 4's OAuth spike and will be
- * dressed with the rest of the registration UI.
+ * Google is offered as a secondary path: a full-page navigation to the URL the
+ * backend returns, never a fetch (see ADR-035's OAuth amendment). Registration
+ * and password reset live on their own routes (Component 12 Step 5); the
+ * invitation note stays because `REGISTRATION_MODE=invite` is still the launch
+ * posture.
  *
- * Design: centred card on cream background, input underline style per
+ * Design: shared `AuthCard` shell, input underline style per
  * docs/mockups/opus_urtext/DESIGN.md §5 "Input Fields".
  */
 export default function Login() {
@@ -30,20 +32,6 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  // Provisional: Step 5 owns the registration UI and will style this properly.
-  // A full-page navigation, not a fetch — see the ADR-035 OAuth amendment.
-  async function handleGoogle() {
-    setError(null);
-    setSubmitting(true);
-    try {
-      const { authorize_url } = await startOAuth('google');
-      window.location.assign(authorize_url);
-    } catch (err) {
-      setError(err instanceof AuthError ? t('auth:serviceUnavailable') : t('errors:unexpected'));
-      setSubmitting(false);
-    }
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -71,92 +59,112 @@ export default function Login() {
     }
   }
 
+  async function handleGoogle() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { authorize_url } = await startOAuth('google');
+      // A navigation, not a fetch: the CSP has no *.supabase.co in connect-src
+      // and does not need one. No `finally` here — the page is leaving.
+      window.location.assign(authorize_url);
+    } catch (err) {
+      setError(
+        err instanceof AuthError && err.code === 'AUTH_SERVICE_UNAVAILABLE'
+          ? t('auth:serviceUnavailable')
+          : t('errors:unexpected')
+      );
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <Surface layer="base" className={styles.page}>
-      <div className={styles.card}>
-        <Surface layer="container-low" className={styles.cardInner}>
-          {/* Header */}
-          <div className={styles.header}>
-            <Type variant="display-sm" as="h1" className={styles.title}>
-              Doppia
-            </Type>
-            <Type variant="label-md" as="p" className={styles.subtitle}>
-              {t('auth:subtitle')}
-            </Type>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className={styles.form} noValidate>
-            <div className={styles.field}>
-              <label htmlFor="email" className={styles.label}>
-                <Type variant="label-md" as="span">
-                  {t('auth:email')}
-                </Type>
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={styles.input}
-                disabled={submitting}
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="password" className={styles.label}>
-                <Type variant="label-md" as="span">
-                  {t('auth:password')}
-                </Type>
-              </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={styles.input}
-                disabled={submitting}
-              />
-            </div>
-
-            {error && (
-              <p className={styles.error} role="alert">
-                <Type variant="body-sm" as="span">
-                  {error}
-                </Type>
-              </p>
-            )}
-
-            <button type="submit" className={styles.submitButton} disabled={submitting}>
-              <Type variant="label-md" as="span">
-                {submitting ? t('auth:signingIn') : t('auth:signIn')}
-              </Type>
-            </button>
-          </form>
-
-          <button
-            type="button"
-            className={styles.submitButton}
-            onClick={handleGoogle}
-            disabled={submitting}
-          >
+    <AuthCard subtitle={t('auth:subtitle')}>
+      <form onSubmit={handleSubmit} className={styles.form} noValidate>
+        <div className={styles.field}>
+          <label htmlFor="email" className={styles.label}>
             <Type variant="label-md" as="span">
-              {t('auth:continueWithGoogle')}
+              {t('auth:email')}
             </Type>
-          </button>
+          </label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={styles.input}
+            disabled={submitting}
+          />
+        </div>
 
-          {/* Footer note */}
-          <p className={styles.note}>
+        <div className={styles.field}>
+          <label htmlFor="password" className={styles.label}>
+            <Type variant="label-md" as="span">
+              {t('auth:password')}
+            </Type>
+          </label>
+          <input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={styles.input}
+            disabled={submitting}
+          />
+        </div>
+
+        {error && (
+          <p className={styles.error} role="alert">
             <Type variant="body-sm" as="span">
-              {t('auth:invitationNote')}
+              {error}
             </Type>
           </p>
-        </Surface>
+        )}
+
+        <button type="submit" className={styles.submitButton} disabled={submitting}>
+          <Type variant="label-md" as="span">
+            {submitting ? t('auth:signingIn') : t('auth:signIn')}
+          </Type>
+        </button>
+      </form>
+
+      <div className={styles.alternative}>
+        <Type variant="label-sm" as="span" className={styles.alternativeLabel}>
+          {t('auth:orContinueWith')}
+        </Type>
+        <button
+          type="button"
+          className={styles.secondaryButton}
+          onClick={handleGoogle}
+          disabled={submitting}
+        >
+          <Type variant="label-md" as="span">
+            {t('auth:continueWithGoogle')}
+          </Type>
+        </button>
       </div>
-    </Surface>
+
+      <p className={styles.noteRow}>
+        <Link to="/auth/forgot-password" className={styles.link}>
+          <Type variant="body-sm" as="span">
+            {t('auth:forgotPassword')}
+          </Type>
+        </Link>
+      </p>
+
+      <p className={styles.note}>
+        <Type variant="body-sm" as="span">
+          {t('auth:invitationNote')}{' '}
+        </Type>
+        <Link to="/register" className={styles.link}>
+          <Type variant="body-sm" as="span">
+            {t('auth:register')}
+          </Type>
+        </Link>
+      </p>
+    </AuthCard>
   );
 }
