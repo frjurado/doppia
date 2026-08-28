@@ -111,3 +111,53 @@ export async function logout(): Promise<void> {
     // best-effort; the AuthProvider clears local state regardless
   }
 }
+
+/**
+ * Begin an OAuth sign-in: ask the backend for the provider's authorize URL.
+ *
+ * The caller must **navigate** to the returned URL (`location.assign`), never
+ * fetch it — the CSP has no `*.supabase.co` in `connect-src` and does not need
+ * one, because a top-level navigation is not a fetch. The PKCE verifier stays
+ * in an HttpOnly cookie the backend sets on this response; it never reaches JS.
+ *
+ * @throws AuthError if the provider is unsupported (404) or OAuth is
+ *   unconfigured server-side (503).
+ */
+export async function startOAuth(provider: string): Promise<{ authorize_url: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/auth/oauth/${provider}/start`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch {
+    throw new AuthError('NETWORK_ERROR', 'Could not reach the sign-in service.');
+  }
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}
+
+/**
+ * Complete an OAuth sign-in by handing the authorization code to the backend.
+ *
+ * The backend exchanges it against the verifier in the HttpOnly cookie, so the
+ * tokens are established exactly as on the password path — the browser sees an
+ * access token and nothing else.
+ *
+ * @throws AuthError if no flow is in progress or the code is stale (401).
+ */
+export async function completeOAuth(code: string): Promise<SessionResponse> {
+  let response: Response;
+  try {
+    response = await fetch('/api/v1/auth/oauth/callback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code }),
+    });
+  } catch {
+    throw new AuthError('NETWORK_ERROR', 'Could not reach the sign-in service.');
+  }
+  if (!response.ok) throw await parseError(response);
+  return response.json();
+}

@@ -20,6 +20,11 @@ primary_region = "lhr"
   PORT = "8000"
   R2_BUCKET_NAME = "doppia-staging"
   R2_ENDPOINT_URL = "https://b0c58a6078065a6edcd5cf3ecced703d.r2.cloudflarestorage.com"
+  # Where OAuth and email links return users. Must also appear in Supabase's
+  # Redirect URLs allowlist, or Supabase falls back to its own Site URL.
+  PUBLIC_APP_URL = "https://doppia-staging.fly.dev"
+  # invite | open — invite-only until Collections ship (Component 13).
+  REGISTRATION_MODE = "invite"
 
 [http_service]
   internal_port = 8000

@@ -59,3 +59,60 @@ class SessionResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: AuthUser
+
+
+class OAuthStartResponse(BaseModel):
+    """The body returned by ``POST /api/v1/auth/oauth/{provider}/start``.
+
+    Attributes:
+        authorize_url: The Supabase URL the browser must *navigate* to (a
+            full-page redirect, not a fetch — see ADR-035's OAuth amendment).
+    """
+
+    authorize_url: str
+
+
+class OAuthCallbackRequest(BaseModel):
+    """The authorization code the SPA received on the callback redirect.
+
+    The PKCE verifier is deliberately absent: it never reached the browser. It
+    travels in the HttpOnly ``doppia_pkce`` cookie and is read server-side.
+
+    Attributes:
+        code: The ``code`` query parameter Supabase appended to the redirect.
+    """
+
+    code: str
+
+
+class SignUpRequest(BaseModel):
+    """Credentials posted to ``POST /api/v1/auth/signup``.
+
+    Attributes:
+        email: The address to register.
+        password: The chosen password (never logged). Strength rules are
+            Supabase's; duplicating them here would be a second source of truth.
+    """
+
+    email: EmailStr
+    password: str
+
+
+class EmailRequest(BaseModel):
+    """An address alone — resend-verification and password-reset requests.
+
+    Attributes:
+        email: The address to send to.
+    """
+
+    email: EmailStr
+
+
+class PasswordUpdateRequest(BaseModel):
+    """A new password for the authenticated caller.
+
+    Attributes:
+        password: The new password (never logged).
+    """
+
+    password: str

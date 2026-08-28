@@ -34,6 +34,7 @@ import {
   subscribe,
 } from '../../services/auth';
 import {
+  completeOAuth as sessionCompleteOAuth,
   login as sessionLogin,
   logout as sessionLogout,
   refresh as sessionRefresh,
@@ -47,6 +48,8 @@ interface AuthContextValue {
   status: AuthStatus;
   user: SessionUser | null;
   login: (email: string, password: string) => Promise<void>;
+  /** Finish an OAuth round trip from the code on the callback URL. */
+  completeOAuthLogin: (code: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -145,7 +148,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const session = await sessionRefresh();
         if (!cancelled) applySession(session);
       } catch {
-        if (!cancelled) setStatus('anonymous');
+        // A session established *while this bootstrap was in flight* must not be
+        // downgraded by its failure. The OAuth callback route mounts under this
+        // provider and exchanges its code concurrently: on a first sign-in there
+        // is no refresh cookie yet, so this refresh always 401s, and if the
+        // exchange happened to land first its session would be clobbered here.
+        if (!cancelled && getAccessToken() === null) setStatus('anonymous');
       }
     })();
     return () => {
@@ -174,6 +182,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applySession]
   );
 
+  const completeOAuthLogin = useCallback(
+    async (code: string) => {
+      applySession(await sessionCompleteOAuth(code));
+    },
+    [applySession]
+  );
+
   const logout = useCallback(async () => {
     clearTimer();
     await sessionLogout();
@@ -181,7 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearTimer, goAnonymous]);
 
   return (
-    <AuthContext.Provider value={{ status, user, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ status, user, login, completeOAuthLogin, logout }}>
+      {children}
+    </AuthContext.Provider>
   );
 }
 

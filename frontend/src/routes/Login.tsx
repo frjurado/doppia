@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../components/auth/AuthContext';
-import { AuthError } from '../services/session';
+import { AuthError, startOAuth } from '../services/session';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import styles from './Login.module.css';
@@ -15,8 +15,9 @@ import styles from './Login.module.css';
  * refresh token in an HttpOnly cookie) and the user is navigated to the corpus
  * browser.
  *
- * No registration or password-reset UI: accounts are created by an admin via
- * the Supabase dashboard. This is intentional for Phase 1 (ADR-001).
+ * Registration and password reset arrive with Component 12 Step 5; the Google
+ * button below is provisional scaffolding for Step 4's OAuth spike and will be
+ * dressed with the rest of the registration UI.
  *
  * Design: centred card on cream background, input underline style per
  * docs/mockups/opus_urtext/DESIGN.md §5 "Input Fields".
@@ -29,6 +30,20 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Provisional: Step 5 owns the registration UI and will style this properly.
+  // A full-page navigation, not a fetch — see the ADR-035 OAuth amendment.
+  async function handleGoogle() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      const { authorize_url } = await startOAuth('google');
+      window.location.assign(authorize_url);
+    } catch (err) {
+      setError(err instanceof AuthError ? t('auth:serviceUnavailable') : t('errors:unexpected'));
+      setSubmitting(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -122,6 +137,17 @@ export default function Login() {
               </Type>
             </button>
           </form>
+
+          <button
+            type="button"
+            className={styles.submitButton}
+            onClick={handleGoogle}
+            disabled={submitting}
+          >
+            <Type variant="label-md" as="span">
+              {t('auth:continueWithGoogle')}
+            </Type>
+          </button>
 
           {/* Footer note */}
           <p className={styles.note}>

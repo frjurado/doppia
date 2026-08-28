@@ -120,3 +120,65 @@ XHR is always same-site), but `Lax` is the conventional default with no downside
 here and avoids surprising behaviour if a future flow relies on a top-level
 navigation. The path scope and header-bearer primary auth already carry the CSRF
 guarantee.
+
+---
+
+## Amendment — OAuth through the proxy (2026-08-28, Component 12 Step 4)
+
+ADR-035 removed all direct browser↔Supabase traffic, which left an open
+question the Component 12 plan flagged as the one genuinely untested path in
+the auth design: how a third-party sign-in works when the browser is not
+allowed to talk to Supabase. This amendment records the answer. **The decision
+is unchanged** — the refresh token still never reaches JavaScript — and the
+flow below is an application of it, not an exception to it.
+
+### The flow
+
+1. `POST /api/v1/auth/oauth/google/start` mints a PKCE verifier/challenge pair,
+   puts the **verifier** in an HttpOnly cookie (`doppia_pkce`, 10 minutes, same
+   path scope and attributes as the refresh cookie), and returns Supabase's
+   authorize URL carrying only the **challenge**.
+2. The SPA *navigates* to that URL (`location.assign`). Supabase redirects to
+   Google, Google returns to Supabase's own callback, and Supabase redirects
+   back to `PUBLIC_APP_URL/auth/callback?code=…`.
+3. The SPA posts the code to `POST /api/v1/auth/oauth/callback`. The backend
+   reads the verifier from the cookie, completes the exchange server-side, and
+   sets the refresh cookie exactly as password login does.
+
+### Why this needs no CSP change
+
+The authorize URL is reached by **navigation, not fetch**. `connect-src` governs
+fetch/XHR/WebSocket and has no `*.supabase.co` entry — correctly, and it still
+does not need one. `form-action 'self'` governs form submissions, not
+`location.assign`. The browser therefore never makes a *request* to Supabase
+from our origin; it simply leaves.
+
+### Why PKCE rather than the implicit flow
+
+Supabase's implicit flow returns the tokens in the URL **fragment**, which puts
+a refresh token directly into JavaScript's hands — the precise thing this ADR
+exists to prevent. PKCE returns an authorization code instead, and a code is
+useless without the verifier. Holding the verifier server-side in an HttpOnly
+cookie is what makes the brokered flow safe to run through a proxy at all.
+
+### The return address is server-side config, not a parameter
+
+Probing Supabase's authorize endpoint (2026-08-28) established that it **does
+not validate `redirect_to`** at hand-off: a request naming an unrelated domain
+was forwarded to Google without complaint. Supabase enforces its Redirect URLs
+allowlist later, at its own callback. Accepting a caller-supplied return URL
+would therefore have made `/oauth/{provider}/start` an open redirect wearing an
+OAuth flow as a disguise, so the value comes from `PUBLIC_APP_URL` and the
+endpoint takes no redirect parameter at all. Outside local development an unset
+`PUBLIC_APP_URL` is a hard 503, not a localhost fallback.
+
+### Consequences
+
+- One more short-lived cookie, with the same properties as the refresh cookie
+  and a much shorter life. It is cleared on success *and* on every failure: the
+  verifier is single-use, so a failed exchange cannot be retried with it.
+- The provider set is closed (`SUPPORTED_OAUTH_PROVIDERS`) because the provider
+  name is interpolated into the authorize URL.
+- The SPA's `/auth/callback` route must guard against React StrictMode's
+  double-invoked effects — the authorization code is single-use, and a second
+  exchange fails against a consumed code.

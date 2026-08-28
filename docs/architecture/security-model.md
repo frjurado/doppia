@@ -98,6 +98,14 @@ the browser never calls Supabase Auth directly. The cookie attributes:
 | `Path` | `/api/v1/auth` | Sent only to login/refresh/logout; no other endpoint sees it. |
 | `Max-Age` | 30 days | Session length; the refresh grant 401s earlier if Supabase invalidates it. |
 
+A second, short-lived cookie exists only during an OAuth round trip:
+
+| Attribute | Value | Reason |
+|---|---|---|
+| name | `doppia_pkce` | Holds the PKCE **verifier** while the user is away at the provider. |
+| `HttpOnly` / `Secure` / `SameSite` / `Path` | as above | Same treatment as the refresh cookie, for the same reason. |
+| `Max-Age` | 10 minutes | One consent screen, generously timed. Cleared on success *and* on every failure — the verifier is single-use. |
+
 **CSRF.** The `SameSite=Lax` + path-scoped cookie is never sent on a cross-site
 POST, and every non-auth endpoint authenticates with the bearer access token (a
 cross-origin page cannot read it), not the cookie — so there is no cookie-driven
@@ -105,6 +113,41 @@ state change to forge. No separate CSRF token is used; one must be added if a
 future endpoint ever authenticates a state change via the cookie. This relies on
 the same-origin deployment (the SPA and API are one Fly app — see
 `deployment.md`), which makes the cookie same-site on every API call.
+
+### Registration and OAuth (Component 12 Step 4)
+
+Registration flows are proxied like login: sign-up, resend-verification and
+password-reset all go through `/api/v1/auth`, never from the browser to
+Supabase.
+
+- **Self-service sign-up is gated** by `REGISTRATION_MODE` (`invite` | `open`).
+  Anything other than a literal `open` keeps it closed, so a typo cannot open
+  public registration; the refusal is a 403 `REGISTRATION_CLOSED` and Supabase
+  is never called.
+- **Resend-verification and password-reset always answer 202**, whether or not
+  the address is registered. Reporting the difference would make either endpoint
+  an oracle for which addresses hold accounts, and someone who owns the address
+  learns the answer from their inbox anyway. A 503 still surfaces — hiding the
+  address is not a reason to hide that Auth is down.
+- **OAuth uses PKCE with the verifier held server-side** (ADR-035's OAuth
+  amendment). The implicit flow is unusable here: it returns tokens in the URL
+  fragment, i.e. directly into JavaScript.
+- **The OAuth return address is server config, never a request parameter.**
+  Supabase does *not* validate `redirect_to` when handing off to the provider
+  (verified by probe, 2026-08-28 — it forwarded an unrelated domain without
+  complaint); its Redirect URLs allowlist is enforced later, at its own
+  callback. A caller-supplied return URL would therefore have made the start
+  endpoint an open redirect, so it comes from `PUBLIC_APP_URL` and the endpoint
+  accepts no redirect parameter.
+- **Password changes carry no role check**: Supabase authorises the write with
+  the caller's own bearer token, so holding the token *is* the authorisation.
+  The same endpoint serves a recovery-link session and a deliberate change.
+
+**Not yet addressed:** these unauthenticated endpoints have no application-level
+rate limit — neither does login, which predates them. Supabase applies its own
+limits to auth endpoints (including a cap on outbound emails), which is the
+current control. Worth a decision when the rate-limiting section is next
+revisited.
 
 ### R2 and CORS
 
@@ -498,6 +541,24 @@ python scripts/seed_dev_users.py
 The script reads `DATABASE_URL` from `.env` and is safe to re-run. **Do not run it against staging or production.** Those environments use real Supabase Auth — `app_user` rows are created by the normal authentication flow when a user first signs in.
 
 Integration tests seed these rows automatically via the `_seed_dev_users` fixture in conftest; the script is only needed for manual local development.
+
+### Testing real Supabase tokens locally
+
+`AUTH_MODE=local` accepts the two dev tokens and **rejects everything else**,
+including a genuine Supabase access token. So any flow that issues a real token
+— password login against the live project, and the whole OAuth dance — cannot be
+exercised end to end while the bypass is on: the sign-in itself succeeds, and
+then the first API call with the resulting token 401s, `apiFetch` clears it, and
+the SPA lands back on `/login`. The symptom looks like a broken OAuth flow and
+is not one.
+
+To exercise those flows locally, run the backend with `AUTH_MODE=supabase` and
+`ENVIRONMENT=local`. That combination is permitted — the startup guard only
+refuses `AUTH_MODE=local` *outside* a local environment, never the reverse — and
+it leaves the refresh cookie unsecured for plain-HTTP localhost, which is what
+`_cookie_secure()` already handles. Clear `localStorage['doppia_access_token']`
+first, or the dev-build bypass in `AuthProvider` re-seeds the dev token on the
+next reload and masks the real session.
 
 ---
 

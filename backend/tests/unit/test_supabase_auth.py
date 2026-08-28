@@ -7,6 +7,7 @@ network and no live project.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import httpx
@@ -125,3 +126,115 @@ async def test_unconfigured_supabase_url_maps_to_503(
     with pytest.raises(SupabaseAuthError) as exc:
         await supabase_auth.password_grant("editor@test.com", "pw")
     assert exc.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# OAuth (PKCE) — Component 12 Step 4
+# ---------------------------------------------------------------------------
+
+
+def test_pkce_challenge_is_the_s256_of_the_verifier() -> None:
+    """The challenge must be base64url(SHA-256(verifier)), unpadded.
+
+    Supabase verifies this relation on the exchange; getting the encoding wrong
+    fails only at the very end of a live round trip, which is an expensive place
+    to discover a typo.
+    """
+    import base64
+    import hashlib
+
+    verifier, challenge = supabase_auth.generate_pkce_pair()
+    expected = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+        .decode("ascii")
+        .rstrip("=")
+    )
+    assert challenge == expected
+    assert "=" not in challenge
+
+
+def test_pkce_pair_is_fresh_each_time() -> None:
+    """Two flows must not share a verifier."""
+    assert (
+        supabase_auth.generate_pkce_pair()[0] != supabase_auth.generate_pkce_pair()[0]
+    )
+
+
+def test_authorize_url_carries_provider_pkce_and_the_configured_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The return address comes from PUBLIC_APP_URL, never from a caller."""
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia-staging.fly.dev/")
+    url = supabase_auth.oauth_authorize_url("google", "chal-123")
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+
+    assert parsed.netloc == "test-project.supabase.co"
+    assert parsed.path == "/auth/v1/authorize"
+    assert query["provider"] == ["google"]
+    assert query["code_challenge"] == ["chal-123"]
+    assert query["code_challenge_method"] == ["s256"]
+    assert query["redirect_to"] == ["https://doppia-staging.fly.dev/auth/callback"]
+
+
+def test_authorize_url_rejects_an_unsupported_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The provider name is interpolated into a URL; the set is closed."""
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia-staging.fly.dev")
+    with pytest.raises(ValueError):
+        supabase_auth.oauth_authorize_url("github", "chal-123")
+
+
+def test_public_app_url_refuses_to_guess_outside_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unset PUBLIC_APP_URL in staging is a 503, not a localhost redirect."""
+    monkeypatch.delenv("PUBLIC_APP_URL", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    with pytest.raises(SupabaseAuthError) as exc:
+        supabase_auth.public_app_url()
+    assert exc.value.status_code == 503
+
+
+def test_public_app_url_falls_back_to_the_vite_origin_locally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PUBLIC_APP_URL", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    assert supabase_auth.public_app_url() == "http://localhost:5173"
+
+
+async def test_pkce_grant_posts_the_code_and_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exchange is a server-side token grant, not a browser round trip."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["grant_type"] = request.url.params.get("grant_type")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json=_TOKEN_BODY)
+
+    _mock_httpx(monkeypatch, handler)
+    session = await supabase_auth.pkce_grant("auth-code-1", "verifier-1")
+
+    assert seen["grant_type"] == "pkce"
+    assert seen["body"] == {"auth_code": "auth-code-1", "code_verifier": "verifier-1"}
+    assert session.refresh_token == "refresh-xyz"
+
+
+async def test_pkce_grant_bad_code_maps_to_401_invalid_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A used or mismatched code is an expired sign-in, not bad credentials."""
+    _mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(400, json={"error": "invalid_request"}),
+    )
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.pkce_grant("stale-code", "verifier-1")
+    assert exc.value.status_code == 401
+    assert exc.value.code == "invalid_grant"
