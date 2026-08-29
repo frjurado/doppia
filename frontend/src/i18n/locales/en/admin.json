@@ -17,5 +17,19 @@
   "role_editor": "Editor",
   "role_author": "Author",
   "role_admin": "Admin",
-  "selfDemotionRefused": "You cannot revoke your own admin role — ask another admin to do it."
+  "selfDemotionRefused": "You cannot revoke your own admin role — ask another admin to do it.",
+  "moderationTitle": "Moderation",
+  "moderationLede": "Reports filed against shared content. Nothing is reportable yet: this queue is here so the tool is live before sharing is.",
+  "filterLabel": "Filter by status",
+  "status_open": "Open",
+  "status_dismissed": "Dismissed",
+  "status_actioned": "Actioned",
+  "reason_spam": "Spam",
+  "reason_abuse": "Abuse",
+  "reason_copyright": "Copyright",
+  "reason_other": "Other",
+  "reportedBy": "Reported by {{email}}",
+  "dismiss": "Dismiss",
+  "noOpenReports": "Nothing to review.",
+  "noReports": "No reports."
 }

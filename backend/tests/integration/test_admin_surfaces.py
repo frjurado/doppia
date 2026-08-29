@@ -1,8 +1,12 @@
-"""Integration tests for admin user management (Component 12 Step 10).
+"""Integration tests for the admin surfaces (Component 12 Steps 10 and 11).
 
-Two things here cannot be proven against a mock: cursor pagination has to walk
-real rows in a real order, and a grant is what the ``user_role`` table actually
-holds afterwards, audit columns included.
+Three things here cannot be proven against a mock:
+
+* the one-open-report rule is a **partial unique index**, not application logic,
+  so only the database can refuse the second report;
+* cursor pagination has to walk real rows in a real order;
+* role grants and revocations are what the ``user_role`` table actually holds
+  afterwards, audit columns included.
 
 Requires ``docker compose up`` (PostgreSQL) before the test session.
 
@@ -10,6 +14,10 @@ Verification cases:
     1. The account listing pages by cursor and never repeats or drops a row.
     2. A grant records ``granted_by``; re-granting does not rewrite the audit.
     3. Revoking a role removes it; revoking your own admin is refused.
+    4. A second open report against the same resource by the same reporter is
+       refused; a different reporter, or the same one after resolution, is not.
+    5. The queue lists oldest first and filters by status.
+    6. Resolving records who and when, and a second resolution is refused.
 """
 
 from __future__ import annotations
@@ -61,6 +69,10 @@ async def people(db_session: AsyncSession) -> AsyncGenerator[dict[str, Any], Non
     yield ids
 
     everyone = list(ids.values())
+    await db_session.execute(
+        text("DELETE FROM moderation_report WHERE reporter_id = ANY(:ids)"),
+        {"ids": everyone},
+    )
     await db_session.execute(
         text(
             "DELETE FROM user_role WHERE user_id = ANY(:ids) OR granted_by = ANY(:ids)"
@@ -202,3 +214,175 @@ class TestRoleGrants:
         )
 
         assert await load_roles(db_session, str(people["bob"])) == frozenset()
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestReportFiling:
+    """One open report per user per resource, enforced by a partial index."""
+
+    async def test_a_second_open_report_is_refused(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        from errors import ReportAlreadyOpenError
+        from models.moderation import ReportRequest
+        from services.moderation import file_report
+
+        reporter = _Caller(id=str(people["alice"]), roles=frozenset())
+        payload = ReportRequest(resource_ref="collection:abc", reason="spam")
+
+        await file_report(db_session, reporter, payload)
+        with pytest.raises(ReportAlreadyOpenError):
+            await file_report(db_session, reporter, payload)
+
+    async def test_a_different_reporter_may_report_the_same_resource(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        from models.moderation import ReportRequest
+        from services.moderation import file_report
+
+        payload = ReportRequest(resource_ref="collection:shared", reason="abuse")
+        await file_report(
+            db_session, _Caller(id=str(people["alice"]), roles=frozenset()), payload
+        )
+        await file_report(
+            db_session, _Caller(id=str(people["bob"]), roles=frozenset()), payload
+        )
+
+        count = await db_session.scalar(
+            text(
+                "SELECT count(*) FROM moderation_report "
+                "WHERE resource_ref = 'collection:shared'"
+            )
+        )
+        assert count == 2
+
+    async def test_the_same_reporter_may_report_again_after_resolution(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        """The index is partial on purpose: the resource may have changed."""
+        from models.moderation import ReportRequest
+        from services.moderation import file_report, resolve_report
+
+        reporter = _Caller(id=str(people["alice"]), roles=frozenset())
+        admin = _Caller(id=str(people["admin"]), roles=frozenset({"admin"}))
+        payload = ReportRequest(resource_ref="collection:again", reason="other")
+
+        first = await file_report(db_session, reporter, payload)
+        await resolve_report(db_session, admin, first, "dismissed")
+        second = await file_report(db_session, reporter, payload)
+
+        assert second != first
+
+    async def test_an_unverified_reporter_is_refused(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        """Filing a report is content creation for the verification gate."""
+        from errors import EmailNotVerifiedError
+        from models.moderation import ReportRequest
+        from services.moderation import file_report
+
+        unverified = _Caller(
+            id=str(people["alice"]), roles=frozenset(), email_verified=False
+        )
+        with pytest.raises(EmailNotVerifiedError):
+            await file_report(
+                db_session,
+                unverified,
+                ReportRequest(resource_ref="collection:x", reason="spam"),
+            )
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestModerationQueue:
+    """The queue is worked from the front and closes reports once."""
+
+    async def test_lists_open_reports_oldest_first(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        from models.moderation import ReportRequest
+        from services.moderation import file_report, list_reports
+
+        alice = _Caller(id=str(people["alice"]), roles=frozenset())
+        bob = _Caller(id=str(people["bob"]), roles=frozenset())
+        first = await file_report(
+            db_session, alice, ReportRequest(resource_ref="collection:1", reason="spam")
+        )
+        second = await file_report(
+            db_session, bob, ReportRequest(resource_ref="collection:2", reason="abuse")
+        )
+
+        # The queue carries whatever else exists; scope to the ids inserted here.
+        ordered = [
+            item.id
+            for item in (await list_reports(db_session, page_size=200)).items
+            if item.id in {str(first), str(second)}
+        ]
+        assert ordered == [str(first), str(second)]
+
+    async def test_the_queue_carries_the_reporter_email(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        """A queue that cannot be triaged at a glance is not a tool."""
+        from models.moderation import ReportRequest
+        from services.moderation import file_report, list_reports
+
+        alice = _Caller(id=str(people["alice"]), roles=frozenset())
+        report_id = await file_report(
+            db_session,
+            alice,
+            ReportRequest(resource_ref="collection:email", reason="copyright"),
+        )
+
+        page = await list_reports(db_session, page_size=200)
+        item = next(i for i in page.items if i.id == str(report_id))
+        assert item.reporter_email.startswith("alice-")
+
+    async def test_resolution_records_who_and_when_and_happens_once(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        from errors import ReportAlreadyResolvedError
+        from models.moderation import ReportRequest
+        from services.moderation import file_report, resolve_report
+
+        alice = _Caller(id=str(people["alice"]), roles=frozenset())
+        admin = _Caller(id=str(people["admin"]), roles=frozenset({"admin"}))
+        report_id = await file_report(
+            db_session,
+            alice,
+            ReportRequest(resource_ref="collection:resolve", reason="spam"),
+        )
+
+        resolved = await resolve_report(db_session, admin, report_id, "dismissed")
+
+        assert resolved.status == "dismissed"
+        assert resolved.resolved_by == str(people["admin"])
+        assert resolved.resolved_at is not None
+
+        # A second resolution would overwrite the audit trail of the first.
+        with pytest.raises(ReportAlreadyResolvedError):
+            await resolve_report(db_session, admin, report_id, "actioned")
+
+    async def test_a_dismissed_report_leaves_the_open_filter(
+        self, db_session: AsyncSession, people: dict[str, Any]
+    ) -> None:
+        from models.moderation import ReportRequest
+        from services.moderation import file_report, list_reports, resolve_report
+
+        alice = _Caller(id=str(people["alice"]), roles=frozenset())
+        admin = _Caller(id=str(people["admin"]), roles=frozenset({"admin"}))
+        report_id = await file_report(
+            db_session,
+            alice,
+            ReportRequest(resource_ref="collection:filter", reason="other"),
+        )
+        await resolve_report(db_session, admin, report_id, "dismissed")
+
+        open_ids = {i.id for i in (await list_reports(db_session, page_size=200)).items}
+        dismissed_ids = {
+            i.id
+            for i in (
+                await list_reports(db_session, status="dismissed", page_size=200)
+            ).items
+        }
+        assert str(report_id) not in open_ids
+        assert str(report_id) in dismissed_ids

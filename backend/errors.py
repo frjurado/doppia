@@ -135,6 +135,12 @@ class UserNotFoundError(NotFoundError):
     code = ErrorCode.USER_NOT_FOUND
 
 
+class ModerationReportNotFoundError(NotFoundError):
+    """The requested moderation report does not exist."""
+
+    code = ErrorCode.MODERATION_REPORT_NOT_FOUND
+
+
 # ── Conflict errors ───────────────────────────────────────────────────────────
 
 
@@ -152,6 +158,22 @@ class HarmonyNotReviewedError(ConflictError):
     """The harmony analysis has not been reviewed and cannot be approved."""
 
     code = ErrorCode.HARMONY_NOT_REVIEWED
+
+
+class ReportAlreadyOpenError(ConflictError):
+    """This reporter already has an open report against this resource.
+
+    One open report per user per resource (``roles-and-permissions.md`` § 4):
+    a second one adds no information and would let one person flood the queue.
+    """
+
+    code = ErrorCode.REPORT_ALREADY_OPEN
+
+
+class ReportAlreadyResolvedError(ConflictError):
+    """The report has already been dismissed or actioned."""
+
+    code = ErrorCode.REPORT_ALREADY_RESOLVED
 
 
 class SelfAdminRevocationError(ConflictError):

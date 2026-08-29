@@ -12,6 +12,7 @@ import ForgotPassword from './routes/ForgotPassword';
 import ResetPassword from './routes/ResetPassword';
 import Profile from './routes/Profile';
 import AdminUsers from './routes/AdminUsers';
+import AdminModeration from './routes/AdminModeration';
 import RequireRole from './components/auth/RequireRole';
 import ConceptPage from './routes/ConceptPage';
 import GlossaryIndex from './routes/GlossaryIndex';
@@ -99,6 +100,14 @@ export default function App() {
               element={
                 <RequireRole role="admin">
                   <AdminUsers />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin/moderation"
+              element={
+                <RequireRole role="admin">
+                  <AdminModeration />
                 </RequireRole>
               }
             />

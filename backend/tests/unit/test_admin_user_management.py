@@ -1,10 +1,9 @@
-"""Route-level unit tests for admin user management (Component 12 Step 10).
+"""Route-level unit tests for the admin surfaces (Component 12 Steps 10 and 11).
 
 What matters here is who may reach these routes and what the route itself owns:
 every one is admin-only, grants record who made them, and the self-demotion
-guard fires. That the listing paginates over real rows and that grants land
-with their audit columns are database questions, proven in
-``tests/integration/test_admin_surfaces.py``.
+guard fires. That the queries paginate and that the one-open-report index holds
+are database questions, proven in ``tests/integration/test_admin_surfaces.py``.
 """
 
 from __future__ import annotations
@@ -44,6 +43,25 @@ def _user_item(**overrides: Any) -> Any:
     }
     base.update(overrides)
     return AdminUserItem(**base)
+
+
+def _report_item(**overrides: Any) -> Any:
+    from models.moderation import ReportItem
+
+    base: dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "resource_ref": "collection:8f14e45f-ceea-467a-9575-5e1b0cba1a49",
+        "reporter_id": _OTHER_SUB,
+        "reporter_email": "reporter@test.com",
+        "reason": "spam",
+        "detail": None,
+        "status": "open",
+        "created_at": datetime(2026, 8, 20, tzinfo=timezone.utc),
+        "resolved_by": None,
+        "resolved_at": None,
+    }
+    base.update(overrides)
+    return ReportItem(**base)
 
 
 def _build_app(roles: frozenset[str]) -> FastAPI:
@@ -112,6 +130,8 @@ class TestAdminOnly:
             ("post", f"/api/v1/admin/users/{_OTHER_SUB}/roles"),
             ("delete", f"/api/v1/admin/users/{_OTHER_SUB}/roles/editor"),
             ("post", "/api/v1/admin/invites"),
+            ("get", "/api/v1/admin/moderation/reports"),
+            ("post", f"/api/v1/admin/moderation/reports/{uuid.uuid4()}/dismiss"),
         ],
     )
     async def test_an_editor_is_refused(
@@ -247,3 +267,72 @@ class TestInvites:
             "/api/v1/admin/invites", json={"email": "not-an-address"}
         )
         assert response.status_code == 422
+
+
+class TestModerationQueue:
+    """GET /api/v1/admin/moderation/reports and its one resolution."""
+
+    async def test_lists_open_reports_by_default(
+        self, admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from models.moderation import ReportListResponse
+
+        listing = AsyncMock(
+            return_value=ReportListResponse(items=[_report_item()], next_cursor=None)
+        )
+        monkeypatch.setattr("services.moderation.list_reports", listing)
+
+        response = await admin_client.get("/api/v1/admin/moderation/reports")
+
+        assert response.status_code == 200
+        assert response.json()["items"][0]["reason"] == "spam"
+        assert listing.await_args.kwargs["status"] == "open"
+
+    async def test_dismissal_records_the_resolving_admin(
+        self, admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolve = AsyncMock(
+            return_value=_report_item(status="dismissed", resolved_by=_ADMIN_SUB)
+        )
+        monkeypatch.setattr("services.moderation.resolve_report", resolve)
+        report_id = uuid.uuid4()
+
+        response = await admin_client.post(
+            f"/api/v1/admin/moderation/reports/{report_id}/dismiss"
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "dismissed"
+        # The outcome is an argument, so Component 13's "unpublish share" lands
+        # as a second route rather than a change to the service.
+        assert resolve.await_args.args[3] == "dismissed"
+
+    async def test_dismissing_a_closed_report_is_a_409(
+        self, admin_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from errors import ReportAlreadyResolvedError
+
+        monkeypatch.setattr(
+            "services.moderation.resolve_report",
+            AsyncMock(side_effect=ReportAlreadyResolvedError("Already closed.")),
+        )
+        response = await admin_client.post(
+            f"/api/v1/admin/moderation/reports/{uuid.uuid4()}/dismiss"
+        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "REPORT_ALREADY_RESOLVED"
+
+    async def test_there_is_no_report_endpoint_yet(
+        self, admin_client: AsyncClient
+    ) -> None:
+        """The report *action* ships dark: nothing is reportable until 13.
+
+        The service exists and is tested; deliberately no route exposes it, so
+        there is no dead UI and no endpoint accepting refs to resources that
+        cannot exist.
+        """
+        response = await admin_client.post(
+            "/api/v1/moderation/reports",
+            json={"resource_ref": "collection:x", "reason": "spam"},
+        )
+        assert response.status_code == 404

@@ -80,18 +80,31 @@ export default function NavBar() {
         >
           {t('review')}
         </NavLink>
-        {/* Admin-only entry. Step 13 folds this, Review and the corpus
-            browser into one role-gated "Editorial" menu; until then it sits
+        {/* Admin-only entries. Step 13 folds these, Review and the corpus
+            browser into one role-gated "Editorial" menu; until then they sit
             here rather than nowhere, gated so nobody is shown a door that does
             not open. */}
         {isAdmin && (
-          <NavLink
-            to="/admin/users"
-            role="listitem"
-            className={({ isActive }) => `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`}
-          >
-            {t('people')}
-          </NavLink>
+          <>
+            <NavLink
+              to="/admin/users"
+              role="listitem"
+              className={({ isActive }) =>
+                `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`
+              }
+            >
+              {t('people')}
+            </NavLink>
+            <NavLink
+              to="/admin/moderation"
+              role="listitem"
+              className={({ isActive }) =>
+                `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`
+              }
+            >
+              {t('moderation')}
+            </NavLink>
+          </>
         )}
       </div>
 

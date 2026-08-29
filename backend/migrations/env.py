@@ -23,11 +23,12 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 import models.analysis  # noqa: F401
 import models.fragment  # noqa: F401
-import models.music  # noqa: F401
 
 # Import all ORM models so they register their tables on Base.metadata.
 # These imports have no other effect; they are purely for side-effect
 # registration on the declarative base.
+import models.moderation  # noqa: F401
+import models.music  # noqa: F401
 import models.user  # noqa: F401
 import models.user_state  # noqa: F401
 from alembic import context

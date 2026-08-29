@@ -17,5 +17,19 @@
   "role_editor": "Editor",
   "role_author": "Autor",
   "role_admin": "Administrador",
-  "selfDemotionRefused": "No puedes revocar tu propio rol de administrador; pídeselo a otro."
+  "selfDemotionRefused": "No puedes revocar tu propio rol de administrador; pídeselo a otro.",
+  "moderationTitle": "Moderación",
+  "moderationLede": "Denuncias sobre contenido compartido. Todavía no hay nada denunciable: esta cola existe para que la herramienta esté lista antes que el uso compartido.",
+  "filterLabel": "Filtrar por estado",
+  "status_open": "Abiertas",
+  "status_dismissed": "Descartadas",
+  "status_actioned": "Resueltas",
+  "reason_spam": "Spam",
+  "reason_abuse": "Abuso",
+  "reason_copyright": "Derechos de autor",
+  "reason_other": "Otro",
+  "reportedBy": "Denunciado por {{email}}",
+  "dismiss": "Descartar",
+  "noOpenReports": "Nada que revisar.",
+  "noReports": "Sin denuncias."
 }

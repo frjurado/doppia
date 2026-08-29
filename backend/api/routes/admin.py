@@ -5,10 +5,19 @@
     POST   /api/v1/admin/users/{user_id}/roles
     DELETE /api/v1/admin/users/{user_id}/roles/{role}
     POST   /api/v1/admin/invites
+    GET    /api/v1/admin/moderation/reports
+    POST   /api/v1/admin/moderation/reports/{report_id}/dismiss
 
-Every route here carries ``require_role(ADMIN)``. User management is what makes
-an invite-only launch operable without handing anyone the Supabase dashboard
-(``roles-and-permissions.md`` § 2).
+Every route here carries ``require_role(ADMIN)``. User management and the
+moderation queue are what make an invite-only launch operable without handing
+anyone the Supabase dashboard (``roles-and-permissions.md`` § 2, § 4).
+
+The moderation queue ships **before** anything reportable exists: the tool has
+to be live before sharing is (``phase-2.md`` § Component 13), so Component 12
+delivers the schema, the service and this queue, and Component 13 wires the
+report button and implements unpublish-share as the first ``actioned`` outcome.
+Until then the only resolution offered is dismissal — there is nothing to
+action.
 
 See docs/adr/ADR-018-partial-failure-recovery-for-ingestion.md,
 docs/adr/ADR-037-role-model-migration.md.
@@ -31,8 +40,10 @@ from models.admin import (
     RoleGrantRequest,
 )
 from models.base import get_db
+from models.moderation import ReportItem, ReportListResponse
 from models.roles import ADMIN
 from pydantic import BaseModel
+from services import moderation as moderation_service
 from services import users as users_service
 from services.supabase_auth import invite_user
 from services.task_dispatch import dispatch_task
@@ -276,3 +287,73 @@ async def issue_invite(payload: InviteRequest) -> InviteResponse:
     """
     await invite_user(payload.email)
     return InviteResponse(email=payload.email, invited_at=datetime.now(timezone.utc))
+
+
+# ── Moderation queue (Step 11) ────────────────────────────────────────────────
+
+
+@router.get(
+    "/moderation/reports",
+    response_model=ReportListResponse,
+    dependencies=[require_role(ADMIN)],
+    summary="List moderation reports",
+    response_description=(
+        "Cursor-paginated reports, oldest first — a queue is worked from the " "front."
+    ),
+)
+async def list_reports(
+    status: str | None = Query(
+        "open",
+        description="Filter by status: open | dismissed | actioned. Omit for all.",
+    ),
+    cursor: str | None = Query(None, description="Opaque cursor from a prior page."),
+    page_size: int = Query(50, ge=1, le=200, description="Reports per page."),
+    db: AsyncSession = Depends(get_db),
+) -> ReportListResponse:
+    """Return one page of the moderation queue.
+
+    Args:
+        status: Status filter; ``None`` returns every report.
+        cursor: Opaque pagination cursor.
+        page_size: Reports per page.
+        db: Async database session.
+
+    Returns:
+        A :class:`~models.moderation.ReportListResponse`.
+    """
+    return await moderation_service.list_reports(
+        db, status=status, cursor=cursor, page_size=page_size
+    )
+
+
+@router.post(
+    "/moderation/reports/{report_id}/dismiss",
+    response_model=ReportItem,
+    summary="Dismiss a moderation report",
+    response_description="The report, closed, with who closed it and when.",
+)
+async def dismiss_report(
+    admin: Annotated[AppUser, require_role(ADMIN)],
+    report_id: uuid.UUID = Path(..., description="The report to dismiss"),
+    db: AsyncSession = Depends(get_db),
+) -> ReportItem:
+    """Close a report with no change to the reported resource.
+
+    Dismissal is the only resolution Component 12 offers: the other outcome —
+    unpublish share — needs a shared collection to unpublish, which arrives
+    with Component 13. ``resolve_report`` already takes the outcome, so that
+    lands as a second route rather than a change to the service.
+
+    Args:
+        admin: The resolving admin, recorded on the report.
+        report_id: The report to dismiss.
+        db: Async database session.
+
+    Returns:
+        The updated :class:`~models.moderation.ReportItem`.
+
+    Raises:
+        ModerationReportNotFoundError: 404 if no such report exists.
+        ReportAlreadyResolvedError: 409 if it has already been closed.
+    """
+    return await moderation_service.resolve_report(db, admin, report_id, "dismissed")

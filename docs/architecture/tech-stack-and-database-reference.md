@@ -335,6 +335,38 @@ unique `(user_id, content_type, content_ref, date_trunc('day', visited_at))`
 constraint plus a `visit_count INTEGER`. That is a later decision, not one to
 pre-empt.
 
+#### Moderation (migration 0014)
+
+```sql
+CREATE TABLE moderation_report (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- One opaque string, deliberately no FK: 'collection:{uuid}' today, other
+    -- surfaces later, and no single foreign key can point at two tables.
+    resource_ref TEXT NOT NULL,
+    reporter_id  UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    reason       TEXT NOT NULL CHECK (reason IN ('spam','abuse','copyright','other')),
+    detail       TEXT,
+    status       TEXT NOT NULL DEFAULT 'open'
+                 CHECK (status IN ('open','dismissed','actioned')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_by  UUID REFERENCES app_user(id),
+    resolved_at  TIMESTAMPTZ
+);
+
+-- "One open report per user per resource" is this index, not application
+-- logic: two simultaneous reports would both pass a check-then-insert. Partial
+-- on purpose — after a report is resolved the same person may report the same
+-- resource again, because it may have changed since.
+CREATE UNIQUE INDEX moderation_report_open_unique
+    ON moderation_report (reporter_id, resource_ref) WHERE status = 'open';
+CREATE INDEX moderation_report_queue_idx    ON moderation_report (status, created_at);
+CREATE INDEX moderation_report_resource_idx ON moderation_report (resource_ref);
+```
+
+RLS enabled, per the migration 0005 pattern. The table ships before anything is
+reportable: the moderation tool must be live before sharing is
+(`../roadmap/phase-2.md` § Component 13).
+
 **Deferred — documented here so the intent is captured but not yet schema'd:**
 
 `collection` and `collection_fragment` — user-curated ordered sets of fragments with intent (class_prep, practice, research), visibility, and per-item annotations. Deferred to Component 13; the column list needs the real feature to pull on it. The deletion/tombstone rules that shape their foreign keys are recorded in Component 12's data-rights ADR.
