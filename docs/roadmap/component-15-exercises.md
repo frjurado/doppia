@@ -171,6 +171,15 @@ Same generator, notation hidden; presentation differences only:
 Supersedes the "shape open" note in `tech-stack-and-database-reference.md`
 § User infrastructure tables.
 
+**Status (2026-08-29):** `exercise_type`, `exercise_session` and
+`exercise_result` were created verbatim from this sketch by Component 12
+Step 7 (Alembic migration `0012`); ORM models are in
+`backend/models/user_state.py`. `exercise_type` is **empty** — it exists only
+as the foreign-key target `exercise_session` requires, and this component
+seeds it from YAML. `exercise_activation` was deliberately **not** created:
+nothing references it, and its status vocabulary is a question for this
+component, not the last one.
+
 ```sql
 CREATE TABLE exercise_type (          -- seeded from YAML
     id            TEXT PRIMARY KEY,   -- 'cadence-identification'

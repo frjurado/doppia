@@ -29,6 +29,7 @@ import models.music  # noqa: F401
 # These imports have no other effect; they are purely for side-effect
 # registration on the declarative base.
 import models.user  # noqa: F401
+import models.user_state  # noqa: F401
 from alembic import context
 from models.base import Base
 from sqlalchemy import engine_from_config, pool

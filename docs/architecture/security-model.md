@@ -164,6 +164,34 @@ limits to auth endpoints (including a cap on outbound emails), which is the
 current control. Worth a decision when the rate-limiting section is next
 revisited.
 
+### Reading history on the public read path (Component 12 Step 7)
+
+`GET /api/v1/public/fragments/{id}` reads the caller for exactly one purpose:
+recording a `reading_history` row when a signed-in user has opted in. Three
+properties keep this from weakening the public path's guarantees:
+
+- **The response does not depend on the caller.** The fragment is still fetched
+  with `caller_id=None` and `caller_roles=frozenset()`, so a signed-in reader
+  and an anonymous one are served the same bytes, and the `approved`-only and
+  ADR-009 licence guarantees are untouched.
+- **The route takes `get_optional_user`, not `get_current_user`.** It loads no
+  role set, because it makes no authorisation decision. Nothing may branch on
+  the roles it carries (they are always empty).
+- **Recording happens after the 404 branch**, so probing for an unapproved
+  fragment records nothing.
+
+The consent check lives inside the SQL statement rather than in a preceding
+read, so there is no check-then-act window; see
+`tech-stack-and-database-reference.md` § User-state tables.
+
+**CORS note.** The public prefix's policy allows only `Accept-Language`, not
+`Authorization` — so a genuine cross-origin consumer of the public API cannot
+send a token, which is correct: that surface is anonymous by definition. Our
+own SPA is unaffected in every environment, because it is always same-origin
+with the API (the Vite dev server proxies `/api`; staging and production serve
+the SPA from the same app). Do not add `Authorization` to the public policy to
+"fix" a cross-origin case — there isn't one to fix.
+
 ### R2 and CORS
 
 Cloudflare R2 is currently accessed server-side only: the API fetches MEI files for processing, or generates signed URLs that the frontend uses to fetch files directly. When the frontend uses a signed URL to fetch from R2 directly, that is a cross-origin request from the browser to `*.r2.cloudflarestorage.com`. R2 CORS rules must be configured at the bucket level for this to work.
@@ -616,6 +644,14 @@ concept_translation
 property_schema_translation
 property_value_translation
 ```
+
+**Every table created since must do the same, in its own migration** — the
+list above is a snapshot, not a mechanism. Component 12 added `user_role`
+(migration 0010) and the four user-state tables `exercise_type`,
+`exercise_session`, `exercise_result`, `reading_history` (migration 0012). The
+user-state tables are the sharpest case yet: they hold per-user history, so a
+missing default-deny there would be a data leak rather than merely an
+inconsistency.
 
 No RLS policies need to be written. The default-deny is the correct policy: PostgREST should never serve these tables directly, and the absence of an explicit policy makes that intent clear.
 

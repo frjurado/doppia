@@ -204,11 +204,19 @@ This sketch shows the MEI-pointer columns (`movement_id`) and the JSONB summary 
 #### User infrastructure tables
 
 Phase 1 created only `app_user`. Component 12 added `user_role` (migration
-`0010`, ADR-037) and dropped `app_user.role`. The remaining user-facing tables
-(`collection`, `collection_fragment`, `exercise_*`, `reading_history`) are
-deferred to the Phase 2 component that consumes them, so their schemas can be
-designed against real use cases; the collection DDL specifically waits for
-Component 13.
+`0010`, ADR-037), dropped `app_user.role`, added the profile columns (migration
+`0011`), and created the four user-state tables — `exercise_type`,
+`exercise_session`, `exercise_result`, `reading_history` (migration `0012`).
+
+The user-state tables exist **before** the features that fill them. That is the
+"record from day one" principle, and it is not tidiness: history that was not
+recorded cannot be reconstructed later, so the tables have to be in place the
+day the surfaces they observe go live. `exercise_type` is empty until
+Component 15 seeds it from YAML; `reading_history` records from now, for the
+one reading surface that exists.
+
+`collection` / `collection_fragment` remain deferred to Component 13, where
+they can be designed against the real feature.
 
 ```sql
 -- Named app_user, not user, because USER is a SQL keyword (alias for CURRENT_USER).
@@ -244,16 +252,51 @@ CREATE TABLE user_role (
 
 ```
 
-**Deferred (Phase 2) — documented here so the intent is captured but not yet schema'd:**
+#### User-state tables (migration 0012)
 
-`collection` and `collection_fragment` — user-curated ordered sets of fragments with intent (class_prep, practice, research), visibility, and per-item annotations. Deferred until the reader UI exists; the column list needs real use cases to pull on it.
-
-`exercise_result` — records of a user's attempts at a fragment/concept exercise (correct/incorrect, response, timestamp). Deferred until exercise types are themselves defined. The shape of this table is coupled to the exercise system, which is still open.
-
-`reading_history` — per-user visit log across fragments and blog posts. **When added, the primary key must include time or be a surrogate**: the naive `(user_id, content_id)` composite PK cannot record repeat visits, which defeats the analytical purpose of the table. Drafted shape for later:
+Shapes taken verbatim from the sketch in
+[`../roadmap/component-15-exercises.md`](../roadmap/component-15-exercises.md) § 6,
+which supersedes the earlier "shape open" note here.
 
 ```sql
--- NOT CREATED IN PHASE 1 — drafted for Phase 2 reference.
+CREATE TABLE exercise_type (          -- seeded from YAML in Component 15
+    id            TEXT PRIMARY KEY,   -- 'cadence-identification'
+    definition    JSONB NOT NULL,     -- validated YAML payload
+    seeded_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE exercise_session (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    exercise_type_id TEXT NOT NULL REFERENCES exercise_type(id),
+    -- The testing-contamination flag is on the session, not the role: an admin
+    -- genuinely practising produces valid data, the preview tool does not.
+    mode             TEXT NOT NULL DEFAULT 'standard'
+                     CHECK (mode IN ('standard', 'preview')),
+    started_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at     TIMESTAMPTZ            -- NULL = abandoned, which is data
+);
+CREATE INDEX exercise_session_user_time_idx ON exercise_session (user_id, started_at);
+
+CREATE TABLE exercise_result (        -- one row per question answered
+    id               BIGSERIAL PRIMARY KEY,
+    session_id       UUID NOT NULL REFERENCES exercise_session(id) ON DELETE CASCADE,
+    -- No FK: a result records what the user was asked and answered, and stays
+    -- true after the fragment is deleted or re-ingested. A cascade here would
+    -- erase a user's history as a side effect of an editorial action.
+    fragment_id      UUID NOT NULL,
+    concept_id       TEXT NOT NULL,   -- the correct answer (Neo4j Concept.id)
+    distractors      JSONB NOT NULL,  -- concept ids in the order shown
+    response         TEXT,            -- concept id chosen (NULL = skipped)
+    correct          BOOLEAN NOT NULL,
+    latency_ms       INTEGER,
+    aids             JSONB,           -- {listens: 3, slowed: true, transpose: -1}
+    answered_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Per-user visit log across fragments and (from Component 16) blog posts.
+-- The surrogate PK is the point: the naive (user_id, content_ref) composite
+-- cannot record a repeat visit, which is what the table exists to observe.
 CREATE TABLE reading_history (
     id            BIGSERIAL PRIMARY KEY,
     user_id       UUID NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
@@ -265,7 +308,36 @@ CREATE INDEX reading_history_user_time_idx ON reading_history (user_id, visited_
 CREATE INDEX reading_history_content_idx   ON reading_history (content_type, content_ref);
 ```
 
-If storage growth becomes a concern, dedupe per day via a unique `(user_id, content_type, content_ref, date_trunc('day', visited_at))` constraint plus a `visit_count INTEGER`. That is a Phase 2+ decision.
+All four have Row Level Security enabled (the migration 0005 pattern). They
+hold per-user history, so a missing default-deny would be a data leak rather
+than merely an inconsistency — PostgREST exposes every public-schema table to
+the anon role whose key ships in the frontend bundle.
+
+`exercise_activation` (the `(type, concept)` gate) is **not** created: nothing
+references it and its status vocabulary is a Component 15 design question.
+
+**How `reading_history` is written.** Recording happens server-side in
+`GET /api/v1/public/fragments/{id}` — the only reading surface that exists —
+through `services/reading_history.py`. The consent lives inside the SQL
+statement (`INSERT ... SELECT ... WHERE reading_history_opt_in`) rather than in
+a preceding check, so there is no window between reading the consent and acting
+on it, and no branch a future caller can forget. A user who has not opted in, or
+who has no `app_user` row, produces zero rows. Recording never fails the
+request: a lost analytics row is cheaper than a broken page.
+
+Nothing about the *response* depends on the caller — the fragment is still
+fetched with `caller_id=None`, so a signed-in reader and an anonymous one are
+served the same bytes. Recording also happens after the 404 branch, so probing
+for an unapproved fragment records nothing.
+
+One row per visit. If storage growth becomes a concern, dedupe per day via a
+unique `(user_id, content_type, content_ref, date_trunc('day', visited_at))`
+constraint plus a `visit_count INTEGER`. That is a later decision, not one to
+pre-empt.
+
+**Deferred — documented here so the intent is captured but not yet schema'd:**
+
+`collection` and `collection_fragment` — user-curated ordered sets of fragments with intent (class_prep, practice, research), visibility, and per-item annotations. Deferred to Component 13; the column list needs the real feature to pull on it. The deletion/tombstone rules that shape their foreign keys are recorded in Component 12's data-rights ADR.
 
 **Python integration:** SQLAlchemy (ORM + Core) with async support via `asyncpg`. Alembic for schema migrations.
 

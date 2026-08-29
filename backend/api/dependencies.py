@@ -98,6 +98,28 @@ async def get_current_user(
     return replace(user, roles=roles)
 
 
+async def get_optional_user(request: Request) -> AppUser | None:
+    """FastAPI dependency returning the caller when there is one, else ``None``.
+
+    For routes that serve anonymous visitors but do something extra for a
+    signed-in one — currently only reading-history recording on the public
+    fragment detail. It deliberately does **not** load the role set: an
+    authorisation decision belongs to ``get_current_user`` and
+    ``require_role``, and a route that takes this dependency has already
+    declared that it makes none.
+
+    The returned user therefore carries an empty ``roles`` set regardless of
+    what the account holds. Nothing may branch on it.
+
+    Args:
+        request: The incoming FastAPI request.
+
+    Returns:
+        The authenticated caller, or ``None`` for a tokenless request.
+    """
+    return getattr(request.state, "user", None)
+
+
 def require_role(*roles: str) -> Annotated[AppUser, Depends]:
     """Dependency factory enforcing that the caller holds any of ``roles``.
 

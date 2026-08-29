@@ -6,7 +6,13 @@ Routes:
 
 These routes carry **no** ``require_role()`` dependency: they are served to
 anonymous callers.  ``AuthMiddleware`` sets ``request.state.user = None`` for
-tokenless requests, and nothing here reads it.
+tokenless requests.
+
+The detail route reads the caller for exactly one purpose — recording a
+``reading_history`` row when a signed-in user has opted in (Component 12
+Step 7). Nothing about the *response* depends on it: the fragment is still
+fetched with ``caller_id=None``, so a signed-in reader and an anonymous one are
+served the same bytes, and the guarantees below are unaffected.
 
 The ``approved``-only guarantee is structural, not parametric:
 
@@ -37,12 +43,16 @@ from __future__ import annotations
 
 import uuid
 
+from api.dependencies import AppUser, get_optional_user
 from api.rate_limiting import READ_ANONYMOUS, limiter
 from api.routes.fragments import get_fragment_service
 from errors import FragmentNotFoundError
 from fastapi import APIRouter, Depends, Path, Query, Request
+from models.base import get_db
 from models.fragment import ConceptBrowseResponse, FragmentDetailResponse
 from services.fragments import FragmentService
+from services.reading_history import record_visit
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/public", tags=["Public"])
 
@@ -136,17 +146,28 @@ async def public_get_fragment(
     request: Request,
     fragment_id: uuid.UUID = Path(..., description="UUID of the fragment to read"),
     service: FragmentService = Depends(get_fragment_service),
+    caller: AppUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
 ) -> FragmentDetailResponse:
-    """Return the full record for one approved fragment, anonymously.
+    """Return the full record for one approved fragment.
 
     Any fragment that is not ``approved`` — draft, submitted, or rejected —
     returns the same 404 as a nonexistent id, so the public surface never
     leaks the existence or review status of unpublished work.
 
+    A signed-in caller who has opted in has the visit recorded in
+    ``reading_history``; everyone else is served identically. The recording is
+    the only thing the caller's identity affects here — the fragment itself is
+    still fetched with ``caller_id=None``, so what is served to a signed-in
+    reader is exactly what is served to an anonymous one.
+
     Args:
         request: The incoming request (used by the rate limiter).
         fragment_id: UUID of the fragment to read.
         service: Fragment service (injected).
+        caller: The signed-in caller, or ``None`` for an anonymous visitor.
+        db: Async database session (injected) — the same session the service
+            holds, used only for the reading-history write.
 
     Returns:
         :class:`~models.fragment.FragmentDetailResponse` with concept tags,
@@ -164,4 +185,9 @@ async def public_get_fragment(
             f"No fragment with id '{fragment_id}' exists.",
             detail={"fragment_id": str(fragment_id)},
         )
+    if caller is not None:
+        # After the 404 branch, so a probe for a non-public fragment records
+        # nothing. The consent check is inside the statement; this cannot write
+        # for a user who has not opted in, and never raises.
+        await record_visit(db, caller.id, "fragment", str(fragment_id))
     return result

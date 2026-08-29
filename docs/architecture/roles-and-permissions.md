@@ -218,7 +218,13 @@ author-role-gated and need no moderation pipeline.
     `fragment_review.reviewer_id` must tolerate reassignment, so it is
     decided now, before Component 12 writes the schema.
 - **Reading history is opt-in, default off** (per
-  `project-architecture.md` § User state).
+  `project-architecture.md` § User state). *Implemented in Component 12: the
+  consent is `app_user.reading_history_opt_in` (migration 0011, editable on the
+  profile page), the log is `reading_history` (migration 0012), and recording
+  is server-side on the public fragment-detail route with the consent enforced
+  inside the insert statement. Withdrawing consent stops future recording; it
+  does not erase what is already there — that is what export and deletion are
+  for.*
 - Imported (snapshot-copied) collections belong to the importer and are
   unaffected by the source owner's deletion — a side benefit of the
   snapshot-copy decision (see `../roadmap/phase-2.md` Component 13).

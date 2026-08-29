@@ -10,8 +10,9 @@ are independent grants), and each grant carries its own audit trail. The
 ``anonymous`` is the absence of a session. See ADR-037 and
 ``docs/architecture/roles-and-permissions.md`` § 1.
 
-The remaining deferred tables (collection, collection_fragment, exercise_*,
-reading_history) are defined in later Component 12 / 13 steps.
+Per-user *state* lives in ``models/user_state.py`` (exercises, reading
+history); ``collection`` / ``collection_fragment`` are deferred to Component 13,
+where they can be designed against real use.
 
 Note: the table is named ``app_user`` rather than ``user`` because ``USER``
 is a SQL reserved keyword (an alias for ``CURRENT_USER`` in PostgreSQL);

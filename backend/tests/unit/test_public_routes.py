@@ -312,6 +312,127 @@ class TestPublicDetail:
 
 
 # ---------------------------------------------------------------------------
+# Reading-history recording (Component 12 Step 7)
+# ---------------------------------------------------------------------------
+
+
+class TestReadingHistoryRecording:
+    """The detail route records a visit for a signed-in caller and no one else.
+
+    Whether a row is actually written is the *service's* decision (the consent
+    lives in its SQL) and is proven against a real database in
+    ``tests/integration/test_reading_history.py``. What is testable here is the
+    part the route owns: who it records for, and when.
+    """
+
+    @pytest.mark.asyncio
+    async def test_anonymous_visit_records_nothing(
+        self,
+        public_client: tuple[AsyncClient, AsyncMock],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import api.routes.public as public_routes
+
+        client, mock_service = public_client
+        recorded = AsyncMock(return_value=False)
+        monkeypatch.setattr(public_routes, "record_visit", recorded)
+        mock_service.get.return_value = _detail_response()
+
+        await client.get(f"/api/v1/public/fragments/{uuid.uuid4()}")
+
+        recorded.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_signed_in_visit_is_offered_for_recording(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The caller's id and the fragment id reach the service unchanged."""
+        import api.routes.public as public_routes
+        from api.dependencies import AppUser, get_optional_user
+        from api.routes.fragments import get_fragment_service
+        from models.base import get_db
+        from services.fragments import FragmentService
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        caller = AppUser(
+            id="11111111-1111-4111-8111-111111111111",
+            roles=frozenset(),
+            email="reader@test.com",
+            email_verified=True,
+        )
+        app = _build_app()
+        mock_service = AsyncMock(spec=FragmentService)
+        mock_db = AsyncMock(spec=AsyncSession)
+
+        async def _get_db() -> AsyncGenerator[AsyncSession, None]:
+            yield mock_db  # type: ignore[misc]
+
+        app.dependency_overrides[get_fragment_service] = lambda: mock_service
+        app.dependency_overrides[get_db] = _get_db
+        app.dependency_overrides[get_optional_user] = lambda: caller
+
+        recorded = AsyncMock(return_value=True)
+        monkeypatch.setattr(public_routes, "record_visit", recorded)
+        fragment_id = uuid.uuid4()
+        mock_service.get.return_value = _detail_response(id=fragment_id)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get(f"/api/v1/public/fragments/{fragment_id}")
+
+        assert response.status_code == 200
+        recorded.assert_awaited_once_with(
+            mock_db, caller.id, "fragment", str(fragment_id)
+        )
+        # The recording must not change what is served: the fragment is still
+        # fetched as if by an anonymous caller.
+        assert mock_service.get.await_args.kwargs["caller_id"] is None
+        assert mock_service.get.await_args.kwargs["caller_roles"] == frozenset()
+
+    @pytest.mark.asyncio
+    async def test_a_hidden_fragment_records_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A probe for an unapproved fragment 404s before it can record."""
+        import api.routes.public as public_routes
+        from api.dependencies import AppUser, get_optional_user
+        from api.routes.fragments import get_fragment_service
+        from models.base import get_db
+        from services.fragments import FragmentService
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        caller = AppUser(
+            id="11111111-1111-4111-8111-111111111111",
+            roles=frozenset(),
+            email="reader@test.com",
+            email_verified=True,
+        )
+        app = _build_app()
+        mock_service = AsyncMock(spec=FragmentService)
+        mock_db = AsyncMock(spec=AsyncSession)
+
+        async def _get_db() -> AsyncGenerator[AsyncSession, None]:
+            yield mock_db  # type: ignore[misc]
+
+        app.dependency_overrides[get_fragment_service] = lambda: mock_service
+        app.dependency_overrides[get_db] = _get_db
+        app.dependency_overrides[get_optional_user] = lambda: caller
+
+        recorded = AsyncMock(return_value=True)
+        monkeypatch.setattr(public_routes, "record_visit", recorded)
+        mock_service.get.return_value = _detail_response(status="draft")
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get(f"/api/v1/public/fragments/{uuid.uuid4()}")
+
+        assert response.status_code == 404
+        recorded.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # Editor routes unchanged
 # ---------------------------------------------------------------------------
 
