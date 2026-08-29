@@ -1,18 +1,25 @@
-"""Integration tests for the data export (Component 12 Step 8).
+"""Integration tests for data rights (Component 12 Steps 8 and 9).
 
-Hard gate 4 of the component plan asks for this to be proven "by an integration
-test, not inspection". The sections are real SQL over a user's own rows, and
-what makes the document correct is as much what it leaves out as what it
-contains.
+Hard gate 4 of the component plan asks for these to be proven "by an
+integration test, not inspection", and it is right to: the whole design lives
+in foreign keys. ``fragment_review.reviewer_id`` is ``ON DELETE RESTRICT``, so
+a deletion that forgot to reassign would fail against a real database and pass
+against a mock.
 
 Requires ``docker compose up`` (PostgreSQL) before the test session.
 
 Verification cases:
-    1. Export returns every registered section, with the user's own rows in
-       them.
+    1. Export returns every section, with the user's own rows in them.
     2. Export excludes editorial content (fragments created, reviews given).
-    3. The route serves the document over HTTP for the authenticated caller,
-       and refuses an anonymous one.
+    3. Deletion reassigns ``fragment.created_by`` to the system user.
+    4. Deletion reassigns ``fragment_review.reviewer_id`` to the system user —
+       the RESTRICT case that would otherwise refuse.
+    5. Deletion removes user-owned rows: role grants, exercise sessions and
+       results, reading history, and the account itself.
+    6. Deletion re-points ``user_role.granted_by`` on *other people's* grants,
+       which would otherwise block the delete outright.
+    7. The system user cannot be deleted.
+    8. A non-admin cannot delete somebody else's account.
 """
 
 from __future__ import annotations
@@ -247,6 +254,139 @@ class TestExport:
         assert str(workspace["other_fragment"]) not in serialised
         assert "fragments" not in document
         assert "reviews" not in document
+
+
+@pytest.fixture(autouse=True)
+def _no_supabase_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run deletions on the dev auth bypass so no Supabase call is attempted.
+
+    The PostgreSQL half is what these tests are about; the Auth half has no
+    local counterpart and is covered by unit tests against a mocked client.
+    """
+    monkeypatch.setenv("AUTH_MODE", "local")
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestDeletion:
+    """Delete what the user owns; reassign what the platform owns."""
+
+    async def test_editorial_contributions_move_to_the_system_user(
+        self, db_session: AsyncSession, workspace: dict[str, Any]
+    ) -> None:
+        from services.account_deletion import delete_account
+
+        leaver = workspace["leaver"]
+        caller = _Caller(id=str(leaver), roles=frozenset())
+
+        await delete_account(db_session, caller, str(leaver))
+
+        assert (
+            await _column(
+                db_session,
+                "SELECT created_by FROM fragment WHERE id = :id",
+                {"id": workspace["fragment_id"]},
+            )
+            == _SYSTEM_USER
+        )
+        # The RESTRICT foreign key: this is the one that would have refused.
+        assert (
+            await _column(
+                db_session,
+                "SELECT reviewer_id FROM fragment_review WHERE fragment_id = :id",
+                {"id": workspace["other_fragment"]},
+            )
+            == _SYSTEM_USER
+        )
+        # An audit trail on somebody else's grant, re-pointed rather than lost.
+        assert (
+            await _column(
+                db_session,
+                "SELECT granted_by FROM user_role WHERE user_id = :id",
+                {"id": workspace["colleague"]},
+            )
+            == _SYSTEM_USER
+        )
+
+    async def test_user_owned_data_is_deleted(
+        self, db_session: AsyncSession, workspace: dict[str, Any]
+    ) -> None:
+        from services.account_deletion import delete_account
+        from services.reading_history import record_visit
+
+        leaver = workspace["leaver"]
+        await record_visit(db_session, str(leaver), "fragment", "read-before-leaving")
+        caller = _Caller(id=str(leaver), roles=frozenset())
+
+        await delete_account(db_session, caller, str(leaver))
+
+        for table, column in (
+            ("app_user", "id"),
+            ("user_role", "user_id"),
+            ("reading_history", "user_id"),
+            ("exercise_session", "user_id"),
+        ):
+            remaining = await _column(
+                db_session,
+                f"SELECT count(*) FROM {table} WHERE {column} = :id",
+                {"id": leaver},
+            )
+            assert remaining == 0, f"{table}.{column} still has rows"
+
+    async def test_the_system_user_cannot_be_deleted(
+        self, db_session: AsyncSession
+    ) -> None:
+        """It is the reassignment target; removing it would orphan the record."""
+        from errors import AuthorizationError
+        from services.account_deletion import delete_account
+
+        admin = _Caller(id=str(uuid.uuid4()), roles=frozenset({"admin"}))
+        with pytest.raises(AuthorizationError, match="system user"):
+            await delete_account(db_session, admin, str(_SYSTEM_USER))
+
+        assert (
+            await _column(
+                db_session,
+                "SELECT count(*) FROM app_user WHERE id = :id",
+                {"id": _SYSTEM_USER},
+            )
+            == 1
+        )
+
+    async def test_a_stranger_cannot_delete_someone_elses_account(
+        self, db_session: AsyncSession, workspace: dict[str, Any]
+    ) -> None:
+        from errors import AuthorizationError
+        from services.account_deletion import delete_account
+
+        stranger = _Caller(id=str(uuid.uuid4()), roles=frozenset({"editor"}))
+        with pytest.raises(AuthorizationError):
+            await delete_account(db_session, stranger, str(workspace["leaver"]))
+
+        assert (
+            await _column(
+                db_session,
+                "SELECT count(*) FROM app_user WHERE id = :id",
+                {"id": workspace["leaver"]},
+            )
+            == 1
+        )
+
+    async def test_an_admin_can_delete_another_account(
+        self, db_session: AsyncSession, workspace: dict[str, Any]
+    ) -> None:
+        from services.account_deletion import delete_account
+
+        admin = _Caller(id=str(uuid.uuid4()), roles=frozenset({"admin"}))
+        await delete_account(db_session, admin, str(workspace["leaver"]))
+
+        assert (
+            await _column(
+                db_session,
+                "SELECT count(*) FROM app_user WHERE id = :id",
+                {"id": workspace["leaver"]},
+            )
+            == 0
+        )
 
 
 @pytest.mark.asyncio(loop_scope="session")

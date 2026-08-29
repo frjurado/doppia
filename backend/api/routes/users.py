@@ -9,9 +9,10 @@ Writes go through the verification gate in the service layer — an unverified
 account can read its profile but not change it
 (``roles-and-permissions.md`` § 3).
 
-The data-export route is deliberately *not* verification-gated: exporting is a
-data right, and withholding someone's own data because they have not confirmed
-an address would be a strange reading of it.
+The data-export and account-deletion routes are deliberately *not*
+verification-gated: they are data rights, and withholding someone's own data —
+or refusing to let them leave — because they have not confirmed an address
+would be a strange reading of them.
 """
 
 from __future__ import annotations
@@ -20,11 +21,12 @@ from typing import Annotated
 
 from api.dependencies import AppUser, get_current_user
 from api.rate_limiting import WRITE, limiter
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from models.base import get_db
 from models.profile import ProfileResponse, ProfileUpdateRequest
 from services import users as users_service
+from services.account_deletion import delete_account
 from services.data_export import build_export
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,3 +130,40 @@ async def export_own_data(
             )
         },
     )
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete the authenticated caller's account",
+    response_description="Empty response; the account and its data are gone.",
+)
+@limiter.limit(WRITE)
+async def delete_own_account(
+    request: Request,
+    user: Annotated[AppUser, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Delete the caller's own account.
+
+    User-owned data goes; editorial contributions are reassigned to the
+    ``deleted-user`` system account so the corpus's provenance and the
+    review-integrity record survive (ADR-038). This is irreversible and there
+    is no undo — the client is responsible for confirming intent, and for
+    offering the export first.
+
+    Args:
+        request: The incoming request (used by the rate limiter).
+        user: The authenticated caller.
+        db: Async database session.
+
+    Returns:
+        An empty 204 response.
+
+    Raises:
+        UserNotFoundError: 404 if the account has already been deleted.
+        SupabaseAuthError: 503 if the Auth user could not be removed after the
+            database side committed.
+    """
+    await delete_account(db, user, user.id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -117,6 +117,36 @@ def _anon_key() -> str:
     return anon_key
 
 
+def _service_role_key() -> str:
+    """Return the Supabase service-role key for admin calls, or raise.
+
+    This key bypasses Row Level Security and can act on any account, so it is
+    read only by the handful of functions that genuinely need admin authority
+    (currently account deletion; Step 10's invites join it). It must never
+    reach the browser.
+
+    Returns:
+        The value of ``SUPABASE_SERVICE_ROLE_KEY``.
+
+    Raises:
+        SupabaseAuthError: 503 if the key is not configured. Deliberately a
+            service error rather than a silent skip — an account deletion that
+            quietly left the auth user alive would be worse than a failure the
+            caller can see.
+    """
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not key:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message=(
+                "Supabase admin operations are not configured "
+                "(SUPABASE_SERVICE_ROLE_KEY unset)."
+            ),
+        )
+    return key
+
+
 def _session_from_payload(payload: dict) -> SupabaseSession:
     """Build a :class:`SupabaseSession` from a Supabase token-response body.
 
@@ -649,3 +679,52 @@ async def verify_email_link(token_hash: str, link_type: str) -> SupabaseSession:
             message="This link has expired or has already been used.",
         )
     return _session_from_payload(response.json())
+
+
+async def delete_auth_user(user_id: str) -> None:
+    """Delete a user from Supabase Auth via the admin API.
+
+    Called **after** the PostgreSQL side of an account deletion has committed
+    (``services/account_deletion.py``). The ordering is deliberate: an
+    ``app_user`` row whose auth user is gone is recoverable by an admin, while
+    an auth user whose application data is gone would be an account that logs
+    in to nothing and can no longer be deleted through the normal path.
+
+    Args:
+        user_id: The Supabase user id (the JWT ``sub``).
+
+    Raises:
+        SupabaseAuthError: 503 if Auth is unreachable or the service-role key
+            is unset; the upstream status otherwise. A 404 is **not** an error
+            — an already-absent auth user is the desired end state.
+    """
+    base = _auth_base_url()
+    key = _service_role_key()
+    headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.delete(
+                f"{base}/admin/users/{user_id}", headers=headers
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code == 404:
+        # Already gone. Idempotent by design: a retried deletion must succeed.
+        return
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=response.status_code,
+            code="invalid_request",
+            message="The authentication service refused to delete the account.",
+        )

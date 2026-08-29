@@ -212,7 +212,7 @@ author-role-gated and need no moderation pipeline.
   limited in the write category, with a "Download my data" control on the
   profile page. The exporter is a **registry** of named sections, so
   Component 13 adds collections by calling `register_section` rather than by
-  editing it (ADR-038, recorded with Step 9).
+  editing it (ADR-038).
 - **Deletion:** account deletion
   - *deletes* user-owned content: collections, exercise history, reading
     history, profile, reports filed;
@@ -222,6 +222,15 @@ author-role-gated and need no moderation pipeline.
     shapes foreign keys — `fragment.created_by` and
     `fragment_review.reviewer_id` must tolerate reassignment, so it is
     decided now, before Component 12 writes the schema.
+  *Implemented in Component 12 Step 9 (ADR-038):* `DELETE /api/v1/users/me`.
+  Five foreign keys are reassigned to the `deleted-user` system account
+  (`00000000-0000-0000-0000-0000000000ff`, seeded by migration `0013`) —
+  `fragment.created_by`, `fragment_review.reviewer_id`, both
+  `translator_id` columns, and `user_role.granted_by` — before the row is
+  deleted; everything else cascades. PostgreSQL commits first, the Supabase
+  Auth user is removed after. The **deletion UI is deliberately not built
+  yet**: the destructive-action treatment has no `DESIGN.md` precedent until
+  the Step 14 design pass adds one.
 - **Reading history is opt-in, default off** (per
   `project-architecture.md` § User state). *Implemented in Component 12: the
   consent is `app_user.reading_history_opt_in` (migration 0011, editable on the

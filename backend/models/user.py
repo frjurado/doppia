@@ -29,6 +29,17 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+#: The system user that inherits a deleted account's editorial contributions.
+#: Fixed and seeded by migration 0013, so every environment has the same id and
+#: a reassignment target always exists. Chosen from the all-zero block because
+#: a real Supabase id is a random v4 and can never collide with it; not the nil
+#: UUID, which code elsewhere is entitled to read as "unset".
+SYSTEM_USER_ID: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-0000000000ff")
+
+#: The system user's address. ``.invalid`` is reserved by RFC 2606 and can
+#: never be registered, so this can never collide with a real account.
+SYSTEM_USER_EMAIL = "deleted-user@doppia.invalid"
+
 
 class AppUser(Base):
     """Registered user account.

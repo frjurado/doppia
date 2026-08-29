@@ -302,3 +302,63 @@ async def test_verify_email_link_maps_a_used_link_to_401(
     with pytest.raises(SupabaseAuthError) as exc:
         await supabase_auth.verify_email_link("stale-hash", "invite")
     assert exc.value.status_code == 401
+
+
+# ── Admin: account deletion (Component 12 Step 9) ─────────────────────────────
+
+
+async def test_delete_auth_user_uses_the_service_role_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admin authority comes from the service-role key, not the caller's token."""
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["apikey"] = request.headers.get("apikey")
+        seen["authorization"] = request.headers.get("authorization")
+        return httpx.Response(200, json={})
+
+    _mock_httpx(monkeypatch, handler)
+    await supabase_auth.delete_auth_user("user-1")
+
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/auth/v1/admin/users/user-1"
+    assert seen["apikey"] == "service-key"
+    assert seen["authorization"] == "Bearer service-key"
+
+
+async def test_delete_auth_user_treats_a_missing_user_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deletion must be idempotent: a retry after a partial failure has to work."""
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    _mock_httpx(monkeypatch, lambda request: httpx.Response(404, json={}))
+
+    await supabase_auth.delete_auth_user("already-gone")
+
+
+async def test_delete_auth_user_requires_the_service_role_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing key is a visible 503, never a silent skip.
+
+    A deletion that quietly left the auth user alive would be worse than a
+    failure the caller can see and retry.
+    """
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.delete_auth_user("user-1")
+    assert exc.value.status_code == 503
+
+
+async def test_delete_auth_user_maps_an_unreachable_service_to_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    _mock_httpx(monkeypatch, lambda request: httpx.Response(500, text="boom"))
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.delete_auth_user("user-1")
+    assert exc.value.status_code == 503

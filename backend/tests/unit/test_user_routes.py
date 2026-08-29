@@ -1,13 +1,14 @@
-"""Route-level unit tests for the account surface (Component 12 Steps 6 and 8).
+"""Route-level unit tests for the account surface (Component 12 Steps 6, 8, 9).
 
 The profile is the first surface every registered user reaches, so the cases
 that matter most are the ones that keep it *only* theirs: it is gated on
 authentication rather than on a role, writes go through the verification gate,
 and the granted role set is read-only here — changing it is an admin action.
 
-The export route is tested here for what the *route* owns — who it acts for,
-what it returns. That the document itself is complete is proven against a real
-database in ``tests/integration/test_data_rights.py``.
+The data-rights routes (export, deletion) are tested here for what the *route*
+owns — who it acts for, what it returns. That the deletion actually reassigns
+editorial content and removes the rest is a foreign-key question, proven
+against a real database in ``tests/integration/test_data_rights.py``.
 """
 
 from __future__ import annotations
@@ -290,3 +291,49 @@ class TestExport:
         ) as client:
             response = await client.get("/api/v1/users/me/export")
         assert response.status_code == 401
+
+
+class TestDeleteOwnAccount:
+    """DELETE /api/v1/users/me — the caller can leave."""
+
+    async def test_deletes_the_callers_own_account(
+        self,
+        profile_client: tuple[AsyncClient, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client, dev_user = profile_client
+        delete = AsyncMock(return_value=None)
+        monkeypatch.setattr("api.routes.users.delete_account", delete)
+
+        response = await client.delete("/api/v1/users/me")
+
+        assert response.status_code == 204
+        assert not response.content
+        # Caller and target are the same value; the route takes no id at all.
+        assert delete.await_args.args[2] == dev_user.id  # type: ignore[attr-defined]
+
+    async def test_an_unverified_account_can_still_leave(
+        self,
+        profile_client: tuple[AsyncClient, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Deletion is a data right, not content creation: no verification gate."""
+        from api.dependencies import AppUser, get_current_user
+
+        client, dev_user = profile_client
+        unverified = AppUser(
+            id=_USER_SUB,
+            roles=frozenset(),
+            email="editor@test.com",
+            email_verified=False,
+        )
+        client._transport.app.dependency_overrides[  # type: ignore[union-attr]
+            get_current_user
+        ] = lambda: unverified
+        monkeypatch.setattr(
+            "api.routes.users.delete_account", AsyncMock(return_value=None)
+        )
+
+        response = await client.delete("/api/v1/users/me")
+
+        assert response.status_code == 204
