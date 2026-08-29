@@ -11,16 +11,21 @@ See docs/architecture/roles-and-permissions.md § 1 and ADR-037.
 
 from __future__ import annotations
 
+import base64
 import uuid
+from datetime import datetime
 
-from errors import UserNotFoundError
+from errors import SelfAdminRevocationError, UserNotFoundError
+from models.admin import AdminUserItem, AdminUserListResponse
 from models.profile import SELF_DECLARED_ROLES, ProfileResponse, ProfileUpdateRequest
-from models.roles import GRANTABLE_ROLES
+from models.roles import ADMIN, GRANTABLE_ROLES
 from models.user import AppUser, UserRole
 from services.permissions import Caller, require_verified
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_DEFAULT_PAGE_SIZE = 50
 
 
 async def ensure_app_user(
@@ -108,18 +113,164 @@ async def grant_role(
     await db.commit()
 
 
-async def revoke_role(db: AsyncSession, user_id: uuid.UUID, role: str) -> None:
+async def revoke_role(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    role: str,
+    *,
+    revoked_by: uuid.UUID | None = None,
+) -> None:
     """Remove a role grant. A no-op if the user does not hold it.
 
     Args:
         db: Async database session.
         user_id: The user losing the grant.
         role: The role to revoke.
+        revoked_by: The admin performing the revocation, when there is one.
+            Supplied so the self-demotion guard can fire; ``None`` for system
+            revocations, which are not guarded.
+
+    Raises:
+        SelfAdminRevocationError: If an admin revokes their own ``admin`` role.
+            The one guard worth having here: an instance can end up with no
+            admin at all, and there is no self-service path back. Revoking
+            somebody *else's* admin is allowed — that is a normal, reversible
+            administrative act.
     """
+    if role == ADMIN and revoked_by is not None and revoked_by == user_id:
+        raise SelfAdminRevocationError(
+            "You cannot revoke your own admin role.",
+            detail={"user_id": str(user_id), "role": role},
+        )
     await db.execute(
         delete(UserRole).where(UserRole.user_id == user_id, UserRole.role == role)
     )
     await db.commit()
+
+
+async def list_users(
+    db: AsyncSession,
+    *,
+    query: str | None = None,
+    cursor: str | None = None,
+    page_size: int = _DEFAULT_PAGE_SIZE,
+) -> AdminUserListResponse:
+    """Return one page of accounts with their granted roles.
+
+    Newest first: during an invite-only launch the account an admin wants is
+    almost always the one they just invited.
+
+    Roles are fetched in a second query keyed on the page's ids rather than by
+    joining, so that a user holding three roles stays one row and the page size
+    means what it says.
+
+    Args:
+        db: Async database session.
+        query: Optional case-insensitive substring match on email or display
+            name.
+        cursor: Opaque cursor from a previous page.
+        page_size: Maximum accounts to return.
+
+    Returns:
+        An :class:`~models.admin.AdminUserListResponse`.
+    """
+    statement = (
+        select(AppUser)
+        .order_by(AppUser.created_at.desc(), AppUser.id.desc())
+        .limit(page_size + 1)
+    )
+    if query:
+        pattern = f"%{query.strip()}%"
+        statement = statement.where(
+            func.lower(AppUser.email).like(func.lower(pattern))
+            | func.lower(func.coalesce(AppUser.display_name, "")).like(
+                func.lower(pattern)
+            )
+        )
+    keyset = _decode_user_cursor(cursor)
+    if keyset is not None:
+        created_at, user_id = keyset
+        statement = statement.where(
+            (AppUser.created_at, AppUser.id) < (created_at, user_id)
+        )
+
+    rows = list((await db.execute(statement)).scalars().all())
+    has_next = len(rows) > page_size
+    page = rows[:page_size]
+
+    grants: dict[uuid.UUID, list[str]] = {}
+    if page:
+        granted = await db.execute(
+            select(UserRole.user_id, UserRole.role).where(
+                UserRole.user_id.in_([row.id for row in page])
+            )
+        )
+        for user_id, role in granted.all():
+            grants.setdefault(user_id, []).append(role)
+
+    return AdminUserListResponse(
+        items=[
+            AdminUserItem(
+                id=str(row.id),
+                email=row.email,
+                display_name=row.display_name,
+                roles=sorted(grants.get(row.id, [])),
+                created_at=row.created_at,
+            )
+            for row in page
+        ],
+        next_cursor=(
+            _encode_user_cursor(page[-1].created_at, page[-1].id)
+            if has_next and page
+            else None
+        ),
+    )
+
+
+async def get_admin_user(db: AsyncSession, user_id: uuid.UUID) -> AdminUserItem:
+    """Return one account as the admin list shows it.
+
+    Args:
+        db: Async database session.
+        user_id: The account to read.
+
+    Returns:
+        The :class:`~models.admin.AdminUserItem`.
+
+    Raises:
+        UserNotFoundError: If no such account exists.
+    """
+    row = await db.get(AppUser, user_id)
+    if row is None:
+        raise UserNotFoundError(
+            "No account exists with this id.", detail={"user_id": str(user_id)}
+        )
+    return AdminUserItem(
+        id=str(row.id),
+        email=row.email,
+        display_name=row.display_name,
+        roles=sorted(await load_roles(db, str(row.id))),
+        created_at=row.created_at,
+    )
+
+
+def _encode_user_cursor(created_at: datetime, user_id: uuid.UUID) -> str:
+    """Encode a ``(created_at, id)`` keyset position as an opaque cursor."""
+    return base64.urlsafe_b64encode(
+        f"{created_at.isoformat()}|{user_id}".encode()
+    ).decode()
+
+
+def _decode_user_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID] | None:
+    """Decode a cursor, or return ``None`` for absent or malformed input."""
+    if not cursor:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode()).decode()
+        timestamp, user_id = raw.split("|", 1)
+        return datetime.fromisoformat(timestamp), uuid.UUID(user_id)
+    except Exception:
+        return None
 
 
 async def get_profile(db: AsyncSession, user: Caller) -> ProfileResponse:

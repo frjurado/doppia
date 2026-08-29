@@ -360,7 +360,11 @@ All `DoppiaError` subclasses are registered with FastAPI at startup. The mapping
 | `ConceptNotFoundError` | 404 | `CONCEPT_NOT_FOUND` |
 | `CollectionNotFoundError` | 404 | `COLLECTION_NOT_FOUND` |
 | `UserNotFoundError` | 404 | `USER_NOT_FOUND` |
+| `ModerationReportNotFoundError` | 404 | `MODERATION_REPORT_NOT_FOUND` |
 | `FragmentAlreadyApprovedError` | 409 | `FRAGMENT_ALREADY_APPROVED` |
+| `ReportAlreadyOpenError` | 409 | `REPORT_ALREADY_OPEN` |
+| `ReportAlreadyResolvedError` | 409 | `REPORT_ALREADY_RESOLVED` |
+| `SelfAdminRevocationError` | 409 | `SELF_ADMIN_REVOCATION` |
 | `HarmonyNotReviewedError` | 422 | `HARMONY_NOT_REVIEWED` |
 | `FragmentValidationError` | 422 | `FRAGMENT_VALIDATION_ERROR` |
 | `AuthorizationError` | 403 | `FORBIDDEN` |

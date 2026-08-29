@@ -1,0 +1,21 @@
+{
+  "usersTitle": "Personas",
+  "usersLede": "Quién tiene cuenta y qué puede hacer. Los roles son concesiones, no ajustes: cada una queda registrada con quién la dio y cuándo. El registro es solo por invitación hasta que lleguen las colecciones.",
+  "inviteTitle": "Invitar a alguien",
+  "inviteEmail": "Correo electrónico",
+  "invite": "Enviar invitación",
+  "inviting": "Enviando…",
+  "inviteHint": "Recibirá un enlace para elegir una contraseña. La cuenta empieza sin ningún rol: concédelos después según haga falta.",
+  "inviteSent": "Invitación enviada a {{email}}.",
+  "inviteRejected": "Esa dirección ya tiene una cuenta.",
+  "search": "Buscar a alguien",
+  "searchAction": "Buscar",
+  "noUsers": "Ninguna cuenta coincide.",
+  "noDisplayName": "Sin nombre visible",
+  "you": "tú",
+  "loadMore": "Mostrar más",
+  "role_editor": "Editor",
+  "role_author": "Autor",
+  "role_admin": "Administrador",
+  "selfDemotionRefused": "No puedes revocar tu propio rol de administrador; pídeselo a otro."
+}

@@ -63,6 +63,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         Neo4jUnavailableError,
         PostgresUnavailableError,
         RedisUnavailableError,
+        SelfAdminRevocationError,
         SelfReviewForbiddenError,
         UserNotFoundError,
         WorkNotFoundError,
@@ -85,6 +86,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         HarmonyEventNotFoundError: 404,
         # Conflict — 409
         FragmentAlreadyApprovedError: 409,
+        SelfAdminRevocationError: 409,
         # Unprocessable — 422
         HarmonyNotReviewedError: 422,
         IngestionError: 422,

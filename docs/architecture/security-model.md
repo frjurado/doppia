@@ -192,6 +192,30 @@ with the API (the Vite dev server proxies `/api`; staging and production serve
 the SPA from the same app). Do not add `Authorization` to the public policy to
 "fix" a cross-origin case — there isn't one to fix.
 
+### Admin surfaces and the service-role key (Component 12 Steps 10–11)
+
+`/api/v1/admin/*` is uniformly `require_role(ADMIN)`. Three notes:
+
+- **The service-role key is now load-bearing.** `SUPABASE_SERVICE_ROLE_KEY`
+  bypasses Row Level Security and can act on any account. Only two functions
+  read it — `invite_user` and `delete_auth_user` — and it must never reach the
+  browser. A missing key is a visible 503 rather than a silent skip.
+- **The invite email template is part of the security posture**, exactly as the
+  recovery template is: it must use `{{ .TokenHash }}` pointing at our own
+  `/auth/reset-password` route. `{{ .ConfirmationURL }}` routes through
+  Supabase's `/verify` and hands the browser a refresh token in the URL, which
+  is what ADR-035 removed. No test can catch this — it lives in the Supabase
+  dashboard.
+- **`redirect_to` on an invite is a server-side constant**, derived from
+  `PUBLIC_APP_URL` and never caller-supplied — the same reasoning as the OAuth
+  authorize URL, and for the same reason: Supabase does not validate the target
+  at issue time. It must also be in the project's Redirect URLs allowlist, or
+  Supabase silently substitutes the Site URL.
+
+The frontend's `RequireRole` route guard and the role-gated nav links are
+**presentation, not permission**. Removing them would leak nothing; they exist
+so nobody is shown a door that does not open.
+
 ### R2 and CORS
 
 Cloudflare R2 is currently accessed server-side only: the API fetches MEI files for processing, or generates signed URLs that the frontend uses to fetch files directly. When the frontend uses a signed URL to fetch from R2 directly, that is a cross-origin request from the browser to `*.r2.cloudflarestorage.com`. R2 CORS rules must be configured at the bucket level for this to work.

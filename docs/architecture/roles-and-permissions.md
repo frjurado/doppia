@@ -50,6 +50,15 @@ admin). This replaces Phase 1's single `role` column on `app_user`.
   row; `anonymous` is the absence of authentication. Role names are constants
   in one module, mirroring the relationship-type-constants convention.
 
+  *Granting implemented in Component 12 Step 10:* `/admin/users` — list,
+  invite, grant, revoke, all `require_role(ADMIN)`. Grants are idempotent and
+  re-granting a held role deliberately does **not** rewrite `granted_by` /
+  `granted_at`: the audit trail records the original grant, not the last time
+  someone clicked. The one guard is that an admin cannot revoke their **own**
+  `admin` role — an instance can end up with no admin at all and there is no
+  self-service path back. Revoking somebody else's is allowed; it is a normal,
+  reversible act.
+
 - **Migration:** at the start of Component 12, migrate `app_user.role` into
   `user_role` rows and drop the column. Record as an ADR (extending ADR-001)
   when implemented.
@@ -178,6 +187,15 @@ author-role-gated and need no moderation pipeline.
 
 - **Report action:** any registered user can report a shared collection
   (reason enum + optional free text). One open report per user per resource.
+  *Implemented in Component 12 Step 11:* `moderation_report` (migration `0014`)
+  and `services/moderation.py`. The **one-open-report rule is a partial unique
+  index** on `(reporter_id, resource_ref) WHERE status = 'open'`, not
+  application logic — two simultaneous reports would both pass a
+  check-then-insert. Partial on purpose: once a report is resolved the same
+  person may report the same resource again, because it may have changed.
+  Filing is verification-gated. `file_report` **ships without a route**:
+  nothing is reportable until Component 13's shared collections, so 12 delivers
+  the schema, the service and the queue, and 13 wires the button.
 
   ```sql
   CREATE TABLE moderation_report (
@@ -198,6 +216,13 @@ author-role-gated and need no moderation pipeline.
   private; owner keeps it and is notified with the reason). No deletion of
   user content by moderation; no bans in v1 — an admin can revoke
   verification/disable the account via Supabase in egregious cases.
+  *Implemented in Component 12 Step 11:* `/admin/moderation`, oldest first
+  (a queue is worked from the front), filterable by status. **Only dismissal
+  is offered** — unpublish-share needs a shared collection to unpublish and
+  arrives with Component 13 as the first `actioned` outcome;
+  `resolve_report(resolution)` already takes the outcome, so that is a second
+  route rather than a change to the service. Resolving records who and when,
+  and a second resolution is refused so the first one's audit trail survives.
 - The `resource_ref` string keeps the table generic for future reportable
   surfaces without migration.
 

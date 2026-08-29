@@ -1,0 +1,21 @@
+{
+  "usersTitle": "People",
+  "usersLede": "Who has an account and what they may do. Roles are grants, not settings: each one is recorded with who gave it and when. Registration is invite-only until collections ship.",
+  "inviteTitle": "Invite someone",
+  "inviteEmail": "Email address",
+  "invite": "Send invitation",
+  "inviting": "Sending…",
+  "inviteHint": "They receive a link that lets them choose a password. The account starts with no roles at all — grant what they need afterwards.",
+  "inviteSent": "Invitation sent to {{email}}.",
+  "inviteRejected": "That address already has an account.",
+  "search": "Find someone",
+  "searchAction": "Search",
+  "noUsers": "No accounts match.",
+  "noDisplayName": "No display name",
+  "you": "you",
+  "loadMore": "Show more",
+  "role_editor": "Editor",
+  "role_author": "Author",
+  "role_admin": "Admin",
+  "selfDemotionRefused": "You cannot revoke your own admin role — ask another admin to do it."
+}

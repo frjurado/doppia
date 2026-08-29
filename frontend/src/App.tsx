@@ -11,6 +11,8 @@ import VerifyEmail from './routes/VerifyEmail';
 import ForgotPassword from './routes/ForgotPassword';
 import ResetPassword from './routes/ResetPassword';
 import Profile from './routes/Profile';
+import AdminUsers from './routes/AdminUsers';
+import RequireRole from './components/auth/RequireRole';
 import ConceptPage from './routes/ConceptPage';
 import GlossaryIndex from './routes/GlossaryIndex';
 import CorpusBrowser from './routes/CorpusBrowser';
@@ -90,6 +92,14 @@ export default function App() {
                 <RequireAuth>
                   <Profile />
                 </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <RequireRole role="admin">
+                  <AdminUsers />
+                </RequireRole>
               }
             />
             <Route

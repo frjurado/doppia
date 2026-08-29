@@ -23,6 +23,7 @@ import enCommon from './locales/en/common.json';
 import enNav from './locales/en/nav.json';
 import enAuth from './locales/en/auth.json';
 import enProfile from './locales/en/profile.json';
+import enAdmin from './locales/en/admin.json';
 import enBrowse from './locales/en/browse.json';
 import enFragments from './locales/en/fragments.json';
 import enReview from './locales/en/review.json';
@@ -34,6 +35,7 @@ import esCommon from './locales/es/common.json';
 import esNav from './locales/es/nav.json';
 import esAuth from './locales/es/auth.json';
 import esProfile from './locales/es/profile.json';
+import esAdmin from './locales/es/admin.json';
 import esBrowse from './locales/es/browse.json';
 import esFragments from './locales/es/fragments.json';
 import esReview from './locales/es/review.json';
@@ -57,6 +59,7 @@ export const NAMESPACES = [
   'nav',
   'auth',
   'profile',
+  'admin',
   'browse',
   'fragments',
   'review',
@@ -71,6 +74,7 @@ const resources = {
     nav: enNav,
     auth: enAuth,
     profile: enProfile,
+    admin: enAdmin,
     browse: enBrowse,
     fragments: enFragments,
     review: enReview,
@@ -83,6 +87,7 @@ const resources = {
     nav: esNav,
     auth: esAuth,
     profile: esProfile,
+    admin: esAdmin,
     browse: esBrowse,
     fragments: esFragments,
     review: esReview,

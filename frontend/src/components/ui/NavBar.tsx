@@ -23,6 +23,7 @@ export default function NavBar() {
   const { status, user, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const isAdmin = status === 'authenticated' && (user?.roles.includes('admin') ?? false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close the dropdown on an outside click or Escape.
@@ -79,6 +80,19 @@ export default function NavBar() {
         >
           {t('review')}
         </NavLink>
+        {/* Admin-only entry. Step 13 folds this, Review and the corpus
+            browser into one role-gated "Editorial" menu; until then it sits
+            here rather than nowhere, gated so nobody is shown a door that does
+            not open. */}
+        {isAdmin && (
+          <NavLink
+            to="/admin/users"
+            role="listitem"
+            className={({ isActive }) => `${styles.link}${isActive ? ` ${styles.linkActive}` : ''}`}
+          >
+            {t('people')}
+          </NavLink>
+        )}
       </div>
 
       {/* Right slot: language switcher + (user dropdown when logged in, login

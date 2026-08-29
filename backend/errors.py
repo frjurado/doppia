@@ -154,6 +154,17 @@ class HarmonyNotReviewedError(ConflictError):
     code = ErrorCode.HARMONY_NOT_REVIEWED
 
 
+class SelfAdminRevocationError(ConflictError):
+    """An admin tried to revoke their own admin role.
+
+    Not an authorisation failure — the caller is an admin and the request is
+    well formed. It is refused as a state guard: an instance can end up with no
+    admin at all, and there is no self-service path back.
+    """
+
+    code = ErrorCode.SELF_ADMIN_REVOCATION
+
+
 # ── Auth errors ───────────────────────────────────────────────────────────────
 
 

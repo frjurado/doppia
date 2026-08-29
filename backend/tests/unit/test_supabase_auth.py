@@ -362,3 +362,61 @@ async def test_delete_auth_user_maps_an_unreachable_service_to_503(
     with pytest.raises(SupabaseAuthError) as exc:
         await supabase_auth.delete_auth_user("user-1")
     assert exc.value.status_code == 503
+
+
+# ── Admin: invitations (Component 12 Step 10) ─────────────────────────────────
+
+
+async def test_invite_user_posts_with_our_own_return_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``redirect_to`` is a server-side constant, never caller-supplied.
+
+    Supabase does not validate the target at issue time, so a caller-supplied
+    one would make this an open redirect — the same reasoning as the OAuth
+    authorize URL.
+    """
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia.example")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["apikey"] = request.headers.get("apikey")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "user-9"})
+
+    _mock_httpx(monkeypatch, handler)
+    await supabase_auth.invite_user("newcomer@test.com")
+
+    assert seen["path"] == "/auth/v1/invite"
+    assert seen["apikey"] == "service-key"
+    assert seen["body"] == {
+        "email": "newcomer@test.com",
+        "redirect_to": "https://doppia.example/auth/reset-password",
+    }
+
+
+async def test_invite_user_requires_admin_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia.example")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.invite_user("newcomer@test.com")
+    assert exc.value.status_code == 503
+
+
+async def test_invite_user_surfaces_an_already_registered_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Supabase refuses an address that already has an account; so do we."""
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia.example")
+    _mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(422, json={"error": "email_exists"}),
+    )
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.invite_user("already@test.com")
+    assert exc.value.status_code == 422

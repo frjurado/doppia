@@ -728,3 +728,68 @@ async def delete_auth_user(user_id: str) -> None:
             code="invalid_request",
             message="The authentication service refused to delete the account.",
         )
+
+
+async def invite_user(email: str) -> None:
+    """Send a Supabase invitation email.
+
+    The admin path into an invite-only launch: Supabase creates the account in
+    an unconfirmed state and emails a one-time link. Accepting it *is* choosing
+    a password, which is why the SPA handles invite and password-reset links on
+    the same route.
+
+    ``redirect_to`` is our own reset route, not a caller-supplied value — the
+    same reasoning as :func:`oauth_authorize_url`: Supabase does not validate
+    the target at issue time, and a caller-supplied one would make this an open
+    redirect. It must also be in the project's Redirect URLs allowlist, or
+    Supabase silently substitutes the Site URL.
+
+    **The invite email template must use ``{{ .TokenHash }}``**, not
+    ``{{ .ConfirmationURL }}``: the latter routes through Supabase's own
+    ``/verify`` and hands the browser a refresh token in the URL, which is
+    exactly what ADR-035 removed. See ``security-model.md``.
+
+    Args:
+        email: The address to invite.
+
+    Raises:
+        SupabaseAuthError: 503 if Auth is unreachable or the service-role key
+            is unset; the upstream status otherwise (422 for an address that
+            already has an account).
+    """
+    base = _auth_base_url()
+    key = _service_role_key()
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.post(
+                f"{base}/invite",
+                headers=headers,
+                json={
+                    "email": email,
+                    "redirect_to": f"{public_app_url()}/auth/reset-password",
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=response.status_code,
+            code="invalid_request",
+            message="The invitation could not be sent to this address.",
+        )
