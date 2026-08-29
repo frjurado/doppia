@@ -7,6 +7,7 @@ set by the router and never crosses into JavaScript.
 
 from __future__ import annotations
 
+from models.profile import SelfDeclaredRole
 from pydantic import BaseModel, EmailStr
 
 
@@ -96,6 +97,7 @@ class SignUpRequest(BaseModel):
 
     email: EmailStr
     password: str
+    self_declared_role: SelfDeclaredRole | None = None
 
 
 class EmailRequest(BaseModel):

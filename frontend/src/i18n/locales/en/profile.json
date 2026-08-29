@@ -1,0 +1,23 @@
+{
+  "title": "Your account",
+  "email": "Email",
+  "emailUnverified": "Not confirmed yet.",
+  "grantedRoles": "Granted roles",
+  "noGrantedRoles": "None",
+  "grantedRolesHint": "Roles are granted by an administrator and cannot be changed here.",
+  "displayName": "Display name",
+  "selfDeclaredRole": "How would you describe yourself?",
+  "preferNotToSay": "Prefer not to say",
+  "role_student": "Student",
+  "role_educator": "Educator",
+  "role_researcher": "Researcher",
+  "role_hobbyist": "Hobbyist",
+  "role_professional_musician": "Professional musician",
+  "role_other": "Other",
+  "readingHistory": "Keep a history of what I read",
+  "readingHistoryHint": "Off by default. When on, the fragments you open are recorded so you can find them again. You can turn this off at any time.",
+  "save": "Save changes",
+  "saving": "Saving…",
+  "saved": "Saved.",
+  "unverifiedBlocked": "Confirm your email address before changing your profile."
+}

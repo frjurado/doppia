@@ -10,6 +10,7 @@ import Register from './routes/Register';
 import VerifyEmail from './routes/VerifyEmail';
 import ForgotPassword from './routes/ForgotPassword';
 import ResetPassword from './routes/ResetPassword';
+import Profile from './routes/Profile';
 import ConceptPage from './routes/ConceptPage';
 import GlossaryIndex from './routes/GlossaryIndex';
 import CorpusBrowser from './routes/CorpusBrowser';
@@ -80,6 +81,14 @@ export default function App() {
               element={
                 <RequireAuth>
                   <CorpusBrowser />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <RequireAuth>
+                  <Profile />
                 </RequireAuth>
               }
             />

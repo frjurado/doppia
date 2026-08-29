@@ -40,12 +40,17 @@ class AppUser:
         email_verified: Whether Supabase has confirmed the address
             (``email_confirmed_at`` on the token). Unverified accounts may log
             in but not create content — see ``services.permissions.require_verified``.
+        declared_role: The optional self-description captured at registration,
+            read from Supabase user metadata. Profile data, never authorisation:
+            it seeds the ``app_user`` row on first sight and is ignored
+            afterwards, the profile page being authoritative.
     """
 
     id: str
     roles: frozenset[str]
     email: str
     email_verified: bool = False
+    declared_role: str | None = None
 
 
 async def get_current_user(
@@ -82,7 +87,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     if os.environ.get("AUTH_MODE", "supabase") == "supabase" and user.email:
-        await ensure_app_user(db, user.id, user.email)
+        await ensure_app_user(db, user.id, user.email, user.declared_role)
     roles = await load_roles(db, user.id)
     # The role lookup autobegins a transaction on the request-scoped session.
     # Close it: service functions that own a unit of work open their own

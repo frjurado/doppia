@@ -17,6 +17,7 @@ from api.routes.movements import router as movements_router
 from api.routes.public import router as public_router
 from api.routes.public_concepts import router as public_concepts_router
 from api.routes.reviews import router as reviews_router
+from api.routes.users import router as users_router
 from fastapi import APIRouter
 
 # Single public router imported by main.py.
@@ -33,3 +34,4 @@ router.include_router(movements_router)
 router.include_router(public_router)
 router.include_router(public_concepts_router)
 router.include_router(reviews_router)
+router.include_router(users_router)

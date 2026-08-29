@@ -22,10 +22,12 @@ from typing import Any, Protocol
 from errors import AuthorizationError, EmailNotVerifiedError
 
 
-class _Caller(Protocol):
-    """The subset of ``api.dependencies.AppUser`` these helpers read.
+class Caller(Protocol):
+    """The subset of ``api.dependencies.AppUser`` the service layer reads.
 
-    Declared structurally so the service layer does not import the API layer.
+    Declared structurally so services never import the API layer. Any service
+    function that needs the authenticated caller takes this rather than the
+    concrete dataclass.
     """
 
     id: str
@@ -34,7 +36,7 @@ class _Caller(Protocol):
 
 
 def require_owner_or_role(
-    user: _Caller,
+    user: Caller,
     resource: Any,
     *roles: str,
     owner_attr: str = "owner_id",
@@ -74,7 +76,7 @@ def require_owner_or_role(
     )
 
 
-def require_verified(user: _Caller) -> None:
+def require_verified(user: Caller) -> None:
     """Assert that the caller's email address is confirmed.
 
     Checked alongside role checks for every content-creating action: an

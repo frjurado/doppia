@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime
 
 from models.base import Base
-from sqlalchemy import DateTime, ForeignKey, String, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +35,10 @@ class AppUser(Base):
     Roles are not an attribute of the account: they live in
     :class:`UserRole`. An account with no ``user_role`` rows is a plain
     registered user, which is the default for every new registration.
+
+    ``self_declared_role`` is unrelated to that: it is how the user describes
+    themselves, is optional, and grants nothing. The two are deliberately not
+    named alike anywhere they meet in the API.
     """
 
     __tablename__ = "app_user"
@@ -46,6 +50,16 @@ class AppUser(Base):
     )
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    self_declared_role: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        comment="Self-reported, optional, no authorisation meaning (see roles.py)",
+    )
+    reading_history_opt_in: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

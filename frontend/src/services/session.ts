@@ -197,8 +197,18 @@ export async function verifyEmailLink(tokenHash: string, type: string): Promise<
  *
  * @throws AuthError with code `REGISTRATION_CLOSED` while invite-only.
  */
-export async function signUp(email: string, password: string): Promise<void> {
-  await postJson('/api/v1/auth/signup', { email, password });
+export async function signUp(
+  email: string,
+  password: string,
+  selfDeclaredRole?: string | null
+): Promise<void> {
+  await postJson('/api/v1/auth/signup', {
+    email,
+    password,
+    // Optional and editable later on the profile page; omitted rather than
+    // sent as null so "prefer not to say" stays the absence of an answer.
+    ...(selfDeclaredRole ? { self_declared_role: selfDeclaredRole } : {}),
+  });
 }
 
 /** Ask for the confirmation email to be sent again. Always succeeds. */

@@ -462,7 +462,9 @@ async def signup(payload: SignUpRequest) -> Response | JSONResponse:
             ).model_dump(),
         )
     try:
-        await supabase_auth.sign_up(payload.email, payload.password)
+        await supabase_auth.sign_up(
+            payload.email, payload.password, payload.self_declared_role
+        )
     except SupabaseAuthError as exc:
         return _auth_error(exc, on_login=True)
     return Response(status_code=status.HTTP_202_ACCEPTED)

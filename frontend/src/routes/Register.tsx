@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AuthCard from '../components/auth/AuthCard';
 import { AuthError, signUp } from '../services/session';
+import { SELF_DECLARED_ROLES, type SelfDeclaredRole } from '../services/profileApi';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
 
@@ -17,12 +18,17 @@ import styles from '../components/auth/AuthCard.module.css';
  *
  * Success does **not** sign the user in: the account is unverified until the
  * confirmation email is followed, so this hands off to the interstitial.
+ *
+ * The self-description is optional and carries no permissions; it is asked here
+ * only because registration is the natural moment, and is editable afterwards
+ * on the profile page.
  */
 export default function Register() {
   const { t } = useTranslation(['auth', 'errors']);
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [declaredRole, setDeclaredRole] = useState<SelfDeclaredRole | ''>('');
   const [error, setError] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +38,7 @@ export default function Register() {
     setError(null);
     setSubmitting(true);
     try {
-      await signUp(email, password);
+      await signUp(email, password, declaredRole || null);
       navigate(`/auth/verify-email?email=${encodeURIComponent(email)}`, { replace: true });
     } catch (err) {
       if (err instanceof AuthError && err.code === 'REGISTRATION_CLOSED') {
@@ -105,6 +111,28 @@ export default function Register() {
           <Type variant="body-sm" as="p" id="password-hint" className={styles.hint}>
             {t('auth:passwordHint')}
           </Type>
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="declared-role" className={styles.label}>
+            <Type variant="label-md" as="span">
+              {t('auth:selfDeclaredRole')}
+            </Type>
+          </label>
+          <select
+            id="declared-role"
+            value={declaredRole}
+            onChange={(e) => setDeclaredRole(e.target.value as SelfDeclaredRole | '')}
+            className={styles.input}
+            disabled={submitting}
+          >
+            <option value="">{t('auth:preferNotToSay')}</option>
+            {SELF_DECLARED_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {t(`auth:role_${role}`)}
+              </option>
+            ))}
+          </select>
         </div>
 
         {error && (

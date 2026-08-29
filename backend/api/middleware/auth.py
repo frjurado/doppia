@@ -180,11 +180,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Roles are deliberately not read from the token. Supabase's
         # ``app_metadata.role`` was the Phase 1 source of truth; since ADR-037 the
         # ``user_role`` table is, and ``get_current_user`` loads it per request.
+        user_metadata: dict = payload.get("user_metadata") or {}
         request.state.user = AppUser(
             id=sub,
             roles=frozenset(),
             email=email,
             email_verified=_email_verified(payload),
+            declared_role=user_metadata.get("self_declared_role"),
         )
         return await call_next(request)
 

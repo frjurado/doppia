@@ -217,6 +217,17 @@ CREATE TABLE app_user (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email         TEXT UNIQUE NOT NULL,
     display_name  TEXT,
+    -- Self-reported and optional. NOT a permission: the granted set lives in
+    -- user_role, and the two are deliberately never named alike in the API.
+    -- NULL means "prefer not to say", which is better expressed as an absent
+    -- value than as another vocabulary entry (migration 0011).
+    self_declared_role TEXT CHECK (self_declared_role IN
+      ('student', 'educator', 'researcher', 'hobbyist',
+       'professional_musician', 'other')),
+    -- Consent for reading_history. Opt-in by design, so every row starts off
+    -- and only an explicit toggle turns it on. Landed before the table it
+    -- governs: the consent has to exist before anything could be recorded.
+    reading_history_opt_in BOOLEAN NOT NULL DEFAULT false,
     created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -231,12 +242,6 @@ CREATE TABLE user_role (
     PRIMARY KEY (user_id, role)
 );
 
--- TODO (Phase 2): add self_declared_role with a CHECK-constrained vocabulary.
--- Shape under consideration:
---   self_declared_role TEXT CHECK (self_declared_role IN
---     ('student', 'educator', 'researcher', 'hobbyist', 'professional_musician', 'other'))
--- Not added in Phase 1 because the only app_user rows are trusted annotators and admins;
--- the field has no consumer until the reader-facing UI exists in Phase 2.
 ```
 
 **Deferred (Phase 2) — documented here so the intent is captured but not yet schema'd:**

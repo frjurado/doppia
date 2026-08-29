@@ -508,8 +508,50 @@ class TestSignUp:
         )
         assert response.status_code == 202
         assert not response.content
-        sign_up.assert_awaited_once_with("new@test.com", "pw12345678")
+        sign_up.assert_awaited_once_with("new@test.com", "pw12345678", None)
         assert _refresh_set_cookie(response) is None
+
+    async def test_optional_self_description_rides_along(
+        self, auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Asked at registration, parked in Supabase metadata until the row exists.
+
+        It is profile data, not a role: it seeds `app_user.self_declared_role`
+        and grants nothing.
+        """
+        monkeypatch.setenv("REGISTRATION_MODE", "open")
+        sign_up = AsyncMock()
+        monkeypatch.setattr("services.supabase_auth.sign_up", sign_up)
+
+        response = await auth_client.post(
+            "/api/v1/auth/signup",
+            json={
+                "email": "new@test.com",
+                "password": "pw12345678",
+                "self_declared_role": "educator",
+            },
+        )
+        assert response.status_code == 202
+        sign_up.assert_awaited_once_with("new@test.com", "pw12345678", "educator")
+
+    async def test_self_description_outside_the_vocabulary_is_refused(
+        self, auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pydantic guards the API; the CHECK constraint guards the table."""
+        monkeypatch.setenv("REGISTRATION_MODE", "open")
+        sign_up = AsyncMock()
+        monkeypatch.setattr("services.supabase_auth.sign_up", sign_up)
+
+        response = await auth_client.post(
+            "/api/v1/auth/signup",
+            json={
+                "email": "new@test.com",
+                "password": "pw12345678",
+                "self_declared_role": "admin",
+            },
+        )
+        assert response.status_code == 422
+        sign_up.assert_not_awaited()
 
     async def test_malformed_email_is_rejected_before_supabase(
         self, auth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch

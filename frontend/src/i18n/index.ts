@@ -22,6 +22,7 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 import enCommon from './locales/en/common.json';
 import enNav from './locales/en/nav.json';
 import enAuth from './locales/en/auth.json';
+import enProfile from './locales/en/profile.json';
 import enBrowse from './locales/en/browse.json';
 import enFragments from './locales/en/fragments.json';
 import enReview from './locales/en/review.json';
@@ -32,6 +33,7 @@ import enPublic from './locales/en/public.json';
 import esCommon from './locales/es/common.json';
 import esNav from './locales/es/nav.json';
 import esAuth from './locales/es/auth.json';
+import esProfile from './locales/es/profile.json';
 import esBrowse from './locales/es/browse.json';
 import esFragments from './locales/es/fragments.json';
 import esReview from './locales/es/review.json';
@@ -54,6 +56,7 @@ export const NAMESPACES = [
   'common',
   'nav',
   'auth',
+  'profile',
   'browse',
   'fragments',
   'review',
@@ -67,6 +70,7 @@ const resources = {
     common: enCommon,
     nav: enNav,
     auth: enAuth,
+    profile: enProfile,
     browse: enBrowse,
     fragments: enFragments,
     review: enReview,
@@ -78,6 +82,7 @@ const resources = {
     common: esCommon,
     nav: esNav,
     auth: esAuth,
+    profile: esProfile,
     browse: esBrowse,
     fragments: esFragments,
     review: esReview,

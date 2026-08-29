@@ -13,14 +13,22 @@ from __future__ import annotations
 
 import uuid
 
+from errors import UserNotFoundError
+from models.profile import SELF_DECLARED_ROLES, ProfileResponse, ProfileUpdateRequest
 from models.roles import GRANTABLE_ROLES
 from models.user import AppUser, UserRole
+from services.permissions import Caller, require_verified
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def ensure_app_user(db: AsyncSession, user_id: str, email: str) -> None:
+async def ensure_app_user(
+    db: AsyncSession,
+    user_id: str,
+    email: str,
+    self_declared_role: str | None = None,
+) -> None:
     """Insert or refresh the ``app_user`` row backing an authenticated caller.
 
     Supabase Auth owns the account; this mirror row exists so that
@@ -35,10 +43,16 @@ async def ensure_app_user(db: AsyncSession, user_id: str, email: str) -> None:
         db: Async database session.
         user_id: The Supabase user id (the JWT ``sub`` claim).
         email: The user's email address as carried by the token.
+        self_declared_role: Optional registration-time self-description. Seeded
+            **on insert only** — once the row exists the profile page owns the
+            field, and a stale metadata copy must never overwrite a later edit.
     """
+    values: dict = {"id": uuid.UUID(user_id), "email": email}
+    if self_declared_role in SELF_DECLARED_ROLES:
+        values["self_declared_role"] = self_declared_role
     statement = (
         insert(AppUser)
-        .values(id=uuid.UUID(user_id), email=email)
+        .values(**values)
         .on_conflict_do_update(index_elements=[AppUser.id], set_={"email": email})
     )
     await db.execute(statement)
@@ -106,3 +120,119 @@ async def revoke_role(db: AsyncSession, user_id: uuid.UUID, role: str) -> None:
         delete(UserRole).where(UserRole.user_id == user_id, UserRole.role == role)
     )
     await db.commit()
+
+
+async def get_profile(db: AsyncSession, user: Caller) -> ProfileResponse:
+    """Return the caller's own account, roles included read-only.
+
+    Verification status comes from the caller rather than from the row: it lives
+    on the Supabase token, and ``app_user`` deliberately does not mirror it —
+    one source of truth, checked fresh on every request.
+
+    Args:
+        db: Async database session.
+        user: The authenticated caller.
+
+    Returns:
+        The assembled :class:`~models.profile.ProfileResponse`.
+
+    Raises:
+        UserNotFoundError: If no ``app_user`` row exists. In practice the JIT
+            upsert in ``get_current_user`` has already created it, so this means
+            something is genuinely inconsistent rather than merely new.
+    """
+    return await _profile_for(db, user)
+
+
+async def update_profile(
+    db: AsyncSession,
+    user: Caller,
+    payload: ProfileUpdateRequest,
+) -> ProfileResponse:
+    """Apply a partial profile edit for the authenticated caller.
+
+    Only fields actually present in the request are touched: ``None`` means
+    "clear this" for the two nullable fields, so absence has to be distinguished
+    from an explicit null. ``model_fields_set`` is what draws that line.
+
+    Args:
+        db: Async database session.
+        user: The authenticated caller (needs ``id`` and ``email_verified``).
+        payload: The partial edit.
+
+    Returns:
+        The updated profile.
+
+    Raises:
+        EmailNotVerifiedError: If the caller's address is unconfirmed — profile
+            edits are content creation for this purpose.
+        UserNotFoundError: If no ``app_user`` row exists.
+    """
+    require_verified(user)
+
+    row = await _row_for(db, user.id)
+    supplied = payload.model_fields_set
+    if "display_name" in supplied:
+        # An all-whitespace name is not a name; treat it as clearing the field
+        # rather than storing a string that renders as an empty account menu.
+        cleaned = (payload.display_name or "").strip()
+        row.display_name = cleaned or None
+    if "self_declared_role" in supplied:
+        row.self_declared_role = payload.self_declared_role
+    if (
+        "reading_history_opt_in" in supplied
+        and payload.reading_history_opt_in is not None
+    ):
+        row.reading_history_opt_in = payload.reading_history_opt_in
+
+    await db.commit()
+    return await _profile_for(db, user, row=row)
+
+
+async def _row_for(db: AsyncSession, user_id: str) -> AppUser:
+    """Load the caller's ``app_user`` row or raise.
+
+    Args:
+        db: Async database session.
+        user_id: The caller's UUID.
+
+    Returns:
+        The ORM row.
+
+    Raises:
+        UserNotFoundError: If no row exists.
+    """
+    row = await db.get(AppUser, uuid.UUID(user_id))
+    if row is None:
+        raise UserNotFoundError(
+            "No account exists for this caller.", detail={"user_id": user_id}
+        )
+    return row
+
+
+async def _profile_for(
+    db: AsyncSession, user: Caller, *, row: AppUser | None = None
+) -> ProfileResponse:
+    """Assemble the profile response for a caller.
+
+    Args:
+        db: Async database session.
+        user: The authenticated caller (source of verification status).
+        row: The already-loaded row, when the caller has one.
+
+    Returns:
+        The assembled response.
+
+    Raises:
+        UserNotFoundError: If no row exists.
+    """
+    row = row or await _row_for(db, user.id)
+    return ProfileResponse(
+        id=str(row.id),
+        email=row.email,
+        email_verified=user.email_verified,
+        display_name=row.display_name,
+        self_declared_role=row.self_declared_role,
+        reading_history_opt_in=row.reading_history_opt_in,
+        roles=sorted(await load_roles(db, user.id)),
+    )

@@ -456,7 +456,9 @@ async def _auth_post(path: str, body: dict, *, params: dict | None = None) -> di
         return {}
 
 
-async def sign_up(email: str, password: str) -> None:
+async def sign_up(
+    email: str, password: str, self_declared_role: str | None = None
+) -> None:
     """Create an account with email + password, pending email confirmation.
 
     Supabase sends the confirmation email; the account exists but is unverified
@@ -470,18 +472,21 @@ async def sign_up(email: str, password: str) -> None:
     Args:
         email: The address to register.
         password: The chosen password (Supabase enforces its own strength rules).
+        self_declared_role: Optional self-description, parked in Supabase user
+            metadata until the account first authenticates and its ``app_user``
+            row is created. It is only a seed for that row: the profile page is
+            authoritative from then on, and the value grants nothing.
 
     Raises:
         SupabaseAuthError: On rejection (weak password, malformed address) or
             an unreachable service.
     """
+    options: dict = {"email_redirect_to": f"{public_app_url()}/auth/callback"}
+    if self_declared_role:
+        options["data"] = {"self_declared_role": self_declared_role}
     await _auth_post(
         "/signup",
-        {
-            "email": email,
-            "password": password,
-            "options": {"email_redirect_to": f"{public_app_url()}/auth/callback"},
-        },
+        {"email": email, "password": password, "options": options},
     )
 
 

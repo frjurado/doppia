@@ -108,6 +108,14 @@ export default function NavBar() {
                     <span className={styles.menuRole}>{user.roles.join(' · ')}</span>
                   )}
                 </div>
+                <Link
+                  to="/profile"
+                  role="menuitem"
+                  className={styles.menuItem}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {t('profile')}
+                </Link>
                 <button
                   type="button"
                   role="menuitem"
