@@ -208,6 +208,11 @@ author-role-gated and need no moderation pipeline.
 - **Export:** a self-service endpoint producing one JSON document — profile,
   collections (with annotations), exercise history, reading history. No
   editorial content (fragments/reviews belong to the platform record).
+  *Implemented in Component 12 Step 8:* `GET /api/v1/users/me/export`, rate
+  limited in the write category, with a "Download my data" control on the
+  profile page. The exporter is a **registry** of named sections, so
+  Component 13 adds collections by calling `register_section` rather than by
+  editing it (ADR-038, recorded with Step 9).
 - **Deletion:** account deletion
   - *deletes* user-owned content: collections, exercise history, reading
     history, profile, reports filed;

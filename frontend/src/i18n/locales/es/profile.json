@@ -19,5 +19,9 @@
   "save": "Guardar cambios",
   "saving": "Guardando…",
   "saved": "Guardado.",
-  "unverifiedBlocked": "Confirma tu dirección de correo antes de cambiar tu perfil."
+  "unverifiedBlocked": "Confirma tu dirección de correo antes de cambiar tu perfil.",
+  "yourData": "Tus datos",
+  "exportHint": "Descárgalo todo: tu perfil, tu historial de ejercicios y tu historial de lectura, en un solo archivo JSON. Los fragmentos y las revisiones con los que has contribuido forman parte del registro editorial compartido y no se incluyen.",
+  "export": "Descargar mis datos",
+  "exporting": "Preparando…"
 }

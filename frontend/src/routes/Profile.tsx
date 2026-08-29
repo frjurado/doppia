@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../services/api';
 import {
+  downloadExport,
   getProfile,
   SELF_DECLARED_ROLES,
   updateProfile,
@@ -24,6 +25,10 @@ import styles from './Profile.module.css';
  * The reading-history toggle lands before the history it governs (Step 7): the
  * consent has to exist before anything could be recorded under it, and it
  * defaults to off.
+ *
+ * The data export (Step 8) sits at the foot of the page as a secondary action:
+ * it is a right rather than a routine edit, and it is what makes the toggle
+ * above it meaningful — a user can see exactly what has been recorded.
  */
 export default function Profile() {
   const { t } = useTranslation(['profile', 'errors']);
@@ -32,6 +37,9 @@ export default function Profile() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const [displayName, setDisplayName] = useState('');
   const [declaredRole, setDeclaredRole] = useState<SelfDeclaredRole | ''>('');
@@ -78,6 +86,18 @@ export default function Profile() {
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleExport() {
+    setExportError(null);
+    setExporting(true);
+    try {
+      await downloadExport();
+    } catch {
+      setExportError(t('errors:unexpected'));
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -207,6 +227,34 @@ export default function Profile() {
             </Type>
           </button>
         </form>
+      </Surface>
+
+      <Surface layer="container-low" className={styles.panel}>
+        <div className={styles.readonly}>
+          <Type variant="label-md" as="span" className={styles.label}>
+            {t('profile:yourData')}
+          </Type>
+          <Type variant="body-sm" as="p" className={styles.hint}>
+            {t('profile:exportHint')}
+          </Type>
+        </div>
+        {exportError && (
+          <p className={styles.error} role="alert">
+            <Type variant="body-sm" as="span">
+              {exportError}
+            </Type>
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={handleExport}
+          className={styles.secondaryButton}
+          disabled={exporting}
+        >
+          <Type variant="label-md" as="span">
+            {exporting ? t('profile:exporting') : t('profile:export')}
+          </Type>
+        </button>
       </Surface>
     </Surface>
   );

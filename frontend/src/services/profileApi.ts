@@ -38,6 +38,33 @@ export interface ProfileUpdate {
   reading_history_opt_in?: boolean;
 }
 
+/**
+ * Download everything this account owns as one JSON file.
+ *
+ * The document is fetched through `apiFetch` (so it carries the bearer token
+ * like every other call) and handed to the browser as a Blob, rather than
+ * linked to directly: a plain `<a href>` navigation would send no token and
+ * come back 401.
+ *
+ * @returns The filename the browser was asked to save.
+ * @throws ApiError on a failed request.
+ */
+export async function downloadExport(): Promise<string> {
+  const document_ = await apiFetch<Record<string, unknown>>('/api/v1/users/me/export');
+  const filename = `doppia-export-${String(document_.generated_at ?? '').slice(0, 10)}.json`;
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(document_, null, 2)], { type: 'application/json' })
+  );
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  // Revoking immediately would race the download in some browsers; a tick is
+  // enough for the click to have been handled.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return filename;
+}
+
 /** Read the authenticated caller's own profile. */
 export async function getProfile(): Promise<Profile> {
   return apiFetch<Profile>('/api/v1/users/me');

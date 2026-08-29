@@ -95,6 +95,34 @@
   margin: 0;
 }
 
+/* Secondary action: the export is a right, not the page's purpose, so it
+   takes the flat tonal treatment rather than the gradient CTA. Still 0px
+   radius and no 1px border — the tonal step alone carries it. */
+.secondaryButton {
+  align-self: flex-start;
+  padding: var(--spacing-3) var(--spacing-6);
+  background: var(--color-surface-container-high);
+  color: var(--color-primary);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondaryButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
 /* Primary CTA: gradient per design system section 5 "Buttons" */
 .submitButton {
   align-self: flex-start;

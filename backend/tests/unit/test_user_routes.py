@@ -1,9 +1,13 @@
-"""Route-level unit tests for the account profile (Component 12 Step 6).
+"""Route-level unit tests for the account surface (Component 12 Steps 6 and 8).
 
 The profile is the first surface every registered user reaches, so the cases
 that matter most are the ones that keep it *only* theirs: it is gated on
 authentication rather than on a role, writes go through the verification gate,
 and the granted role set is read-only here — changing it is an admin action.
+
+The export route is tested here for what the *route* owns — who it acts for,
+what it returns. That the document itself is complete is proven against a real
+database in ``tests/integration/test_data_rights.py``.
 """
 
 from __future__ import annotations
@@ -212,3 +216,77 @@ class TestUpdateProfile:
         )
         assert response.status_code == 200
         assert response.json()["reading_history_opt_in"] is True
+
+
+class TestExport:
+    """GET /api/v1/users/me/export — the caller's own data, as one document."""
+
+    async def test_returns_the_document_for_the_caller(
+        self,
+        profile_client: tuple[AsyncClient, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client, dev_user = profile_client
+        build = AsyncMock(
+            return_value={
+                "export_version": 1,
+                "generated_at": "2026-08-29T10:00:00+00:00",
+                "user_id": _USER_SUB,
+                "profile": {"id": _USER_SUB},
+                "exercise_history": [],
+                "reading_history": [],
+            }
+        )
+        monkeypatch.setattr("api.routes.users.build_export", build)
+
+        response = await client.get("/api/v1/users/me/export")
+
+        assert response.status_code == 200
+        assert response.json()["user_id"] == _USER_SUB
+        # The id passed to the exporter is the *caller's*, never a parameter:
+        # there is no way to ask this route for somebody else's data.
+        assert build.await_args.args[1] == dev_user.id  # type: ignore[attr-defined]
+
+    async def test_offers_a_filename_for_a_direct_fetch(
+        self,
+        profile_client: tuple[AsyncClient, object],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client, _ = profile_client
+        monkeypatch.setattr(
+            "api.routes.users.build_export",
+            AsyncMock(
+                return_value={
+                    "export_version": 1,
+                    "generated_at": "2026-08-29T10:00:00+00:00",
+                    "user_id": _USER_SUB,
+                }
+            ),
+        )
+        response = await client.get("/api/v1/users/me/export")
+        assert (
+            "doppia-export-2026-08-29.json" in response.headers["content-disposition"]
+        )
+
+    async def test_requires_authentication(self) -> None:
+        """Without the dependency override, a tokenless request is refused."""
+        from api.middleware.auth import AuthMiddleware
+        from api.router import router as api_router
+        from models.base import get_db
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        app = FastAPI(lifespan=_noop_lifespan)
+        app.add_middleware(AuthMiddleware)
+        app.include_router(api_router)
+
+        async def _mock_db() -> AsyncGenerator[AsyncMock, None]:
+            yield AsyncMock(spec=AsyncSession)
+
+        # Overridden only so the session dependency resolves; the 401 comes
+        # from ``get_current_user``, before anything touches it.
+        app.dependency_overrides[get_db] = _mock_db
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.get("/api/v1/users/me/export")
+        assert response.status_code == 401

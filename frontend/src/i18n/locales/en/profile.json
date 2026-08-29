@@ -19,5 +19,9 @@
   "save": "Save changes",
   "saving": "Saving…",
   "saved": "Saved.",
-  "unverifiedBlocked": "Confirm your email address before changing your profile."
+  "unverifiedBlocked": "Confirm your email address before changing your profile.",
+  "yourData": "Your data",
+  "exportHint": "Download everything this account holds — your profile, exercise history and reading history — as a single JSON file. Fragments and reviews you have contributed are part of the shared editorial record and are not included.",
+  "export": "Download my data",
+  "exporting": "Preparing…"
 }

@@ -17,7 +17,7 @@ import Profile from '../Profile';
 
 vi.mock('../../services/profileApi', async () => {
   const actual = await vi.importActual<typeof profileApi>('../../services/profileApi');
-  return { ...actual, getProfile: vi.fn(), updateProfile: vi.fn() };
+  return { ...actual, getProfile: vi.fn(), updateProfile: vi.fn(), downloadExport: vi.fn() };
 });
 
 function profile(overrides: Partial<ProfileData> = {}): ProfileData {
@@ -107,6 +107,30 @@ describe('Profile', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/confirm your email/i);
+    });
+  });
+
+  it('offers the data export and reports a failure without losing the page', async () => {
+    // The export is a right, so a failed download must not look like a broken
+    // profile: the form stays, and only the export reports the error.
+    vi.mocked(profileApi.getProfile).mockResolvedValue(profile());
+    vi.mocked(profileApi.downloadExport).mockRejectedValueOnce(
+      new ApiError('API_ERROR', 'nope', 500)
+    );
+    render(<Profile />);
+
+    const button = await screen.findByRole('button', { name: /download my data/i });
+    await userEvent.click(button);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument();
+
+    vi.mocked(profileApi.downloadExport).mockResolvedValueOnce('doppia-export.json');
+    await userEvent.click(button);
+    await waitFor(() => {
+      expect(profileApi.downloadExport).toHaveBeenCalledTimes(2);
     });
   });
 });
