@@ -38,7 +38,7 @@ export default function VerifyEmail() {
 
   return (
     <AuthCard subtitle={t('auth:verifySubtitle')}>
-      <Type variant="body-md" as="p">
+      <Type variant="body-lg" as="p">
         {email ? t('auth:verifySentTo', { email }) : t('auth:verifySent')}
       </Type>
       <Type variant="body-sm" as="p" className={styles.hint}>

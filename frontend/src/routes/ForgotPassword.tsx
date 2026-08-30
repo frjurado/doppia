@@ -42,7 +42,7 @@ export default function ForgotPassword() {
   return (
     <AuthCard subtitle={t('auth:forgotSubtitle')}>
       {sent ? (
-        <Type variant="body-md" as="p" role="status">
+        <Type variant="body-lg" as="p" role="status">
           {t('auth:resetSent', { email })}
         </Type>
       ) : (

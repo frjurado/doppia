@@ -74,7 +74,7 @@ export default function ResetPassword() {
   if (redeeming || status === 'loading') {
     return (
       <AuthCard subtitle={subtitle}>
-        <Type variant="body-md" as="p">
+        <Type variant="body-lg" as="p">
           {t('auth:checkingLink')}
         </Type>
       </AuthCard>
@@ -84,7 +84,7 @@ export default function ResetPassword() {
   if (linkFailed || status === 'anonymous') {
     return (
       <AuthCard subtitle={subtitle}>
-        <Type variant="body-md" as="p" role="status">
+        <Type variant="body-lg" as="p" role="status">
           {t('auth:resetLinkExpired')}
         </Type>
         <p className={styles.note}>
@@ -102,7 +102,7 @@ export default function ResetPassword() {
     <AuthCard subtitle={subtitle}>
       {done ? (
         <>
-          <Type variant="body-md" as="p" role="status">
+          <Type variant="body-lg" as="p" role="status">
             {invited ? t('auth:inviteDone') : t('auth:resetDone')}
           </Type>
           <p className={styles.note}>

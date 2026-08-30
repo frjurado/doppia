@@ -85,7 +85,7 @@ export default function AdminModeration() {
       <Type variant="display-sm" as="h1" className={styles.title}>
         {t('admin:moderationTitle')}
       </Type>
-      <Type variant="body-md" as="p" className={styles.lede}>
+      <Type variant="body-lg" as="p" className={styles.lede}>
         {t('admin:moderationLede')}
       </Type>
 
@@ -121,7 +121,7 @@ export default function AdminModeration() {
 
         {reports.length === 0 && !loadError ? (
           <p className={styles.empty}>
-            <Type variant="body-md" as="span">
+            <Type variant="body-lg" as="span">
               {filter === 'open' ? t('admin:noOpenReports') : t('admin:noReports')}
             </Type>
           </p>
@@ -130,7 +130,7 @@ export default function AdminModeration() {
             {reports.map((report) => (
               <li key={report.id} className={styles.row}>
                 <span className={styles.rowMain}>
-                  <Type variant="body-md" as="span">
+                  <Type variant="body-lg" as="span">
                     {t(`admin:reason_${report.reason}`, { defaultValue: report.reason })} ·{' '}
                     {report.resource_ref}
                   </Type>

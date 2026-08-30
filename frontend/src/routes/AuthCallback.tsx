@@ -62,7 +62,7 @@ export default function AuthCallback() {
 
   return (
     <Surface layer="base">
-      <Type variant="body-md" as="p" role={error ? 'alert' : undefined}>
+      <Type variant="body-lg" as="p" role={error ? 'alert' : undefined}>
         {error ?? t('auth:completingSignIn')}
       </Type>
     </Surface>

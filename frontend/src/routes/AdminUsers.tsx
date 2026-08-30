@@ -122,7 +122,7 @@ export default function AdminUsers() {
       <Type variant="display-sm" as="h1" className={styles.title}>
         {t('admin:usersTitle')}
       </Type>
-      <Type variant="body-md" as="p" className={styles.lede}>
+      <Type variant="body-lg" as="p" className={styles.lede}>
         {t('admin:usersLede')}
       </Type>
 
@@ -201,7 +201,7 @@ export default function AdminUsers() {
 
         {users.length === 0 && !loadError ? (
           <p className={styles.empty}>
-            <Type variant="body-md" as="span">
+            <Type variant="body-lg" as="span">
               {t('admin:noUsers')}
             </Type>
           </p>
@@ -210,7 +210,7 @@ export default function AdminUsers() {
             {users.map((account) => (
               <li key={account.id} className={styles.row}>
                 <span className={styles.rowMain}>
-                  <Type variant="body-md" as="span">
+                  <Type variant="body-lg" as="span">
                     {account.display_name || account.email}
                   </Type>
                   <Type variant="body-sm" as="span" className={styles.rowMeta}>

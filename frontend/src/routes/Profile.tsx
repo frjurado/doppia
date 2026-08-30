@@ -105,7 +105,7 @@ export default function Profile() {
     return (
       <Surface layer="base" className={styles.page}>
         <p className={styles.error} role="alert">
-          <Type variant="body-md" as="span">
+          <Type variant="body-lg" as="span">
             {loadError}
           </Type>
         </p>
@@ -126,7 +126,7 @@ export default function Profile() {
           <Type variant="label-md" as="span" className={styles.label}>
             {t('profile:email')}
           </Type>
-          <Type variant="body-md" as="span">
+          <Type variant="body-lg" as="span">
             {profile.email}
           </Type>
           {!profile.email_verified && (
@@ -140,7 +140,7 @@ export default function Profile() {
           <Type variant="label-md" as="span" className={styles.label}>
             {t('profile:grantedRoles')}
           </Type>
-          <Type variant="body-md" as="span">
+          <Type variant="body-lg" as="span">
             {profile.roles.length > 0 ? profile.roles.join(' · ') : t('profile:noGrantedRoles')}
           </Type>
           <Type variant="body-sm" as="span" className={styles.hint}>
@@ -197,7 +197,7 @@ export default function Profile() {
               disabled={saving}
             />
             <label htmlFor="reading-history">
-              <Type variant="body-md" as="span">
+              <Type variant="body-lg" as="span">
                 {t('profile:readingHistory')}
               </Type>
             </label>

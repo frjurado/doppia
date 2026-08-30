@@ -77,7 +77,7 @@ consulted for authorisation.**
    sits alongside them as a precondition, not a third mechanism.
 
 7. **The dev bypass grants identity only.** `AUTH_MODE=local` resolves roles
-   from `user_role` exactly as staging does; `scripts/seed_dev_users.py` grants
+   from `user_role` exactly as staging does; `backend/scripts/seed_dev_users.py` grants
    the two dev identities their roles.
 
 Existing `app_metadata.role` values in Supabase are migrated once by `0010`'s

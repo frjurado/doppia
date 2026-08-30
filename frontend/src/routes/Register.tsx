@@ -55,7 +55,7 @@ export default function Register() {
   if (closed) {
     return (
       <AuthCard subtitle={t('auth:registerSubtitle')}>
-        <Type variant="body-md" as="p" role="status">
+        <Type variant="body-lg" as="p" role="status">
           {t('auth:registrationClosed')}
         </Type>
         <p className={styles.note}>
