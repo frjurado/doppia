@@ -1,9 +1,9 @@
 # Staging score loading fails — R2 S3 endpoint unreachable from Orange España
 
-**Date:** 2026-08-29
+**Date:** 2026-08-29 · **Updated:** 2026-08-30 (second opinion + re-probe)
 **Author:** Francisco (symptom report, network-side confirmation) · investigation in Claude Code
 **Source:** Staging (`doppia-staging.fly.dev`) returning "Failed to fetch" on every score load, reported alongside a Fly Doctor port warning and a recurring Neo4j deprecation notice in the logs.
-**Status:** **Diagnosed and confirmed.** Not a defect in Doppia. Workaround in place (Cloudflare WARP, verified by Francisco). A durable fix is **proposed below but NOT implemented** — it conflicts with ADR-002 and needs a decision first.
+**Status:** **Diagnosed and confirmed.** Not a defect in Doppia. Workaround in place (Cloudflare WARP, verified by Francisco). A 2026-08-30 re-probe (§ 6) found the endpoint reachable again but the routing hole only **partially** healed — this is ongoing instability, not a closed incident. A durable fix is **proposed below but NOT implemented** — it needs an ADR decision first. The action plan is split into short-term (unconditional) and long-term (decision-gated) items under § Follow-ups.
 
 **Bottom line: Orange España is not routing the Cloudflare anycast prefixes that R2's S3 API endpoint lives on.** The browser must reach `<account>.r2.cloudflarestorage.com` directly to fetch presigned MEI and SVG artifacts; from Orange, TCP connections to that host are silently dropped. Everything else in the stack — Fly, Supabase, Neo4j, the API, DNS, CORS, CSP — is healthy. The two log messages that prompted the investigation are both red herrings.
 
@@ -131,6 +131,66 @@ HTTP response received: 403  -> endpoint is UP
 > paths hit the same missing route. Testing over mobile on the same carrier is
 > not an independent vantage point — the Fly machine is.
 
+### 6 — Re-probe on 2026-08-30: partial restoration, not a full recovery
+
+The same probe battery, run from the same Orange fixed line one day later:
+
+| Address | Host | 2026-08-29 | 2026-08-30 |
+|---|---|---|---|
+| `172.64.66.1` | R2 S3 endpoint | dead | **connects, 76 ms** |
+| `172.64.190.1` | R2 S3 endpoint | dead | **connects, 15 ms** |
+| `172.64.128.1` | Cloudflare | dead | **still dead** (8 s timeout) |
+| `188.114.97.5` | `check-host.net` (Cloudflare) | dead | connects, 15 ms |
+| `104.18.50.34` | `pub-*.r2.dev` soundfonts | connects | connects, 16 ms |
+
+An unsigned HTTPS request to the R2 hostname now returns `400` with a 39 ms
+connect — the endpoint is up, and score loading works again without WARP. But
+`172.64.128.1` remains unroutable, so the hole in Orange's routing of
+Cloudflare's `172.64.0.0/13` space has only partially healed. The R2 prefixes
+happen to be routed again today. **Treat this as ongoing instability with a
+real chance of recurrence, not a resolved one-off.**
+
+---
+
+## Exposure assessment — second opinion, 2026-08-30
+
+How frequent and how problematic are two different questions, with opposite
+answers:
+
+- **Frequency: low, but not negligible.** ISP-level failures to route a subset
+  of Cloudflare's anycast prefixes are a known, recurring class of incident in
+  Europe (peering and route-announcement friction with large incumbents,
+  Orange included, has history). They are sporadic and usually resolve in
+  hours to days — consistent with §6. The proposal's claim that this "will hit
+  real users on other ISPs" is a projection; the honest statement is that it
+  *can*, at a low base rate. When it does, it is not a tail-of-the-tail event:
+  Orange España alone is roughly a quarter of Spanish broadband.
+- **Severity: total, and invisible to us.** While active, the core surface
+  (every score, every thumbnail) is dead with an opaque `Failed to fetch`, and
+  the app can neither detect nor recover. Critically, the failure is
+  **vantage-dependent**: staging looks perfectly healthy from Fly and from any
+  uptime checker. Server-side monitoring can never see this failure class —
+  only client-side telemetry can.
+
+Current blast radius: one developer, on an internal-only staging, with a
+working workaround. Real exposure, zero urgency.
+
+### Next-occurrence playbook
+
+The 2026-08-29 evidence took an evening to gather; the next occurrence should
+take minutes.
+
+1. **Capture.** Timestamp it and run the probe battery: curl the R2 hostname,
+   TCP-connect the five reference addresses in §6, traceroute one working and
+   one dead address. (Short-term follow-up: script this.)
+2. **Get an independent vantage inside Orange.** RIPE Atlas has probes in
+   Orange España's AS; a measurement toward `172.64.66.1` distinguishes an
+   Orange-wide routing hole from a single-line problem — the one axis the
+   original investigation could not resolve (mobile data shares the same AS,
+   see the note under §5).
+3. **Confirm from outside.** The Fly machine remains the decisive control (§5).
+4. **Work around.** WARP, immediately (§ Temporary fix).
+
 ---
 
 ## Red herrings
@@ -219,15 +279,31 @@ SVGs, fragment-preview SVGs. Each new route carries the same role gate as the
 - Same-origin: no CORS, and `connect-src` can drop `*.r2.cloudflarestorage.com`.
 - Failures become real HTTP statuses inside the error envelope, not opaque
   network errors — so they are diagnosable and translatable.
+- Better security posture: `require_role()` is re-checked on every fetch and
+  access is instantly revocable, replacing hour-long bearer-capability URLs
+  (a presigned URL grants access to whoever holds it until it expires).
+- Better browser caching is *possible*, not lost. Presigned URLs are unique
+  per call — the signature covers the request time
+  ([backend/services/object_storage.py:181-187](../../backend/services/object_storage.py#L181-L187))
+  — so today the browser cache gets a fresh URL every page view and can reuse
+  nothing. A stable proxy URL plus `ETag`/`Cache-Control` caches strictly
+  better. (This corrects the 2026-08-29 draft, which listed free caching as
+  something the proxy would forfeit.)
 
 **What it costs**
 
 - All artifact egress moves through Fly, on a 512 MB shared-CPU VM.
+- Egress economics shift: R2→browser egress is free — a stated reason ADR-002
+  chose R2 — while Fly→browser outbound is metered above Fly's allowance.
+  Negligible at Phase-1 volume, but it erodes an ADR-002 rationale and belongs
+  in the ADR text.
 - Incipit SVGs are the volume concern, not MEI: the browse grid requests many
   per page view.
-- Adds a hop to every artifact fetch and forfeits R2's edge proximity.
-- Needs explicit `ETag` / `Cache-Control` handling to avoid re-streaming
-  immutable objects — presigned URLs get caching behaviour for free today.
+- Adds a hop to every artifact fetch and forfeits R2's edge proximity. (No new
+  cold-start cost, though: the `-url` call already wakes the scaled-to-zero
+  machine today.)
+- Needs the explicit `ETag` / `Cache-Control` handling described above, and a
+  streaming response rather than buffering bodies in memory on the 512 MB VM.
 
 ### Conflicts to resolve before writing code
 
@@ -247,7 +323,7 @@ SVGs, fragment-preview SVGs. Each new route carries the same role gate as the
 |---|---|
 | **R2 custom domain** (e.g. `assets.doppia.app`) | **Rejected.** Custom domains serve objects publicly and do not honour S3 presigned signatures. It would make the private bucket public — unacceptable. Still the right answer for the *public* soundfonts bucket, as [docs/deployment.md](../deployment.md) § 4 already recommends. |
 | **Cloudflare Worker on a custom domain**, implementing its own signed-token auth in front of R2 | Viable and keeps egress off Fly, but adds a third deployment target and a bespoke auth scheme to maintain. Disproportionate for Phase 1. |
-| **Presigned-first, proxy on fallback** — try R2 directly, retry through the backend when the fetch throws | Preserves today's egress profile and only pays the proxy cost for affected clients. Costs a failed request plus timeout on every load for those clients, and two code paths to keep correct. Worth weighing if egress turns out to be the blocking objection. |
+| **Presigned-first, proxy on fallback** — try R2 directly, retry through the backend when the fetch throws | **Rejected** (2026-08-30 review; the 08-29 draft left it open). Every affected client pays a multi-second timeout on every score load before the fallback fires, and it puts two code paths on the product's core fetch — a standing correctness tax for a rare event. |
 | **Do nothing** | Defensible only while staging is internal-only and every user can be told to install WARP. Not defensible once there are external users. |
 
 ### Recommendation
@@ -258,15 +334,42 @@ Decide on incipit and preview SVGs separately once there is a real measurement
 of browse-grid volume. Neither should be written before the ADR question in (1)
 is settled.
 
+The 2026-08-30 second opinion **agrees with the direction but decouples the
+urgency**: with staging internal-only, the incident (partially) recovered, and
+WARP covering the one affected developer, nothing is on fire. The unconditional
+short-term items below are worth doing now regardless of the ADR outcome; the
+proxy decision itself can wait for a natural slot rather than interrupting
+Component 12. On ADR shape: prefer a **new ADR referencing ADR-002** over an
+amendment — the store-the-key model survives intact (keys stay canonical,
+presigning stays for backend use); only browser delivery changes.
+
 ---
 
 ## Follow-ups
 
-- [ ] **Decision required:** accept, modify, or reject the proxy proposal; if
-      accepted, write the ADR before any code.
-- [x] Raise health-check `grace_period` from `10s` to `30s` in
-      [fly.toml](../../fly.toml) — done and deployed, 2026-08-29.
+### Short term — unconditional, no decision needed
+
+- [ ] **Frontend failure discriminator + specific message.** When an artifact
+      fetch throws `TypeError`, fire a canary fetch to the public
+      `pub-*.r2.dev` soundfont host. Private-dead-but-public-alive is this
+      failure's fingerprint (§ Symptom): show "your network can't reach our
+      storage provider" instead of the raw `Failed to fetch`, and log the
+      event. This is the only telemetry that can see this failure class
+      (§ Exposure assessment) and it pays off whatever the ADR decides.
+- [ ] **Repeatable probe script** implementing step 1 of the next-occurrence
+      playbook, so the next capture takes minutes, not an evening.
+- [ ] Optional: report upstream on `community.cloudflare.com`
+      (Network/Peering) with the §3/§4/§6 evidence — see § Temporary fix.
 - [ ] Optional cleanup: scoped `CALL (c) {` syntax in
       [backend/graph/queries/concepts.py](../../backend/graph/queries/concepts.py).
-- [ ] Consider surfacing a specific user-facing message when an artifact fetch
-      fails at the network layer, instead of the raw `Failed to fetch`.
+- [x] Raise health-check `grace_period` from `10s` to `30s` in
+      [fly.toml](../../fly.toml) — done and deployed, 2026-08-29.
+
+### Long term — decision-gated
+
+- [ ] **ADR decision on the MEI proxy.** Recommendation: accept, as a new ADR
+      referencing ADR-002. Write the ADR before any code; schedule at a
+      natural slot (post-Component-12), since WARP covers the current exposure.
+- [ ] **Incipit / fragment-preview SVG delivery.** Decide separately, only
+      after measuring real browse-grid volume; until then they stay on
+      presigned URLs.
