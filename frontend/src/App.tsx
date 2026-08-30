@@ -1,6 +1,7 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './components/auth/AuthContext';
 import RequireAuth from './components/auth/RequireAuth';
+import EmailLinkRedirect from './components/auth/EmailLinkRedirect';
 import BrowsingLayout from './components/ui/BrowsingLayout';
 import PublicLayout from './components/ui/PublicLayout';
 import ErrorBoundary from './components/ui/ErrorBoundary';
@@ -38,122 +39,127 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/auth/verify-email" element={<VerifyEmail />} />
-          <Route path="/auth/forgot-password" element={<ForgotPassword />} />
-          <Route path="/auth/reset-password" element={<ResetPassword />} />
+        {/* Sits above the route tree because an emailed token can arrive at any
+            path: Supabase silently substitutes its Site URL when redirect_to is
+            not allowlisted. See EmailLinkRedirect. */}
+        <EmailLinkRedirect>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/auth/verify-email" element={<VerifyEmail />} />
+            <Route path="/auth/forgot-password" element={<ForgotPassword />} />
+            <Route path="/auth/reset-password" element={<ResetPassword />} />
 
-          {/* Public (anonymous) read path — Component 10 Step 5. No RequireAuth;
+            {/* Public (anonymous) read path — Component 10 Step 5. No RequireAuth;
             a minimal public shell (no editor nav). The corpus browser and
             whole-movement score viewer stay editorial and are not exposed
             here. */}
-          <Route
-            element={
-              <ErrorBoundary>
-                <PublicLayout />
-              </ErrorBoundary>
-            }
-          >
-            <Route path="/public/concepts" element={<PublicFragmentBrowser />} />
             <Route
-              path="/public/fragments/:fragmentId"
-              element={<FragmentDetail loadFragment={getPublicFragment} publicMode />}
-            />
-            {/* Concept glossary — Component 11. The browse-by-domain index
+              element={
+                <ErrorBoundary>
+                  <PublicLayout />
+                </ErrorBoundary>
+              }
+            >
+              <Route path="/public/concepts" element={<PublicFragmentBrowser />} />
+              <Route
+                path="/public/fragments/:fragmentId"
+                element={<FragmentDetail loadFragment={getPublicFragment} publicMode />}
+              />
+              {/* Concept glossary — Component 11. The browse-by-domain index
               (Step 7) is the public entry surface; each concept page (Step 5)
               is keyed on the immutable concept id (§ Decisions 1). */}
-            <Route path="/glossary" element={<GlossaryIndex />} />
-            <Route path="/glossary/:conceptId" element={<ConceptPage />} />
-          </Route>
+              <Route path="/glossary" element={<GlossaryIndex />} />
+              <Route path="/glossary/:conceptId" element={<ConceptPage />} />
+            </Route>
 
-          {/* Browsing views share the NavBar via BrowsingLayout (no auth gate here).
+            {/* Browsing views share the NavBar via BrowsingLayout (no auth gate here).
             RequireAuth is on each child so unauthenticated users still see the
             nav bar — and the Login button — before being redirected. */}
-          <Route
-            element={
-              <ErrorBoundary>
-                <BrowsingLayout />
-              </ErrorBoundary>
-            }
-          >
             <Route
-              path="/"
               element={
-                <RequireAuth>
-                  <CorpusBrowser />
-                </RequireAuth>
+                <ErrorBoundary>
+                  <BrowsingLayout />
+                </ErrorBoundary>
               }
-            />
-            <Route
-              path="/profile"
-              element={
-                <RequireAuth>
-                  <Profile />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/admin/users"
-              element={
-                <RequireRole role="admin">
-                  <AdminUsers />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/admin/moderation"
-              element={
-                <RequireRole role="admin">
-                  <AdminModeration />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/review-queue"
-              element={
-                <RequireAuth>
-                  <ReviewQueue />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/concepts"
-              element={
-                <RequireAuth>
-                  <FragmentBrowser />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/fragments/:fragmentId"
-              element={
-                <RequireAuth>
-                  <FragmentDetail />
-                </RequireAuth>
-              }
-            />
-          </Route>
+            >
+              <Route
+                path="/"
+                element={
+                  <RequireAuth>
+                    <CorpusBrowser />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/profile"
+                element={
+                  <RequireAuth>
+                    <Profile />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/admin/users"
+                element={
+                  <RequireRole role="admin">
+                    <AdminUsers />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/admin/moderation"
+                element={
+                  <RequireRole role="admin">
+                    <AdminModeration />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/review-queue"
+                element={
+                  <RequireAuth>
+                    <ReviewQueue />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/concepts"
+                element={
+                  <RequireAuth>
+                    <FragmentBrowser />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/fragments/:fragmentId"
+                element={
+                  <RequireAuth>
+                    <FragmentDetail />
+                  </RequireAuth>
+                }
+              />
+            </Route>
 
-          {/* Score viewer is full-screen; no shared nav */}
-          <Route
-            path="/scores/:movementId"
-            element={
-              <RequireAuth>
-                <ScoreViewer />
-              </RequireAuth>
-            }
-          />
+            {/* Score viewer is full-screen; no shared nav */}
+            <Route
+              path="/scores/:movementId"
+              element={
+                <RequireAuth>
+                  <ScoreViewer />
+                </RequireAuth>
+              }
+            />
 
-          {/* Throwaway rendering spike (Component 10 Step 12) — dev builds only,
+            {/* Throwaway rendering spike (Component 10 Step 12) — dev builds only,
             never shipped to production. Findings report:
             docs/reports/component-10-horizontal-rendering-spike.md */}
-          {import.meta.env.DEV && (
-            <Route path="/spike/horizontal" element={<HorizontalRenderSpike />} />
-          )}
-        </Routes>
+            {import.meta.env.DEV && (
+              <Route path="/spike/horizontal" element={<HorizontalRenderSpike />} />
+            )}
+          </Routes>
+        </EmailLinkRedirect>
       </AuthProvider>
     </BrowserRouter>
   );

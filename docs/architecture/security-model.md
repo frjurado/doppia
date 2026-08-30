@@ -212,6 +212,37 @@ the SPA from the same app). Do not add `Authorization` to the public policy to
   at issue time. It must also be in the project's Redirect URLs allowlist, or
   Supabase silently substitutes the Site URL.
 
+**The Site-URL fallback, and why the SPA now survives it** (staging,
+2026-08-30). `redirect_to=<PUBLIC_APP_URL>/auth/reset-password` was not on the
+staging project's Redirect URLs allowlist, so Supabase replaced the path with
+the Site URL and sent the invitation as `https://doppia-staging.fly.dev/?token_hash=…&type=invite`.
+The **query string survives; the path does not.**
+
+Nothing at `/` reads a token, so the invitee's browser ran the ordinary
+anonymous bootstrap (`POST /auth/refresh` → 401, correct), `RequireAuth` sent
+them to `/login`, and the token was discarded. The account could not be
+created, and there was nothing on screen to say why — the failure is entirely
+silent, and the only symptom is a support request.
+
+The allowlist entry is the fix and every environment needs its own. But because
+the failure mode is silent and repeats per environment,
+`components/auth/EmailLinkRedirect.tsx` sits above the route tree and forwards
+any request carrying `token_hash` plus a known `type` to that type's redemption
+route, query string intact:
+
+| `type` | redeemed at |
+|---|---|
+| `invite`, `recovery` | `/auth/reset-password` (both end in choosing a password) |
+| `signup`, `email_change` | `/auth/callback` (session only) |
+
+It changes nothing about redemption — still one server-side call, credential
+never in JavaScript (ADR-035). It only ensures the code that redeems is the
+code that runs. An unknown `type` is left alone rather than guessed at.
+
+**Checklist when adding an environment:** every route that ends an auth flow
+needs an allowlist entry — `/auth/callback` (OAuth, email confirmation) and
+`/auth/reset-password` (recovery, invitation) — plus the Site URL itself.
+
 The frontend's `RequireRole` route guard and the role-gated nav links are
 **presentation, not permission**. Removing them would leak nothing; they exist
 so nobody is shown a door that does not open.

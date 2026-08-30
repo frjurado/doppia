@@ -51,7 +51,7 @@ NEO4J_PASSWORD=<auradb-password>
 DATABASE_URL=postgresql+asyncpg://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
-SUPABASE_SERVICE_ROLE_KEY=<service-role-key>   # required from Component 12: account deletion
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>   # required from Component 12: account deletion, invitations
 
 # Cloudflare R2
 R2_ACCOUNT_ID=<account-id>
