@@ -145,10 +145,13 @@ False positive caused by scale-to-zero. [fly.toml](../../fly.toml) sets
 Measured behaviour: first request `200` in **14.1–14.3 s** (cold boot), then
 `200` in **0.15 / 0.17 / 0.27 s** warm. The app binds `0.0.0.0:8000` correctly.
 
-Related but separate: the health check's `grace_period` is `10s`, shorter than
-the measured ~14 s cold boot, which makes the check flap on every wake and feeds
-Doctor's complaint. **Raising it to `30s` is a known, agreed follow-up, held
-pending Francisco's call — deliberately not changed as part of this report.**
+Related but separate: the health check's `grace_period` was `10s`, shorter than
+the measured ~14 s cold boot, which made the check fail on every wake and fed
+Doctor's complaint. **Raised to `30s` in [fly.toml](../../fly.toml) and
+deployed on 2026-08-29.** Note that this fixes the flapping check and the
+`1 warning` on `fly status`; Fly Doctor may still report the port warning,
+because with `min_machines_running = 0` it can continue to probe a stopped
+machine. That remaining warning is benign.
 
 **Neo4j: `Neo.ClientNotification.Statement.FeatureDeprecationWarning`.**
 Log noise, `severity: WARNING`, emitted at `level: info`. It reports the scoped
@@ -261,8 +264,8 @@ is settled.
 
 - [ ] **Decision required:** accept, modify, or reject the proxy proposal; if
       accepted, write the ADR before any code.
-- [ ] Raise health-check `grace_period` from `10s` to `30s` in
-      [fly.toml](../../fly.toml) — agreed, awaiting Francisco's call.
+- [x] Raise health-check `grace_period` from `10s` to `30s` in
+      [fly.toml](../../fly.toml) — done and deployed, 2026-08-29.
 - [ ] Optional cleanup: scoped `CALL (c) {` syntax in
       [backend/graph/queries/concepts.py](../../backend/graph/queries/concepts.py).
 - [ ] Consider surfacing a specific user-facing message when an artifact fetch
