@@ -254,9 +254,19 @@ the topbar work.
 | Collection editing | Degrade gracefully |
 | Tagging tool, blog authoring, admin, presentation mode | Desktop-only |
 
-Open technical check: Verovio at narrow widths (vertical scroll + small scale
-— expected fine, needs an afternoon of testing) and the scrollytelling
-fallback layout on phones (a Component 16 design decision).
+**Landed 2026-08-31 (Component 12 Step 12):** the addendum is in `DESIGN.md`
+§ 7 — breakpoints, the mobile nav pattern, layout-width set, touch-target
+minimum, and this matrix, which § 7.2 now carries authoritatively. The Verovio
+narrow-width check is done: below a ~552px viewport notation is *optically
+scaled* (Verovio's pageWidth is clamped at 480px and the SVG is CSS-scaled to
+fit) rather than reflowed, which is accepted and recorded as intended; bracket
+overlays stay aligned through the downscale and no public surface scrolls
+horizontally at any width. Guarded by `frontend/e2e/narrow-width.spec.ts`. Two
+scoped follow-ups (glossary example-card layout below `sm`; sub-part label
+scaling, folded into M5) went to Component 12 Step 14.
+
+Still open: the scrollytelling fallback layout on phones (a Component 16
+design decision).
 
 ### Carried in from the Component 11 triage (2026-08-25)
 

@@ -285,6 +285,20 @@ public surfaces — glossary, fragment detail. Findings noted in the addendum;
 anything ugly becomes a scoped follow-up, not a blocker (the matrix already
 commits only the reading surfaces to full mobile support).
 
+**Done 2026-08-31.** `DESIGN.md` § 7 carries the addendum: three breakpoints
+(`sm` 600 / `md` 900 / `lg` 1280, `sm` derived from the measured 552–560px
+point where notation stops being downscaled), the support matrix, the
+layout-width set that Step 14's F10 tokenises, the below-`sm` disclosure-nav
+pattern Step 13 builds to, and a 44px touch-target minimum (nothing on the
+public reading path currently meets it — Step 14 / F12). Verovio check: below
+`sm` notation is **optically scaled, not reflowed** (pageWidth clamped at
+480px, SVG CSS-scaled to ~0.60× at 360px); accepted as intended, since a 26px
+staff is near print size and reflowing would give ~2 bars per system. The two
+risks did not materialise — bracket overlays stay aligned through the
+downscale, and no surface scrolls horizontally at any width tested.
+Regression-guarded by `frontend/e2e/narrow-width.spec.ts` (5 cases, real
+Verovio WASM). Two follow-ups handed to Step 14, below.
+
 ### Step 13 — Topbar redesign
 
 The three editorial links become: **public nav** (Fragments, Glossary — plus
@@ -321,6 +335,18 @@ touches:
   `DESIGN.md`), then implementation. This is the pass's largest unknown;
   timebox the exploration and let the implementation land late in the
   component without gating anything else.
+- **Carried from Step 12's narrow-width check** (`DESIGN.md` § 7.7), both
+  scoped and small:
+  - *Glossary example card below `sm`.* `ConceptExamples.module.css`
+    `.cardHeader` is a three-column flex row with a `flex-shrink: 0` 140px
+    preview well; at 360px the metadata column is left ~46px and wraps to one
+    word per line. Below `sm` the header stacks (or the preview well
+    collapses). This is a **Full**-support surface, so it is a bug, not a
+    deferral. `FragmentBrowser.module.css` shares the pattern but is
+    desktop-only — leave it.
+  - *Sub-part label scaling.* Labels are a fixed 10px while their brackets
+    shrink to 60% on a phone, so the M5 collision case is ~2.4× worse there.
+    **M5's redesign must be verified at 360px, not only at desktop width.**
 - **F8, F9, F11, F13 stay in the backlog** unless the pass touches their
   files anyway — "fold in where it overlaps" (`phase-2.md`), not a sweep.
 
