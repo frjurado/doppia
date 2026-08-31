@@ -145,23 +145,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    let cancelled = false;
+    // No cleanup, and deliberately no `cancelled` flag. `bootstrapped` already
+    // guarantees this body runs exactly once for the provider's lifetime, so a
+    // cancellation flag has nothing legitimate to cancel — but StrictMode's
+    // simulated unmount would *set* it, and the re-run returns at the guard
+    // above without clearing it. The in-flight refresh would then resolve into
+    // a no-op and `status` would stay 'loading' for ever, so in dev builds an
+    // anonymous visitor never reached 'anonymous': no login link, and
+    // RequireAuth rendering null instead of redirecting.
     (async () => {
       try {
-        const session = await sessionRefresh();
-        if (!cancelled) applySession(session);
+        applySession(await sessionRefresh());
       } catch {
         // A session established *while this bootstrap was in flight* must not be
         // downgraded by its failure. The OAuth callback route mounts under this
         // provider and exchanges its code concurrently: on a first sign-in there
         // is no refresh cookie yet, so this refresh always 401s, and if the
         // exchange happened to land first its session would be clobbered here.
-        if (!cancelled && getAccessToken() === null) setStatus('anonymous');
+        // That guard is the token check — never the cancellation flag.
+        if (getAccessToken() === null) setStatus('anonymous');
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [applySession]);
 
   // Reflect a token cleared outside React (apiFetch clearing on a 401) into
