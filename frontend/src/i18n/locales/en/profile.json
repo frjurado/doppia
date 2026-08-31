@@ -23,5 +23,10 @@
   "yourData": "Your data",
   "exportHint": "Download everything this account holds — your profile, exercise history and reading history — as a single JSON file. Fragments and reviews you have contributed are part of the shared editorial record and are not included.",
   "export": "Download my data",
-  "exporting": "Preparing…"
+  "exporting": "Preparing…",
+  "progress": {
+    "pageTitle": "Progress — Doppia",
+    "heading": "Progress",
+    "body": "Your progress will appear here once exercises are available. Nothing is being recorded yet."
+  }
 }

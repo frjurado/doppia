@@ -95,17 +95,21 @@ Three, no more. Each earns its place with a reason, not a device name.
 fragment detail and 560px on the glossary concept page (§ 7.6). 600 is the
 first round number clearing both.
 
-**Write breakpoints as literals.** CSS custom properties are not valid inside
-`@media` conditions, so a `--bp-sm` token would be silently useless. Write the
-query with the name in a comment:
+**Write breakpoints as literals, in range notation.** CSS custom properties
+are not valid inside `@media` conditions, so a `--bp-sm` token would be
+silently useless. Write the query with the name in a comment:
 
 ```css
 /* < sm — single column, disclosure nav */
-@media (max-width: 599px) { … }
+@media (width < 600px) { … }
 ```
 
-Use `max-width: 599px` / `min-width: 600px` (never both at 600, which
-double-matches at fractional zoom levels).
+Range notation (`width < 600px`, `width >= 600px`) rather than
+`max-width: 599px`: it states the boundary exactly, so there is no off-by-one
+fudge and no pair of queries that both match at fractional zoom. Stylelint
+enforces it (`media-feature-range-notation`). The JS half of the same
+boundary lives in `frontend/src/hooks/useMediaQuery.ts` (`BELOW_SM`,
+`BELOW_MD`) and uses the identical string — keep the two in step.
 
 ### 7.2 Supported-surface matrix
 
@@ -153,8 +157,13 @@ menu, and the account menu. Inline above `sm`; below it they collapse into
 **one disclosure panel**, not three separate menus.
 
 - The bar keeps the wordmark and a single menu button. **The tagline is
-  hidden below `sm`** — at 360px it wraps to two lines and breaks the bar's
-  fixed 48px height.
+  hidden below `md`** — at 360px it wraps to two lines and breaks the bar's
+  fixed 48px height, and between `sm` and `md` the bar is already carrying the
+  Editorial and account groups, where a tagline truncated to "OPEN MUSIC …"
+  reads as a defect rather than as graceful degradation. It is the only thing
+  on the bar carrying no function, so it is the first to go. (Revised during
+  Step 13 from an initial "below `sm`", which measurement showed was too
+  late.)
 - The button opens a full-width panel below the bar, using the existing
   glassmorphism treatment from § 4: `surface` at 80% opacity,
   `backdrop-blur: 12px`. This is the "frosted vellum" case that token was

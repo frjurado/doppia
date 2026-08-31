@@ -1,10 +1,8 @@
 {
   "ariaMain": "Navegación principal",
   "ariaHome": "Inicio de Doppia",
-  "browse": "Explorar",
   "fragments": "Fragmentos",
   "review": "Revisión",
-  "ariaUserMenu": "Menú de usuario",
   "account": "Cuenta",
   "logout": "Cerrar sesión",
   "login": "Iniciar sesión",
@@ -15,5 +13,17 @@
   },
   "profile": "Perfil",
   "people": "Personas",
-  "moderation": "Moderación"
+  "moderation": "Moderación",
+  "glossary": "Glosario",
+  "corpus": "Corpus",
+  "conceptTree": "Árbol de conceptos",
+  "editorial": "Editorial",
+  "progress": "Progreso",
+  "register": "Crear cuenta",
+  "menu": "Menú",
+  "sections": {
+    "browse": "Explorar",
+    "editorial": "Editorial",
+    "account": "Cuenta"
+  }
 }

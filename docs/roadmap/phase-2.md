@@ -240,6 +240,13 @@ annotated in place.
   design-system work below, not a standalone tweak. Fold in the design-debt
   register F8–F13 (shared button library, layout width tokens, etc. —
   `step-17-design-coherence-review.md`) where it overlaps.
+  **Landed 2026-08-31 (Component 12 Step 13):** one shared `TopBar` replaces
+  both the editorial `NavBar` and the minimal public header, so every surface
+  carries the same frame. Public nav is Fragments + Glossary (the rest join as
+  they ship); the Editorial menu holds Corpus, Concept tree, Review, and for
+  admins Moderation and People; the account menu holds Profile, Progress and
+  sign out. Below `sm` the three groups collapse into one disclosure panel per
+  `DESIGN.md` § 7.4. The F8–F13 fold-in remains Step 14's.
 
 ### Mobile — supported-surface matrix
 
@@ -485,6 +492,7 @@ second-language content machinery (ADR-006).
 | Scrollytelling risk | Early horizontal rendering spike in Component 10 | this doc |
 | Role model | Multi-role set; Author distinct from Editor; `require_owner_or_role()` ownership pattern | `roles-and-permissions.md` |
 | Registration | Email+password (verified) + Google OAuth; invite-only launch, open with Collections; default role `registered` | `roles-and-permissions.md` |
+| Route topology | `/` becomes a public landing page and the corpus browser moves to `/corpus`; the two fragment-browse surfaces collapse into one. Scheduled after Step 14, before Part 6 | `component-12-user-infrastructure.md` § Step 14b |
 | Glossary fragment selection | Random 3 + shuffle; `featured_rank` documented as future override | this doc, Component 11 |
 | Glossary stubs | Shown as such ("not yet covered") | this doc, Component 11 |
 | Glossary definitions | Editorial revision is a per-concept gate (`definition_reviewed`) | this doc, Component 11 |

@@ -311,6 +311,31 @@ via the existing auth context. Built mobile-first against Step 12's
 addendum; this retires the Component 10 note that the public shell's nav was
 minimal-by-decision.
 
+**Done 2026-08-31.** `NavBar` and the minimal public header are replaced by
+one shared `TopBar` mounted from both layouts, so every surface carries the
+same frame. Public nav is Fragments (`/public/concepts`) + Glossary; the
+Editorial menu (editor or admin) holds Corpus, Concept tree, Review, and for
+admins Moderation and People; the account menu holds Profile, Progress and
+sign out, with Login / Create account when anonymous. Below `sm` all three
+groups collapse into one frosted-vellum disclosure panel with 44px targets,
+per `DESIGN.md` § 7.4. The progress entry opens a real placeholder page
+(`/progress`) rather than sitting greyed out, since § 7.4 forbids
+shown-and-disabled entries.
+
+Decided during the step (see § Decisions 5): the **editorial fragment browser
+shows the same approved-only fragments as the public one** —
+`FragmentBrowser.tsx:270` pins `statusFilter` to `approved` with no setter and
+no UI to change it, even though the endpoint supports every status. It is
+therefore listed as "Concept tree", which is its only real feature, not as a
+second Fragments view.
+
+Two defects the build turned up, both from verifying on renders rather than
+tests alone: `role="listitem"` on the nav anchors (inherited from `NavBar`)
+destroyed their link semantics, and an `aria-label` on the account button
+replaced the email with "User menu". Both are gone. The `sm` tagline rule from
+Step 12 was revised to `md` — a tagline truncated between the two breakpoints
+reads as a defect; `DESIGN.md` § 7.4 records the revision.
+
 ### Step 14 — Design-system pass (F-register overlap, triage 10 + 11, M5)
 
 One pass over the shared chrome, scoped to what this component already
@@ -349,6 +374,52 @@ touches:
     **M5's redesign must be verified at 360px, not only at desktop width.**
 - **F8, F9, F11, F13 stay in the backlog** unless the pass touches their
   files anyway — "fold in where it overlaps" (`phase-2.md`), not a sweep.
+
+### Step 14b — Route topology: a real landing page, and one browse surface
+
+Added 2026-08-31 (Francisco), after Step 13 surfaced both halves of this. It
+runs **after Step 14** — a landing page is a design deliverable, and Step 14
+lands the width tokens (F10) and shared control library (F12) it should be
+built from; building it first means building it twice — and **before Part 6**,
+because Component 13 adds Collections to the public nav and user-owned content
+on top of these routes. Settling topology inside 12 avoids shipping a topbar
+that 13 has to revise.
+
+Two problems with one shape:
+
+- **`/` is the corpus browser**, an editorial surface. So the post-login
+  redirect (`Login.tsx:42`) sends every account there including role-less
+  ones; an anonymous visitor to the site root is bounced to `/login` and never
+  sees the product; and `RequireRole`'s "you lack the role" fallback cannot
+  use `/` without looping. Step 13's interim gating stops the raw permission
+  string from rendering, but the topology is still wrong.
+- **`/concepts` and `/public/concepts` are near-duplicates** (§ Decisions 5):
+  identical status set, same `FragmentCard`, detail pages differing only by
+  API client and an always-`approved` badge. The real differences are the
+  concept-tree navigator, the ADR-009 NonCommercial licence filter, and the
+  auth gate.
+
+The work:
+
+1. **`/` becomes a public landing page**, common to every audience, and the
+   corpus browser moves to `/corpus`. This is the piece that pays for the
+   rest: the post-login redirect becomes correct for all roles,
+   `RequireRole`'s fallback becomes `/` (see its docstring), and `TopBar`'s
+   `isEditorial ? '/' : '/glossary'` wordmark special case collapses to plain
+   `/`. Delete that branch when it does — it exists only because `/` is
+   currently editorial.
+2. **Collapse the two browse surfaces**, deciding as part of it whether the
+   concept-tree navigator is worth keeping (the glossary index largely does
+   its job publicly, with `fragment_count` per node) or whether the glossary
+   simply becomes the way in. If it is kept for anonymous users it needs
+   public concept-tree endpoints — the current ones are editor-only.
+   Licence filtering keys off the session, not the route.
+3. **Revisit the interim gating** from Step 13 in light of 1 and 2: which
+   routes still need `RequireRole`, and whether `/fragments/:id` should
+   collapse into the public detail route the same way.
+
+Recorded in `phase-2.md` § Decisions Log. `login-page.md` gets a note if the
+post-login destination changes there rather than in `Login.tsx`.
 
 ---
 
@@ -453,6 +524,14 @@ Made in this planning session (2026-08-26, Francisco):
    caret move to Component 13.
 4. **`collection` / `collection_fragment` DDL waits for Component 13**;
    Component 12's data-rights ADR records the FK-shaping rules now.
+5. **(2026-08-31, during Step 13) The two fragment-browse surfaces stay split
+   for now, with one public nav entry.** Investigation showed they are
+   near-duplicates rather than an editorial/public pair — the "editorial" one
+   is pinned to approved fragments too (`FragmentBrowser.tsx:270`). Public nav
+   points at `/public/concepts` for everyone; the editorial browser sits in
+   the Editorial menu as "Concept tree", its only distinguishing feature.
+   Consolidation is logged for Component 13 (§ Deferred) rather than resolved
+   inside the topbar step.
 
 Flagged for confirmation during implementation (small, but this plan does
 not decide them):
@@ -474,6 +553,15 @@ not decide them):
 Stated so the boundary is a decision, not a gap:
 
 - **Item 13 — capture extensions** → Component 15 (decision 1 above).
+- **Browse-surface consolidation** → Component 13. `/concepts` (editorial) and
+  `/public/concepts` are near-duplicates: identical status set, the same
+  `FragmentCard`, and detail pages differing only by API client and an
+  always-`approved` badge. The real differences are the concept-tree navigator
+  (whose job the glossary index largely already does), the ADR-009
+  NonCommercial licence filter, and the auth gate. Collapsing them touches
+  routes, the editor-only concept-tree endpoints, and the glossary's role as
+  entry point — too much to absorb into a topbar step, but it should not
+  outlive Component 13.
 - **Collection tables + the report button + unpublish-share action** →
   Component 13, on top of this component's moderation schema/queue.
 - **Open registration** → flipped by config when Collections ship.
@@ -517,6 +605,8 @@ Part 5  Design (parallel with Parts 2–4 after Step 1)
   Step 12 DESIGN.md responsive addendum + Verovio narrow check
   Step 13 topbar (needs Step 12 + role set from Step 1)
   Step 14 design pass: F10/F12, items 10+11, M5 bracket redesign
+  Step 14b route topology: landing page at /,
+          corpus browser to /corpus, one browse surface
 
 Part 6  Tagging chrome & conventions (parallel; independent of Parts 1–4)
   Step 15 short labels (items 8+14, M4 naming)   ← editorial input

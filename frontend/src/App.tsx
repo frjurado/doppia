@@ -12,9 +12,11 @@ import VerifyEmail from './routes/VerifyEmail';
 import ForgotPassword from './routes/ForgotPassword';
 import ResetPassword from './routes/ResetPassword';
 import Profile from './routes/Profile';
+import Progress from './routes/Progress';
 import AdminUsers from './routes/AdminUsers';
 import AdminModeration from './routes/AdminModeration';
 import RequireRole from './components/auth/RequireRole';
+import { ADMIN, EDITORIAL_ROLES } from './services/roles';
 import ConceptPage from './routes/ConceptPage';
 import GlossaryIndex from './routes/GlossaryIndex';
 import CorpusBrowser from './routes/CorpusBrowser';
@@ -74,7 +76,7 @@ export default function App() {
               <Route path="/glossary/:conceptId" element={<ConceptPage />} />
             </Route>
 
-            {/* Browsing views share the NavBar via BrowsingLayout (no auth gate here).
+            {/* Browsing views share the TopBar via BrowsingLayout (no auth gate here).
             RequireAuth is on each child so unauthenticated users still see the
             nav bar — and the Login button — before being redirected. */}
             <Route
@@ -84,12 +86,15 @@ export default function App() {
                 </ErrorBoundary>
               }
             >
+              {/* Editorial: browse.py gates these endpoints on EDITOR/ADMIN,
+              so an ungated route showed a role-less account a raw permission
+              string. Moves to /corpus when / becomes a landing page. */}
               <Route
                 path="/"
                 element={
-                  <RequireAuth>
+                  <RequireRole roles={EDITORIAL_ROLES}>
                     <CorpusBrowser />
-                  </RequireAuth>
+                  </RequireRole>
                 }
               />
               <Route
@@ -100,10 +105,20 @@ export default function App() {
                   </RequireAuth>
                 }
               />
+              {/* Progress dashboard proper is Component 15; the account menu
+              opens this honest placeholder meanwhile (Step 13). */}
+              <Route
+                path="/progress"
+                element={
+                  <RequireAuth>
+                    <Progress />
+                  </RequireAuth>
+                }
+              />
               <Route
                 path="/admin/users"
                 element={
-                  <RequireRole role="admin">
+                  <RequireRole roles={[ADMIN]}>
                     <AdminUsers />
                   </RequireRole>
                 }
@@ -111,7 +126,7 @@ export default function App() {
               <Route
                 path="/admin/moderation"
                 element={
-                  <RequireRole role="admin">
+                  <RequireRole roles={[ADMIN]}>
                     <AdminModeration />
                   </RequireRole>
                 }
@@ -119,36 +134,38 @@ export default function App() {
               <Route
                 path="/review-queue"
                 element={
-                  <RequireAuth>
+                  <RequireRole roles={EDITORIAL_ROLES}>
                     <ReviewQueue />
-                  </RequireAuth>
+                  </RequireRole>
                 }
               />
               <Route
                 path="/concepts"
                 element={
-                  <RequireAuth>
+                  <RequireRole roles={EDITORIAL_ROLES}>
                     <FragmentBrowser />
-                  </RequireAuth>
+                  </RequireRole>
                 }
               />
               <Route
                 path="/fragments/:fragmentId"
                 element={
-                  <RequireAuth>
+                  <RequireRole roles={EDITORIAL_ROLES}>
                     <FragmentDetail />
-                  </RequireAuth>
+                  </RequireRole>
                 }
               />
             </Route>
 
-            {/* Score viewer is full-screen; no shared nav */}
+            {/* Score viewer is full-screen; no shared nav. Editorial like the
+            corpus browser that leads to it — movements.py gates its endpoints
+            on EDITOR/ADMIN. */}
             <Route
               path="/scores/:movementId"
               element={
-                <RequireAuth>
+                <RequireRole roles={EDITORIAL_ROLES}>
                   <ScoreViewer />
-                </RequireAuth>
+                </RequireRole>
               }
             />
 

@@ -11,10 +11,15 @@
  */
 
 import { apiFetch } from './api';
+import { GRANTABLE_ROLES, type Role } from './roles';
 
-/** Roles an admin can grant. `registered` is implicit and never granted. */
-export const GRANTABLE_ROLES = ['editor', 'author', 'admin'] as const;
-export type GrantableRole = (typeof GRANTABLE_ROLES)[number];
+/**
+ * Roles an admin can grant. `registered` is implicit and never granted.
+ * Re-exported from the canonical vocabulary so this module keeps its existing
+ * surface without owning a second copy of the strings.
+ */
+export { GRANTABLE_ROLES };
+export type GrantableRole = Role;
 
 export interface AdminUser {
   id: string;

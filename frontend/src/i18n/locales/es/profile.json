@@ -23,5 +23,10 @@
   "yourData": "Tus datos",
   "exportHint": "Descárgalo todo: tu perfil, tu historial de ejercicios y tu historial de lectura, en un solo archivo JSON. Los fragmentos y las revisiones con los que has contribuido forman parte del registro editorial compartido y no se incluyen.",
   "export": "Descargar mis datos",
-  "exporting": "Preparando…"
+  "exporting": "Preparando…",
+  "progress": {
+    "pageTitle": "Progreso — Doppia",
+    "heading": "Progreso",
+    "body": "Tu progreso aparecerá aquí cuando los ejercicios estén disponibles. Todavía no se registra nada."
+  }
 }
