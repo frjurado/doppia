@@ -355,13 +355,40 @@
 
 /* ── Review actions (Step 14) ──────────────────────────────────────────────── */
 
-.reviewSection {
+/* ── The panel's one action block (triage item 10) ─────────────────────────
+   Review decisions and lifecycle chrome were two rows on two different tonal
+   layers, both left-aligned, four buttons in two styles — legible only if you
+   already knew which group was which. One block now, one layer, pinned to the
+   foot. Decisions stack full-width because the panel is a ~320px resizable
+   column where an inline row of four cannot read; chrome sits in a small row
+   beneath, never full-width, so it reads as subordinate without needing a
+   rule to divide it (DESIGN.md § 6). */
+.actionBlock {
+  margin-top: auto;
   padding: var(--spacing-3) var(--spacing-4);
   padding-left: calc(var(--spacing-4) + 4px);
-  background-color: var(--color-surface-container);
+  background-color: var(--color-surface-container-low);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-3);
+  gap: var(--spacing-2);
+}
+
+.decisions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+/* Separated from the decisions above by space, not a line. */
+.chromeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+}
+
+.destructiveAction {
+  margin-left: auto;
 }
 
 .reviewHeading {
@@ -369,56 +396,6 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin: 0;
-}
-
-.reviewActions {
-  display: flex;
-  gap: var(--spacing-2);
-  align-items: center;
-}
-
-.approveButton {
-  background-color: var(--color-primary);
-  color: var(--color-on-primary);
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-4);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.approveButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.approveButton:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.rejectOpenButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-3);
-  color: var(--color-error);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.rejectOpenButton:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.rejectOpenButton:hover:not(:disabled) {
-  background-color: var(--color-error-container);
 }
 
 .rejectTextarea {
@@ -437,28 +414,6 @@
 .rejectTextarea:focus {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
-}
-
-.rejectSendButton {
-  background-color: var(--color-error);
-  color: var(--color-on-error);
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-3);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.rejectSendButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.rejectSendButton:hover:not(:disabled) {
-  opacity: 0.9;
 }
 
 .reviewErrorText {
@@ -542,81 +497,4 @@
   gap: var(--spacing-2);
 }
 
-.confirmDeleteButton {
-  background-color: var(--color-error);
-  color: var(--color-on-error);
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-3);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.confirmDeleteButton:hover {
-  opacity: 0.9;
-}
-
-.cancelButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-3);
-  color: var(--color-on-surface-variant);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.cancelButton:hover {
-  color: var(--color-on-surface);
-}
-
 /* ── Footer: Edit + Delete actions (tag mode only) ──────────────────────────── */
-
-.footer {
-  padding: var(--spacing-3) var(--spacing-4);
-  padding-left: calc(var(--spacing-4) + 4px);
-  display: flex;
-  gap: var(--spacing-2);
-  background-color: var(--color-surface-container-low);
-  margin-top: auto;
-}
-
-.editButton {
-  background-color: var(--color-primary);
-  color: var(--color-on-primary);
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-4);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.editButton:hover {
-  opacity: 0.9;
-}
-
-.deleteButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-3);
-  color: var(--color-error);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.deleteButton:hover {
-  background-color: var(--color-error-container);
-}

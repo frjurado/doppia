@@ -55,6 +55,7 @@ import StageList from './StageList';
 import PropertyForm from './PropertyForm';
 import HarmonyPanel from './HarmonyPanel';
 import SubmissionChecklist from './SubmissionChecklist';
+import Button from '../ui/Button';
 import type { PropertyFormValues } from './PropertyForm';
 import { carryOverValues, computeIsComplete } from './propertyFormHelpers';
 import Type from '../ui/Type';
@@ -446,91 +447,6 @@ export default function FormPanel({
     >
       {/* ── Resize handle (G6.1) ─────────────────────────────────────── */}
       <div className={styles.resizeHandle} onMouseDown={onHandleMouseDown} aria-hidden="true" />
-      {/* ── Fragment header: reset / lifecycle controls ──────────────── */}
-      {/* Create (G1.2): a single Delete clears selection, concept, stages, and
-          properties together. Edit (Step 16): Cancel discards the edit and
-          returns to viewing the stored fragment, while Delete removes it from
-          the database (real delete, behind an inline confirmation). */}
-      {flags.fragmentSet && (
-        <div className={styles.fragmentHeader}>
-          <Type variant="label-sm" as="span" className={styles.fragmentHeaderLabel}>
-            {t('score:formPanel.fragmentLabel')}
-          </Type>
-          {editMode ? (
-            <div className={styles.fragmentHeaderActions}>
-              <button
-                type="button"
-                className={styles.cancelButton}
-                onClick={onCancelEdit}
-                disabled={isDeleting}
-              >
-                <Type variant="label-sm" as="span">
-                  {t('score:formPanel.cancelEdit')}
-                </Type>
-              </button>
-              <button
-                type="button"
-                className={styles.deleteButton}
-                onClick={() => setDeleteConfirming(true)}
-                disabled={isDeleting}
-                aria-label={t('score:formPanel.deleteAria')}
-              >
-                <Type variant="label-sm" as="span">
-                  {t('common:delete')}
-                </Type>
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className={styles.deleteButton}
-              onClick={onDeleteFragment}
-              aria-label={t('score:formPanel.deleteAria')}
-            >
-              <Type variant="label-sm" as="span">
-                {t('common:delete')}
-              </Type>
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* ── Inline delete confirmation (edit mode) ───────────────────── */}
-      {editMode && deleteConfirming && (
-        <div className={styles.deleteConfirm} role="alertdialog" aria-live="assertive">
-          <Type variant="body-sm" as="p" className={styles.deleteConfirmText}>
-            {editSubPartCount > 0
-              ? t('score:detailPanel.deleteConfirmWithSubparts', { count: editSubPartCount })
-              : t('score:detailPanel.deleteConfirm')}
-          </Type>
-          <div className={styles.deleteConfirmActions}>
-            <button
-              type="button"
-              className={styles.confirmDeleteButton}
-              onClick={handleConfirmDelete}
-              disabled={isDeleting}
-              aria-busy={isDeleting}
-            >
-              <Type variant="label-sm" as="span">
-                {isDeleting
-                  ? t('score:detailPanel.deleting')
-                  : t('score:detailPanel.confirmDelete')}
-              </Type>
-            </button>
-            <button
-              type="button"
-              className={styles.cancelButton}
-              onClick={() => setDeleteConfirming(false)}
-              disabled={isDeleting}
-            >
-              <Type variant="label-sm" as="span">
-                {t('common:cancel')}
-              </Type>
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── Section: Concept ─────────────────────────────────────────── */}
       <section className={styles.section}>
         <Type variant="label-sm" as="h2" className={styles.sectionHeading}>
@@ -664,9 +580,11 @@ export default function FormPanel({
         </section>
       )}
 
-      {/* ── Step 18: Submission checklist ────────────────────────────── */}
-      {/* Always visible. Shows the annotator which blocking items remain and
-          provides Save Draft / Submit for Review actions. Replaces the
+      {/* ── Step 18: Submission checklist + the panel's action row ───── */}
+      {/* Always visible. Shows the annotator which blocking items remain, then
+          carries every action the panel offers: Save Draft / Submit for Review,
+          and since triage item 10 the lifecycle pair (Cancel / Delete) that
+          used to sit in a header at the top of the panel. Replaces the
           "no selection" hint — the checklist itself signals missing items. */}
       <section className={styles.section}>
         <SubmissionChecklist
@@ -680,6 +598,16 @@ export default function FormPanel({
           draftId={draftId}
           reviewedEdit={reviewedEdit}
           isSavingChanges={isSavingChanges}
+          editMode={editMode}
+          isDeleting={isDeleting}
+          onCancelEdit={onCancelEdit}
+          onDeleteFragment={
+            flags.fragmentSet
+              ? editMode
+                ? () => setDeleteConfirming(true)
+                : onDeleteFragment
+              : undefined
+          }
           onSaveDraft={() => {
             if (!selectedConcept) return;
             onSaveDraft?.({
@@ -705,6 +633,45 @@ export default function FormPanel({
             });
           }}
         />
+
+        {/* ── Inline delete confirmation (edit mode) ─────────────────── */}
+        {/* Sits immediately under the action row that opened it. The solid
+            error fill appears only here, inside the error-container well —
+            never on the trigger above (DESIGN.md § 5). */}
+        {editMode && deleteConfirming && (
+          <div className={styles.deleteConfirm} role="alertdialog" aria-live="assertive">
+            <Type variant="body-sm" as="p" className={styles.deleteConfirmText}>
+              {editSubPartCount > 0
+                ? t('score:detailPanel.deleteConfirmWithSubparts', { count: editSubPartCount })
+                : t('score:detailPanel.deleteConfirm')}
+            </Type>
+            <div className={styles.deleteConfirmActions}>
+              <Button
+                variant="destructiveConfirm"
+                size="sm"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                aria-busy={isDeleting}
+              >
+                <Type variant="label-sm" as="span">
+                  {isDeleting
+                    ? t('score:detailPanel.deleting')
+                    : t('score:detailPanel.confirmDelete')}
+                </Type>
+              </Button>
+              <Button
+                variant="quiet"
+                size="sm"
+                onClick={() => setDeleteConfirming(false)}
+                disabled={isDeleting}
+              >
+                <Type variant="label-sm" as="span">
+                  {t('common:cancel')}
+                </Type>
+              </Button>
+            </div>
+          </div>
+        )}
       </section>
     </aside>
   );
