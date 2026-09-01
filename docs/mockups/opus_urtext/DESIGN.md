@@ -49,9 +49,31 @@ We reject the heavy drop shadows of the modern web. Depth is achieved through **
 ## 5. Components
 All components must adhere to the **0px Roundedness Scale**. Sharp corners are non-negotiable; they reflect the cut edges of paper.
 
-*   **Buttons:**
-    *   **Primary:** Gradient of `primary` to `primary_container`. Text in `on_primary`. 0px radius. Padding: `spacing-3` (vertical) / `spacing-6` (horizontal).
+*   **Buttons:** implemented once, in `frontend/src/components/ui/Button.tsx` (design-debt register **F12**). Do not re-declare these in a module stylesheet; pass a layout-only class if a call site needs positioning. Sizes carry padding only — `md` (`spacing-3`/`spacing-6`) for page surfaces, `sm` (`spacing-2`/`spacing-3`) for panel chrome — because typography is `Type`'s job everywhere in this codebase.
+    *   **Primary:** Gradient of `primary` to `primary_container`. Text in `on_primary`. 0px radius.
+    *   **Secondary:** The same shape without the gradient — a tonal fill of `surface_container_high` with `primary` text, so the primary action keeps its rank. A fill, not an outline: the no-line rule applies to buttons too.
     *   **Tertiary:** Newsreader serif, underlined with a 1px `primary` line. No container.
+    *   **Quiet:** A neutral dismissal (Cancel, Close, Back). No container until hovered.
+    *   **Destructive:** A *pair*, never a single treatment — see below.
+*   **Destructive actions:** the trigger and the confirmation are two different buttons, and the difference is the safeguard.
+    *   The **trigger** (Delete, Reject) is never a filled button: `error` ink on no container, hover fills with `error_container`. A filled destructive control sitting beside a filled Save is a control the hand can reach by muscle memory.
+    *   The **confirmation** is the only place a solid `error` fill is permitted, and it appears inside an `error_container` well, where it is the one filled thing present. Reaching it always costs a second, deliberate click.
+    *   The destructive control is **separated spatially**, not merely ordered last: it sits in the chrome row below the decisions, takes that row's trailing edge (`margin-left: auto`), and is never full-width where the decisions are. Distance is the affordance; a divider line is not available to us (§ 6). See **Action blocks** below for the row it belongs to.
+    *   This is the codified version of what the tagging tool already converged on independently in three places (fragment delete, fragment-detail delete, review rejection). Recorded as a precedent during Component 12 Step 14 so the account-deletion UI has one to follow.
+*   **Action blocks:** a panel has **one** action block, at its foot, on **one** tonal layer. Never two rows on two backgrounds — that was the state this rule replaced, and it made a four-button panel unreadable.
+    *   **Decisions stack full-width.** The editorial panels are ~320px resizable columns; an inline row of four controls cannot read at that width, so decisions are stacked buttons, most consequential last.
+    *   **At most one filled button**, and it is the action that moves the record's lifecycle *on the server* — Submit for review, Save changes, Approve. A mode switch such as Edit changes nothing server-side, so it is always secondary; its treatment never depends on what else happens to be on screen.
+    *   A **forward action keeps its primary treatment while unavailable**, faded rather than recoloured. A faded primary says "not yet"; a grey box says "a different kind of button".
+    *   **Lifecycle chrome** (Edit, Cancel, Delete) sits in one small row beneath the decisions, never full-width and never filled, separated by space rather than a rule (§ 6). The destructive action takes the **trailing edge**.
+    *   Semantic wells (a delete confirmation, an approval-gate failure) **nest inside** the block and keep their own colour.
+*   **Option controls (radio / checkbox / BOOL):** one family, one row shape. Down a sidebar column these had drifted into three different controls; the rules that hold them together:
+    *   **One mark, 16px, in one column.** Property marks, the BOOL mark and the stage swatch are all 16×16 and left-aligned with each other. They were 16, 24 and 14px, so the same gesture had three targets down one column — and the smallest mark carried the largest label.
+    *   **The row is flat; only the mark changes colour.** No per-row fill: a fill that reads as a tonal step in one context is invisible in another (`surface-container` rows inside a `surface-container-highest` stage well became pale rectangles inside a grey one; in a `surface-container` panel section the same rows vanished entirely). Hover is the only fill, and it is transient.
+    *   **The whole row is the target**, label included — never the mark alone.
+    *   **An empty mark is a white card with the ghost outline** (§ 4), not a tonal step, because it has to read on every layer it sits on.
+    *   **The selected mark carries the cardinality**, since the 0px rule rules out the conventional circle-vs-square. **A MANY_OF option is a BOOL** — its well fills, exactly like the BOOL "on" state, because a multi-select is a row of independent booleans and should look like one. **A ONE_OF option** gets a solid mark centred inside the well: the square counterpart of a radio's dot. The same marks are used in the dropdown presentation.
+    *   **No explanatory text.** A control that has to tell you how it works has already failed.
+*   **Explanations (ⓘ):** one implementation, `frontend/src/components/ui/InfoHint.tsx`. Opens on **hover, focus and click**; the panel **floats** and never pushes siblings down; it spans the **full sidebar width**, so a two-word explanation and a two-sentence one produce the same rectangle rather than a shrink-wrapped sliver. It is absolutely positioned against the nearest positioned ancestor, so **give it a full-width one** — that contract is the only thing a call site has to remember.
 *   **Input Fields:** Avoid the "box." Use a single 1px underline of `outline` (`#72787d`) and a background of `surface_container_low`. Labels should be `label-md` in `primary`.
 *   **Cards:** No borders. Use a background of `surface_container` or `surface_container_high`.
 *   **Lists:** **Forbid the use of divider lines.** Use vertical white space (`spacing-4` or `spacing-5`) to separate items.
@@ -138,14 +160,20 @@ fixes the *set* so the tokenisation is a rename, not a redesign:
 |---|---|---|
 | `--width-prose` | `62ch` | Definition and annotation body text |
 | `--width-form` | `400px` | Login, register, single-purpose forms |
-| `--width-list` | `640px` | List panels, review queue |
+| `--width-list` | `640px` | List panels, review queue, profile column |
 | `--width-reading` | `720px` | Glossary index, concept page |
-| `--width-listing` | `880px` | Public fragment browse |
+| `--width-listing` | `880px` | Public fragment browse, admin tables |
 | `--width-wide` | `1280px` | Fragment detail, score viewer |
 
 The score viewer's 1200px unifies **up** to 1280 (F10 left this open; the
 score viewer's width interacts with Verovio break behaviour, so confirm on a
 render before committing that change).
+
+**Landed in Step 14** as custom properties in `frontend/src/styles/tokens.css`.
+Two surfaces the Component 9 survey predated joined the set rather than adding
+to it: the admin tables (960px → `--width-listing`) and the profile column
+(640px → `--width-list`). Reach for the token that names what the surface *is*;
+a new width value needs a reason recorded here first.
 
 Below `sm`, every cap yields to the viewport: `width: 100%` with a
 `spacing-4` gutter. Never a horizontal scrollbar on the page — see § 7.6.
@@ -252,7 +280,11 @@ Neither blocks Step 13.
    one word per line ("MOZART / · / PIANO / SONATA / K. / 279 …"). Fix: below
    `sm` the header becomes `flex-direction: column`, or the preview well
    collapses. This is a **Full**-support surface, so it is a bug, not a
-   deferral. Folded into Step 14.
+   deferral. Folded into Step 14. **Fixed in Step 14:** the header wraps below
+   `sm` and the preview takes the full width with the metadata and hint on the
+   line beneath it. Collapsing the preview was the other option in this note
+   and was rejected — the incipit is the most useful thing on a glossary
+   example, so it is the metadata column that yields.
 2. **Sub-part label scaling** — see § 7.6; folded into M5 in Step 14.
 
 `FragmentBrowser.module.css` has the same fixed 140px preview pattern, but it

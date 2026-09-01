@@ -375,6 +375,118 @@ touches:
 - **F8, F9, F11, F13 stay in the backlog** unless the pass touches their
   files anyway — "fold in where it overlaps" (`phase-2.md`), not a sweep.
 
+**Step 14a done 2026-09-01** (split at Francisco's request: the design-system
+items first, M5 as a second pass). F10, F12, triage 10 and 11, and the § 7.7
+glossary card all landed; M5 is what remains.
+
+- **F10.** Six width tokens in `styles/tokens.css`, replacing eighteen magic
+  numbers. Two surfaces the Component 9 survey predated joined the set rather
+  than extending it: admin tables 960 → `--width-listing` (880), profile column
+  640 → `--width-list`. The open 1200-vs-1280 question is **closed**: A/B'd on a
+  48-bar render at a 1600px viewport, where the score viewer's cap actually
+  binds. 1200 gives a uniform 8 bars per system, 1280 gives 9 (8 on the first,
+  which carries the clef and meter); the 1280 engraving is clean and better
+  filled, with no crowding or overflow. Unified up, as § 7.3 proposed.
+- **F12.** `components/ui/Button.tsx` — six variants (primary, secondary,
+  tertiary, quiet, and the destructive **pair**), two padding sizes, `fullWidth`.
+  Sizes carry padding only: typography stays `Type`'s job, as everywhere else
+  in this codebase. Migrated: the five auth routes, both admin routes, profile,
+  `FormPanel`, `FragmentDetailPanel`, `SubmissionChecklist`, the three
+  load-more rows and the corpus CTA. The migration found real drift it then
+  erased — three copies of primary/secondary that disagreed on hover colour and
+  padding, and an `Admin .primaryButton` with no hover state at all.
+  **Deliberately not migrated**, and carried to the second pass with M5 because
+  they are all score-surface chrome: segmented controls (`.scaleBtn`,
+  `.sizeButton`, `.resolutionButton`, `.tagButton`), the two transport rows,
+  the icon buttons (`.infoButton`, `.descButton`, `.closeButton`), the text-link
+  register (`.retryButton` ×2, `.shuffleButton`, `.clearButton`), and the
+  checklist's own Save/Submit — whose muted-until-ready state is meaningful and
+  is not a `disabled` variant.
+- **Triage 10.** Done in two passes. The first moved Cancel and Delete out of
+  the old `.fragmentHeader` (removed entirely — hosting those controls was its
+  whole purpose) into the checklist's action row. Francisco's read-through then
+  found the real problem was wider than the move: the tool had **three** action
+  grammars, and the move had added a fourth. On a stored fragment, four buttons
+  in two rows on two tonal layers, all left-aligned, in two styles; on a new
+  fragment, centred full-width buttons in two different colours plus a
+  right-aligned Delete. "Somewhat random, and merits a conceptual review."
+
+  The second pass replaced all of it with one grammar, now in `DESIGN.md` § 5
+  "Action blocks": one block per panel, one tonal layer, pinned to the foot;
+  decisions stacked full-width (these panels are ~320px resizable columns —
+  an inline row of four cannot read there); at most one filled button, and it
+  is the action that moves the fragment's lifecycle *on the server*; lifecycle
+  chrome in one small row beneath, never filled, destructive at the trailing
+  edge; semantic wells nested inside. Consequences worth noting: `.reviewSection`
+  and `.footer` collapsed into one `.actionBlock`; **Edit became secondary
+  everywhere** (it switches mode locally and changes no server state, so its
+  treatment no longer depends on whether a review is pending); and Submit now
+  keeps the primary treatment while unavailable, faded rather than recoloured
+  — the old muted grey box read as a different kind of control. Verified on a
+  render in all three states, including the destructive pair's trigger and
+  confirmation.
+- **The destructive precedent** is recorded in `DESIGN.md` § 5 — the
+  deliverable the account-deletion UI has been waiting on since Step 9.
+- **Triage 11.** The check found them **identical**, not merely similar: same
+  `.optionLabel`, same tonal fill, native input visually hidden, so nothing at
+  all distinguished a ONE_OF group from a MANY_OF one. The first attempt added
+  a "Choose one" / "Choose any" line plus a leading indicator, and filled the
+  selected row with `primary`. Francisco rejected both halves, correctly: a
+  control that needs explanatory text has already failed, and the full-width
+  blue drowned the ⓘ buttons sitting inside the row.
+
+  What shipped instead takes the **BOOL toggle as the model**, since it was
+  already the cleanest of the three controls: only the indicator well changes
+  colour, never the row. A MANY_OF option *is* a BOOL — its well fills with a
+  tick, identically. A ONE_OF option shows a solid mark centred in the well,
+  the square counterpart of a radio's dot. No explanatory text. The same mark
+  went into the **dropdown presentation** (>2 values), which had no indicator
+  at all and so carried the same bug in its other half.
+
+  A third read-through then found the drift ran through the whole sidebar, not
+  just the two option groups, and all of it resolved the same way — toward the
+  BOOL row and the floating ⓘ, both of which were already right. Measured
+  before touching anything: three mark sizes down one column (property 16px,
+  BOOL 24px, stage swatch 14px), the smallest mark carrying the largest label;
+  option rows with a `surface-container` fill that read as pale rectangles
+  inside a stage's `surface-container-highest` well and as *nothing* in a panel
+  section, where the two tones are identical; the BOOL clickable only on its
+  mark while option rows were clickable across their whole width; and three
+  separate ⓘ implementations, one of which opened on click alone and expanded
+  inline, shoving the rest of the sidebar down. What landed:
+
+  - **One 16px mark** for property rows, the BOOL row and the stage swatch.
+    The swatch keeps its per-stage *colour* — that is what ties the row to its
+    bracket in the score, and is not decoration to be unified away.
+  - **Flat rows.** No per-row fill; hover is the only fill and it is transient.
+    An empty mark became a white card with the sanctioned ghost outline
+    (`DESIGN.md` § 4) because a tonal step cannot read on both a panel section
+    and a stage well — against the latter it disappeared outright.
+  - **The whole row is the target**, BOOL included.
+  - **One ⓘ.** `InfoHint` absorbed both of `PropertyForm`'s private
+    implementations (gaining an optional title for referenced concepts) and its
+    fixed 240px panel became full-width. `.descButton`, `.descFloating`,
+    `.infoButton`, `.infoPanel`, `.infoTitle` and `.infoDef` are gone.
+  - **The absent stage swatch** stopped being a 1.5px solid border — a
+    standing no-line-rule violation — and became the same empty mark.
+  - The `hideFieldLabels` BOOL special case could be deleted: the name is part
+    of the control now, so hiding field labels can no longer strand it as an
+    unlabelled tick.
+
+  Verified on a render: property rows, BOOL, dropdown and stage swatches in one
+  column, in both the panel-section and stage-well contexts.
+- **Deliberately not in scope:** Francisco's wider point that "a full review of
+  sidebar design would be good" — spacing rhythm, heading hierarchy, section
+  nesting depth. This step unified the *controls*, which is what triage item 11
+  covers; the layout review is a Component 13 candidate.
+- **Render verification.** Everything reachable was checked on screen. The two
+  panel surfaces could not be driven through the score viewer (the stored
+  bracket needs a committed selection the stub harness could not produce), so
+  they were rendered through a temporary dev-only route mounting both panels
+  with stubbed fragments — added, screenshotted, and reverted in the same
+  session. Worth repeating rather than rediscovering: it is the only cheap way
+  to see a panel state that is otherwise several interactions deep.
+
 ### Step 14b — Route topology: a real landing page, and one browse surface
 
 Added 2026-08-31 (Francisco), after Step 13 surfaced both halves of this. It
