@@ -61,11 +61,17 @@
   margin-bottom: var(--spacing-1);
 }
 
-/* 14×14 swatch — doubles as a present/absent toggle for optional stages.
-   Uses --swatch-color CSS custom property set via inline style. */
+/* 16×16 swatch — doubles as a present/absent toggle for optional stages.
+   Uses --swatch-color CSS custom property set via inline style.
+
+   16px is the sidebar's one mark size (triage item 11): the property rows and
+   the BOOL row use it too. This swatch was 14px and the BOOL toggle 24px, so
+   the same gesture had three different targets down one column. The *colour*
+   stays per-stage — it is what ties the row to its bracket in the score, and
+   is not decoration to be unified away. */
 .colorSwatch {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -89,14 +95,17 @@
 .swatchPresent::after {
   content: '✓';
   color: var(--color-on-primary);
-  font-size: 9px;
+  font-size: 0.6875rem;
   line-height: 1;
 }
 
-/* Absent state: hollow outline in the stage colour, no fill. */
+/* Absent state: exactly the empty mark the property rows use — a white card
+   with the sanctioned ghost outline (DESIGN.md § 4). It was a 1.5px solid
+   border in the stage colour, which the no-line rule does not allow, and which
+   made "absent" look like a third kind of control rather than an empty one. */
 .swatchAbsent {
-  background: transparent;
-  border: 1.5px solid var(--swatch-color);
+  background-color: var(--color-surface-container-lowest);
+  box-shadow: inset 0 0 0 1px var(--color-outline-variant);
 }
 
 .stageName {
