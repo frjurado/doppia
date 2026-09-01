@@ -10,6 +10,7 @@ import { ConceptBrowseItem, listByConcept } from '../services/fragmentApi';
 import { formatBarRange, makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentBrowser.module.css';
+import Button from '../components/ui/Button';
 
 // ---------------------------------------------------------------------------
 // Tree building helpers
@@ -581,15 +582,16 @@ export default function FragmentBrowser() {
                 ))}
                 {fragmentsNextCursor && !fragmentsLoading && (
                   <div className={styles.loadMore}>
-                    <button
-                      type="button"
-                      className={styles.loadMoreButton}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      fullWidth
                       onClick={() => loadFragments(fragmentsNextCursor)}
                     >
                       <Type variant="label-sm" as="span">
                         {t('common:loadMore')}
                       </Type>
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>

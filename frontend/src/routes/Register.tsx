@@ -6,6 +6,7 @@ import { AuthError, signUp } from '../services/session';
 import { SELF_DECLARED_ROLES, type SelfDeclaredRole } from '../services/profileApi';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Registration page (`/register`).
@@ -143,11 +144,17 @@ export default function Register() {
           </p>
         )}
 
-        <button type="submit" className={styles.submitButton} disabled={submitting}>
+        <Button
+          type="submit"
+          variant="primary"
+          fullWidth
+          className={styles.submitButton}
+          disabled={submitting}
+        >
           <Type variant="label-md" as="span">
             {submitting ? t('auth:registering') : t('auth:register')}
           </Type>
-        </button>
+        </Button>
       </form>
 
       <p className={styles.note}>

@@ -7,7 +7,7 @@
   --footer-height: 0px;
 }
 
-.page[data-has-footer="true"] {
+.page[data-has-footer='true'] {
   --footer-height: 80px;
 }
 
@@ -57,15 +57,8 @@
   gap: var(--spacing-1);
 }
 
+/* Layout-only. Shape and colour come from the shared Button (F12); the CTA
+   must not shrink when the movement title beside it is long. */
 .ctaButton {
   flex-shrink: 0;
-  background-color: var(--color-primary);
-  color: var(--color-on-primary);
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-3) var(--spacing-6);
-}
-
-.ctaButton:hover {
-  background-color: var(--color-primary-container);
 }

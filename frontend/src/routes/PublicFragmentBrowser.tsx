@@ -9,6 +9,7 @@ import { ApiError } from '../services/api';
 import type { ConceptBrowseItem } from '../services/fragmentApi';
 import { listPublicFragmentsByConcept } from '../services/publicApi';
 import styles from './PublicFragmentBrowser.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Anonymous public browse-by-concept view — Component 10 Step 5.
@@ -128,15 +129,16 @@ export default function PublicFragmentBrowser() {
 
             {nextCursor && !loading && (
               <div className={styles.loadMore}>
-                <button
-                  type="button"
-                  className={styles.loadMoreButton}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  fullWidth
                   onClick={() => loadFragments(nextCursor)}
                 >
                   <Type variant="label-sm" as="span">
                     {t('public:browse.loadMore')}
                   </Type>
-                </button>
+                </Button>
               </div>
             )}
           </>

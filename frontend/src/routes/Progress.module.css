@@ -9,7 +9,7 @@
 .inner {
   /* --width-reading (DESIGN.md § 7.3); a literal until Step 14 tokenises the
      width scale (F10). */
-  max-width: 720px;
+  max-width: var(--width-reading);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -17,6 +17,6 @@
 }
 
 .body {
-  max-width: 62ch;
+  max-width: var(--width-prose);
   color: var(--color-on-surface-variant);
 }

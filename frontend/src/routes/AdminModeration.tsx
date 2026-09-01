@@ -4,6 +4,7 @@ import { dismissReport, listReports, type ModerationReport } from '../services/a
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import styles from './Admin.module.css';
+import Button from '../components/ui/Button';
 
 const FILTERS = ['open', 'dismissed', 'actioned'] as const;
 type Filter = (typeof FILTERS)[number];
@@ -146,16 +147,15 @@ export default function AdminModeration() {
                 </span>
                 <span className={styles.rowActions}>
                   {report.status === 'open' ? (
-                    <button
-                      type="button"
-                      className={styles.secondaryButton}
+                    <Button
+                      variant="secondary"
                       disabled={busy === report.id}
                       onClick={() => handleDismiss(report)}
                     >
                       <Type variant="label-md" as="span">
                         {t('admin:dismiss')}
                       </Type>
-                    </button>
+                    </Button>
                   ) : (
                     <Type variant="body-sm" as="span" className={styles.rowMeta}>
                       {t(`admin:status_${report.status}`)}
@@ -168,11 +168,11 @@ export default function AdminModeration() {
         )}
 
         {nextCursor && (
-          <button type="button" className={styles.secondaryButton} onClick={handleLoadMore}>
+          <Button variant="secondary" onClick={handleLoadMore}>
             <Type variant="label-md" as="span">
               {t('admin:loadMore')}
             </Type>
-          </button>
+          </Button>
         )}
       </Surface>
     </Surface>

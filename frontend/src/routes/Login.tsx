@@ -6,6 +6,7 @@ import AuthCard from '../components/auth/AuthCard';
 import { AuthError, startOAuth } from '../services/session';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Login page.
@@ -124,27 +125,28 @@ export default function Login() {
           </p>
         )}
 
-        <button type="submit" className={styles.submitButton} disabled={submitting}>
+        <Button
+          type="submit"
+          variant="primary"
+          fullWidth
+          className={styles.submitButton}
+          disabled={submitting}
+        >
           <Type variant="label-md" as="span">
             {submitting ? t('auth:signingIn') : t('auth:signIn')}
           </Type>
-        </button>
+        </Button>
       </form>
 
       <div className={styles.alternative}>
         <Type variant="label-sm" as="span" className={styles.alternativeLabel}>
           {t('auth:orContinueWith')}
         </Type>
-        <button
-          type="button"
-          className={styles.secondaryButton}
-          onClick={handleGoogle}
-          disabled={submitting}
-        >
+        <Button variant="secondary" fullWidth onClick={handleGoogle} disabled={submitting}>
           <Type variant="label-md" as="span">
             {t('auth:continueWithGoogle')}
           </Type>
-        </button>
+        </Button>
       </div>
 
       <p className={styles.noteRow}>

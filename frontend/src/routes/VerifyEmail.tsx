@@ -5,6 +5,7 @@ import AuthCard from '../components/auth/AuthCard';
 import { resendVerification } from '../services/session';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * "Check your inbox" interstitial (`/auth/verify-email`).
@@ -54,16 +55,11 @@ export default function VerifyEmail() {
               </Type>
             </p>
           ) : (
-            <button
-              type="button"
-              className={styles.secondaryButton}
-              onClick={handleResend}
-              disabled={busy}
-            >
+            <Button variant="secondary" fullWidth onClick={handleResend} disabled={busy}>
               <Type variant="label-md" as="span">
                 {t('auth:resendVerification')}
               </Type>
-            </button>
+            </Button>
           )}
         </div>
       )}

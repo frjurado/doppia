@@ -12,6 +12,7 @@ import { useBrowseSelection } from '../hooks/useBrowseSelection';
 import { formatKeyName } from '../utils/keyName';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './CorpusBrowser.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Main corpus browsing page.
@@ -210,8 +211,8 @@ export default function CorpusBrowser() {
                 </Type>
               )}
             </div>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               className={styles.ctaButton}
               onClick={() => {
                 const qs = selectedMovement.key_signature
@@ -223,7 +224,7 @@ export default function CorpusBrowser() {
               <Type variant="label-md" as="span">
                 {t('browse:openForTagging')}
               </Type>
-            </button>
+            </Button>
           </div>
         </div>
       )}

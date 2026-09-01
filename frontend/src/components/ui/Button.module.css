@@ -1,0 +1,131 @@
+/* Shared button/control library — design-debt register F12, Component 12
+   Step 14. One implementation of the shapes that were re-declared in eighteen
+   module stylesheets (AuthCard, Admin, Profile, FormPanel, FragmentDetailPanel,
+   SubmissionChecklist, the load-more rows, the retry rows).
+
+   DESIGN.md 5 "Buttons" and 6: 0px radius everywhere, no 1px borders, state
+   carried by tonal fill. */
+
+.base {
+  border: none;
+  border-radius: 0; /* non-negotiable */
+  cursor: pointer;
+  font-family: inherit;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+}
+
+.base:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.base:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ── Sizes ────────────────────────────────────────────────────────────────
+   Padding only. Typography is `Type`'s job everywhere else in this codebase
+   and stays so here: callers wrap the label in <Type variant="label-md"> (page
+   register) or <Type variant="label-sm"> (the tagging tool's panel chrome).
+   `md` is the page register (auth, admin, profile forms); `sm` is panel
+   chrome. */
+
+.md {
+  padding: var(--spacing-3) var(--spacing-6);
+}
+
+.sm {
+  padding: var(--spacing-2) var(--spacing-3);
+}
+
+/* ── Variants ─────────────────────────────────────────────────────────── */
+
+/* Primary: the ink-sheen gradient of DESIGN.md 5. */
+.primary {
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-container) 100%);
+  color: var(--color-on-primary);
+}
+
+.primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* Secondary: the same shape without the gradient, so the primary action keeps
+   its rank. A tonal fill, not an outline — the no-line rule applies here too. */
+.secondary {
+  background: var(--color-surface-container-high);
+  color: var(--color-primary);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--color-primary-container);
+  color: var(--color-on-primary-container);
+}
+
+/* Tertiary: DESIGN.md 5 — Newsreader serif, underlined, no container. The
+   serif is the variant's defining trait, so unlike the sizes it does set a
+   font-family; `Type` has no "serif link" variant to defer to. */
+.tertiary {
+  background: none;
+  padding-left: 0;
+  padding-right: 0;
+  font-family: var(--font-serif);
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.tertiary:hover:not(:disabled) {
+  text-decoration-thickness: 2px;
+}
+
+/* Quiet: a neutral dismissal (Cancel, Close). No container until hovered. */
+.quiet {
+  background: none;
+  color: var(--color-on-surface-variant);
+}
+
+.quiet:hover:not(:disabled) {
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+/* ── Destructive ──────────────────────────────────────────────────────────
+   Two states, and the pair is the point (DESIGN.md 5 "Destructive actions").
+   The trigger is never a filled button: error ink on no container, so it
+   cannot be hit by muscle memory aiming at the adjacent constructive action.
+   The solid error fill is reserved for the confirmation, where it is the only
+   filled thing in an error-container well. */
+
+.destructive {
+  background: none;
+  color: var(--color-error);
+}
+
+.destructive:hover:not(:disabled) {
+  background: var(--color-error-container);
+}
+
+.destructiveConfirm {
+  background: var(--color-error);
+  color: var(--color-on-error);
+}
+
+.destructiveConfirm:focus-visible {
+  outline-color: var(--color-error);
+}
+
+.destructiveConfirm:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* ── Modifiers ────────────────────────────────────────────────────────── */
+
+.fullWidth {
+  width: 100%;
+}

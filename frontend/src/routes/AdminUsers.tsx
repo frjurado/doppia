@@ -14,6 +14,7 @@ import { useAuth } from '../components/auth/AuthContext';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import styles from './Admin.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * User management (`/admin/users`) — Component 12 Step 10.
@@ -145,11 +146,11 @@ export default function AdminUsers() {
             className={styles.input}
             disabled={inviting}
           />
-          <button type="submit" className={styles.primaryButton} disabled={inviting}>
+          <Button type="submit" variant="primary" disabled={inviting}>
             <Type variant="label-md" as="span">
               {inviting ? t('admin:inviting') : t('admin:invite')}
             </Type>
-          </button>
+          </Button>
         </form>
         <Type variant="body-sm" as="p" className={styles.rowMeta}>
           {t('admin:inviteHint')}
@@ -170,11 +171,11 @@ export default function AdminUsers() {
             onChange={(e) => setSearch(e.target.value)}
             className={styles.input}
           />
-          <button type="submit" className={styles.secondaryButton}>
+          <Button type="submit" variant="secondary">
             <Type variant="label-md" as="span">
               {t('admin:searchAction')}
             </Type>
-          </button>
+          </Button>
         </form>
 
         {notice && (
@@ -241,11 +242,11 @@ export default function AdminUsers() {
         )}
 
         {nextCursor && (
-          <button type="button" className={styles.secondaryButton} onClick={handleLoadMore}>
+          <Button variant="secondary" onClick={handleLoadMore}>
             <Type variant="label-md" as="span">
               {t('admin:loadMore')}
             </Type>
-          </button>
+          </Button>
         )}
       </Surface>
     </Surface>

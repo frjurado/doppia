@@ -6,6 +6,7 @@ import { useAuth } from '../components/auth/AuthContext';
 import { ApiError, apiFetch } from '../services/api';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Set a new password (`/auth/reset-password`).
@@ -152,11 +153,17 @@ export default function ResetPassword() {
             </p>
           )}
 
-          <button type="submit" className={styles.submitButton} disabled={submitting}>
+          <Button
+            type="submit"
+            variant="primary"
+            fullWidth
+            className={styles.submitButton}
+            disabled={submitting}
+          >
             <Type variant="label-md" as="span">
               {submitting ? t('auth:saving') : t('auth:setPassword')}
             </Type>
-          </button>
+          </Button>
         </form>
       )}
     </AuthCard>

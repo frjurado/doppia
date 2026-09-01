@@ -5,6 +5,7 @@ import AuthCard from '../components/auth/AuthCard';
 import { AuthError, requestPasswordReset } from '../services/session';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Password-reset request (`/auth/forgot-password`).
@@ -77,11 +78,17 @@ export default function ForgotPassword() {
             </p>
           )}
 
-          <button type="submit" className={styles.submitButton} disabled={submitting}>
+          <Button
+            type="submit"
+            variant="primary"
+            fullWidth
+            className={styles.submitButton}
+            disabled={submitting}
+          >
             <Type variant="label-md" as="span">
               {submitting ? t('auth:sending') : t('auth:sendResetLink')}
             </Type>
-          </button>
+          </Button>
         </form>
       )}
 

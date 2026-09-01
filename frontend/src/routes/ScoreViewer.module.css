@@ -278,7 +278,7 @@
    pageWidth — the SVG output exactly fills this container. */
 .scoreContent {
   width: 100%;
-  max-width: 1200px;
+  max-width: var(--width-wide);
   margin: 0 auto;
   display: flex;
   flex-direction: column;

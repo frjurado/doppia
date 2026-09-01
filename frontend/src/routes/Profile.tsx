@@ -12,6 +12,7 @@ import {
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import styles from './Profile.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Account profile (`/profile`), reached from the account menu.
@@ -221,11 +222,11 @@ export default function Profile() {
             </p>
           )}
 
-          <button type="submit" className={styles.submitButton} disabled={saving}>
+          <Button type="submit" variant="primary" className={styles.submitButton} disabled={saving}>
             <Type variant="label-md" as="span">
               {saving ? t('profile:saving') : t('profile:save')}
             </Type>
-          </button>
+          </Button>
         </form>
       </Surface>
 
@@ -245,8 +246,8 @@ export default function Profile() {
             </Type>
           </p>
         )}
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={handleExport}
           className={styles.secondaryButton}
           disabled={exporting}
@@ -254,7 +255,7 @@ export default function Profile() {
           <Type variant="label-md" as="span">
             {exporting ? t('profile:exporting') : t('profile:export')}
           </Type>
-        </button>
+        </Button>
       </Surface>
     </Surface>
   );

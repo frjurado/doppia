@@ -11,6 +11,7 @@ import { ReviewQueueItem, ReviewQueueResponse, listReviewQueue } from '../servic
 import { makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './ReviewQueue.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Reviewer work-queue page (Component 7, Step 13).
@@ -182,16 +183,17 @@ export default function ReviewQueue() {
           {/* Load more */}
           {nextCursor && !isLoading && (
             <div className={styles.loadMore}>
-              <button
-                type="button"
-                className={styles.loadMoreButton}
+              <Button
+                variant="secondary"
+                size="sm"
+                fullWidth
                 onClick={handleLoadMore}
                 disabled={isLoadingMore}
               >
                 <Type variant="label-sm" as="span">
                   {isLoadingMore ? t('common:loading') : t('common:loadMore')}
                 </Type>
-              </button>
+              </Button>
             </div>
           )}
         </Surface>

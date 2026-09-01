@@ -18,7 +18,7 @@
 /* Centred card — no border, tonal depth only */
 .card {
   width: 100%;
-  max-width: 400px;
+  max-width: var(--width-form);
 }
 
 .cardInner {
@@ -98,59 +98,10 @@
   margin: 0;
 }
 
-/* Primary CTA: gradient per design system §5 "Buttons" */
+/* Layout-only. Shape, colour and state live in the shared Button (F12);
+   what stays here is the CTA's relationship to the fields above it. */
 .submitButton {
   margin-top: var(--spacing-2);
-  padding: var(--spacing-3) var(--spacing-6);
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-container) 100%);
-  color: var(--color-on-primary);
-  border: none;
-  border-radius: 0; /* non-negotiable */
-  cursor: pointer;
-  width: 100%;
-  text-align: center;
-}
-
-.submitButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.submitButton:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.submitButton:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-/* Secondary CTA (the OAuth provider): the same shape without the ink-sheen
-   gradient, so the password path stays the primary action. A tonal fill, not
-   an outline — the no-line rule applies to buttons too. */
-.secondaryButton {
-  padding: var(--spacing-3) var(--spacing-6);
-  background: var(--color-surface-container-high);
-  color: var(--color-primary);
-  border: none;
-  border-radius: 0;
-  cursor: pointer;
-  width: 100%;
-  text-align: center;
-}
-
-.secondaryButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.secondaryButton:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.secondaryButton:hover:not(:disabled) {
-  background: var(--color-surface-container-highest);
 }
 
 /* Separates the alternative sign-in path from the form. Space, not a rule —

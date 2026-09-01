@@ -8,7 +8,7 @@
 }
 
 .inner {
-  max-width: 720px;
+  max-width: var(--width-reading);
   margin: 0 auto;
   padding: var(--spacing-12) var(--spacing-6);
   display: flex;
@@ -82,13 +82,13 @@
 
 .definition {
   margin: 0;
-  max-width: 62ch;
+  max-width: var(--width-prose);
   line-height: 1.75;
 }
 
 .definitionPlaceholder {
   margin: 0;
-  max-width: 62ch;
+  max-width: var(--width-prose);
   line-height: 1.75;
   font-style: italic;
   color: var(--color-on-surface-variant);
@@ -102,7 +102,7 @@
 
 .stubBanner p {
   margin: 0;
-  max-width: 62ch;
+  max-width: var(--width-prose);
   line-height: 1.7;
 }
 
