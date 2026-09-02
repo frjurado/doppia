@@ -1,5 +1,6 @@
 /**
- * Unit tests for resolveSegments() in MainBracket.tsx (Component 9 Step 3).
+ * Unit tests for resolveSegments() — moved to bracketSegments.ts with the
+ * removal of the live selection bracket (M5, Component 12 Step 14).
  *
  * Pins the §6A.1 I1 invariant (bracket ≡ committed ghost range) against the
  * Step 1 bracket-geometry fixtures:
@@ -18,7 +19,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolveSegments } from '../MainBracket';
+import { resolveSegments, serifSides } from '../bracketSegments';
 import type { GhostLayer, MeasureGhostEntry, SubBeatGhostEntry } from '../ghosts';
 import { encodeSubBeat, measureGhostKey } from '../ghosts';
 import type { SelectionRange } from '../annotator';
@@ -357,5 +358,62 @@ describe('resolveSegments — the two endpoints constrain independently', () => 
       'subbeat'
     );
     expect(segments![0]).toMatchObject({ left: 0, right: 200 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serifSides (M5, Component 12 Step 14)
+// ---------------------------------------------------------------------------
+
+describe('serifSides', () => {
+  const span = (left: number, right: number, lane = 0) => ({ left, right, lane });
+
+  it('gives a lone segment both serifs', () => {
+    expect(serifSides([span(0, 100)])).toEqual([{ left: true, right: true }]);
+  });
+
+  it('drops the right serif where the next segment begins', () => {
+    // Sub-parts tile their parent, so this is the ordinary case: the boundary
+    // is marked once, by the following bracket's left serif.
+    expect(serifSides([span(0, 100), span(100, 200)])).toEqual([
+      { left: true, right: false },
+      { left: true, right: true },
+    ]);
+  });
+
+  it('keeps both serifs when segments are separated by a gap', () => {
+    expect(serifSides([span(0, 100), span(140, 200)])).toEqual([
+      { left: true, right: true },
+      { left: true, right: true },
+    ]);
+  });
+
+  it('tolerates sub-pixel drift at the boundary', () => {
+    // Extents come from measured geometry, so exact equality is not safe.
+    expect(serifSides([span(0, 100), span(100.7, 200)])[0]).toEqual({
+      left: true,
+      right: false,
+    });
+  });
+
+  it('never lets segments on different system rows suppress each other', () => {
+    // A segment ending at x=100 on one row and another starting at x=100 on
+    // the next row do not touch on screen.
+    expect(serifSides([span(0, 100, 0), span(100, 200, 1)])).toEqual([
+      { left: true, right: true },
+      { left: true, right: true },
+    ]);
+  });
+
+  it('does not let a segment suppress its own right serif', () => {
+    // A zero-width segment's left equals its right; it must not match itself.
+    expect(serifSides([span(50, 50)])).toEqual([{ left: true, right: true }]);
+  });
+
+  it('returns sides positionally, whatever order the spans arrive in', () => {
+    expect(serifSides([span(100, 200), span(0, 100)])).toEqual([
+      { left: true, right: true },
+      { left: true, right: false },
+    ]);
   });
 });
