@@ -360,6 +360,45 @@ touches:
   `DESIGN.md`), then implementation. This is the pass's largest unknown;
   timebox the exploration and let the implementation land late in the
   component without gating anything else.
+
+  **Done 2026-09-01.** Exploration:
+  [`../reports/component-12-reports/m5-bracket-redesign-exploration.md`](../reports/component-12-reports/m5-bracket-redesign-exploration.md),
+  which measured the failures in a sandbox against the production constants
+  rather than arguing from the report. The four asks all reduced to one cause:
+  **four surfaces each carrying a private copy of the vertical geometry**, one
+  of which had deliberately matched another's constant so that stored sub-parts
+  would "sit in the same lane as live stage brackets" — and duly collided with
+  them. `bracketLanes.ts` is now the single lane table.
+
+  What shipped: square serifs on committed brackets and a gradient fade kept
+  for live ones, so **the end treatment encodes editability**; labels always on
+  the far side of their bracket from the staff; stored sub-parts in their own
+  lane; stored brackets dimmed while a live selection exists (focus by quieting
+  the rest); and stage and sub-part labels staggered onto a second row **only
+  where they would actually collide**. The stored lane also moved from −16 to
+  −26: at 3px of clearance the stored and live brackets read as one two-tone
+  bar, which is why "differentiate the one being edited" was felt as a problem.
+
+  A second read-through (2026-09-03) reworked three of these — see § 7 of the
+  exploration. The serif trick became "one serif per boundary, drawn by the
+  bracket that begins there"; serifs below the staff turn *up*, so a bracket's
+  ends always turn in toward what they enclose; and the **live selection
+  bracket was removed outright** as redundant with the ghost layer, which
+  already fills the committed selection and carries its drag handles. That
+  freed an above-staff lane, and the stage-visibility fix let the below-staff
+  lanes merge again — together ~36px less vertical stack per system, which is
+  what feeds the adjacent-system collision.
+
+  Stage visibility is the keystone: expansion is derived from selection now
+  rather than toggled beside it, which fixes "B's stages appear but A's stay
+  on", "clicking A again switches its stages off", and "entering an edit should
+  hide everyone else's stages" in one change.
+
+  The roadmap's open question is answered: M5 **did** want the bracket-geometry
+  unification, but only its vertical half. The horizontal projection
+  (`stageFrame.ts`, `resolveSegments`) is untouched — it carries the M7
+  beat-precision fix and invariant I7, and has no bearing on these collisions.
+  That half stays in the Phase-2 backlog.
 - **Carried from Step 12's narrow-width check** (`DESIGN.md` § 7.7), both
   scoped and small:
   - *Glossary example card below `sm`.* `ConceptExamples.module.css`
@@ -372,6 +411,11 @@ touches:
   - *Sub-part label scaling.* Labels are a fixed 10px while their brackets
     shrink to 60% on a phone, so the M5 collision case is ~2.4× worse there.
     **M5's redesign must be verified at 360px, not only at desktop width.**
+    **Done 2026-09-01:** labels scale with the notation, with a legibility
+    floor — a faithful ratio gives 6px at 360px, which is not readable type, so
+    the rule is `max(8px, 10px × scale)`. Verified at 360px as required. The
+    fix was masked by `Number('480px')` returning `NaN` where `parseFloat`
+    works, which had pinned the ratio at 1.
 - **F8, F9, F11, F13 stay in the backlog** unless the pass touches their
   files anyway — "fold in where it overlaps" (`phase-2.md`), not a sweep.
 

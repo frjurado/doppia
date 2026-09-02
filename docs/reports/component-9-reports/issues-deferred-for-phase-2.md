@@ -66,7 +66,7 @@ The cadence editor doesn't work properly:
 - Above & below staff brackets frequently collide or even cross. Think about how to minimize this.
 - The sub-brackets text often collides (Dominant with Final Tonic, etc.). This should be packed with the previous item.
 - Consider re-turning on the ghosts on edition, even on mere selection?
-- Weird behavior of stage brackets: off by default, clicking on a fragment shows them. Clicking on another one does the same, but the old one doesn't turn off? (What's the desired behavior here?)
+- ~~Weird behavior of stage brackets: off by default, clicking on a fragment shows them. Clicking on another one does the same, but the old one doesn't turn off? (What's the desired behavior here?)~~ **✅ Fixed — M5, Component 12 Step 14 (2026-09-03).** `FragmentOverlay` kept a per-fragment `collapsed` flag toggled by the same click that selected the fragment, so expansion and selection drifted apart. Expansion is derived from selection now (`collapsed = id !== selectedFragmentId`), so only the selected fragment's stages show and an annotation (which clears the selection) hides them all. **New open question logged in its place:** a click can no longer deselect, so the score has no way back to nothing-selected except the sidebar's X — see `../component-12-reports/m5-bracket-redesign-exploration.md` § 8.
 
 
 ## I18N

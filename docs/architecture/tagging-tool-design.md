@@ -51,7 +51,7 @@ Five layers stack on top of the Verovio render. Layers 1 and 2 carry over direct
 
 **Layer 2 — Measure / beat / sub-beat ghost layer.** The transparent SVG ghost overlay from the prototype: measure ghosts for the main fragment selection, beat and sub-beat ghosts for sub-measure precision. Governed by the resolution toggle (see §5). Sits over the staff.
 
-**Layer 3 — Main bracket track.** A single coloured bracket rendered above the staff once `fragmentSet` is true. Has gradient-zone drag handles at both endpoints (from the prototype). Colour is fixed across all annotations (e.g. system accent colour).
+**Layer 3 — Main bracket track.** ~~A single coloured bracket rendered above the staff once `fragmentSet` is true. Has gradient-zone drag handles at both endpoints (from the prototype). Colour is fixed across all annotations (e.g. system accent colour).~~ **Removed in M5 (Component 12 Step 14, 2026-09-03).** The layer restated what Layer 2 already showed: the ghost overlay fills the committed selection (`.ghost.dark`) and renders the endpoint drag handles (`.ghost-handle-*`), and this bracket's own gradient zones were cosmetic duplicates of them — its source said so. It cost an above-staff lane, and above-staff vertical stack is what pushes a system's brackets into its neighbour. The committed selection is Layer 2's to show; brackets above the staff are now only *stored* fragments'.
 
 **Layer 4 — Stage bracket track.** Rendered below the staff once `conceptSet` is true and the concept has `CONTAINS` edges. One bracket per stage, each in a distinct colour keyed to the stage concept. See §4 for pre-population and §6 for the split-handle interaction.
 
@@ -480,7 +480,7 @@ This section maps each design section above to the shipped modules. It is update
 |---|---|
 | §2 State model (concurrent flags) | `frontend/src/components/score/selection.ts` |
 | §3 Layer 2 — Ghost overlay | `frontend/src/components/score/ghosts.ts` |
-| §3 Layer 3 — Main bracket track | `frontend/src/components/score/MainBracket.tsx` |
+| §3 Layer 3 — Main bracket track | *removed in M5; the committed selection is shown by Layer 2. Segment projection lives in `frontend/src/components/score/bracketSegments.ts`* |
 | §3 Layer 4 — Stage bracket track | `frontend/src/components/score/StageBrackets.tsx` |
 | §4 Stage pre-population and grid snapping | `frontend/src/components/score/stages.ts` |
 | §5 Selection grid (resolution toggle) | `frontend/src/components/score/ghosts.ts` (layer switching), `frontend/src/components/score/annotator.ts` (toggle handler) |
