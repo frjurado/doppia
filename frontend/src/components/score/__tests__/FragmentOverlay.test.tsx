@@ -27,6 +27,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import FragmentOverlay from '../FragmentOverlay';
+import { ABOVE_STORED, BELOW_SUB_PART } from '../bracketLanes';
 import type { FragmentOverlayProps } from '../FragmentOverlay';
 import { encodeBeat, encodeSubBeat, measureGhostKey } from '../ghosts';
 import type { BeatGhostEntry, GhostLayer, MeasureGhostEntry, SubBeatGhostEntry } from '../ghosts';
@@ -201,7 +202,7 @@ describe('FragmentOverlay — projection', () => {
     const frag = makeFragment('frag-c', 1, 2);
     render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
     const el = screen.getByTestId('stored-bracket-frag-c');
-    expect(el.style.top).toBe('34px');
+    expect(el.style.top).toBe(`${50 - ABOVE_STORED}px`); // systemTop 50
   });
 
   it('projects a full-span bracket when the fragment covers all bars', () => {
@@ -419,39 +420,46 @@ describe('FragmentOverlay — collapse/expand', () => {
   });
 
   it('clicking the expand button shows sub-part brackets', async () => {
-    const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2);
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     expect(screen.getByTestId('stored-bracket-sub')).toBeInTheDocument();
   });
 
   it('button aria-label changes to "Collapse fragment" when expanded', async () => {
-    const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2);
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     expect(
       screen.getByRole('button', { name: 'Collapse fragment', hidden: true })
     ).toBeInTheDocument();
   });
 
-  it('clicking again collapses the sub-part brackets', async () => {
+  it('a second click on the selected fragment does not collapse it', async () => {
+    // The old contract toggled here, independently of selection, so clicking a
+    // fragment you had already selected switched its stages off while leaving
+    // it selected. Expansion follows selection now, so a repeat click is inert.
     const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2);
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    // Expand.
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    const onBracketClick = vi.fn();
+    render(
+      <FragmentOverlay
+        fragments={[frag]}
+        ghostLayer={FOUR_BAR_LAYER}
+        selectedFragmentId="parent"
+        onBracketClick={onBracketClick}
+      />
+    );
     expect(screen.getByTestId('stored-bracket-sub')).toBeInTheDocument();
 
-    // Collapse.
-    await user.click(screen.getByRole('button', { name: 'Collapse fragment', hidden: true }));
-    expect(screen.queryByTestId('stored-bracket-sub')).not.toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { hidden: true })[0]!);
+
+    expect(screen.getByTestId('stored-bracket-sub')).toBeInTheDocument();
+    expect(onBracketClick).toHaveBeenCalledWith('parent');
   });
 
   it('expand also calls onBracketClick when wired', async () => {
@@ -468,22 +476,39 @@ describe('FragmentOverlay — collapse/expand', () => {
     expect(handler).toHaveBeenCalledWith('parent');
   });
 
-  it('two fragments expand/collapse independently', async () => {
-    const user = userEvent.setup();
+  it('only the selected fragment is expanded, never two at once', async () => {
+    // This replaces a test asserting the two expanded *independently*, which
+    // is the defect: selecting a second fragment left the first one's stages
+    // on screen, so the score showed stages belonging to something you were no
+    // longer looking at.
     const frags = [
       makeFragmentWithSubPart('p1', 1, 2, 's1', 1, 1),
       makeFragmentWithSubPart('p2', 3, 4, 's2', 3, 3),
     ];
-    render(<FragmentOverlay fragments={frags} ghostLayer={FOUR_BAR_LAYER} />);
-
-    // Expand only the first.
-    const [expandBtn] = screen.getAllByRole('button', {
-      name: 'Expand fragment',
-      hidden: true,
-    });
-    await user.click(expandBtn!);
-
+    const { rerender } = render(
+      <FragmentOverlay fragments={frags} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="p1" />
+    );
     expect(screen.getByTestId('stored-bracket-s1')).toBeInTheDocument();
+    expect(screen.queryByTestId('stored-bracket-s2')).not.toBeInTheDocument();
+
+    rerender(
+      <FragmentOverlay fragments={frags} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="p2" />
+    );
+    expect(screen.queryByTestId('stored-bracket-s1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('stored-bracket-s2')).toBeInTheDocument();
+  });
+
+  it('expands nothing while an annotation is in progress (no selection)', async () => {
+    // Entering create/edit clears the selection, which is what takes every
+    // other fragment's stages off the score.
+    const frags = [
+      makeFragmentWithSubPart('p1', 1, 2, 's1', 1, 1),
+      makeFragmentWithSubPart('p2', 3, 4, 's2', 3, 3),
+    ];
+    render(
+      <FragmentOverlay fragments={frags} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId={null} />
+    );
+    expect(screen.queryByTestId('stored-bracket-s1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('stored-bracket-s2')).not.toBeInTheDocument();
   });
 });
@@ -494,25 +519,24 @@ describe('FragmentOverlay — collapse/expand', () => {
 
 describe('FragmentOverlay — sub-part brackets', () => {
   it('sub-part brackets are positioned below the staff (systemBottom + gap)', async () => {
-    const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2);
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
-
-    // systemTop=50, bounds.top=54, bounds.height=40 → systemBottom=94
-    // sub-part top = systemBottom + SUB_BRACKET_BELOW_STAFF_GAP = 94 + 20 = 114
+    // systemTop=50, bounds.top=54, bounds.height=40 → systemBottom=94.
+    // Sub-parts have their own lane below the live stage lane since M5 — they
+    // used to share +20 with live stage brackets and collide with them.
     const subBracket = screen.getByTestId('stored-bracket-sub');
-    expect(subBracket.style.top).toBe('114px');
+    expect(subBracket.style.top).toBe(`${94 + BELOW_SUB_PART}px`);
   });
 
   it('sub-part bracket has the correct x-bounds from its own bar range', async () => {
-    const user = userEvent.setup();
     // sub covers bars 2–3: left=100, right=300 → width=200
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 2, 3);
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     const subBracket = screen.getByTestId('stored-bracket-sub');
     expect(subBracket.style.left).toBe('100px');
@@ -520,73 +544,66 @@ describe('FragmentOverlay — sub-part brackets', () => {
   });
 
   it('sub-part bracket has the subPartBracket CSS class', async () => {
-    const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2);
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     const subBracket = screen.getByTestId('stored-bracket-sub');
     expect(subBracket.className).toContain('subPartBracket');
   });
 
   it('sub-part bracket carries the correct status class', async () => {
-    const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2, 'submitted');
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     const subBracket = screen.getByTestId('stored-bracket-sub');
     expect(subBracket.className).toContain('statusSubmitted');
   });
 
   it('sub-part alias label is rendered', async () => {
-    const user = userEvent.setup();
     const frag = makeFragmentWithSubPart('parent', 1, 4, 'sub', 1, 2);
     // sub has primary_concept_alias: 'PAC' (from makeFragment)
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     const subBracket = screen.getByTestId('stored-bracket-sub');
     expect(subBracket.textContent).toContain('PAC');
   });
 
   it('sub-part label falls back to the concept name when no alias', async () => {
-    const user = userEvent.setup();
     const sub: FragmentListItem = {
       ...makeFragment('sub', 1, 2),
       primary_concept_alias: null,
       primary_concept_name: 'Antecedent',
     };
     const frag: FragmentListItem = { ...makeFragment('parent', 1, 4), sub_parts: [sub] };
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     // The whole-score lane is never nameless: alias null → concept name shown.
     expect(screen.getByTestId('stored-bracket-sub').textContent).toContain('Antecedent');
   });
 
   it('sub-part label falls back to a positional label when alias and name are both null', async () => {
-    const user = userEvent.setup();
     const sub: FragmentListItem = {
       ...makeFragment('sub', 1, 2),
       primary_concept_alias: null,
       primary_concept_name: null,
     };
     const frag: FragmentListItem = { ...makeFragment('parent', 1, 4), sub_parts: [sub] };
-    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} selectedFragmentId="parent" />
+    );
 
     expect(screen.getByTestId('stored-bracket-sub').textContent).toContain('Part 1');
   });
 
   it('two-level display limit: sub_parts.sub_parts are never rendered', async () => {
-    const user = userEvent.setup();
-
     // depth-2 grandchild
     const grandchild = makeFragment('grandchild', 1, 1);
     // sub-part carries a grandchild (depth-2 nesting)
@@ -599,9 +616,13 @@ describe('FragmentOverlay — sub-part brackets', () => {
       sub_parts: [sub],
     };
 
-    render(<FragmentOverlay fragments={[parent]} ghostLayer={FOUR_BAR_LAYER} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay
+        fragments={[parent]}
+        ghostLayer={FOUR_BAR_LAYER}
+        selectedFragmentId="parent"
+      />
+    );
 
     // Direct sub-part renders.
     expect(screen.getByTestId('stored-bracket-sub')).toBeInTheDocument();
@@ -681,7 +702,6 @@ describe('FragmentOverlay — sub-beat stages in compound meter', () => {
   }
 
   it('renders two stages sharing one 6/8 measure without overlap', async () => {
-    const user = userEvent.setup();
     // Two stages inside beat 1: A = first eighth, B = second eighth. Under the
     // old whole-beat ('beat') projection A would span the whole beat (width 150)
     // and B would vanish (no integer beat onset in its range). With sub-beat
@@ -693,9 +713,13 @@ describe('FragmentOverlay — sub-beat stages in compound meter', () => {
         subBeatPart('stageB', 1 + 1 / 3, 1 + 2 / 3),
       ],
     };
-    render(<FragmentOverlay fragments={[parent]} ghostLayer={makeCompoundLayer()} />);
-
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay
+        fragments={[parent]}
+        ghostLayer={makeCompoundLayer()}
+        selectedFragmentId="parent"
+      />
+    );
 
     const a = screen.getByTestId('stored-bracket-stageA');
     const b = screen.getByTestId('stored-bracket-stageB');
@@ -725,13 +749,17 @@ describe('FragmentOverlay — sub-beat stages in compound meter', () => {
     // Component 11 triage item 5: storedResolution read beatStart alone, so a
     // null start demoted the whole fragment to measure resolution and the
     // stage ran to the end of its bar (the Final Tonic symptom).
-    const user = userEvent.setup();
     const parent: FragmentListItem = {
       ...makeFragment('parent-hb', 1, 1),
       sub_parts: [halfBoundPart('finalTonic', null, 2.0)],
     };
-    render(<FragmentOverlay fragments={[parent]} ghostLayer={makeCompoundLayer()} />);
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay
+        fragments={[parent]}
+        ghostLayer={makeCompoundLayer()}
+        selectedFragmentId="parent-hb"
+      />
+    );
 
     const el = screen.getByTestId('stored-bracket-finalTonic');
     expect(parseFloat(el.style.left)).toBeCloseTo(0); // pinned to the barline
@@ -739,13 +767,17 @@ describe('FragmentOverlay — sub-beat stages in compound meter', () => {
   });
 
   it('tiles a null-start stage against the beat-precise one that follows it', async () => {
-    const user = userEvent.setup();
     const parent: FragmentListItem = {
       ...makeFragment('parent-tile', 1, 1),
       sub_parts: [halfBoundPart('before', null, 2.0), halfBoundPart('after', 2.0, null)],
     };
-    render(<FragmentOverlay fragments={[parent]} ghostLayer={makeCompoundLayer()} />);
-    await user.click(screen.getByRole('button', { name: 'Expand fragment', hidden: true }));
+    render(
+      <FragmentOverlay
+        fragments={[parent]}
+        ghostLayer={makeCompoundLayer()}
+        selectedFragmentId="parent-tile"
+      />
+    );
 
     const before = screen.getByTestId('stored-bracket-before');
     const after = screen.getByTestId('stored-bracket-after');
@@ -829,7 +861,7 @@ describe('FragmentOverlay — movements whose bar numbers restart', () => {
 
     const segs = screen.getAllByTestId('stored-bracket-trio-frag');
     expect(segs).toHaveLength(1);
-    expect(segs[0]!.style.top).toBe('384px'); // Trio system (400) − 16
+    expect(segs[0]!.style.top).toBe(`${400 - ABOVE_STORED}px`); // Trio system
   });
 
   it('paints a first-pass fragment on the first-pass system', () => {
@@ -844,7 +876,7 @@ describe('FragmentOverlay — movements whose bar numbers restart', () => {
 
     const segs = screen.getAllByTestId('stored-bracket-menuetto-frag');
     expect(segs).toHaveLength(1);
-    expect(segs[0]!.style.top).toBe('34px'); // Menuetto system (50) − 16
+    expect(segs[0]!.style.top).toBe(`${50 - ABOVE_STORED}px`); // Menuetto system
   });
 
   it('without an mcIndex, a Trio fragment lands on the Menuetto — the old bug', () => {
@@ -860,6 +892,6 @@ describe('FragmentOverlay — movements whose bar numbers restart', () => {
 
     const segs = screen.getAllByTestId('stored-bracket-trio-frag');
     expect(segs).toHaveLength(1);
-    expect(segs[0]!.style.top).toBe('34px'); // the Menuetto's system, not the Trio's
+    expect(segs[0]!.style.top).toBe(`${50 - ABOVE_STORED}px`); // Menuetto's system, not the Trio's
   });
 });

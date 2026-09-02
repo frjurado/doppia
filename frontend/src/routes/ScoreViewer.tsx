@@ -3,7 +3,6 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
 import FragmentOverlay from '../components/score/FragmentOverlay';
-import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
 import PlaybackCaret from '../components/score/PlaybackCaret';
 import {
@@ -639,7 +638,7 @@ export default function ScoreViewer() {
   const prevScoreKeyRef = useRef<string | null>(null);
 
   // ── Annotation state (Step 11) ────────────────────────────────────────────
-  // Exposed to React render tree so MainBracket and future Part 4/5 panels
+  // Exposed to React render tree so StageBrackets and future Part 4/5 panels
   // can react to selection and flag changes.
   const [ghostLayer, setGhostLayer] = useState<GhostLayer | null>(null);
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
@@ -746,7 +745,7 @@ export default function ScoreViewer() {
 
   // While a stored fragment is being edited (fragmentDraftId is its id, set by
   // the session-build effect), hide its stored bracket so it does not render
-  // twice — once as the live editing MainBracket and once as the stored overlay
+  // twice — once as the live editing overlay and once as the stored overlay
   // bracket, which sat at a slightly different height and duplicated the label.
   const overlayFragments = useMemo(
     () =>
@@ -1870,7 +1869,7 @@ export default function ScoreViewer() {
   // (zoom / resize / font change), any committed selection and its associated
   // state survive. The new session is seeded with the logical coordinates from
   // the old session so it re-highlights the ghosts on the new geometry and
-  // MainBracket / StageBrackets re-derive their pixel bounds automatically.
+  // StageBrackets re-derives its pixel bounds automatically.
   // A full reset happens only when the score changes (movementId or tagMode).
   //
   // The effect depends on `svgPages` (array reference changes on each update)
@@ -1948,7 +1947,7 @@ export default function ScoreViewer() {
     if (!shouldReproject) {
       // Full reset — new score, tagMode change, no committed fragment, or edit.
       // State resets are batched with the subsequent setGhostLayer call so
-      // MainBracket sees a single coherent update.
+      // the overlays see a single coherent update.
       setSelectionRange(null);
       setCommittedSelection(null);
       setAnnotationFlags({
@@ -1976,7 +1975,7 @@ export default function ScoreViewer() {
     //   subPartTags — keyed by stageId (stable strings)
     //   proseAnnotation — free text, independent of geometry
     //   fragmentDraftId — API draft UUID, still valid for the same fragment
-    // MainBracket and StageBrackets re-derive pixel positions from the fresh
+    // StageBrackets re-derives pixel positions from the fresh
     // ghostLayer on the next render automatically.
 
     // Build the new ghost layer over the currently rendered SVG.
@@ -2537,7 +2536,7 @@ export default function ScoreViewer() {
             {/* Fragment overlay: houses all annotation visuals (brackets, labels).
                 Overlays are always HTML elements above the SVG, never injected
                 into Verovio's SVG output (CLAUDE.md §"Verovio SVG overlay rule").
-                Step 11: MainBracket (Layer 3) renders once fragmentSet is true.
+                Step 11: the ghost layer marks the committed selection.
                 Step 14: StageBrackets (Layer 4) renders once conceptSet is true
                          and the concept has CONTAINS edges. */}
             <FragmentOverlay
@@ -2545,13 +2544,9 @@ export default function ScoreViewer() {
               ghostLayer={ghostLayer}
               mcIndex={mcIndexRef.current}
               onBracketClick={setSelectedFragmentId}
+              dimmed={selectionRange !== null}
+              selectedFragmentId={selectedFragmentId}
             >
-              <MainBracket
-                selection={selectionRange}
-                layer={ghostLayer}
-                fragmentSet={annotationFlags.fragmentSet}
-                resolution={resolution}
-              />
               <StageBrackets
                 assignments={stageAssignments}
                 selection={selectionRange}

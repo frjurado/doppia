@@ -48,6 +48,8 @@ import {
   nearestBoundaryTarget,
   nearestSystemBottom,
 } from './stageFrame';
+import { BELOW_STAGE, STAGE_BRACKET_H } from './bracketLanes';
+import { useStaggeredLabels } from './staggerLabels';
 import styles from './StageBrackets.module.css';
 
 // ---------------------------------------------------------------------------
@@ -55,11 +57,13 @@ import styles from './StageBrackets.module.css';
 // ---------------------------------------------------------------------------
 
 /** Bracket bar height in pixels. */
-const BRACKET_H = 6;
-/** Gap below the last staff-line bottom before the bracket top (px).
- *  Must be > harmonyOverlay LANE_OFFSET_PX (6) + label height (~12) to avoid
- *  collision with the harmony label lane. */
-const BELOW_STAFF_GAP = 20;
+const BRACKET_H = STAGE_BRACKET_H;
+/**
+ * Gap below the last staff-line bottom before the bracket top (px). From the
+ * shared lane table (M5), which is also what keeps stored sub-parts out of
+ * this lane — they used to match this constant deliberately and land on top.
+ */
+const BELOW_STAFF_GAP = BELOW_STAGE;
 /** Width of each gradient handle zone on a bracket endpoint. */
 const HANDLE_W = 20;
 /** Half-width of the split handle hit target. */
@@ -154,37 +158,36 @@ export default function StageBrackets({
 
   // ── Mouse handlers for split handle drag ──────────────────────────────────
 
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    const drag = dragRef.current;
-    if (!drag || !handleContainerRef.current) return;
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag || !handleContainerRef.current) return;
 
-    const containerRect = handleContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - containerRect.left;
-    const y = e.clientY - containerRect.top;
+      const containerRect = handleContainerRef.current.getBoundingClientRect();
+      const x = e.clientX - containerRect.left;
+      const y = e.clientY - containerRect.top;
 
-    // The target system follows the cursor, so a boundary can be dragged
-    // onto another system of a multi-system fragment (I11, Part 8 item 2).
-    const target = nearestBoundaryTarget(
-      drag.slots,
-      x,
-      nearestSystemBottom(drag.slots, y),
-    );
-    const moved = moveBoundary(
-      drag.boundaries,
-      drag.boundaryIdx,
-      target,
-      drag.required,
-      drag.slots.length,
-    );
-    const updated = frameToAssignments(
-      drag.initialAssignments,
-      drag.initialActive,
-      drag.slots,
-      moved,
-      drag.flankIds,
-    );
-    onSplitHandleMove(updated);
-  }, [onSplitHandleMove]);
+      // The target system follows the cursor, so a boundary can be dragged
+      // onto another system of a multi-system fragment (I11, Part 8 item 2).
+      const target = nearestBoundaryTarget(drag.slots, x, nearestSystemBottom(drag.slots, y));
+      const moved = moveBoundary(
+        drag.boundaries,
+        drag.boundaryIdx,
+        target,
+        drag.required,
+        drag.slots.length
+      );
+      const updated = frameToAssignments(
+        drag.initialAssignments,
+        drag.initialActive,
+        drag.slots,
+        moved,
+        drag.flankIds
+      );
+      onSplitHandleMove(updated);
+    },
+    [onSplitHandleMove]
+  );
 
   const handleMouseUp = useCallback(() => {
     dragRef.current = null;
@@ -203,7 +206,7 @@ export default function StageBrackets({
       const slots = buildStageSlots(selection, layer, resolution);
       if (slots.length === 0) return;
       const { active, boundaries } = projectBoundaries(assignments, slots);
-      const left  = active[boundaryIdx];
+      const left = active[boundaryIdx];
       const right = active[boundaryIdx + 1];
       if (!left || !right) return;
 
@@ -211,7 +214,7 @@ export default function StageBrackets({
         boundaryIdx,
         slots,
         boundaries,
-        required: active.map(a => a.required),
+        required: active.map((a) => a.required),
         initialAssignments: assignments,
         initialActive: active,
         flankIds: new Set([left.stageId, right.stageId]),
@@ -230,7 +233,7 @@ export default function StageBrackets({
       handleMouseUp,
       session,
       onDragActiveChange,
-    ],
+    ]
   );
 
   // Cleanup on unmount.
@@ -243,6 +246,18 @@ export default function StageBrackets({
   }, [handleMouseMove, handleMouseUp, onDragActiveChange]);
 
   // ── Render guard ─────────────────────────────────────────────────────────
+
+  // Stage labels stagger onto a second row only where they would collide
+  // (M5 ask 4). Above the early returns because hooks must run unconditionally;
+  // it is keyed on the inputs the bracket geometry is derived from, and is a
+  // no-op when the component renders nothing.
+  useStaggeredLabels(handleContainerRef, [
+    assignments,
+    selection,
+    layer,
+    resolution,
+    activeStageId,
+  ]);
 
   if (!visible || !selection || !layer) return null;
 
@@ -304,9 +319,7 @@ export default function StageBrackets({
         // Keyed on schema order (not array position) for the same reason as
         // StageList.tsx: colour must stay stable regardless of iteration/sort
         // order (Component 9 G2).
-        const color = assignment.orphaned
-          ? '#aaaaaa'
-          : stageColor(assignment.order);
+        const color = assignment.orphaned ? '#aaaaaa' : stageColor(assignment.order);
 
         const isActive = assignment.stageId === activeStageId;
 
@@ -325,41 +338,45 @@ export default function StageBrackets({
                 assignment.error ? styles.error : '',
                 assignment.orphaned ? styles.orphaned : '',
                 isActive ? styles.active : '',
-              ].filter(Boolean).join(' ')}
-              style={{
-                left: seg.left,
-                top,
-                width,
-                height: BRACKET_H,
-                '--stage-color': color,
-              } as React.CSSProperties}
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              style={
+                {
+                  left: seg.left,
+                  top,
+                  width,
+                  height: BRACKET_H,
+                  '--stage-color': color,
+                } as React.CSSProperties
+              }
               data-testid={`stage-bracket-${assignment.stageId}`}
-              onClick={() => onStageActivate(
-                isActive ? null : assignment.stageId,
-              )}
+              onClick={() => onStageActivate(isActive ? null : assignment.stageId)}
             >
               {/* Label: stage name, always visible on the first segment */}
               {seg.isFirst && (
                 <span
                   className={styles.label}
                   style={{ color }}
+                  data-stage-label=""
+                  data-lane={Math.round(seg.systemBottom)}
                 >
                   {assignment.stageName}
                   {assignment.orphaned && (
-                    <span className={styles.orphanBadge} title={t('stageBrackets.orphanTitle')}>⚠</span>
+                    <span className={styles.orphanBadge} title={t('stageBrackets.orphanTitle')}>
+                      ⚠
+                    </span>
                   )}
                   {assignment.error && (
-                    <span className={styles.errorBadge} title={t('stageBrackets.errorTitle')}>!</span>
+                    <span className={styles.errorBadge} title={t('stageBrackets.errorTitle')}>
+                      !
+                    </span>
                   )}
                 </span>
               )}
               {/* Gradient endpoint handles (decorative, pointer-events auto via CSS) */}
-              {seg.isFirst && (
-                <div className={styles.handleLeft} style={{ width: handleW }} />
-              )}
-              {seg.isLast && (
-                <div className={styles.handleRight} style={{ width: handleW }} />
-              )}
+              {seg.isFirst && <div className={styles.handleLeft} style={{ width: handleW }} />}
+              {seg.isLast && <div className={styles.handleRight} style={{ width: handleW }} />}
             </div>
           );
         });
@@ -379,7 +396,7 @@ export default function StageBrackets({
               height: BRACKET_H + SPLIT_HANDLE_HW * 2,
             }}
             data-testid={`split-handle-${sh.boundaryIdx}`}
-            onMouseDown={e => startSplitDrag(e, sh.boundaryIdx)}
+            onMouseDown={(e) => startSplitDrag(e, sh.boundaryIdx)}
           />
         );
       })}

@@ -69,6 +69,14 @@
   line-height: 1;
 }
 
+/* Second row, applied by useStaggeredLabels to the labels that would otherwise
+   collide with their left-hand neighbour (M5 ask 4). Only those: a permanent
+   two-row stagger would spend the vertical budget, and look irregular, on the
+   common case where the names fit. */
+.label[data-label-row='1'] {
+  margin-top: 15px;
+}
+
 .orphanBadge,
 .errorBadge {
   margin-left: 3px;
