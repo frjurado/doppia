@@ -75,15 +75,13 @@ describe('public nav', () => {
     expect(screen.getByRole('link', { name: 'Glossary' })).toBeInTheDocument();
   });
 
-  it('points Fragments at the public browse, not the editorial one', () => {
+  it('points Fragments at the one browse surface, for every audience', () => {
     signedIn(['editor']);
     renderBar();
-    // The audience split only means anything if the public link means the same
-    // thing for everyone — including an editor who also has the concept tree.
-    expect(screen.getByRole('link', { name: 'Fragments' })).toHaveAttribute(
-      'href',
-      '/public/concepts'
-    );
+    // There is one browse route since Step 14b; the editorial and public
+    // halves it used to choose between are the same page now, and the session
+    // decides what it fetches.
+    expect(screen.getByRole('link', { name: 'Fragments' })).toHaveAttribute('href', '/fragments');
   });
 
   it('shows sign-in and register entry points when anonymous', () => {
@@ -110,8 +108,14 @@ describe('editorial menu', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Editorial/ }));
     const menu = screen.getByRole('menu');
-    expect(within(menu).getByRole('menuitem', { name: 'Corpus' })).toBeInTheDocument();
-    expect(within(menu).getByRole('menuitem', { name: 'Concept tree' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Corpus' })).toHaveAttribute(
+      'href',
+      '/corpus'
+    );
+    // "Concept tree" is gone: it pointed at the editorial half of a browse
+    // surface that no longer has halves, and the public Fragments entry
+    // reaches the same page.
+    expect(within(menu).queryByRole('menuitem', { name: 'Concept tree' })).not.toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: 'Review' })).toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: 'People' })).not.toBeInTheDocument();
     expect(within(menu).queryByRole('menuitem', { name: 'Moderation' })).not.toBeInTheDocument();

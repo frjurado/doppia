@@ -28,11 +28,9 @@ interface RequireRoleProps {
  * roles yet and a redirect would bounce them off their own page.
  *
  * An anonymous caller goes to `/login`; a signed-in caller without the role
- * goes to the glossary, because sending them to a login form they have already
- * passed would suggest the wrong remedy. The glossary is the public entry
- * surface and is reachable by everyone — note it cannot be `/`, which is
- * itself role-gated while the corpus browser lives there. When `/` becomes a
- * landing page (the route-topology step after Step 14) this should become `/`.
+ * goes to `/`, because sending them to a login form they have already passed
+ * would suggest the wrong remedy. It could not be `/` until Step 14b: the site
+ * root was itself role-gated, so refusing a caller there looped.
  */
 export default function RequireRole({ roles, children }: RequireRoleProps) {
   const { status, user } = useAuth();
@@ -40,7 +38,7 @@ export default function RequireRole({ roles, children }: RequireRoleProps) {
   if (status === 'loading') return null;
   if (status === 'anonymous') return <Navigate to="/login" replace />;
   if (!roles.some((role) => user?.roles.includes(role))) {
-    return <Navigate to="/glossary" replace />;
+    return <Navigate to="/" replace />;
   }
   return <>{children}</>;
 }

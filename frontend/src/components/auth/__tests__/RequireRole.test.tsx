@@ -34,7 +34,7 @@ function renderGate(roles: readonly string[], at = '/gated') {
             </RequireRole>
           }
         />
-        <Route path="/glossary" element={<span>glossary</span>} />
+        <Route path="/" element={<span>landing</span>} />
         <Route path="/login" element={<span>login form</span>} />
       </Routes>
     </MemoryRouter>
@@ -74,12 +74,14 @@ describe('any-of role matching', () => {
 });
 
 describe('where a refused caller lands', () => {
-  it('sends a signed-in caller to the glossary, not to a login form', () => {
+  it('sends a signed-in caller to the site root, not to a login form', () => {
     signedIn([]);
     renderGate(EDITORIAL_ROLES);
-    // "/" would loop: it is itself gated while the corpus browser lives there.
-    // A login form would suggest the wrong remedy to someone already signed in.
-    expect(screen.getByText('glossary')).toBeInTheDocument();
+    // The root is a public landing page since Step 14b. It could not be the
+    // destination before: it was itself role-gated, so refusing a caller there
+    // looped. A login form would suggest the wrong remedy to someone already
+    // signed in.
+    expect(screen.getByText('landing')).toBeInTheDocument();
     expect(screen.queryByText('login form')).not.toBeInTheDocument();
   });
 
@@ -94,7 +96,7 @@ describe('where a refused caller lands', () => {
     // Redirecting here would bounce a legitimate admin off their own page on
     // every reload, before the refresh cookie has restored their roles.
     expect(screen.queryByText('gated content')).not.toBeInTheDocument();
-    expect(screen.queryByText('glossary')).not.toBeInTheDocument();
+    expect(screen.queryByText('landing')).not.toBeInTheDocument();
     expect(screen.queryByText('login form')).not.toBeInTheDocument();
   });
 });

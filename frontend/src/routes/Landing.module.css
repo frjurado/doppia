@@ -1,0 +1,108 @@
+/* Site root — one page for every audience (Step 14b).
+   DESIGN.md: reading column, tonal layering, 0px radius, no divider lines;
+   space separates blocks, not rules (§ 6). */
+
+.page {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-10) var(--spacing-4);
+}
+
+.inner {
+  max-width: var(--width-reading);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-12);
+}
+
+/* ── Hero ─────────────────────────────────────────────────────────────── */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+.title {
+  margin: 0;
+  color: var(--color-primary);
+}
+
+.tagline {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* The lede holds the one paragraph that says what this is. Capped at the prose
+   measure rather than the column, so it reads as a preface. */
+.lede {
+  margin: var(--spacing-4) 0 0;
+  max-width: var(--width-prose);
+  color: var(--color-on-background);
+}
+
+/* ── Doors ────────────────────────────────────────────────────────────── */
+
+/* Each door is a tonal card on the paper ground — the § 4 layering, not a
+   border. They stack on one column: at the reading width a two-up grid would
+   make each door narrower than its own prose. */
+.doors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.door {
+  display: block;
+  padding: var(--spacing-5) var(--spacing-6);
+  background-color: var(--color-surface-container-low);
+  text-decoration: none;
+  color: inherit;
+}
+
+.door:hover {
+  background-color: var(--color-surface-container);
+}
+
+.door:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.doorTitle {
+  margin: 0 0 var(--spacing-2);
+  color: var(--color-primary);
+}
+
+.doorBody {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  max-width: var(--width-prose);
+}
+
+/* ── Closing note ─────────────────────────────────────────────────────── */
+
+.note {
+  margin: 0;
+  max-width: var(--width-prose);
+  color: var(--color-on-surface-variant);
+  font-style: italic;
+}
+
+/* Below `sm` the caps yield to the viewport (DESIGN.md § 7.3). */
+@media (width < 600px) {
+  .page {
+    padding: var(--spacing-6) var(--spacing-4);
+  }
+
+  .inner {
+    gap: var(--spacing-8);
+  }
+
+  .door {
+    padding: var(--spacing-4);
+  }
+}

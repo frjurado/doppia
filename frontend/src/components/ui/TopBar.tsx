@@ -33,7 +33,7 @@ import styles from './TopBar.module.css';
  *
  * Responsive behaviour follows `DESIGN.md` § 7.4: below the `sm` breakpoint the
  * three groups collapse into a single disclosure panel (not three separate
- * menus), the tagline is dropped, and the panel uses the § 4 glassmorphism
+ * menus), and the panel uses the § 4 glassmorphism
  * treatment rather than a second overlay style. Groups are separated by space
  * and a label heading — no divider lines, per § 5.
  */
@@ -131,13 +131,15 @@ export default function TopBar() {
   const isEditorial = isAdmin || roles.includes(EDITOR);
 
   const publicNav: NavItem[] = [
-    { to: '/public/concepts', label: t('fragments') },
+    { to: '/fragments', label: t('fragments') },
     { to: '/glossary', label: t('glossary') },
   ];
 
+  // "Concept tree" is gone: it pointed at the editorial half of a browse
+  // surface that no longer has halves, and the public "Fragments" entry above
+  // now reaches the same page with the same navigator (Step 14b).
   const editorialNav: NavItem[] = [
-    { to: '/', label: t('corpus'), end: true },
-    { to: '/concepts', label: t('conceptTree') },
+    { to: '/corpus', label: t('corpus') },
     { to: '/review-queue', label: t('review') },
     ...(isAdmin
       ? [
@@ -152,10 +154,11 @@ export default function TopBar() {
     { to: '/progress', label: t('progress') },
   ];
 
-  // An editor's home is the corpus they work in; everyone else's is the
-  // glossary, the public entry surface. Sending an anonymous visitor to "/"
-  // would bounce them straight to the login form.
-  const homePath = isEditorial ? '/' : '/glossary';
+  // The wordmark goes to the site root for everyone. It used to branch on
+  // role, because "/" was the corpus browser and would have bounced an
+  // anonymous visitor to the login form; "/" is a public landing page since
+  // Step 14b, so the branch is gone.
+  const homePath = '/';
 
   async function handleLogout() {
     setPanelOpen(false);
@@ -175,9 +178,6 @@ export default function TopBar() {
         <Link to={homePath} className={styles.wordmark} aria-label={t('ariaHome')}>
           {t('public:wordmark')}
         </Link>
-        {/* Decorative; shrinks away under pressure before anything functional
-            does, and is dropped entirely below `sm` (DESIGN.md § 7.4). */}
-        <span className={styles.tagline}>{t('public:tagline')}</span>
 
         {compact ? (
           <div className={styles.actions}>

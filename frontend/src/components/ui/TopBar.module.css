@@ -30,26 +30,7 @@
   color: var(--color-primary-container);
 }
 
-/* Decorative, and the first thing to go under pressure. The high shrink factor
-   is a safety net for a very long account label on a wide bar; the real rule is
-   the `md` media query below, because a tagline truncated to "OPEN MUSIC …"
-   reads as a defect rather than as graceful degradation. */
-.tagline {
-  font-family: var(--font-sans);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-on-surface-variant);
-  flex-shrink: 100;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* Public nav — never squeezed; the tagline and the account label absorb
-   pressure instead (in that order). */
+/* Public nav — never squeezed; the account label absorbs pressure instead. */
 .links {
   display: flex;
   align-items: center;
@@ -315,14 +296,6 @@
 .panel button,
 .panel a {
   min-height: 44px;
-}
-
-/* < md — the bar is carrying the Editorial and account groups by now, and the
-   tagline is the one thing on it that carries no function (§ 7.4). */
-@media (width < 900px) {
-  .tagline {
-    display: none;
-  }
 }
 
 /* < sm — phone gutter; the nav itself has collapsed into the panel (§ 7.4). */

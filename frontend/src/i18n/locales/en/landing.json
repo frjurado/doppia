@@ -1,0 +1,20 @@
+{
+  "pageTitle": "Doppia",
+  "title": "Doppia",
+  "tagline": "Open music analysis",
+  "lede": "A curated corpus of musical scores, annotated fragment by fragment and linked to a knowledge graph of the concepts behind them. Every analysis points at the bars it is about, and every concept points back at the music that shows it.",
+  "doorsAria": "Where to start",
+  "glossary": {
+    "title": "The glossary",
+    "body": "Every concept in the graph has a page: what it is, where it sits among its neighbours, and annotated examples you can play."
+  },
+  "fragments": {
+    "title": "Browse fragments",
+    "body": "Pick a concept and read the passages tagged with it, in notation, with their analysis alongside."
+  },
+  "corpus": {
+    "title": "The corpus",
+    "body": "Scores by composer and work, for reading whole movements and for tagging."
+  },
+  "note": "Doppia is being built in the open, and the corpus is still growing. What is here is real: nothing on this site is placeholder analysis."
+}
