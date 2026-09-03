@@ -1,0 +1,40 @@
+/* Bare glyph control (F12). One hover treatment and one disabled treatment,
+   where there were two of each. */
+
+.button {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: var(--color-on-surface);
+  font-family: inherit;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.button:hover:not(:disabled) {
+  color: var(--color-primary);
+}
+
+.md {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: 1.25rem;
+}
+
+.sm {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: 0.875rem;
+  min-width: 28px;
+}

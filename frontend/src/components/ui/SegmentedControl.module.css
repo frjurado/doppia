@@ -1,0 +1,62 @@
+/* Segmented control and its single-option sibling (F12, the score-surface
+   half). One implementation of "an exclusive short choice", replacing three
+   that disagreed about what selected looks like.
+
+   DESIGN.md: 0px radius, no borders, state carried by fill. */
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+/* A segment always has a resting fill. Transparent looked cleaner for a row of
+   words — but it left the standalone TAG toggle reading as plain text, and the
+   grid-resolution icons as decorations rather than controls. A chip says "this
+   is a control" before you know what it does; the primary fill then says which
+   one is active.
+
+   The fill is `surface-container-lowest`, not a tonal step, for the same
+   reason the option marks are: these controls sit on two different layers —
+   the score viewer's toolbar (`surface-container`) and the fragment viewer's
+   panel (`surface-container-low`) — and any step chosen to read against one
+   disappears against the other. A white card lifts off both (DESIGN.md § 4). */
+.segment {
+  background-color: var(--color-surface-container-lowest);
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  padding: var(--spacing-2) var(--spacing-3);
+  min-width: 28px;
+  text-align: center;
+  color: var(--color-on-surface-variant);
+  font-family: inherit;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.segment:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.segment:hover:not(:disabled) {
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface);
+}
+
+/* Selected: a primary fill. See the note in SegmentedControl.tsx for why this
+   rather than the tonal step the resolution control used to use. */
+.segmentActive {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.segmentActive:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  opacity: 0.9;
+}
