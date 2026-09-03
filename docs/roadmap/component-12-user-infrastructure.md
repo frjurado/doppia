@@ -439,13 +439,29 @@ glossary card all landed; M5 is what remains.
   load-more rows and the corpus CTA. The migration found real drift it then
   erased — three copies of primary/secondary that disagreed on hover colour and
   padding, and an `Admin .primaryButton` with no hover state at all.
-  **Deliberately not migrated**, and carried to the second pass with M5 because
-  they are all score-surface chrome: segmented controls (`.scaleBtn`,
-  `.sizeButton`, `.resolutionButton`, `.tagButton`), the two transport rows,
-  the icon buttons (`.infoButton`, `.descButton`, `.closeButton`), the text-link
-  register (`.retryButton` ×2, `.shuffleButton`, `.clearButton`), and the
-  checklist's own Save/Submit — whose muted-until-ready state is meaningful and
-  is not a `disabled` variant.
+  The score-surface chrome was deferred to a second pass and **completed
+  2026-09-03** — after M5 rather than during it, since M5 turned out to be about
+  bracket geometry and touched none of those files. Two shapes were missing
+  from the library and are now in it: `SegmentedControl` (with `ToggleButton`,
+  its single-option form) and `IconButton`. Migrated: staff size ×2, the
+  selection grid, the TAG/Done and harmony toggles, both transport rows, both
+  close buttons, and the text-link register. `HarmonyPanel`'s four buttons went
+  with them — they were in F12's original scope and the first pass simply
+  missed them.
+
+  Two findings worth keeping. The three segmented controls **disagreed about
+  what "selected" looks like**: staff size filled the active segment with
+  `primary`, the selection grid stepped it one tonal layer instead. Both are
+  defensible; both sitting in one toolbar is not. And the resting fill had to
+  become a white card rather than a tonal step, because these controls sit on
+  two different layers and a step that reads against the score viewer's toolbar
+  vanishes against the fragment viewer's panel — the same trap the option marks
+  hit in triage item 11.
+
+  Two things stay unmigrated, deliberately: `.transposeButton`, a dropdown
+  trigger belonging to the toolbar's select family rather than the button
+  library; and the checklist's own Save/Submit, whose muted-until-ready state
+  is meaningful and is not a `disabled` variant.
 - **Triage 10.** Done in two passes. The first moved Cancel and Delete out of
   the old `.fragmentHeader` (removed entirely — hosting those controls was its
   whole purpose) into the checklist's action row. Francisco's read-through then

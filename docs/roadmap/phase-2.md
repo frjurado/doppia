@@ -252,9 +252,13 @@ annotated in place.
   primary/secondary/destructive/quiet shapes that had been re-declared across
   eighteen module stylesheets. The score viewer's 1200px unified up to 1280
   after an A/B on a 48-bar render (see the component plan). Score-surface
-  chrome — segmented controls, transport rows, icon buttons, the text-link
-  register — was deliberately left for the M5 pass, which works on that
-  surface. **F8, F9, F11 and F13 stay in the backlog**, untouched.
+  chrome was deferred and then **completed 2026-09-03**, adding the two shapes
+  the library still lacked: `SegmentedControl` (with its single-option
+  `ToggleButton`) and `IconButton`. That closes **F12** — the three segmented
+  controls that disagreed about what "selected" looks like are one component,
+  both transport rows are one, and `HarmonyPanel`'s buttons, in F12's original
+  scope but missed by the first pass, use the shared `Button`.
+  **F8, F9, F11 and F13 stay in the backlog**, untouched.
 
 ### Mobile — supported-surface matrix
 
