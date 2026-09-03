@@ -264,7 +264,7 @@ for (const vp of PHONES) {
     page,
   }) => {
     await page.setViewportSize({ width: vp.width, height: vp.height });
-    await page.goto(`/public/fragments/${FRAGMENT_ID}`);
+    await page.goto(`/fragments/${FRAGMENT_ID}`);
     await waitForNotation(page);
 
     const layout = await readLayout(page);
@@ -299,7 +299,7 @@ for (const vp of PHONES) {
 
 test('fragment detail at tablet width renders 1:1 and stays aligned', async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 1024 });
-  await page.goto(`/public/fragments/${FRAGMENT_ID}`);
+  await page.goto(`/fragments/${FRAGMENT_ID}`);
   await waitForNotation(page);
 
   const layout = await readLayout(page);

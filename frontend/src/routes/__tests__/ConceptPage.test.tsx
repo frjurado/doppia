@@ -259,11 +259,11 @@ describe('ConceptPage — example fragments (Step 6)', () => {
 });
 
 describe('ConceptPage — fragment browse link', () => {
-  it('links into the anonymous fragment browse for this concept', async () => {
+  it('links into the one fragment-browse surface for this concept', async () => {
     renderConceptPage();
 
     const link = await screen.findByRole('link', { name: /browse fragments/i });
-    expect(link).toHaveAttribute('href', '/public/concepts?concept=PerfectAuthenticCadence');
+    expect(link).toHaveAttribute('href', '/fragments?concept=PerfectAuthenticCadence');
   });
 });
 

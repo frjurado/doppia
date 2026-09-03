@@ -16,7 +16,7 @@
  *  4. Inline example fragments (Step 6, ConceptExamples) — a shuffleable draw
  *     of approved fragments, each expandable to a full render.
  *  5. A link into the anonymous fragment browse for this concept
- *     (`/public/concepts?concept=<id>`).
+ *     (`/fragments?concept=<id>`).
  *
  * Two states diverge from that shape:
  *  - **Stub concept** — leads with the honest "domain not yet modelled" banner,
@@ -322,7 +322,7 @@ export default function ConceptPage() {
         {!concept.stub && (
           <div className={styles.browse}>
             <Link
-              to={`/public/concepts?concept=${encodeURIComponent(concept.id)}`}
+              to={`/fragments?concept=${encodeURIComponent(concept.id)}`}
               className={styles.browseLink}
             >
               <Type variant="body-lg" as="span">

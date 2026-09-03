@@ -7,6 +7,7 @@
     "searchPlaceholder": "Search for a concept root…",
     "searchAria": "Search concept roots",
     "searchToBrowse": "Search for a concept to browse",
+    "noConcepts": "No concepts to browse yet.",
     "includeSubtypes": "Include subtypes",
     "loadingFragments": "Loading fragments…",
     "noApprovedFound": "No approved fragments found",

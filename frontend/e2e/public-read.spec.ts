@@ -187,16 +187,18 @@ test('anonymous read journey: browse → detail → score + MIDI, no editor affo
   page,
 }) => {
   // Browse by concept (the deep-link shape the glossary will use).
-  await page.goto(`/public/concepts?concept=${CONCEPT_ID}`);
+  await page.goto(`/fragments?concept=${CONCEPT_ID}`);
 
   // The approved fragment appears as a card (a button whose accessible name
   // includes the primary concept alias).
-  const card = page.getByRole('button', { name: /PAC/i });
+  // The navigator's tree row also carries the alias, so match the card's own
+  // label — anonymous callers get the tree since Step 14b.
+  const card = page.getByRole('button', { name: /Open fragment/i });
   await expect(card).toBeVisible();
 
   // Open the fragment detail.
   await card.click();
-  await expect(page).toHaveURL(new RegExp(`/public/fragments/${FRAGMENT_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/fragments/${FRAGMENT_ID}`));
 
   // The production Verovio WASM renders the fragment into the score page
   // container: wait for real musical content (a note glyph) to appear. We assert
@@ -241,13 +243,38 @@ test('glossary journey: index → concept page → example expand → browse →
 
   // 4. Follow the browse link into the concept's approved fragments.
   await page.getByRole('link', { name: /browse fragments tagged/i }).click();
-  await expect(page).toHaveURL(new RegExp(`/public/concepts\\?concept=${CONCEPT_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/fragments\\?concept=${CONCEPT_ID}`));
 
   // 5. Open the fragment detail from its card, and confirm it renders.
-  const card = page.getByRole('button', { name: /PAC/i });
+  // The navigator's tree row also carries the alias, so match the card's own
+  // label — anonymous callers get the tree since Step 14b.
+  const card = page.getByRole('button', { name: /Open fragment/i });
   await expect(card).toBeVisible();
   await card.click();
-  await expect(page).toHaveURL(new RegExp(`/public/fragments/${FRAGMENT_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/fragments/${FRAGMENT_ID}`));
+  await expect(page.locator('[class*="svgPage"] svg .note').first()).toBeAttached({
+    timeout: 30_000,
+  });
+});
+
+/**
+ * The old public URLs are permalinks in the wild: Component 11's glossary
+ * linked into `/public/concepts?concept=…` from the day it shipped, and
+ * fragment detail pages have been shareable since Component 10. Step 14b
+ * collapsed both onto one route, so the redirects are the only thing keeping
+ * those links working — and a redirect that dropped the query would land the
+ * reader on an empty prompt rather than the fragments they asked for.
+ */
+test('legacy public URLs still resolve after the Step 14b collapse', async ({ page }) => {
+  await page.goto(`/public/concepts?concept=${CONCEPT_ID}`);
+  await expect(page).toHaveURL(new RegExp(`/fragments\\?concept=${CONCEPT_ID}`));
+  await expect(page.getByRole('button', { name: /Open fragment/i })).toBeVisible();
+
+  await page.goto(`/public/fragments/${FRAGMENT_ID}`);
+  await expect(page).toHaveURL(new RegExp(`/fragments/${FRAGMENT_ID}`));
+  // Same proof of arrival the journey above uses: Verovio ran and produced
+  // notes. Asserted *attached* rather than visible because the headless layout
+  // measures the container at 0 width.
   await expect(page.locator('[class*="svgPage"] svg .note').first()).toBeAttached({
     timeout: 30_000,
   });

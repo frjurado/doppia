@@ -1,8 +1,9 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { AuthProvider } from './components/auth/AuthContext';
 import RequireAuth from './components/auth/RequireAuth';
 import EmailLinkRedirect from './components/auth/EmailLinkRedirect';
 import BrowsingLayout from './components/ui/BrowsingLayout';
+import Landing from './routes/Landing';
 import PublicLayout from './components/ui/PublicLayout';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import Login from './routes/Login';
@@ -22,11 +23,9 @@ import GlossaryIndex from './routes/GlossaryIndex';
 import CorpusBrowser from './routes/CorpusBrowser';
 import FragmentBrowser from './routes/FragmentBrowser';
 import FragmentDetail from './routes/FragmentDetail';
-import PublicFragmentBrowser from './routes/PublicFragmentBrowser';
 import ReviewQueue from './routes/ReviewQueue';
 import ScoreViewer from './routes/ScoreViewer';
 import HorizontalRenderSpike from './routes/spike/HorizontalRenderSpike';
-import { getPublicFragment } from './services/publicApi';
 
 /**
  * Root application component.
@@ -37,6 +36,23 @@ import { getPublicFragment } from './services/publicApi';
  * Design system: before writing any UI, read docs/mockups/opus_urtext/DESIGN.md.
  * Key constraints: Henle Blue #3f5f77, Urtext Cream #fbf9f0, 0px border-radius everywhere.
  */
+/**
+ * `/public/concepts?concept=…` → `/fragments?concept=…`, query intact.
+ *
+ * Component 11's glossary has linked into the old path since it shipped, and
+ * a concept id in the query is the whole point of those links.
+ */
+function RedirectToFragments() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: '/fragments', search }} replace />;
+}
+
+/** `/public/fragments/:id` → `/fragments/:id`. */
+function RedirectToFragmentDetail() {
+  const { fragmentId } = useParams();
+  return <Navigate to={`/fragments/${fragmentId}`} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -64,16 +80,32 @@ export default function App() {
                 </ErrorBoundary>
               }
             >
-              <Route path="/public/concepts" element={<PublicFragmentBrowser />} />
-              <Route
-                path="/public/fragments/:fragmentId"
-                element={<FragmentDetail loadFragment={getPublicFragment} publicMode />}
-              />
+              {/* The site root, for every audience (Step 14b). It was the
+              corpus browser, which bounced anonymous visitors to /login, sent
+              every post-login account to a page most could not open, and left
+              RequireRole with nowhere to refuse callers to. */}
+              <Route path="/" element={<Landing />} />
+
+              {/* One browse surface and one detail, both session-aware: the
+              component picks the editorial or the public client from the
+              caller's roles, which is how the backend already keys its policy
+              (ADR-009 § 2 is enforced on caller_id is None, not on the route).
+              The /public/* pair they replace redirect below. */}
+              <Route path="/fragments" element={<FragmentBrowser />} />
+              <Route path="/fragments/:fragmentId" element={<FragmentDetail />} />
+
               {/* Concept glossary — Component 11. The browse-by-domain index
               (Step 7) is the public entry surface; each concept page (Step 5)
               is keyed on the immutable concept id (§ Decisions 1). */}
               <Route path="/glossary" element={<GlossaryIndex />} />
               <Route path="/glossary/:conceptId" element={<ConceptPage />} />
+
+              {/* Retired routes. Kept as redirects rather than deleted: the
+              glossary has linked into /public/concepts?concept=… since
+              Component 11, and those links are in the wild. */}
+              <Route path="/public/concepts" element={<RedirectToFragments />} />
+              <Route path="/public/fragments/:fragmentId" element={<RedirectToFragmentDetail />} />
+              <Route path="/concepts" element={<RedirectToFragments />} />
             </Route>
 
             {/* Browsing views share the TopBar via BrowsingLayout (no auth gate here).
@@ -88,9 +120,9 @@ export default function App() {
             >
               {/* Editorial: browse.py gates these endpoints on EDITOR/ADMIN,
               so an ungated route showed a role-less account a raw permission
-              string. Moves to /corpus when / becomes a landing page. */}
+              string. Off the site root since Step 14b. */}
               <Route
-                path="/"
+                path="/corpus"
                 element={
                   <RequireRole roles={EDITORIAL_ROLES}>
                     <CorpusBrowser />
@@ -136,22 +168,6 @@ export default function App() {
                 element={
                   <RequireRole roles={EDITORIAL_ROLES}>
                     <ReviewQueue />
-                  </RequireRole>
-                }
-              />
-              <Route
-                path="/concepts"
-                element={
-                  <RequireRole roles={EDITORIAL_ROLES}>
-                    <FragmentBrowser />
-                  </RequireRole>
-                }
-              />
-              <Route
-                path="/fragments/:fragmentId"
-                element={
-                  <RequireRole roles={EDITORIAL_ROLES}>
-                    <FragmentDetail />
                   </RequireRole>
                 }
               />
