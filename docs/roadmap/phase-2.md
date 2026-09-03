@@ -504,7 +504,7 @@ second-language content machinery (ADR-006).
 | Scrollytelling risk | Early horizontal rendering spike in Component 10 | this doc |
 | Role model | Multi-role set; Author distinct from Editor; `require_owner_or_role()` ownership pattern | `roles-and-permissions.md` |
 | Registration | Email+password (verified) + Google OAuth; invite-only launch, open with Collections; default role `registered` | `roles-and-permissions.md` |
-| Route topology | `/` becomes a public landing page and the corpus browser moves to `/corpus`; the two fragment-browse surfaces collapse into one. Scheduled after Step 14, before Part 6 | `component-12-user-infrastructure.md` § Step 14b |
+| Route topology | `/` becomes a public landing page and the corpus browser moves to `/corpus`; the two fragment-browse surfaces collapse into one. Scheduled after Step 14, before Part 6. **Done 2026-09-04.** One `/fragments` route with the client chosen by session — the backend already keys ADR-009 § 2 on `caller_id is None`, so an editor still sees NonCommercial corpora and an anonymous reader still never does. The concept navigator runs on the public index and now serves anonymous readers too, which was the last structural reason for two surfaces. Old public URLs redirect with the query intact | `component-12-user-infrastructure.md` § Step 14b |
 | Glossary fragment selection | Random 3 + shuffle; `featured_rank` documented as future override | this doc, Component 11 |
 | Glossary stubs | Shown as such ("not yet covered") | this doc, Component 11 |
 | Glossary definitions | Editorial revision is a per-concept gate (`definition_reviewed`) | this doc, Component 11 |

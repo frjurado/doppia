@@ -186,14 +186,17 @@ The topbar (Step 13) carries three groups: public nav, a role-gated Editorial
 menu, and the account menu. Inline above `sm`; below it they collapse into
 **one disclosure panel**, not three separate menus.
 
-- The bar keeps the wordmark and a single menu button. **The tagline is
-  hidden below `md`** — at 360px it wraps to two lines and breaks the bar's
-  fixed 48px height, and between `sm` and `md` the bar is already carrying the
-  Editorial and account groups, where a tagline truncated to "OPEN MUSIC …"
-  reads as a defect rather than as graceful degradation. It is the only thing
-  on the bar carrying no function, so it is the first to go. (Revised during
-  Step 13 from an initial "below `sm`", which measurement showed was too
-  late.)
+- The bar keeps the wordmark and a single menu button. **There is no tagline
+  on the bar.** There was one, and this note used to argue about the width at
+  which to hide it — first below `sm`, then below `md` once measurement showed
+  that a tagline truncated to "OPEN MUSIC …" reads as a defect rather than as
+  graceful degradation. Step 14b removed it outright instead: a tagline is
+  something a site says once, on arrival, and the landing page now exists to
+  say it. Repeated on every screen it was noise, and set in the same face and
+  size as the nav links beside it, it read as one of them.
+
+  The rule that survives is the general one it was an instance of: **the bar
+  carries nothing that has no function.** It is a frame, not a banner.
 - The button opens a full-width panel below the bar, using the existing
   glassmorphism treatment from § 4: `surface` at 80% opacity,
   `backdrop-blur: 12px`. This is the "frosted vellum" case that token was

@@ -593,6 +593,61 @@ The work:
 Recorded in `phase-2.md` § Decisions Log. `login-page.md` gets a note if the
 post-login destination changes there rather than in `Login.tsx`.
 
+**Done 2026-09-04.** The investigation this step asked for found the two
+surfaces closer together than the plan assumed and further apart in one
+respect that mattered.
+
+*Already shared, before any work:* `FragmentCard` (the public browser imported
+it from the editorial one), the `ConceptBrowseResponse` type, the same service
+method behind both endpoints — and the **detail page**, which was already one
+component parameterised by `loadFragment` + `publicMode`.
+
+*The one real difference:* `/api/v1/fragments` requires `EDITOR`/`ADMIN` and
+`/api/v1/public/fragments` is anonymous, pinned to `approved`, and excludes
+NonCommercial corpora (ADR-009 § 2). Crucially the service enforces both on
+**`caller_id is None`** — the session, not the route. So an editor sees NC
+corpora and an anonymous visitor never does, and that distinction survives the
+collapse rather than being flattened by it.
+
+*The blocker the plan recorded had already gone.* "If the navigator is kept for
+anonymous users it needs public concept-tree endpoints" — `/api/v1/public/
+concepts` already returns a flat node list keyed by `parent_id` with fragment
+counts, and its nodes are **field-for-field identical** to the editorial tree's.
+The adapter is one `flatMap`.
+
+Decided (Francisco): **one route, client picked by session; navigator kept and
+public-powered for everyone.**
+
+- `/` is a landing page for every audience; the corpus browser moved to
+  `/corpus`. That alone fixes the post-login redirect for role-less accounts,
+  stops anonymous visitors bouncing off the site root, and lets `RequireRole`
+  refuse callers to `/` without looping.
+- `/fragments` and `/fragments/:id` are the only browse and detail routes.
+  Both components read the session and choose their client; `publicMode`
+  becomes `!isEditorial` rather than a route-injected prop.
+- Root search stays editorial — `/concepts/search` is gated and has no public
+  counterpart. The forest below it is public, so the navigator itself stays.
+- `/public/concepts`, `/public/fragments/:id` and `/concepts` are **redirects,
+  not deletions**: the glossary has linked into the first since Component 11 and
+  fragment permalinks have been shareable since Component 10. The redirect
+  preserves the query, which is the whole point — a concept id lives there.
+- Both Step 13 stopgaps are retired: `TopBar`'s `isEditorial ? '/' : '/glossary'`
+  wordmark branch is a plain `/`, and `RequireRole`'s refusal destination is
+  `/`. The editorial menu lost "Concept tree", which pointed at the editorial
+  half of a surface that no longer has halves.
+
+Two defects the work surfaced, both from the collapse itself: `FragmentDetail`
+would have fetched with the public client and never retried, because roles
+arrive asynchronously and its effect depended only on the fragment id — an
+editor would have silently lost the status badge, resolved property names, and
+any NC fragment; and the browse empty state said "search for a concept" to
+readers who have a tree beside them and no search box, because it keyed on
+`?root` rather than on whether a forest had rendered.
+
+`PublicFragmentBrowser` and its test are deleted; the test's coverage moved
+into `FragmentBrowser.test.tsx` as the role-less case rather than being dropped
+with the file.
+
 ---
 
 ## Part 6 — Tagging-Tool Chrome & Conventions Batch
