@@ -39,6 +39,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import PlaybackCaret from './PlaybackCaret';
+import SegmentedControl, { ToggleButton } from '../ui/SegmentedControl';
+import IconButton from '../ui/IconButton';
 import { ABOVE_STORED, BELOW_STAGE, STORED_BRACKET_H } from './bracketLanes';
 import { useStaggeredLabels } from './staggerLabels';
 import { serifSides } from './bracketSegments';
@@ -760,37 +762,18 @@ export default function FragmentNotation({
       <div className={styles.scoreControls}>
         {fragment.harmony_events.length > 0 && (
           <div className={styles.harmonyToggleGroup}>
-            <button
-              type="button"
-              className={
-                showHarmony ? `${styles.scaleBtn} ${styles.scaleBtnActive}` : styles.scaleBtn
-              }
-              aria-pressed={showHarmony}
-              onClick={() => setShowHarmony((v) => !v)}
-            >
-              <Type variant="label-sm" as="span">
-                {t('fragments:detail.harmonyToggle')}
-              </Type>
-            </button>
+            <ToggleButton pressed={showHarmony} onClick={() => setShowHarmony((v) => !v)}>
+              {t('fragments:detail.harmonyToggle')}
+            </ToggleButton>
           </div>
         )}
-        <div className={styles.scaleGroup} role="group" aria-label={t('common:staffSize')}>
-          {([35, 45, 55] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={
-                scale === s ? `${styles.scaleBtn} ${styles.scaleBtnActive}` : styles.scaleBtn
-              }
-              aria-pressed={scale === s}
-              onClick={() => setScale(s)}
-            >
-              <Type variant="label-sm" as="span">
-                {SCALE_LABELS[s]}
-              </Type>
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className={styles.scaleGroup}
+          ariaLabel={t('common:staffSize')}
+          value={scale}
+          onChange={setScale}
+          options={([35, 45, 55] as const).map((s) => ({ value: s, label: SCALE_LABELS[s] }))}
+        />
       </div>
 
       {/* Score content (position: relative for overlays). Vertical
@@ -884,27 +867,25 @@ export default function FragmentNotation({
 
       {/* Playback bar */}
       <div className={styles.playbackBar}>
-        <button
-          type="button"
-          className={styles.transportButton}
+        <IconButton
+          size="sm"
           disabled={playbackStatus === 'idle' || playbackStatus === 'loading-instrument'}
-          aria-label={playbackStatus === 'playing' ? t('common:pause') : t('common:play')}
+          ariaLabel={playbackStatus === 'playing' ? t('common:pause') : t('common:play')}
           onClick={() => {
             if (playbackStatus === 'playing') pause();
             else void play();
           }}
         >
           {playbackStatus === 'playing' ? '⏸' : '▶'}
-        </button>
-        <button
-          type="button"
-          className={styles.transportButton}
+        </IconButton>
+        <IconButton
+          size="sm"
           disabled={playbackStatus === 'idle'}
-          aria-label={t('common:stop')}
+          ariaLabel={t('common:stop')}
           onClick={handleStop}
         >
           ⏹
-        </button>
+        </IconButton>
         {(playbackStatus === 'playing' || playbackStatus === 'paused') && (
           <Type variant="label-sm" as="span" className={styles.positionDisplay}>
             {displayPosition.bar}:{displayPosition.beat}

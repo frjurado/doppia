@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
+import SegmentedControl, { ToggleButton } from '../components/ui/SegmentedControl';
+import IconButton from '../components/ui/IconButton';
+import Button from '../components/ui/Button';
 import FragmentOverlay from '../components/score/FragmentOverlay';
 import StageBrackets from '../components/score/StageBrackets';
 import PlaybackCaret from '../components/score/PlaybackCaret';
@@ -2339,25 +2342,19 @@ export default function ScoreViewer() {
         {/* Centred controls group — middle column of the 1fr/auto/1fr grid */}
         <div className={styles.toolbarControls}>
           {/* Staff size presets */}
-          <div className={styles.staffSizeControl} role="group" aria-label={t('common:staffSize')}>
+          <div className={styles.staffSizeControl}>
             <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
               {t('score:viewer.size')}
             </Type>
-            {([35, 45, 55] as ScalePreset[]).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={[styles.sizeButton, scale === s ? styles.sizeButtonActive : '']
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => handleScaleChange(s)}
-                aria-pressed={scale === s}
-              >
-                <Type variant="label-sm" as="span">
-                  {t(`score:${SCALE_LABEL_KEYS[s]}`)}
-                </Type>
-              </button>
-            ))}
+            <SegmentedControl
+              ariaLabel={t('common:staffSize')}
+              value={scale}
+              onChange={handleScaleChange}
+              options={([35, 45, 55] as ScalePreset[]).map((s) => ({
+                value: s,
+                label: t(`score:${SCALE_LABEL_KEYS[s]}`),
+              }))}
+            />
           </div>
 
           {/* Transposition select */}
@@ -2394,38 +2391,25 @@ export default function ScoreViewer() {
               >
                 {t('score:viewer.selectLabel')}
               </Type>
-              {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
-                const ARIA_LABELS: Record<ResolutionMode, string> = {
-                  measure: t('score:viewer.resolutionAria.measure'),
-                  beat: t('score:viewer.resolutionAria.beat'),
-                  subbeat: t('score:viewer.resolutionAria.subbeat'),
-                };
-                return (
-                  <button
-                    key={resMode}
-                    type="button"
-                    className={[
-                      styles.resolutionButton,
-                      resolution === resMode ? styles.resolutionButtonActive : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    onClick={() => {
-                      resolutionRef.current = resMode;
-                      setResolution(resMode);
-                    }}
-                    aria-pressed={resolution === resMode}
-                    aria-label={ARIA_LABELS[resMode]}
-                    title={ARIA_LABELS[resMode]}
-                  >
+              <SegmentedControl
+                ariaLabel={t('score:viewer.selectLabel')}
+                value={resolution}
+                onChange={(resMode) => {
+                  resolutionRef.current = resMode;
+                  setResolution(resMode);
+                }}
+                options={(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => ({
+                  value: resMode,
+                  ariaLabel: t(`score:viewer.resolutionAria.${resMode}`),
+                  label: (
                     <ResolutionIcon
                       mode={resMode}
                       beatCount={globalMeter[0]}
                       beatUnit={globalMeter[1]}
                     />
-                  </button>
-                );
-              })}
+                  ),
+                }))}
+              />
             </div>
           )}
           {/* Brief note shown when pre-population auto-drops the resolution grid. */}
@@ -2446,18 +2430,12 @@ export default function ScoreViewer() {
             the ghost layer is ready. */}
         {status === 'ready' && (
           <div className={styles.toolbarRight}>
-            <button
-              type="button"
-              className={[styles.tagButton, tagMode === 'tag' ? styles.tagButtonActive : '']
-                .filter(Boolean)
-                .join(' ')}
+            <ToggleButton
+              pressed={tagMode === 'tag'}
               onClick={() => setTagMode(tagMode === 'view' ? 'tag' : 'view')}
-              aria-pressed={tagMode === 'tag'}
             >
-              <Type variant="label-sm" as="span">
-                {tagMode === 'tag' ? t('score:viewer.done') : t('score:viewer.tag')}
-              </Type>
-            </button>
+              {tagMode === 'tag' ? t('score:viewer.done') : t('score:viewer.tag')}
+            </ToggleButton>
           </div>
         )}
       </Surface>
@@ -2668,49 +2646,43 @@ export default function ScoreViewer() {
             {t('score:viewer.audioUnavailablePre')}
             <code>{SOUNDFONT_ENV_VAR}</code>
             {t('score:viewer.audioUnavailablePost')}
-            <button type="button" className={styles.retryButton} onClick={play}>
+            <Button variant="tertiary" size="sm" onClick={play}>
               {t('common:retry')}
-            </button>
+            </Button>
           </Type>
         ) : (
           <>
             {/* Rewind to top (Step 20): clears an armed play-from-position
                 origin so the next Play starts at the movement top. Disabled
                 while playing or already at the top. */}
-            <button
-              type="button"
-              className={styles.transportButton}
+            <IconButton
               onClick={handleRewind}
               disabled={!isPlaybackAvailable || isPlaying || playbackOriginMs === 0}
-              aria-label={t('score:viewer.rewindAria')}
+              ariaLabel={t('score:viewer.rewindAria')}
               title={t('score:viewer.rewindAria')}
             >
               ⏮
-            </button>
+            </IconButton>
 
             {/* Play / Pause */}
-            <button
-              type="button"
-              className={styles.transportButton}
+            <IconButton
               onClick={isPlaying ? pause : play}
               disabled={!isPlaybackAvailable || isLoadingInstrument}
-              aria-label={isPlaying ? t('common:pause') : t('common:play')}
+              ariaLabel={isPlaying ? t('common:pause') : t('common:play')}
             >
               {isPlaying ? '⏸' : '▶'}
-            </button>
+            </IconButton>
 
             {/* Stop */}
-            <button
-              type="button"
-              className={styles.transportButton}
+            <IconButton
               onClick={handleStop}
               disabled={
                 !isPlaybackAvailable || playbackStatus === 'ready' || playbackStatus === 'idle'
               }
-              aria-label={t('common:stop')}
+              ariaLabel={t('common:stop')}
             >
               ⏹
-            </button>
+            </IconButton>
 
             {/* Position display: MEI @n bar and beat-in-denominator-unit.
                 Uses displayPosition (from bar schedule) when available;

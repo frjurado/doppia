@@ -42,6 +42,7 @@ import {
 } from '../../utils/fragmentRange';
 import { formatKeyName } from '../../utils/keyName';
 import Button from '../ui/Button';
+import IconButton from '../ui/IconButton';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -638,11 +639,11 @@ export default function FragmentDetailPanel({
             {loadError}
           </Type>
           {onClose && (
-            <button type="button" className={styles.closeInlineButton} onClick={onClose}>
+            <Button variant="tertiary" size="sm" onClick={onClose}>
               <Type variant="label-sm" as="span">
                 {t('common:close')}
               </Type>
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -670,14 +671,13 @@ export default function FragmentDetailPanel({
                   </Type>
                 )}
               </div>
-              <button
-                type="button"
+              <IconButton
                 className={styles.closeButton}
                 onClick={onClose}
-                aria-label={t('score:detailPanel.closePanelAria')}
+                ariaLabel={t('score:detailPanel.closePanelAria')}
               >
                 ×
-              </button>
+              </IconButton>
             </header>
           )}
 

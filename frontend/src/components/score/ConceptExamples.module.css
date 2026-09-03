@@ -22,23 +22,6 @@
   letter-spacing: 0.08em;
 }
 
-/* Tertiary control: underlined primary text, no box (matches the browse link
-   treatment on the concept page). */
-.shuffleButton {
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  color: var(--color-primary);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  font-family: inherit;
-}
-
-.shuffleButton:hover {
-  text-decoration-thickness: 2px;
-}
-
 .emptyNote {
   margin: 0;
   color: var(--color-on-surface-variant);

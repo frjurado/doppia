@@ -39,6 +39,7 @@ import {
 } from '../../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../../utils/workTitle';
 import styles from './ConceptExamples.module.css';
+import Button from '../ui/Button';
 
 /** The glossary draws three inline examples (Step 3 default). */
 const EXAMPLE_LIMIT = 3;
@@ -241,11 +242,11 @@ export default function ConceptExamples({ conceptId }: ConceptExamplesProps) {
           {t('glossary.examples.heading')}
         </Type>
         {status === 'ready' && examples.length > 1 && (
-          <button type="button" className={styles.shuffleButton} onClick={shuffle}>
+          <Button variant="tertiary" size="sm" onClick={shuffle}>
             <Type variant="label-sm" as="span">
               {t('glossary.examples.shuffle')}
             </Type>
-          </button>
+          </Button>
         )}
       </div>
 

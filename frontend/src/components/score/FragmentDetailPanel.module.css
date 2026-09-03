@@ -51,19 +51,6 @@
   margin: 0;
 }
 
-.closeInlineButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-1) 0;
-  color: var(--color-primary);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
 /* ── Header ─────────────────────────────────────────────────────────────────── */
 
 /* Status badge + concept name + hierarchy path on the left; × on the right. */
@@ -127,21 +114,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.closeButton {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-1) var(--spacing-2);
-  color: var(--color-on-surface-variant);
-  font-size: 1.25rem;
-  line-height: 1;
-}
-
-.closeButton:hover {
-  color: var(--color-on-surface);
 }
 
 /* ── Sections ────────────────────────────────────────────────────────────────── */
@@ -498,3 +470,9 @@
 }
 
 /* ── Footer: Edit + Delete actions (tag mode only) ──────────────────────────── */
+
+/* Layout-only. Shape and state come from the shared IconButton (F12); the
+   close affordance must not shrink when the concept name beside it is long. */
+.closeButton {
+  flex-shrink: 0;
+}

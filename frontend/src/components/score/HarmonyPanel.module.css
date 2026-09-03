@@ -23,25 +23,6 @@
   color: var(--color-on-surface-variant, #41484d);
 }
 
-/* Confirm-all: compact ghost button with primary colour */
-.confirmAllButton {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--color-primary, #3f5f77);
-  padding: var(--spacing-1) var(--spacing-2);
-  white-space: nowrap;
-}
-
-.confirmAllButton:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.confirmAllButton:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 10%, transparent);
-}
-
 /* ── Status text ─────────────────────────────────────────────────────────── */
 
 .statusText {
@@ -318,56 +299,7 @@
   gap: var(--spacing-2);
 }
 
-.saveButton {
-  background-color: var(--color-primary, #3f5f77);
-  color: var(--color-on-primary, #ffffff);
-  border: 0;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-4);
-}
-
-.saveButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.saveButton:hover:not(:disabled) {
-  background-color: var(--color-primary-container, #587891);
-}
-
-.cancelButton {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--color-on-surface-variant, #41484d);
-  padding: var(--spacing-2) var(--spacing-3);
-}
-
-.cancelButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.cancelButton:hover:not(:disabled) {
-  background-color: var(--color-surface-container-highest, #e4e3da);
-}
-
 /* ── Add event button ────────────────────────────────────────────────────── */
-
-.addEventButton {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--color-primary, #3f5f77);
-  padding: var(--spacing-2) var(--spacing-3);
-  margin-top: var(--spacing-1);
-  text-align: left;
-  width: 100%;
-}
-
-.addEventButton:hover {
-  background-color: color-mix(in srgb, var(--color-primary, #3f5f77) 8%, transparent);
-}
 
 /* ── DCML note (bass/soprano not computed until Component 6) ─────────────── */
 
@@ -376,4 +308,14 @@
   padding: var(--spacing-2) var(--spacing-3) var(--spacing-1);
   margin: 0;
   opacity: 0.7;
+}
+
+/* Layout-only. Shape and state come from the shared Button (F12). */
+.confirmAllButton {
+  white-space: nowrap;
+}
+
+.addEventButton {
+  margin-top: var(--spacing-1);
+  justify-content: flex-start;
 }

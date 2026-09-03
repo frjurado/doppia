@@ -44,6 +44,7 @@ import type {
   HarmonyEventInsertPayload,
   HarmonyQuality,
 } from '../../services/analysisApi';
+import Button from '../ui/Button';
 import Type from '../ui/Type';
 import styles from './HarmonyPanel.module.css';
 
@@ -375,9 +376,7 @@ export default function HarmonyPanel({
    */
   const resolveMcForBar = useCallback(
     (mn: number): number | null => {
-      const placed = events.filter(
-        (e): e is HarmonyEventOut & { mc: number } => e.mc != null
-      );
+      const placed = events.filter((e): e is HarmonyEventOut & { mc: number } => e.mc != null);
       if (placed.length === 0) return null;
       const exact = placed.find((e) => e.mn === mn);
       if (exact) return exact.mc;
@@ -617,15 +616,7 @@ export default function HarmonyPanel({
     } finally {
       setInsertSaving(false);
     }
-  }, [
-    insertForm,
-    movementId,
-    selectionRange,
-    fetchEvents,
-    resolveMcForBar,
-    onHarmonyUpdated,
-    t,
-  ]);
+  }, [insertForm, movementId, selectionRange, fetchEvents, resolveMcForBar, onHarmonyUpdated, t]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -665,8 +656,9 @@ export default function HarmonyPanel({
           </Type>
         )}
         {unreviewedCount > 0 && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             className={styles.confirmAllButton}
             onClick={handleConfirmAll}
             disabled={busyKeys.size > 0}
@@ -674,7 +666,7 @@ export default function HarmonyPanel({
             <Type variant="label-sm" as="span">
               {t('score:harmony.confirmAll', { count: unreviewedCount })}
             </Type>
-          </button>
+          </Button>
         )}
       </div>
 
@@ -951,26 +943,26 @@ export default function HarmonyPanel({
                           )}
 
                           <div className={styles.formActions}>
-                            <button
-                              type="button"
-                              className={styles.saveButton}
+                            <Button
+                              variant="primary"
+                              size="sm"
                               onClick={handleEditSave}
                               disabled={editSaving}
                             >
                               <Type variant="label-sm" as="span">
                                 {editSaving ? t('checklist.saving') : t('common:save')}
                               </Type>
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.cancelButton}
+                            </Button>
+                            <Button
+                              variant="quiet"
+                              size="sm"
                               onClick={handleEditCancel}
                               disabled={editSaving}
                             >
                               <Type variant="label-sm" as="span">
                                 {t('common:cancel')}
                               </Type>
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -1134,19 +1126,14 @@ export default function HarmonyPanel({
           )}
 
           <div className={styles.formActions}>
-            <button
-              type="button"
-              className={styles.saveButton}
-              onClick={handleInsertSave}
-              disabled={insertSaving}
-            >
+            <Button variant="primary" size="sm" onClick={handleInsertSave} disabled={insertSaving}>
               <Type variant="label-sm" as="span">
                 {insertSaving ? t('score:harmony.inserting') : t('score:harmony.insert')}
               </Type>
-            </button>
-            <button
-              type="button"
-              className={styles.cancelButton}
+            </Button>
+            <Button
+              variant="quiet"
+              size="sm"
               onClick={() => {
                 setInsertOpen(false);
                 setInsertError(null);
@@ -1156,12 +1143,14 @@ export default function HarmonyPanel({
               <Type variant="label-sm" as="span">
                 {t('common:cancel')}
               </Type>
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
-        <button
-          type="button"
+        <Button
+          variant="quiet"
+          size="sm"
+          fullWidth
           className={styles.addEventButton}
           onClick={() => {
             setInsertForm(emptyInsertForm(selectionRange?.barStart));
@@ -1171,7 +1160,7 @@ export default function HarmonyPanel({
           <Type variant="label-sm" as="span">
             {t('score:harmony.addEvent')}
           </Type>
-        </button>
+        </Button>
       )}
 
       {/* ── DCML-only note ────────────────────────────────────────────────── */}

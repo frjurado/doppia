@@ -27,15 +27,8 @@
   gap: var(--spacing-3);
 }
 
+/* Layout-only. Shape and colour come from the shared Button (F12); the retry
+   link hugs the leading edge of the error block. */
 .retryButton {
   align-self: flex-start;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--color-primary);
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  text-decoration: underline;
 }
