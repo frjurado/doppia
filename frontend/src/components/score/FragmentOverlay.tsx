@@ -363,7 +363,13 @@ export default function FragmentOverlay({
       result.push({
         id: frag.id,
         status: frag.status,
-        alias: frag.primary_concept_alias,
+        // `alias ?? name`, never alias alone. Six of the ten taggable cadence
+        // concepts declare no alias, so an alias-only label left their brackets
+        // silently nameless. The sub-part path in this same file has always
+        // fallen back — its docstring says "the whole-score stage lane is never
+        // nameless"; the parent path never got the same treatment (Component 11
+        // triage item 14).
+        alias: frag.primary_concept_alias ?? frag.primary_concept_name,
         hasSubParts: frag.sub_parts.length > 0,
         segments,
         subPartProjections,

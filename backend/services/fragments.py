@@ -1411,11 +1411,13 @@ class FragmentService:
             {t.concept_id for tags in tags_by_frag.values() for t in tags}
         )
         alias_map: dict[str, str | None] = {}
+        name_map: dict[str, str | None] = {}
         if all_concept_ids:
             async with self._driver.session() as neo_session:
                 for c in await get_concepts_by_ids(neo_session, all_concept_ids):
                     aliases: list[str] = c.get("aliases", [])
                     alias_map[c["id"]] = aliases[0] if aliases else None
+                    name_map[c["id"]] = c.get("name", c["id"])
 
         # Batch movement context: one JOIN query for all unique movement_ids.
         ctx_result = await self._db.execute(
@@ -1440,15 +1442,21 @@ class FragmentService:
         # restart reads "Trio, mm. 12-15" like every other surface (ADR-036).
         sections_by_movement = await self._fetch_movement_sections(movement_ids)
 
-        def _primary_for(frag_id: uuid.UUID) -> tuple[str | None, str | None]:
+        def _primary_for(
+            frag_id: uuid.UUID,
+        ) -> tuple[str | None, str | None, str | None]:
             for tag in tags_by_frag.get(frag_id, []):
                 if tag.is_primary:
-                    return tag.concept_id, alias_map.get(tag.concept_id)
-            return None, None
+                    return (
+                        tag.concept_id,
+                        alias_map.get(tag.concept_id),
+                        name_map.get(tag.concept_id),
+                    )
+            return None, None, None
 
         items: list[ReviewQueueItem] = []
         for f in page:
-            p_id, p_alias = _primary_for(f.id)
+            p_id, p_alias, p_name = _primary_for(f.id)
             ctx = movement_ctx.get(f.movement_id, {})
             items.append(
                 ReviewQueueItem(
@@ -1467,6 +1475,7 @@ class FragmentService:
                     status=f.status,
                     primary_concept_id=p_id,
                     primary_concept_alias=p_alias,
+                    primary_concept_name=p_name,
                     created_by=f.created_by,
                     submitted_at=f.updated_at,
                     composer_name=ctx.get("composer_name", ""),

@@ -368,15 +368,29 @@ describe('FragmentOverlay — alias labels', () => {
     expect(bracket.textContent).toContain('PAC');
   });
 
-  it('does not render a label when primary_concept_alias is null', () => {
+  it('falls back to the concept name when there is no alias', () => {
+    // Six of the ten taggable cadence concepts declare no alias, so an
+    // alias-only label left their brackets silently nameless (Component 11
+    // triage item 14). The sub-part path in the same file has always fallen
+    // back; this is the parent path catching up.
     const frag: FragmentListItem = {
       ...makeFragment('frag-no-alias', 1, 2),
       primary_concept_alias: null,
+      primary_concept_name: 'Standing on the Dominant',
     };
     render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
     const bracket = screen.getByTestId('stored-bracket-frag-no-alias');
-    // The bracket element should have no text content (no label span).
-    expect(bracket.textContent).toBe('');
+    expect(bracket.textContent).toContain('Standing on the Dominant');
+  });
+
+  it('renders no label only when neither alias nor name is available', () => {
+    const frag: FragmentListItem = {
+      ...makeFragment('frag-nameless', 1, 2),
+      primary_concept_alias: null,
+      primary_concept_name: null,
+    };
+    render(<FragmentOverlay fragments={[frag]} ghostLayer={FOUR_BAR_LAYER} />);
+    expect(screen.getByTestId('stored-bracket-frag-nameless').textContent).toBe('');
   });
 
   it('renders the alias text matching primary_concept_alias', () => {

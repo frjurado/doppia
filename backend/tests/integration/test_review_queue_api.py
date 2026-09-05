@@ -276,8 +276,13 @@ async def _insert_fragment(
     status: str,
     creator_id: str | None,
     mc_start: int = 1,
+    primary_tag: bool = True,
 ) -> str:
-    """Insert a fragment row with the given status and creator; return its UUID."""
+    """Insert a fragment row with the given status and creator; return its UUID.
+
+    ``primary_tag=False`` leaves the fragment untagged, which is the path the
+    queue's primary-concept resolution falls through on.
+    """
     fragment_id = str(uuid.uuid4())
     await db_session.execute(
         text(
@@ -299,13 +304,15 @@ async def _insert_fragment(
             "creator": creator_id,
         },
     )
-    await db_session.execute(
-        text(
-            "INSERT INTO fragment_concept_tag (fragment_id, concept_id, is_primary) "
-            "VALUES (:fid, 'PerfectAuthenticCadence', true)"
-        ),
-        {"fid": fragment_id},
-    )
+    if primary_tag:
+        await db_session.execute(
+            text(
+                "INSERT INTO fragment_concept_tag "
+                "(fragment_id, concept_id, is_primary) "
+                "VALUES (:fid, 'PerfectAuthenticCadence', true)"
+            ),
+            {"fid": fragment_id},
+        )
     await db_session.commit()
     return fragment_id
 
@@ -369,6 +376,59 @@ class TestReviewQueue:
         assert item["composer_name"] == "Wolfgang Amadeus Mozart"
         assert item["work_title"] == "Piano Sonata No. 11"
         assert item["primary_concept_alias"] == "PAC"
+
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": frag_id}
+        )
+        await db_session.commit()
+
+    async def test_carries_concept_name_beside_the_alias(
+        self,
+        queue_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """The queue ships the concept name so aliasless concepts still label a row.
+
+        Not every taggable concept declares an alias, and a row labelled by
+        alias alone would be blank for those.
+        """
+        frag_id = await _insert_fragment(
+            db_session, seeded_movement, "submitted", _ADMIN_USER_ID
+        )
+
+        items = await _collect_queue_items(queue_client, "dev-token")
+        item = next((i for i in items if i["id"] == frag_id), None)
+        assert item is not None
+        assert item["primary_concept_alias"] == "PAC"
+        assert item["primary_concept_name"] == "Perfect Authentic Cadence"
+
+        await db_session.execute(
+            text("DELETE FROM fragment WHERE id = :fid"), {"fid": frag_id}
+        )
+        await db_session.commit()
+
+    async def test_fragment_without_primary_tag_lists_with_null_concept(
+        self,
+        queue_client: AsyncClient,
+        seeded_movement: str,
+        db_session: AsyncSession,
+    ) -> None:
+        """An untagged fragment still lists, with all three concept fields null."""
+        frag_id = await _insert_fragment(
+            db_session,
+            seeded_movement,
+            "submitted",
+            _ADMIN_USER_ID,
+            primary_tag=False,
+        )
+
+        items = await _collect_queue_items(queue_client, "dev-token")
+        item = next((i for i in items if i["id"] == frag_id), None)
+        assert item is not None, "Untagged fragment must still reach the queue"
+        assert item["primary_concept_id"] is None
+        assert item["primary_concept_alias"] is None
+        assert item["primary_concept_name"] is None
 
         await db_session.execute(
             text("DELETE FROM fragment WHERE id = :fid"), {"fid": frag_id}

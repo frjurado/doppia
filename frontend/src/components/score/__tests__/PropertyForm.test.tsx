@@ -598,17 +598,18 @@ describe('Schema description tooltip', () => {
 });
 
 describe('VALUE_REFERENCES info panel', () => {
-  it('shows the definition panel when ⓘ is clicked', () => {
+  it('shows the referenced definition when ⓘ is clicked, without repeating the value', () => {
     render(<PropertyForm schemas={[schemaWithRef]} values={{}} onChange={vi.fn()} />);
     expect(screen.queryByTestId('info-panel-Cad64')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('info-btn-Cad64'));
     const infoPanel = screen.getByTestId('info-panel-Cad64');
-    expect(infoPanel).toBeInTheDocument();
-    // "Cadential 6-4" also appears as the option label, so scope to the panel.
-    expect(within(infoPanel).getByText('Cadential 6-4')).toBeInTheDocument();
     expect(
       within(infoPanel).getByText('A second-inversion tonic chord preceding the dominant.')
     ).toBeInTheDocument();
+    // The panel used to title itself with the referenced concept's name, which
+    // for these values is all but identical to the value label sitting an inch
+    // away — help that only restated what you were already looking at.
+    expect(within(infoPanel).queryByText('Cadential 6-4')).not.toBeInTheDocument();
   });
 
   it('hides the definition panel when ⓘ is clicked a second time', () => {
@@ -680,5 +681,95 @@ describe('PropertyForm — radio and checkbox groups are distinguishable', () =>
         `dropdown-option-${schemaManyOfLarge.id}-${schemaManyOfLarge.values[0].id}`
       )
     ).toHaveTextContent('✓');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8 — Short names and per-value help (Component 12 Step 15, triage item 8)
+// ---------------------------------------------------------------------------
+
+/**
+ * A value carrying all three layers: the absolute `name`, the context-elided
+ * `short_name` the form shows, and the `description` the ⓘ shows.
+ */
+const schemaWithShortNames: PropertySchema = {
+  id: 'Stage2Components',
+  name: 'Stage 2 Components',
+  cardinality: 'MANY_OF',
+  required: false,
+  description: null,
+  values: [
+    {
+      id: 'Stage2SD4',
+      name: 'Pre-dominant on Scale Degree 4',
+      short_name: 'On Scale Degree 4',
+      description: 'IV, ii, ii6, …',
+      referenced_concept: {
+        id: 'SD4Predominant',
+        name: 'Pre-dominant on Scale Degree 4',
+        definition: 'Stub: defined in the harmonic-functions domain.',
+        stub: true,
+      },
+    },
+    {
+      id: 'Stage2Plain',
+      name: 'A value with no short form',
+      referenced_concept: null,
+    },
+  ],
+};
+
+describe('PropertyForm — short names', () => {
+  it('renders short_name where the seed provides one', () => {
+    // The schema name sits directly above, so the elided form reads correctly:
+    // "On Scale Degree 4" under "Stage 2 Components".
+    render(<PropertyForm schemas={[schemaWithShortNames]} values={{}} onChange={vi.fn()} />);
+    expect(screen.getByText('On Scale Degree 4')).toBeInTheDocument();
+    expect(screen.queryByText('Pre-dominant on Scale Degree 4')).not.toBeInTheDocument();
+  });
+
+  it('falls back to name when there is no short form', () => {
+    render(<PropertyForm schemas={[schemaWithShortNames]} values={{}} onChange={vi.fn()} />);
+    expect(screen.getByText('A value with no short form')).toBeInTheDocument();
+  });
+});
+
+describe('PropertyForm — per-value help', () => {
+  it('shows the value description rather than a stub referenced definition', () => {
+    // The whole complaint that started this: the ⓘ showed a title repeating the
+    // value and a body reading "Stub: defined in the harmonic-functions
+    // domain." The gloss lives on the value now.
+    render(<PropertyForm schemas={[schemaWithShortNames]} values={{}} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('info-btn-Stage2SD4'));
+    const panel = screen.getByTestId('info-panel-Stage2SD4');
+    expect(within(panel).getByText('IV, ii, ii6, …')).toBeInTheDocument();
+    expect(within(panel).queryByText(/Stub: defined in/)).not.toBeInTheDocument();
+  });
+
+  it('offers no ⓘ for a value with neither a description nor a referenced concept', () => {
+    render(<PropertyForm schemas={[schemaWithShortNames]} values={{}} onChange={vi.fn()} />);
+    expect(screen.queryByTestId('info-btn-Stage2Plain')).not.toBeInTheDocument();
+  });
+
+  it('offers no ⓘ when the only source would be a stub concept', () => {
+    // A stub's definition is boilerplate; showing it is worse than showing
+    // nothing, because it looks like help until you read it.
+    const stubOnly: PropertySchema = {
+      ...schemaWithShortNames,
+      values: [
+        {
+          id: 'StubOnly',
+          name: 'Tonic',
+          referenced_concept: {
+            id: 'Tonic',
+            name: 'Tonic',
+            definition: 'Stub: defined in the harmonic-functions domain.',
+            stub: true,
+          },
+        },
+      ],
+    };
+    render(<PropertyForm schemas={[stubOnly]} values={{}} onChange={vi.fn()} />);
+    expect(screen.queryByTestId('info-btn-StubOnly')).not.toBeInTheDocument();
   });
 });

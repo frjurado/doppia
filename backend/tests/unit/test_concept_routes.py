@@ -928,3 +928,99 @@ class TestConceptServiceSchemaTree:
         }
         item = _build_schema_item(row, "en", {}, {}, {})
         assert item.values[0].referenced_concept is None
+
+    def test_build_schema_item_projects_short_name_and_description(self) -> None:
+        """A value row carries its short form and per-value gloss through."""
+        from services.concepts import _build_schema_item
+
+        row = {
+            "schema_id": "Stage2Components",
+            "schema_name": "Stage 2 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage2SD4",
+                    "name": "Pre-dominant on Scale Degree 4",
+                    "short_name": "On Scale Degree 4",
+                    "description": "IV, ii, ii6, …",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        item = _build_schema_item(row, "en", {}, {}, {})
+        value = item.values[0]
+        # The absolute name survives for context-free consumers; the short form
+        # is what a surface printing "Stage 2 Components" above it renders.
+        assert value.name == "Pre-dominant on Scale Degree 4"
+        assert value.short_name == "On Scale Degree 4"
+        assert value.description == "IV, ii, ii6, …"
+
+    def test_build_schema_item_short_name_absent_is_none(self) -> None:
+        """A value with no short form or gloss leaves both fields None."""
+        from services.concepts import _build_schema_item
+
+        row = {
+            "schema_id": "CadenceFunction",
+            "schema_name": "Cadence Function",
+            "schema_description": None,
+            "cardinality": "ONE_OF",
+            "required": True,
+            "values": [
+                {
+                    "id": "Independent",
+                    "name": "Independent",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        item = _build_schema_item(row, "en", {}, {}, {})
+        assert item.values[0].short_name is None
+        assert item.values[0].description is None
+
+    def test_build_schema_item_marks_stub_reference(self) -> None:
+        """A referenced stub is flagged so clients can suppress its boilerplate.
+
+        Stub concepts carry a definition like "Stub: defined in the
+        harmonic-functions domain", which is not help text.
+        """
+        from services.concepts import _build_schema_item
+
+        row = {
+            "schema_id": "Stage1Components",
+            "schema_name": "Stage 1 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage1AppliedDominant",
+                    "name": "Applied Dominant of Pre-dominant",
+                    "short_name": "Applied Dominant",
+                    "referenced_concept_id": "AppliedDominant",
+                    "referenced_concept_name": "Applied Dominant",
+                    "referenced_concept_definition": (
+                        "Stub: defined in the harmonic-functions domain."
+                    ),
+                    "referenced_concept_stub": True,
+                },
+                {
+                    "id": "ClosesSentence",
+                    "name": "Closes a Sentence",
+                    "referenced_concept_id": "Sentence",
+                    "referenced_concept_name": "Sentence",
+                    "referenced_concept_definition": "A phrase type.",
+                    "referenced_concept_stub": False,
+                },
+            ],
+        }
+        item = _build_schema_item(row, "en", {}, {}, {})
+        assert item.values[0].referenced_concept is not None
+        assert item.values[0].referenced_concept.stub is True
+        assert item.values[1].referenced_concept is not None
+        assert item.values[1].referenced_concept.stub is False

@@ -244,10 +244,13 @@ WITH ps, schema_order, schema_group, collect(
     THEN {
       id: pv.id,
       name: pv.name,
+      short_name: pv.short_name,
+      description: pv.description,
       order: rv.order,
       referenced_concept_id: ref.id,
       referenced_concept_name: ref.name,
-      referenced_concept_definition: ref.definition
+      referenced_concept_definition: ref.definition,
+      referenced_concept_stub: ref.stub
     }
     ELSE null
   END
@@ -347,7 +350,8 @@ async def get_concept_property_schemas(
     ``cardinality``, ``required``, ``order``, ``group``, ``values``
     (list of value dicts, empty for BOOL).
 
-    Each value dict has: ``id``, ``name``, ``order``, ``referenced_concept_id``,
+    Each value dict has: ``id``, ``name``, ``short_name``, ``description``,
+    ``order``, ``referenced_concept_id``,
     ``referenced_concept_name``, ``referenced_concept_definition`` (last three
     may be ``None`` when the value carries no VALUE_REFERENCES edge).
 

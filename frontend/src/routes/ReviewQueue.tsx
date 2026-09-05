@@ -142,10 +142,13 @@ export default function ReviewQueue() {
                 <div className={styles.itemRow}>
                   {/* Concept alias badge + bar range */}
                   <div className={styles.itemPrimary}>
-                    {item.primary_concept_alias && (
+                    {/* `alias ?? name`: six taggable cadence concepts have no
+                        alias, and a queue row identified only by bar range is
+                        the same nameless-bracket bug in another surface. */}
+                    {(item.primary_concept_alias ?? item.primary_concept_name) && (
                       <span className={styles.aliasBadge}>
                         <Type variant="label-sm" as="span">
-                          {item.primary_concept_alias}
+                          {item.primary_concept_alias ?? item.primary_concept_name}
                         </Type>
                       </span>
                     )}

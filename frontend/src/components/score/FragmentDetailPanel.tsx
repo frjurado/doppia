@@ -551,6 +551,23 @@ export default function FragmentDetailPanel({
   const schemaMap = new Map(schemas?.map((s) => [s.id, s.name]) ?? []);
 
   /**
+   * Map property-value id → label, from the same schema list already fetched.
+   *
+   * Stored values are ids, and this panel printed them raw — a reader saw
+   * "Stage 2 Components: Stage2SD4". The schema list carries every permitted
+   * value, so resolving them costs one pass and no extra request.
+   *
+   * `short_name ?? name` for the same reason the form uses it: the schema name
+   * is the row's own label, immediately to the left, so the context the short
+   * form leans on is right there. Unresolvable ids keep printing raw rather
+   * than vanishing — on the public path the schema fetch is skipped entirely
+   * (it is editor-only), and a visible id beats a blank cell.
+   */
+  const valueMap = new Map(
+    (schemas ?? []).flatMap((sc) => sc.values.map((v) => [v.id, v.short_name ?? v.name]))
+  );
+
+  /**
    * Order stored property entries the way the create/edit form shows them (M6).
    *
    * The server returns schemas already sorted by (grouped-first, order, name)
@@ -579,10 +596,10 @@ export default function FragmentDetailPanel({
 
   /** Render a stored property value: lists join, booleans read as yes/no. */
   function propertyValueLabel(val: string | string[]): string {
-    if (Array.isArray(val)) return val.join(', ');
+    if (Array.isArray(val)) return val.map((v) => valueMap.get(v) ?? v).join(', ');
     if (val === 'true') return t('common:yes');
     if (val === 'false') return t('common:no');
-    return val;
+    return valueMap.get(val) ?? val;
   }
 
   const harmonyRows = (fragment?.harmony_events ?? []).map((e) =>

@@ -623,6 +623,7 @@ def _build_schema_item(
                 definition=(
                     ct.definition if ct else v.get("referenced_concept_definition")
                 ),
+                stub=bool(v.get("referenced_concept_stub")),
                 translation_missing=is_translation_missing(language, concept_t, ref_id),
             )
         vt = value_t.get(v["id"])
@@ -630,6 +631,12 @@ def _build_schema_item(
             PropertyValueItem(
                 id=v["id"],
                 name=vt.name if vt else v["name"],
+                # Not translated: the translation tables carry `name` only
+                # (ADR-006). A non-English locale therefore falls back to the
+                # English short form and gloss, which is the same fallback the
+                # rest of the payload already uses.
+                short_name=v.get("short_name"),
+                description=v.get("description"),
                 order=v.get("order"),
                 referenced_concept=ref,
                 translation_missing=is_translation_missing(language, value_t, v["id"]),

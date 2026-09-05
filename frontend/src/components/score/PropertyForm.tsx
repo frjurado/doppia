@@ -28,7 +28,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PropertySchema } from '../../services/conceptApi';
+import type { PropertySchema, PropertyValue } from '../../services/conceptApi';
 import InfoHint from '../ui/InfoHint';
 import Type from '../ui/Type';
 import styles from './PropertyForm.module.css';
@@ -64,6 +64,34 @@ export interface PropertyFormProps {
 // ---------------------------------------------------------------------------
 
 /** Field name label and optional description shown above each control. */
+/**
+ * The label to print for a value.
+ *
+ * `short_name` where the seed provides one, because every surface that shows a
+ * value prints its schema name beside it — "On Scale Degree 4" under
+ * "Stage 2 Components". `name` stays the absolute form for the context-free
+ * consumers (exports, Component 15 distractors) and is the fallback here.
+ */
+function valueLabel(pv: PropertyValue): string {
+  return pv.short_name ?? pv.name;
+}
+
+/**
+ * Help text for a value's ⓘ, or null when there is nothing worth showing.
+ *
+ * The ⓘ used to render the *referenced concept* — which for these values is a
+ * placeholder in an unwritten domain, so it showed a title that merely repeated
+ * the value and a body reading "Stub: defined in the harmonic-functions
+ * domain." Now the value's own `description` is the help, and a referenced
+ * concept contributes only when it is not a stub and actually has a definition.
+ */
+function valueHelp(pv: PropertyValue): string | null {
+  if (pv.description) return pv.description;
+  const ref = pv.referenced_concept;
+  if (ref && !ref.stub && ref.definition) return ref.definition;
+  return null;
+}
+
 /**
  * Leading mark on an option row (triage item 11).
  *
@@ -237,7 +265,7 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
           >
             {schema.values.map((pv) => {
               const isSelected = selectedIds.includes(pv.id);
-              const hasRef = !!pv.referenced_concept;
+              const help = valueHelp(pv);
               return (
                 <div key={pv.id}>
                   <div
@@ -250,15 +278,12 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
                   >
                     <OptionIndicator selected={isSelected} multiple={multiple} />
                     <Type variant="label-md" as="span" className={styles.optionText}>
-                      {pv.name}
+                      {valueLabel(pv)}
                     </Type>
-                    {hasRef && (
+                    {help !== null && (
                       <InfoHint
-                        title={pv.referenced_concept!.name}
-                        text={pv.referenced_concept!.definition ?? ''}
-                        ariaLabel={t('propertyForm.infoAria', {
-                          name: pv.referenced_concept!.name,
-                        })}
+                        text={help}
+                        ariaLabel={t('propertyForm.infoAria', { name: valueLabel(pv) })}
                         buttonTestId={`info-btn-${pv.id}`}
                         panelTestId={`info-panel-${pv.id}`}
                       />
@@ -290,7 +315,7 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
       <div className={styles.optionGroup} role="radiogroup" aria-label={schema.name}>
         {schema.values.map((pv) => {
           const isChecked = selected === pv.id;
-          const hasRef = !!pv.referenced_concept;
+          const help = valueHelp(pv);
           return (
             <div key={pv.id}>
               <label className={styles.optionLabel} data-testid={`radio-${schema.id}-${pv.id}`}>
@@ -302,17 +327,16 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
                   onChange={() => {}}
                   onClick={() => onChange(schema.id, isChecked ? null : pv.id)}
                   className={styles.hiddenInput}
-                  aria-label={pv.name}
+                  aria-label={valueLabel(pv)}
                 />
                 <OptionIndicator selected={isChecked} multiple={false} />
                 <Type variant="label-md" as="span" className={styles.optionText}>
-                  {pv.name}
+                  {valueLabel(pv)}
                 </Type>
-                {hasRef && (
+                {help !== null && (
                   <InfoHint
-                    title={pv.referenced_concept!.name}
-                    text={pv.referenced_concept!.definition ?? ''}
-                    ariaLabel={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
+                    text={help}
+                    ariaLabel={t('propertyForm.infoAria', { name: valueLabel(pv) })}
                     buttonTestId={`info-btn-${pv.id}`}
                     panelTestId={`info-panel-${pv.id}`}
                   />
@@ -348,7 +372,7 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
       <div className={styles.optionGroup} role="group" aria-label={schema.name}>
         {schema.values.map((pv) => {
           const isChecked = selected.includes(pv.id);
-          const hasRef = !!pv.referenced_concept;
+          const help = valueHelp(pv);
           return (
             <div key={pv.id}>
               <label className={styles.optionLabel} data-testid={`checkbox-${schema.id}-${pv.id}`}>
@@ -357,17 +381,16 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
                   className={styles.hiddenInput}
                   checked={isChecked}
                   onChange={() => toggle(pv.id)}
-                  aria-label={pv.name}
+                  aria-label={valueLabel(pv)}
                 />
                 <OptionIndicator selected={isChecked} multiple />
                 <Type variant="label-md" as="span" className={styles.optionText}>
-                  {pv.name}
+                  {valueLabel(pv)}
                 </Type>
-                {hasRef && (
+                {help !== null && (
                   <InfoHint
-                    title={pv.referenced_concept!.name}
-                    text={pv.referenced_concept!.definition ?? ''}
-                    ariaLabel={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
+                    text={help}
+                    ariaLabel={t('propertyForm.infoAria', { name: valueLabel(pv) })}
                     buttonTestId={`info-btn-${pv.id}`}
                     panelTestId={`info-panel-${pv.id}`}
                   />

@@ -676,6 +676,29 @@ the model only reliably carries a long one":
   review queue") — verify it is the same alias gap and falls out of the
   fallback; if the queue renders a different field, fix it to the same rule.
 
+**Landed 2026-09-05**, with one addition the plan did not anticipate and one
+bug it surfaced:
+
+- `short_name` alone could not carry item 8, because removing "(IV, ii, ii6,
+  …)" from a name deletes the gloss outright — the ⓘ is per *schema*, so
+  there was nowhere for it to go. The step added `description` alongside
+  `short_name` on `PropertyValueYAML`, and repointed the per-value ⓘ at it.
+  That ⓘ previously rendered the referenced concept, which for these values
+  is stub boilerplate under a title repeating the value; it now suppresses
+  entirely when there is nothing real to say, which needed a `stub` flag on
+  `ReferencedConcept`. `name` stays the absolute form on purpose — Component
+  15's distractors and any export are context-free consumers.
+- M4's naming piece **is** the same alias gap, but the queue could not
+  simply fall back: `ReviewQueueItem` carried the alias and not the name.
+  Added `primary_concept_name`, which is where the bug came in — the two
+  listing helpers in `FragmentService` ended up with fallthrough `return`
+  statements of the wrong arity, unpacked as tuples of a different length.
+  Neither path had a test, because every fixture inserts a primary tag.
+  Fixed, and covered: an untagged fragment now has an integration test
+  asserting it still lists with all three concept fields null.
+- Editorial outcome (short forms, and four coined aliases) is recorded in
+  the triage report under items 8 and 14.
+
 ### Step 16 — Item 9: rare properties under an "Other" group
 
 Three `group:` lines in `cadences.yaml` (the ADR-023 mechanism already

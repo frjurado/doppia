@@ -198,6 +198,7 @@ property_schemas:
         references: Tonic
       - id: Stage1AppliedDominant
         name: "Applied Dominant of Pre-dominant"
+        short_name: "Applied Dominant"
         order: 2
         references: AppliedDominant
 
@@ -210,11 +211,15 @@ property_schemas:
     required: false
     values:
       - id: Stage2SD4
-        name: "Pre-dominant on Scale Degree 4 (IV, ii, ii6, …)"
+        name: "Pre-dominant on Scale Degree 4"
+        short_name: "On Scale Degree 4"
+        description: "IV, ii, ii6, …"
         order: 1
         references: SD4Predominant
       - id: Stage2SDSharp4
-        name: "Pre-dominant on Raised Scale Degree 4 (applied V, +6, …)"
+        name: "Pre-dominant on Raised Scale Degree ♯4"
+        short_name: "On Scale Degree ♯4"
+        description: "Applied V, augmented sixths, …"
         order: 2
         references: SDSharp4Predominant
 
@@ -423,7 +428,7 @@ concepts:
   - id: DeceptiveCadence
     name: "Deceptive Cadence"
     aliases:
-      - DC
+      - Dec.Cad.
     domain: cadences
     type: CadenceType
     complexity: intermediate
@@ -443,6 +448,8 @@ concepts:
 
   - id: EvadedCadence
     name: "Evaded Cadence"
+    aliases:
+      - Ev.Cad.
     domain: cadences
     type: CadenceType
     complexity: intermediate
@@ -465,6 +472,8 @@ concepts:
 
   - id: AbandonedCadence
     name: "Abandoned Cadence"
+    aliases:
+      - Abnd.
     domain: cadences
     type: CadenceType
     complexity: advanced
@@ -523,6 +532,8 @@ concepts:
 
   - id: ReopeningHalfCadence
     name: "Reopening Half Cadence"
+    aliases:
+      - "HC (reopening)"
     domain: cadences
     type: CadenceType
     complexity: advanced
@@ -546,6 +557,8 @@ concepts:
 
   - id: DominantArrival
     name: "Dominant Arrival"
+    aliases:
+      - Dom.Arr.
     domain: cadences
     type: CadenceType
     complexity: advanced

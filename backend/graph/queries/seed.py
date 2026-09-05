@@ -69,8 +69,16 @@ ON MATCH SET  d.name = $name
 
 _MERGE_PROPERTY_VALUE = """\
 MERGE (pv:PropertyValue {id: $id})
-ON CREATE SET pv.name = $name, pv.aliases = $aliases, pv.references = $references
-ON MATCH SET  pv.name = $name, pv.aliases = $aliases, pv.references = $references
+ON CREATE SET pv.name        = $name,
+              pv.short_name  = $short_name,
+              pv.description = $description,
+              pv.aliases     = $aliases,
+              pv.references  = $references
+ON MATCH SET  pv.name        = $name,
+              pv.short_name  = $short_name,
+              pv.description = $description,
+              pv.aliases     = $aliases,
+              pv.references  = $references
 """
 
 # ---------------------------------------------------------------------------
@@ -227,6 +235,8 @@ def merge_property_value(
     session: _Session,
     pv_id: str,
     name: str,
+    short_name: str | None,
+    description: str | None,
     aliases: list[str],
     references: str | None,
 ) -> None:
@@ -235,7 +245,9 @@ def merge_property_value(
     Args:
         session: An open synchronous Neo4j session.
         pv_id: The PropertyValue id.
-        name: Human-readable label.
+        name: Human-readable label, absolute (readable without its schema).
+        short_name: The same label with the schema's context elided, or ``None``.
+        description: Per-value help text, or ``None``.
         aliases: Alternative labels (may be empty).
         references: Concept id this value points back to, or ``None``.
     """
@@ -243,6 +255,8 @@ def merge_property_value(
         _MERGE_PROPERTY_VALUE,
         id=pv_id,
         name=name,
+        short_name=short_name,
+        description=description,
         aliases=aliases,
         references=references,
     )
@@ -267,7 +281,15 @@ def merge_property_schema(session: _Session, schema: PropertySchemaYAML) -> None
         required=schema.required,
     )
     for pv in schema.values:
-        merge_property_value(session, pv.id, pv.name, pv.aliases, pv.references)
+        merge_property_value(
+            session,
+            pv.id,
+            pv.name,
+            pv.short_name,
+            pv.description,
+            pv.aliases,
+            pv.references,
+        )
         session.run(
             _MERGE_HAS_VALUE_EDGE,
             schema_id=schema.id,

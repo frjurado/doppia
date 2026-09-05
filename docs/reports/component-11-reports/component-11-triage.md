@@ -50,6 +50,38 @@ Worth knowing: `PropertyValueYAML` already has an `aliases` list, and `merge_pro
 
 **Recommendation: (c).** Five small touch points, and it says what it means. The precedent is concept `aliases`, which already act as the short label in the score sidebar (`subPartLabel` renders the primary concept alias — "PAC" rather than "Perfect Authentic Cadence"); this gives values the same affordance without redefining `aliases`. **Disposition: deferred to Component 12** — the naming is editorial and Francisco writes the short forms.
 
+**Resolved in Component 12, Step 15 (2026-09-05) — (c), plus a `description`.**
+`short_name` alone would have forced a choice between losing the
+"(IV, ii, ii6, …)" gloss and keeping it in the name, because the ⓘ is per
+*schema*, so the gloss had nowhere to go. Step 15 therefore added **two**
+fields to `PropertyValueYAML`: `short_name` (the context-elided label) and
+`description` (per-value help). `description` rather than the referenced
+concept's definition, because most values have no `references:` at all
+(`SD3`, `SD5`, `Basic`, `Converging`, `Independent`, …), so a referenced
+definition could never be the general home for it.
+
+The editorial outcome, Francisco's call:
+
+| id | `name` | `short_name` | `description` |
+|---|---|---|---|
+| `Stage1AppliedDominant` | Applied Dominant of Pre-dominant | Applied Dominant | — |
+| `Stage2SD4` | Pre-dominant on Scale Degree 4 | On Scale Degree 4 | IV, ii, ii6, … |
+| `Stage2SDSharp4` | Pre-dominant on Raised Scale Degree ♯4 | On Scale Degree ♯4 | Applied V, augmented sixths, … |
+
+`name` stays the absolute form deliberately — it is what context-free
+consumers need (exports, Component 15 distractors), and a short label cannot
+be expanded back into a long one. Rendering is `short_name ?? name` in the
+tagging form and the fragment record panel; both print the schema heading
+beside the value, so the elided context is always present on screen.
+
+Folded in while the ⓘ was open: it used to render the *referenced concept*,
+whose definition for these values is stub boilerplate ("Stub: defined in the
+harmonic-functions domain") under a title that merely repeated the value.
+The ⓘ now shows the value's own `description`, falls back to a referenced
+concept only when it is **not** a stub and has a real definition, and
+renders nothing at all otherwise — so `ReferencedConcept` gained a `stub`
+flag to make that decision possible client-side.
+
 ### 9. "Covered" and "Unison" are too rare to sit inline
 
 **Finding — the mechanism already exists.** ADR-023 put a `group` label on the `HAS_PROPERTY_SCHEMA` edge, and `PropertyForm` already renders schemas sharing a group as a contiguous cluster under a visible group label (`groupSchemas`, [`PropertyForm.tsx:506–538`](../../../frontend/src/components/score/PropertyForm.tsx)). `Cadence` already uses it: `CadenceFunction`, `PhraseClosure` and `ThemeClosure` all carry `group: "closure"`.
@@ -156,6 +188,22 @@ data model only reliably carries a long one. Worth solving once, together.
 
 **Disposition: deferred to Component 12**, with item 8.
 
+**Resolved in Component 12, Step 15 (2026-09-05) — (c), as recommended.**
+The fallback landed on both surfaces that label a fragment by alias: the
+parent bracket (`FragmentOverlay.tsx`) and the review queue
+(`ReviewQueue.tsx`), the latter reached through a new
+`ReviewQueueItem.primary_concept_name` — the queue payload carried the alias
+only, so it had nothing to fall back *to*. This confirmed M4's naming piece
+("Evaded Cadences are not named as such in the review queue") as the same
+alias gap, resolved by the same rule.
+
+Aliases Francisco coined, mostly following Caplin: `Ev.Cad.`
+(`EvadedCadence`), `Abnd.` (`AbandonedCadence`), `Dom.Arr.`
+(`DominantArrival`), `HC (reopening)` (`ReopeningHalfCadence`), and `DC` →
+`Dec.Cad.` for consistency with them. `ClosingSection` and
+`StandingOnTheDominant` keep no alias — no conventional abbreviation exists
+— which is exactly the case the fallback now covers.
+
 ---
 
 ## Carried forward from batch A
@@ -169,7 +217,9 @@ data model only reliably carries a long one. Worth solving once, together.
 | Disposition | Items |
 |---|---|
 | **Landed in Component 11** | 1, 2, 3, 4, 5, 7 |
-| **Deferred to Component 12** | 8 (short names), 9 (grouping), 10 (button row), 11 (radio/checkbox design check), 12 (blocked notice), 13 (capture extensions), 14 (unlabelled brackets) |
+| **Landed in Component 12** | 10 (button row), 11 (radio/checkbox design check) — Step 14; 8 (short names), 14 (unlabelled brackets) — Step 15 |
+| **Deferred to Component 12** | 9 (grouping) — Step 16; 12 (blocked notice) — Step 17 |
+| **Re-homed to Component 15** | 13 (capture extensions) — see the Component 12 plan, § Decisions |
 | **Phase-2 backlog** | 6 (glossary hierarchy), collapsible property groups, bracket-geometry unification |
 
 Deferring batch B in full was Francisco's call (2026-08-25). The items are

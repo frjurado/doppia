@@ -59,6 +59,26 @@ class PropertyValueYAML(BaseModel):
 
     id: str
     name: str
+    """The absolute label, readable without its schema's heading for context.
+
+    Kept as the canonical form even where nothing displays it today: exports and
+    Component 15's exercise distractors are context-free consumers, and a short
+    label cannot be expanded back into a long one.
+    """
+    short_name: str | None = None
+    """The same label with the schema heading's context elided, e.g. "On Scale
+    Degree 4" under "Stage 2 Components". Forms and the record sidebar render
+    ``short_name or name``; both surfaces print the schema name alongside, so
+    the context is always present where the short form is used.
+    """
+    description: str | None = None
+    """Per-value help — the gloss that used to be crammed into the name, e.g.
+    "IV, ii, ii6, …". Surfaced by the ⓘ beside the value.
+
+    Lives here rather than on the referenced concept because most values have
+    no ``references`` at all (SD3, SD5, Basic, Converging, Independent, …), so a
+    referenced definition could never be the general home for it.
+    """
     order: int | None = None
     """Display position within this property schema's value list; unset sorts last."""
     references: str | None = None

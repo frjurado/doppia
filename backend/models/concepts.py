@@ -24,6 +24,10 @@ class ReferencedConcept(BaseModel):
         id: Immutable concept identifier.
         name: Human-readable concept name.
         definition: Long-form definition text, or ``None`` if not set.
+        stub: ``True`` when the concept is a placeholder awaiting its own
+            domain. Its ``definition`` is then boilerplate ("Stub: defined in
+            the … domain"), so a reader-facing surface must not present it as
+            help text.
         translation_missing: ``True`` when the requested non-English locale has
             no translation for this concept and English values are served as a
             fallback (ADR-006 §6). Always ``False`` for English.
@@ -31,6 +35,7 @@ class ReferencedConcept(BaseModel):
 
     id: str
     name: str
+    stub: bool = False
     definition: str | None = None
     translation_missing: bool = False
 
@@ -40,7 +45,13 @@ class PropertyValueItem(BaseModel):
 
     Attributes:
         id: Stable value identifier.
-        name: Human-readable value label.
+        name: Human-readable value label, absolute — readable without the
+            schema heading that sits above it.
+        short_name: The same label with that heading's context elided
+            ("On Scale Degree 4" under "Stage 2 Components"), or ``None``.
+            Clients render ``short_name or name``.
+        description: Per-value help text, or ``None``. Holds the gloss that
+            used to be crammed into ``name`` ("IV, ii, ii6, …").
         order: Display position within the schema's value list (from the
             ``HAS_VALUE`` edge); ``None`` when not declared (sorts last).
         referenced_concept: If this value has a ``VALUE_REFERENCES`` edge,
@@ -52,6 +63,8 @@ class PropertyValueItem(BaseModel):
 
     id: str
     name: str
+    short_name: str | None = None
+    description: str | None = None
     order: int | None = None
     referenced_concept: ReferencedConcept | None = None
     translation_missing: bool = False

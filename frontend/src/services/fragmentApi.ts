@@ -284,6 +284,8 @@ export interface ReviewQueueItem {
   primary_concept_id: string | null;
   /** Abbreviated concept label, e.g. "PAC". Null when no alias is set. */
   primary_concept_alias: string | null;
+  /** Full concept name, the fallback when no alias exists. */
+  primary_concept_name: string | null;
   created_by: string | null;
   /** ISO datetime of the last status transition (approximates submission time). */
   submitted_at: string;

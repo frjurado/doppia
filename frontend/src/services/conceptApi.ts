@@ -22,10 +22,33 @@ const BASE = '/api/v1';
 
 const PropertyValueSchema = z.object({
   id: z.string(),
+  /** The absolute label — readable without the schema heading above it. */
   name: z.string(),
+  /**
+   * The same label with that heading's context elided ("On Scale Degree 4"
+   * under "Stage 2 Components"). Render `short_name ?? name`: every surface
+   * that shows a value prints its schema name beside it, so the context the
+   * short form relies on is always present.
+   */
+  short_name: z.string().nullable().optional(),
+  /**
+   * Per-value help, shown by the ⓘ — the gloss that used to be crammed into
+   * the name ("IV, ii, ii6, …").
+   */
+  description: z.string().nullable().optional(),
   order: z.number().nullable().optional(),
   referenced_concept: z
-    .object({ id: z.string(), name: z.string(), definition: z.string().nullable() })
+    .object({
+      id: z.string(),
+      name: z.string(),
+      definition: z.string().nullable(),
+      /**
+       * True for a placeholder concept awaiting its own domain. Its definition
+       * is boilerplate ("Stub: defined in the … domain"), so it must never be
+       * shown as help text.
+       */
+      stub: z.boolean().optional(),
+    })
     .nullable()
     .optional(),
 });
