@@ -92,6 +92,25 @@ So clustering `ECP` / `Covered` / `Unison` under an "Other" heading is a **YAML-
 
 **Recommendation:** do the YAML grouping first and see whether the cluster is enough; build collapsibility only if it is not. One editorial call for Francisco: `ECP` is arguably common enough to stay inline, in which case "Other" holds only `Covered` and `Unison`. **Disposition: deferred to Component 12** (the YAML grouping is three lines whenever it is picked up); collapsibility filed separately in the Phase-2 backlog.
 
+**Resolved in Component 12, Step 16 (2026-09-06).** `Covered` and `Unison` sit
+under an `other` heading, last in the form; `ECP` stays inline and ungrouped
+(Francisco's editorial call — it is a genuine analytical property asked on most
+fragments, not a rarity).
+
+This needed a change to ADR-023 § 4, which the triage assumed it would not.
+The original sort put every grouped schema ahead of every ungrouped one, so
+grouping the rare pair promoted it above `ECP`. The sort is now `order` then
+`name`, with `group` clustering contiguous runs only — see the amendment in
+ADR-023 for the contiguity obligation it creates.
+
+Collapsibility remains unbuilt and is now scoped in the Component 12 plan
+(§ Step 16). The short version: the cost is a shared `Disclosure` primitive —
+none exists, and three components hand-roll one — plus a `DESIGN.md` pattern,
+not the collapsing itself. Worth doing with that extraction rather than alone.
+Grounding: `Covered` and `Unison` are set on **zero** of the 91 fragments in
+the local DB, and both are optional, so no completeness or data-hiding risk
+attaches to collapsing them.
+
 ### 10. Cancel/Delete at the top, Save/Submit at the bottom
 
 **Finding.** They live in two different components. Cancel and Delete render inside `fragmentHeaderActions` in the fragment header ([`FormPanel.tsx:455–475`](../../../frontend/src/components/score/FormPanel.tsx)) and appear **only in edit mode**. Save Draft and Submit for Review are props of `SubmissionChecklist`, rendered at the panel's foot (`FormPanel.tsx:676–700`), and appear **always**. Nothing but layout ties them apart — no state or ordering constraint.
@@ -218,7 +237,8 @@ Aliases Francisco coined, mostly following Caplin: `Ev.Cad.`
 |---|---|
 | **Landed in Component 11** | 1, 2, 3, 4, 5, 7 |
 | **Landed in Component 12** | 10 (button row), 11 (radio/checkbox design check) — Step 14; 8 (short names), 14 (unlabelled brackets) — Step 15 |
-| **Deferred to Component 12** | 9 (grouping) — Step 16; 12 (blocked notice) — Step 17 |
+| **Landed in Component 12** (cont.) | 9 (grouping) — Step 16 |
+| **Deferred to Component 12** | 12 (blocked notice) — Step 17 |
 | **Re-homed to Component 15** | 13 (capture extensions) — see the Component 12 plan, § Decisions |
 | **Phase-2 backlog** | 6 (glossary hierarchy), collapsible property groups, bracket-geometry unification |
 

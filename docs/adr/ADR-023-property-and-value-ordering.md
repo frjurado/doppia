@@ -1,6 +1,6 @@
 # ADR-023 — Property and Value Ordering (`order` / `group` on `HAS_PROPERTY_SCHEMA` and `HAS_VALUE`)
 
-**Status:** Accepted
+**Status:** Accepted (§ 4 amended 2026-09-06 — see the note in that section)
 **Date:** 2026-06-03
 **See also:** `docs/architecture/edge-vocabulary-reference.md` (`HAS_PROPERTY_SCHEMA` and `HAS_VALUE` definitions; `order` precedent on `CONTAINS`), `docs/architecture/knowledge-graph-design-reference.md` (§ 5 PropertySchema node fields; § 6–7 edge property tables), `docs/adr/ADR-019-bool-property-cardinality.md` (PropertySchema cardinality; first consumer: cadences domain), `docs/architecture/fragment-schema.md` (schema-tree payload), `backend/seed/domains/cadences.yaml` (first consumer of this ordering mechanism)
 
@@ -41,6 +41,30 @@ Controls the display position of a permitted value within a property schema's va
 The form renders property schemas in the order: sort by group (groups sorted by their minimum `order`; no-group last), then by `order` within the group (unset last), then alphabetically by `name` as a final tiebreaker.
 
 Required and optional schemas are **not** separated by sort position. Required status is indicated by a `*` marker in the form label. This lets a group like "closure" contain `CadenceFunction` (required) alongside `PhraseClosure` and `ThemeClosure` (optional) without forcing a split.
+
+> **Amended 2026-09-06 (Component 12, Step 16) — the sort is `(order, name)`; groups no longer sort first.**
+>
+> The original rule placed every grouped schema ahead of every ungrouped one.
+> Component 11 triage item 9 asked for the rare properties (`Covered`, `Unison`)
+> to cluster under an "other" heading **last**, while `ECP` stays inline and
+> ungrouped — and under the original rule that is unreachable: grouping the rare
+> pair promotes it above `ECP`, putting the leftovers *before* the property they
+> were meant to follow. Giving `ECP` a group of its own would fix the order at
+> the cost of a heading over a single property, which is precisely what "stays
+> inline" rules out.
+>
+> The sort is therefore `order` then `name`, with no grouped-first term. A
+> schema's declared `order` alone fixes its position; `group` only says which
+> neighbours draw a shared heading. An ungrouped schema may sit between two
+> groups.
+>
+> **This makes group membership a contiguity contract on the seed.** A group
+> whose members hold non-contiguous `order` values now renders as two clusters
+> under the same heading rather than one — the renderer clusters contiguous runs
+> and deliberately does not re-sort. Keep a group's `order` values adjacent.
+>
+> Unchanged: values within a schema (`HAS_VALUE.order`), the null-sorts-last
+> rule, and required status not affecting position.
 
 ### 5. YAML shape for `property_schemas` under concept entries
 

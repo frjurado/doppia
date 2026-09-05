@@ -10,9 +10,11 @@
  *  MANY_OF → checkbox group (≤2 values) or compact multi-select popover (>2 values)
  *  BOOL    → binary on/off toggle; null = never-touched initial state (ADR-019)
  *
- * Ordering (ADR-023): schemas are rendered in the order returned by the server,
- * which sorts by (grouped-first, order, name). Schemas sharing the same `group`
- * label are rendered as a contiguous cluster with a visible group label.
+ * Ordering (ADR-023 as amended): schemas are rendered in the order returned by
+ * the server, which sorts by (order, name) alone. Schemas sharing the same
+ * `group` label are rendered as a contiguous cluster with a visible group label;
+ * an ungrouped schema may sit between two groups, which is how `ECP` stays
+ * inline while `other` stays last. We cluster contiguous runs and never re-sort.
  * Required schemas are marked with * but are not separated from optional ones
  * by position — a required schema may appear inside the same group as optional ones.
  *
@@ -489,8 +491,9 @@ function SchemaField({ schema, value, onChange }: FieldProps) {
 
 // ---------------------------------------------------------------------------
 // Group schemas into contiguous sections by their `group` label (ADR-023).
-// The server already delivers schemas in (grouped-first, order, name) order;
-// we only need to detect group boundaries and cluster them visually.
+// The server already delivers schemas in (order, name) order; we only detect
+// group boundaries and cluster them visually. Never re-sort here — the server's
+// sequence is what puts an ungrouped schema between two groups.
 // ---------------------------------------------------------------------------
 
 interface SchemaSection {

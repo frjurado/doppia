@@ -313,12 +313,19 @@ concepts:
       - schema: ThemeClosure
         order: 3
         group: "closure"
+      # ECP stays inline and ungrouped: it is a genuine analytical property of
+      # the cadence, asked on most fragments, not a rarity to be tucked away.
       - schema: ECP
         order: 11
+      # Covered and Unison are rare enough that they read as noise beside the
+      # rest (Component 11 triage item 9). Clustered under one heading, last —
+      # the order values put them after ECP, and the group makes them a block.
       - schema: Covered
         order: 12
+        group: "other"
       - schema: Unison
         order: 13
+        group: "other"
     capture_extensions:
       # A review gate, not stored data: nothing lands in
       # summary.concept_extensions, because the harmony already lives in

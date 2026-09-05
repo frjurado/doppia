@@ -264,7 +264,6 @@ RETURN ps.id          AS schema_id,
        schema_group   AS group,
        [v IN raw_values WHERE v IS NOT NULL] AS values
 ORDER BY
-  CASE WHEN schema_group IS NULL THEN 1 ELSE 0 END,
   coalesce(schema_order, 9999),
   ps.name
 """
@@ -274,9 +273,12 @@ For each schema, the values list is hydrated with name and optional
 VALUE_REFERENCES concept info (id, name, definition).  BOOL schemas have
 an empty values list.
 
-Schemas are sorted by (group, order, name) per ADR-023: schemas with a
-non-null group come first, ordered by their declared order within the group;
-ungrouped schemas follow, also ordered by their declared order.  Values within
+Schemas are sorted by (order, name) per ADR-023 as amended: a schema's
+declared order alone fixes its position, whether or not it carries a group.
+Groups cluster contiguous runs of that single sequence, so an ungrouped
+schema can sit between two groups — which is how ``ECP`` stays inline while
+``other`` remains last.  Group members must therefore hold contiguous order
+values, or the group renders as two clusters under one heading.  Values within
 each schema are sorted by their HAS_VALUE edge order (nulls last), then name.
 """
 
@@ -360,7 +362,7 @@ async def get_concept_property_schemas(
         concept_id: The concept id to resolve schemas for.
 
     Returns:
-        List of schema dicts sorted by (grouped-first, order, name) per ADR-023.
+        List of schema dicts sorted by (order, name) per ADR-023 as amended.
     """
     result = await session.run(_GET_CONCEPT_PROPERTY_SCHEMAS, concept_id=concept_id)
     return await result.data()

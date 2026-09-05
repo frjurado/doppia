@@ -707,6 +707,78 @@ renders labelled clusters — no code). **Editorial call for Francisco:** does
 stays in the backlog per the triage recommendation — see whether the cluster
 suffices first.
 
+**Landed 2026-09-06.** Francisco's call: `ECP` stays inline, `other` =
+`Covered` + `Unison`, and the cluster sorts last.
+
+It was not "no code". The plan assumed the ordering mechanism could express
+this; it could not. ADR-023 § 4 sorted **every grouped schema ahead of every
+ungrouped one**, so grouping the rare pair promoted it *above* `ECP` — the
+leftovers would have rendered before the property they were meant to follow.
+Giving `ECP` a group of its own would have fixed the order at the cost of a
+heading over a single property, which is what "stays inline" rules out.
+
+So the sort is now `order` then `name`, with no grouped-first term: a
+schema's declared `order` alone fixes its position, and `group` only says
+which neighbours draw a shared heading. One clause removed from the Cypher
+`ORDER BY`; the renderer already clustered contiguous runs without
+re-sorting, so no frontend change was needed. ADR-023 § 4 carries the
+amendment, including the new obligation it creates — **group members must
+hold contiguous `order` values**, or the group draws two headings. Covered by
+tests at both ends (`tests/graph/test_concept_detail_async.py`,
+`PropertyForm.test.tsx` § 9), neither of which existed before.
+
+Resulting order on a PAC: `closure` (CadenceFunction, PhraseClosure,
+ThemeClosure) → ungrouped inline (ReinterpretedAsHC, ECP) → `other`
+(Covered, Unison).
+
+#### Scope: making "other" collapsible (not built — for Francisco to schedule)
+
+Francisco is confident collapsing is right, but wanted the grouping first and
+the cost of the rest written down before committing to it.
+
+**What the data says.** Of 91 fragments in the local DB, **`Covered` and
+`Unison` are set on zero**; `ECP` on four. Both are optional `BOOL`s, so a
+collapsed cluster can never hide a required field or affect
+`computeIsComplete` — the correctness risk that would normally dominate this
+work is absent here.
+
+**The work, honestly sized:**
+
+1. **A disclosure primitive — the real cost.** There is no shared one.
+   `ConceptExamples`, `InfoHint` and `TopBar` each hand-roll `aria-expanded`,
+   which is exactly the F-register duplication Step 14 was set up to remove.
+   Doing this properly means extracting a `Disclosure` into
+   `components/ui/` and migrating those three, not adding a fourth variant.
+   That is the majority of the effort and it is shared-chrome work, not
+   property-form work.
+2. **A `DESIGN.md` pattern.** No collapsed-section precedent exists (the
+   `sm`-breakpoint disclosure nav is a different thing). Under 0px radius, no
+   1px dividers and tonal-layering-only, "there is more here" has to be
+   carried by tone and an affordance glyph. Same shape as Step 14's
+   destructive-action precedent: the documented pattern *is* the deliverable.
+3. **Where the collapsed state lives.** Per-group, per-session is the cheap
+   answer (component state); remembering it across fragments needs somewhere
+   to put it. Not a hard problem, but a decision.
+4. **The "never hide a set value" rule.** Even though nothing sets these
+   today, a group that silently hides a checked box is a data-integrity
+   trap: open by default when any member has a value, and keep it open.
+   One predicate, but it must be tested, and it is the reason not to
+   hard-code "collapsed by default".
+5. **Tests.** Toggle, keyboard, the auto-open predicate, and the existing
+   § 9 clustering tests extended.
+
+**Recommendation: schedule it with the `Disclosure` extraction, in Component
+13's chrome work — not as a Step 16 follow-up.** Collapsing two never-used
+optional booleans is a thin payoff for a new bespoke widget; the same effort
+spent extracting the primitive pays for itself across three existing call
+sites and makes this a few lines. The grouping already delivers most of what
+item 9 asked for — the rare pair no longer reads as noise beside the rest.
+
+**Also noted, not fixed:** group labels are free-form strings rendered
+verbatim (uppercased in CSS) and are **not translated** — a Spanish reader
+sees "CLOSURE" and "OTHER". Pre-existing with `closure`; this step adds the
+second instance. Belongs with the ADR-006 overlay work, not here.
+
 ### Step 17 — Item 12: the blocked-stages notice
 
 Render the already-computed state: when `stageGridBlocked`

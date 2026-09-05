@@ -773,3 +773,83 @@ describe('PropertyForm — per-value help', () => {
     expect(screen.queryByTestId('info-btn-StubOnly')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 9. Group clustering (ADR-023 as amended, Step 16)
+// ---------------------------------------------------------------------------
+
+describe('PropertyForm — group clustering', () => {
+  const bool = (id: string, name: string, group: string | null): PropertySchema => ({
+    id,
+    name,
+    cardinality: 'BOOL',
+    required: false,
+    description: null,
+    values: [],
+    group,
+  });
+
+  it('clusters contiguous schemas sharing a group label', () => {
+    render(
+      <PropertyForm
+        schemas={[bool('A', 'Alpha', 'closure'), bool('B', 'Beta', 'closure')]}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    );
+    const section = screen.getByTestId('group-closure');
+    expect(within(section).getByText('Alpha')).toBeInTheDocument();
+    expect(within(section).getByText('Beta')).toBeInTheDocument();
+  });
+
+  it('keeps an ungrouped schema between two groups, in server order', () => {
+    // The shape Step 16 needs: "closure", then ECP inline and ungrouped, then
+    // "other" last. The server sorts by `order` alone, so an ungrouped schema
+    // can sit between two groups — the component must not re-sort or hoist.
+    render(
+      <PropertyForm
+        schemas={[
+          bool('CadenceFunction', 'Cadence Function', 'closure'),
+          bool('ECP', 'Expanded Cadential Progression', null),
+          bool('Covered', 'Covered', 'other'),
+          bool('Unison', 'Unison', 'other'),
+        ]}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    );
+
+    const sections = screen.getAllByTestId(/^(group-|ungrouped-properties)/);
+    expect(sections.map((s) => s.getAttribute('data-testid'))).toEqual([
+      'group-closure',
+      'ungrouped-properties',
+      'group-other',
+    ]);
+
+    // The rare pair sits together under one heading, and ECP carries none.
+    const other = screen.getByTestId('group-other');
+    expect(within(other).getByText('Covered')).toBeInTheDocument();
+    expect(within(other).getByText('Unison')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('ungrouped-properties')).getByText('Expanded Cadential Progression')
+    ).toBeInTheDocument();
+  });
+
+  it('splits a non-contiguous group into two clusters — the seed contract', () => {
+    // Documents the cost of the amended sort: `group` clusters contiguous runs
+    // and never re-sorts, so a group whose `order` values straddle another
+    // schema renders twice. The seed must keep group members adjacent.
+    render(
+      <PropertyForm
+        schemas={[
+          bool('A', 'Alpha', 'other'),
+          bool('B', 'Beta', null),
+          bool('C', 'Gamma', 'other'),
+        ]}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    );
+    expect(screen.getAllByTestId('group-other')).toHaveLength(2);
+  });
+});
