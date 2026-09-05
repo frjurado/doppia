@@ -39,14 +39,26 @@ Full component narrative and diagram: `docs/architecture/project-architecture.md
 
 ## 2. Repo layout
 
+**Six** tracked directories at the root. Everything else up there is a config file
+(`docker-compose.yml`, `fly.toml`, `pyproject.toml`, `CLAUDE.md`, `CONTRIBUTING.md`,
+`README.md`, `.pre-commit-config.yaml`, `.env.example`).
+
 | Path | What lives there |
 |---|---|
-| `backend/` | FastAPI app. `api/` routes (all `/api/v1/`, async), `models/` SQLAlchemy, `services/` business logic, `graph/` Neo4j access, `migrations/` Alembic, `seed/` graph YAML, `scripts/` seed/validate/ingest, `tests/` (unit / integration / graph / snapshots) |
-| `frontend/` | React 18 + TypeScript SPA built with Vite. `src/` app code (`.ts`/`.tsx` only), `e2e/` Playwright |
-| `lib/` | Vendored/bound libraries (Verovio bindings, tom-select, vis) |
+| `backend/` | FastAPI app. `api/` thin route handlers (all `/api/v1/`, async) split into `routes/` and `middleware/`; `models/` SQLAlchemy + Pydantic; `services/` business logic, owns cross-DB joins, with `tasks/` for the Celery-dispatchable jobs; `graph/queries/` raw Cypher; `migrations/` Alembic **schema** revisions; `data_migrations/` one-off **data** backfills that Alembic knows nothing about; `seed/` graph YAML; `scripts/` two dev-only utilities; `tests/` (unit / integration / graph / snapshots); plus `errors.py` and `resources/` (the MEI RNG schema) |
+| `frontend/` | React 18 + TypeScript SPA built with Vite. `src/` app code (`.ts`/`.tsx` only), `e2e/` Playwright — a *sibling* of `src/`, not inside it, because it drives the built bundle through `vite preview` and its specs would otherwise be swept up by `tsc -b` and the Vitest glob |
+| `scripts/` | Repo-root CLI utilities: `seed.py`, `validate_graph.py`, `lint_doc_crossrefs.py`, `visualize_domain.py`, plus ingest/audit/backfill helpers and the Verovio spikes |
 | `docker/` | Local infra extras (PostgreSQL init scripts) |
-| `docs/` | The knowledge home: `adr/`, `architecture/`, `roadmap/`, `reports/`, `handbook/` (this file, the ledger, and `guides/`) |
+| `docs/` | The knowledge home: `adr/`, `architecture/`, `roadmap/`, `reports/`, `handbook/` (this file, the ledger, and `guides/`), `mockups/`, `howto/`, `investigations/`, `seed-drafts/` |
 | `.github/workflows/` | CI (`ci.yml`) and keepalive |
+
+**Untracked droppings.** `lib/` and a root-level `<domain>.html` are pyvis output from
+`scripts/visualize_domain.py`, which writes its asset tree into the current working
+directory; `.gitignore` covers `/lib/`, `backend/lib/` and `/*.html`. They are *not*
+vendored libraries. Verovio is an ordinary pinned dependency on both sides — `verovio`
+6.1.0 in `frontend/package.json` and in `backend/requirements.txt`, deliberately the same
+version, since the backend renders the ADR-008 preview SVGs and the browser renders the
+live view.
 
 ---
 

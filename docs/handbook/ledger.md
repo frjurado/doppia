@@ -43,7 +43,7 @@ ideas for any new tech to the backlog below.
 | Topic | Start from | Conf | Last session | Notes |
 |---|---|---|---|---|
 | The system map: layers and how data flows | handbook §1; project-architecture.md; guide 019 | 2 | 2026-08-26 | Read path was the gap: assumed server-side Verovio slicing (it is a presigned URL + client-side render). Also: tags live in the `fragment_concept_tag` join table, not a fragment column; and cross-DB integrity is a live Neo4j check in `services/fragment_validation.py`, not Pydantic. Redis and the translation overlay were absent from the recalled map. Next time start at the write path (submission → validation → preview task). |
-| Repo layout: what lives where and why | handbook §2 | 0 | — | |
+| Repo layout: what lives where and why | handbook §2; guide 003 | 1 | 2026-09-03 | Rules were solid, inventory was not. Named 4 of 6 tracked root dirs (missed `scripts/`, `.github/`) and 5 of 9 `docs/` subfolders (missed `mockups/`, `howto/`, `investigations/`, `seed-drafts/`). Did not know `backend/data_migrations/` exists — one-off data backfills, untracked by Alembic, as opposed to `migrations/` schema revisions. Believed root `lib/` was vendored libraries; it is gitignored pyvis output from `scripts/visualize_domain.py`. Got unaided: thin routes / services own logic and cross-DB joins, tests as a sibling of source, docs-in-repo so CI can lint them. Next time: name every tracked directory cold, then open `backend/seed/` (bloom/corrections/domains), which we never looked at. |
 | ADR workflow and the decision clusters | handbook §8 | 0 | — | |
 
 ### Backend
@@ -113,6 +113,8 @@ drafting is the fallback, not the default.
 
 | Guide idea | Why / where it bites | Written? |
 |---|---|---|
+| Alembic schema revisions vs one-off data migrations | `backend/migrations/` vs `backend/data_migrations/`; nothing tracks whether a data fix has run | — |
+| The doc cross-reference linter | `scripts/lint_doc_crossrefs.py` gates CI; checks paths exist, not that prose is true | — |
 | Cypher & querying Neo4j | Every graph feature; the three key traversals | — |
 | SQLAlchemy async patterns (engine, sessions, asyncpg) | All relational access | — |
 | Auth end to end: Supabase JWT, PyJWT, HttpOnly cookies | ADR-001/016/035; `api/middleware/auth.py` | — |
