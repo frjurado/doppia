@@ -99,11 +99,18 @@ Secrets are stored in Fly.io's secret store (`fly secrets set KEY=value`) and ar
 
 ```bash
 fly ssh console --app doppia-staging
-python scripts/seed.py --domain cadences
+python scripts/seed.py --all
 python scripts/validate_graph.py
 ```
 
 The seed script uses `MERGE` and is idempotent; it is safe to re-run after any YAML change.
+
+**Always `--all`, never `--domain <name>`, on a remote console.** Single-domain
+seeding compares the *whole* graph against the one file it loaded, so every id
+belonging to the other domains looks orphaned and the script stops on an
+id-immutability prompt — `input()` at `scripts/seed.py:413`, which over
+`fly ssh console -C` has no terminal to answer it. `--all` is what CI runs and
+raises no prompt.
 
 ### 2. Supabase
 
@@ -371,9 +378,11 @@ Run migrations before deploying the new application version if the migration add
 If the update includes knowledge graph YAML changes:
 
 ```bash
-fly ssh console --app doppia-staging -C "python scripts/seed.py --domain cadences"
+fly ssh console --app doppia-staging -C "python scripts/seed.py --all"
 fly ssh console --app doppia-staging -C "python scripts/validate_graph.py"
 ```
+
+`--all`, not `--domain <name>` — see the note under § Neo4j AuraDB above.
 
 ## DCML corpus re-ingestion
 
