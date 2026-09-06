@@ -907,6 +907,57 @@ adds (registration, topbar, moderation, profile) — ending in a decision
 session with Francisco on what to implement when. Full second-language
 machinery stays deferred per ADR-006.
 
+**Landed 2026-09-06** —
+[`../reports/component-12-reports/i18n-surface-inventory.md`](../reports/component-12-reports/i18n-surface-inventory.md).
+
+The headline inverts the expectation the step was written with: **UI chrome is
+already complete**. A scan of every `.tsx` for JSX text and literal
+`aria-label`/`placeholder`/`title`/`alt` found one real hit, in a dev-only
+spike route. 519 keys, 12 namespaces, `en` + `es`, parity enforced in CI —
+including everything this component added.
+
+The gap is entirely **editorial content**. All four ADR-006 translation tables
+exist and are wired, with the `machine`/`reviewed`/`authoritative` ladder and
+`source_hash` staleness tracking — and hold zero Spanish rows. Switching to
+Spanish today gives a fully Spanish interface around entirely English musical
+content. Populating them is data entry, not engineering.
+
+Three structural gaps need schema work first: property value `short_name` and
+`description` (ADR-039 — the table carries `name` only), property schema
+group labels (free-form strings with no id to key a translation on), and
+backend error messages (English at the raise site; the frontend surfaces the
+server's prose rather than mapping on `code`). The report sizes each and
+proposes an order for the decision session, whose first question is whether
+Spanish is a real second language for *content* or a UI convenience over an
+English corpus.
+
+**Decisions taken 2026-09-06**, recorded in § E of the report. Spanish **is**
+a real second language, so content translation is in scope. § B (populate the
+tables) and § C.1 (`short_name` / `description` columns) and § C.3 (error
+messages on `code`) are scheduled as Step 19b, before Step 20. § C.2 (group
+labels) is deferred with its strategy settled — promote them to keyed
+entities, not client-side i18n keys. `fragment_annotation_translation` gets a
+working assumption (machine translation, provenance on the existing status
+ladder) and its own scoping pass later; it is not in 19b.
+
+### Step 19b — Spanish content translation
+
+The implementation half of Step 19, scheduled by the decisions above:
+
+- **Populate the Spanish rows** in `concept_translation`,
+  `property_schema_translation` and `property_value_translation`. 34 concepts,
+  13 schemas, 22 values — bounded editorial work against machinery that
+  already exists. `fragment_annotation_translation` is **out of scope** here.
+- **Extend `property_value_translation`** with `short_name` and `description`
+  (ADR-039 recorded them as untranslated; that was always provisional), plus
+  the overlay read path so a non-English locale resolves them.
+- **Translate errors on `code`** rather than surfacing the server's English
+  `message`: an `errors` namespace entry per code, and a decision about the
+  fallback for an unmapped code.
+
+The editorial content is Francisco's; the schema and read-path work is not.
+Sequence accordingly — the columns can land before the rows exist.
+
 ### Step 20 — M17 + G1: the meter-rule and beat-display conventions
 
 Decided into this component 2026-08-26 (display/coordinate conventions
