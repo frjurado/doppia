@@ -137,3 +137,18 @@
   text-align: center;
   margin: 0;
 }
+
+/* ── Blocked stage grid notice (Step 17) ──────────────────────────────────── */
+
+/* Tonal well, no rule and no radius: DESIGN.md carries emphasis through tone
+   alone. Sits above the stage cards it explains. */
+.stageBlockedNotice {
+  background: var(--color-surface-container-high);
+  padding: var(--spacing-3) var(--spacing-4);
+  margin-bottom: var(--spacing-3);
+}
+
+.stageBlockedText {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}

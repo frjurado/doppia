@@ -787,12 +787,117 @@ short for the concept's stages; lengthen it or mark stages absent. The copy
 follows the design pass's tone; the state and the submission block already
 work.
 
+**Landed 2026-09-06, with the precondition Francisco set.** He accepted the
+notice *only if* the stages are in the sidebar so disabling is possible
+without lengthening — and they were not. `computeAutoPrePopulate` returned
+`assignments: []` when blocked (its docstring said "keep assignments empty"),
+`StageList` returns `null` on an empty list, and the absent toggle lives on a
+stage card. The notice would have told the annotator to do something the UI
+gave them no way to do.
+
+Blocked now yields *unplaced* assignments — one per stage, `bounds: null`,
+`absent: false` — so the cards render and the toggle is reachable. Marking a
+stage absent re-attempts placement with the stages that remain and clears the
+notice once they fit. `computeStagesComplete` already reports false for a
+non-absent stage with no bounds, so submission stays blocked meanwhile.
+
+Two follow-on corrections this forced: the three "needs pre-population"
+guards keyed on `stageAssignments.length === 0`, which no longer means what
+it did — they now test blocked explicitly, or extending a blocked selection
+would never retry placement. All four cadence stages are optional, so the
+"mark absent" escape is genuinely available; a concept with required stages
+would still have only the lengthen option, which the copy does not promise.
+
+**Corrected after Francisco's read-through (same day).** The first cut
+re-evaluated placement only *while* blocked, so the un-block direction was
+never re-checked: mark a stage absent on a too-short selection and the other
+three place and the notice clears, but re-enable it and nothing happens — no
+bracket, no space, no notice. Reproduced exactly against the real functions
+before changing anything.
+
+Two causes. `toggleStageAbsent` restores a stage by carving bars from a
+neighbour, and when no neighbour can spare one it restores the stage with no
+bounds at all. That is the right answer — the alternative is the inverted
+geometry Step 18 fixed, and Step 18's `canDonate` guard is what turned the old
+silent *corruption* into a silent *no-op* — but it says nothing. And the
+handler only looked at the blocked flag, which was false by then.
+
+The toggle handler now re-evaluates in both directions: if any stage is wanted
+but unplaced (`hasUnplacedWantedStage`, extracted and tested rather than left
+inline), it re-attempts placement across the whole wanted set, and raises the
+notice again when that too is blocked. Local surgery is kept whenever it
+placed everything, so confirmed positions are not thrown away by an unrelated
+toggle. Note submission was never actually possible in the broken state —
+`computeStagesComplete` already returns false for a wanted stage with no
+bounds — so this was a missing explanation, not a bad write.
+
+**A third defect, from the same read-through: the carve counts bars, the
+stages sit on beats.** 4/4, a measure and a half selected, PAC laid out
+2+2+1+1. Disabling Initial Tonic hands its beats to Pre-dominant, which then
+holds `m1b1 .. m2b1`. Re-enabling gave Initial Tonic the *whole* of bar 1 and
+left Pre-dominant at `m2b1 .. m2b1` — zero beats wide, still listed present.
+
+Pre-dominant spans "two bars" by the bar count and two beats in reality,
+because its range crosses the barline. `canDonate` and the carve both counted
+bars, so they read a stage with two beats as having a bar to spare. Step 18's
+`expectValidBounds` test missed it for the same reason: `barEnd >= barStart`
+holds, and the emptiness is entirely in the beats.
+
+Bounds are now checked for real extent — `(bar, beat)` pairs under the
+half-open reading, where `beatStart: null` is the bar's first beat and
+`beatEnd: null` its end — and the restore declines when either the restored
+stage's or the donor's new bounds would span nothing, restoring unplaced
+instead. `hasUnplacedWantedStage` then routes it to the wholesale
+re-placement, which lays the wanted set out on the grid the selection
+actually needs and recovers the original 2+2+1+1. Three regression tests
+cover the reported sequence; all three fail without the guard.
+
+**Not a bug, asked in the same message:** the 2+2+1+1 distribution over six
+beats. `chooseStageGrid` returns the *coarsest* grid at which every stage gets
+a slot — measure, then beat, then sub-beat — and six beat slots hold four
+stages, so it stops at beat and never reaches sub-beat. The resolution control
+in the toolbar is the display grid; it does not force pre-population finer.
+
 ### Step 18 — M9 + M4 UX: small tagging/review chrome fixes
 
 - **M9:** fix stage ordering (un-toggled stages jump to the end — keep the
   set order fixed). The "stage properties" label was already dropped in M0.
 - **M4 UX:** review-queue select scrolls the score to the fragment; back
   button returns to the queue, not the browser root.
+
+**Landed 2026-09-06.** Both items were larger than the plan's one-liners.
+
+**M9 was hiding a data-integrity bug.** Francisco's warning that "weird
+orderings happen depending on how you click the stages" was right, and the
+cause is not ordering. Restoring a stage carves bars out of its nearest
+*active* neighbour — which, after other stages have been disabled, is not
+necessarily its schema neighbour. When that donor spans a single bar the
+carve took the bar anyway, leaving the donor at `barEnd === barStart - 1`.
+Probing toggle sequences on four one-bar stages: `S2- S3- S3+ S2+` ends with
+`S1 (1-0)`, `S3- S1- S3+ S1+` with `S2 (2-1)`, while `S2- S3- S2+ S3+` — the
+same toggles, different order — is clean.
+
+Nothing downstream rejects an inverted bracket: the write model validates
+`ge=0` and within-bar beat ordering only, sub-part containment reads an
+inverted range as trivially contained, and `fragment` has no check
+constraint. It would have been persisted. Fixed by refusing a donor that
+cannot spare a bar (falling through to the other neighbour), with the
+proportional carve clamped as a second line of defence, and covered by a test
+that walks five toggle sequences asserting no bounds ever invert.
+
+**The ordering fix itself** was Francisco's call between three options: placed
+stages still sort by position (Component 9 G2 preserved), but an unplaced
+stage now keeps its slot in the sequence instead of dropping to the bottom.
+For contiguous stages — all of them — position order and schema order
+coincide, so only the absent cards move. `tagging-tool-design.md` updated.
+
+**M4 UX turned up a Step 14b regression.** The score viewer's back link still
+pointed at `/`, which Step 14b turned into the public landing page; it had
+been the corpus browser. It now goes to `/corpus`, or to `/review-queue` when
+the viewer was reached from the queue (`?fragmentId=`), with its own label.
+The scroll-to-fragment waits for the bracket element rather than firing with
+the panel, since the bracket only exists after Verovio renders and the
+overlay positions it.
 
 ### Step 19 — M13: i18n surface inventory
 
@@ -875,6 +980,20 @@ not decide them):
 Stated so the boundary is a decision, not a gap:
 
 - **Item 13 — capture extensions** → Component 15 (decision 1 above).
+- **Stage absent/restore should carve in grid slots, not bars** → later
+  consideration (Francisco, 2026-09-06: "too much for right now"). Three
+  defects in this one path during Step 17/18 all came from the same root:
+  `toggleStageAbsent` rebalances in whole bars while the stages are laid out
+  on whatever grid the selection needs, usually beats. A stage spanning
+  `m1b3 .. m2b1` counts as two bars and holds two beats, and every bar-based
+  judgement about it is wrong. Both guards now in place — refusing a donor
+  that cannot spare a bar, and refusing any carve that would leave either side
+  spanning nothing — are *detectors*: they keep invalid geometry out and hand
+  the case to the caller's wholesale re-placement. That is correct but coarse,
+  since it discards the local surgery that would have preserved confirmed
+  positions. The principled fix is to carve in the frame's own slots, which
+  means `toggleStageAbsent` needs the ghost layer and stops being a pure
+  function over assignments — a real refactor, not a patch.
 - **Browse-surface consolidation** → Component 13. `/concepts` (editorial) and
   `/public/concepts` are near-duplicates: identical status set, the same
   `FragmentCard`, and detail pages differing only by API client and an

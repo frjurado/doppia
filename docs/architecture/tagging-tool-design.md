@@ -367,7 +367,9 @@ If the children differ only in property values (not in stage structure), Type Re
 
 ### 7.3 Stage list
 
-Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, **ordered by physical position in the score** (bar, then beat; absent stages grouped last) — not by the abstract `order` edge property (Component 9 G2). During a split-handle drag the display order **freezes** at its pre-drag state, resorting once on release, so cards never jump around mid-gesture (Component 9 Part 8 item 4).
+Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, **ordered by physical position in the score** (bar, then beat) — not by the abstract `order` edge property (Component 9 G2). An **unplaced stage keeps its slot in the sequence**, inserted ahead of the first card whose `order` follows its own; it is not grouped at the end. (Absent stages were grouped last until Component 12 Step 18: disabling the second of four stages threw its card to the bottom of the list, which is M9. For contiguous stages — every stage the corpus defines — position order and schema order coincide, so this moves only the unplaced cards and leaves G2's intent intact.) During a split-handle drag the display order **freezes** at its pre-drag state, resorting once on release, so cards never jump around mid-gesture (Component 9 Part 8 item 4).
+
+When the committed selection is too short to place the concept's stages even at sub-beat resolution, the stages are listed **unplaced** rather than not listed at all, under a notice saying so. The absent toggle lives on a stage card, so an empty list would make "mark stages absent" — the alternative to lengthening the selection — impossible to act on (Component 12 Step 17). Marking stages absent re-attempts placement with the stages that remain, and the notice clears once they fit.
 
 Each card shows *(trimmed to essentials, Part 8 item 4 — the "Stages" interaction explanation lives behind an (i) hover affordance on the section heading rather than a permanent paragraph)*:
 

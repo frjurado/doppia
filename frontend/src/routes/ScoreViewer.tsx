@@ -42,7 +42,9 @@ import type {
   SubPartTag,
 } from '../components/score/stages';
 import {
+  buildUnplacedStages,
   chooseStageGrid,
+  hasUnplacedWantedStage,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -317,7 +319,10 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
  * excluded sibling endings.
  *
  * blocked is true when the selection cannot fit stages even at sub-beat
- * resolution — the caller should surface a UI note and keep assignments empty.
+ * resolution. The assignments come back *unplaced* (bounds null) rather than
+ * empty, so the sidebar can still list the stages: marking one absent is the
+ * annotator's alternative to lengthening the selection, and the absent toggle
+ * only exists on a rendered stage card (Step 17).
  */
 function computeAutoPrePopulate(
   stages: ContainsStage[],
@@ -357,7 +362,7 @@ function computeAutoPrePopulate(
     beatPositions.length < stages.length &&
     subBeatPositions.length < stages.length;
 
-  if (blocked) return { assignments: [], grid, blocked: true };
+  if (blocked) return { assignments: buildUnplacedStages(stages), grid, blocked: true };
 
   let assignments: StageAssignment[];
   if (grid === 'measure') {
@@ -685,6 +690,11 @@ export default function ScoreViewer() {
   // True when the committed selection is too short for the chosen concept's
   // stages even at sub-beat resolution (Step 2 auto-grid; Step 3 will clamp).
   const [stageGridBlocked, setStageGridBlocked] = useState(false);
+  // Mirrored so the placement guards can ask "are these stages placed yet?"
+  // without depending on the state. Since Step 17 a blocked grid yields a
+  // non-empty list of *unplaced* stages, so an empty list no longer means
+  // "needs pre-population" on its own — blocked does too.
+  const stageGridBlockedRef = useRef(false);
   // Brief inline note shown when pre-population auto-switches the resolution.
   const [gridAutoSwitchNote, setGridAutoSwitchNote] = useState<string | null>(null);
   const gridNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -768,6 +778,26 @@ export default function ScoreViewer() {
       setSelectedFragmentId(focusFragmentId);
     }
   }, [focusFragmentId, storedFragments]);
+
+  // Scroll the score to the fragment the review queue sent us to (Step 18, M4).
+  // Opening the panel alone left the reviewer looking at bar 1 of a long
+  // movement with no clue where the fragment was. The bracket is the anchor: it
+  // only exists once Verovio has rendered and the overlay has positioned it, so
+  // this watches for the element rather than firing with the panel.
+  const didScrollToFocusRef = useRef(false);
+  useEffect(() => {
+    if (!focusFragmentId || didScrollToFocusRef.current) return;
+    const container = scorePanelRef.current;
+    if (!container) return;
+
+    const bracket = container.querySelector<HTMLElement>(
+      `[data-fragment-id="${CSS.escape(focusFragmentId)}"]`
+    );
+    if (!bracket) return;
+
+    didScrollToFocusRef.current = true;
+    bracket.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+  });
   // Incremented to force a session rebuild when the edit flow is triggered
   // while already in tag mode (tagMode change alone wouldn't fire the effect).
   const [sessionRebuildKey, setSessionRebuildKey] = useState(0);
@@ -1238,7 +1268,7 @@ export default function ScoreViewer() {
         return;
       }
 
-      if (stageAssignmentsRef.current.length === 0) {
+      if (stageAssignmentsRef.current.length === 0 || stageGridBlockedRef.current) {
         if (!selectionRange) {
           setStageAssignments([]);
           setStageGridBlocked(false);
@@ -1302,7 +1332,7 @@ export default function ScoreViewer() {
           return;
         }
 
-        if (stageAssignmentsRef.current.length === 0) {
+        if (stageAssignmentsRef.current.length === 0 || stageGridBlockedRef.current) {
           if (!selectionRange) {
             setStageAssignments([]);
             setStageGridBlocked(false);
@@ -1344,9 +1374,62 @@ export default function ScoreViewer() {
   }, []);
 
   /** Called by StageList absent toggle. */
-  const handleToggleAbsent = useCallback((stageId: string, absent: boolean) => {
-    setStageAssignments((prev) => toggleStageAbsent(prev, stageId, absent));
-  }, []);
+  const handleToggleAbsent = useCallback(
+    (stageId: string, absent: boolean) => {
+      const next = toggleStageAbsent(stageAssignmentsRef.current, stageId, absent);
+      const stages = activeSchemaTreeRef.current?.stages;
+
+      // Every toggle changes how many stages want room, so both directions have
+      // to be re-evaluated — not just the blocked one. Marking absent frees
+      // space and can clear the notice; re-enabling asks for space back and can
+      // bring it back.
+      //
+      // toggleStageAbsent does local surgery: it hands an absent stage's space
+      // to a neighbour and carves it back on restore. When no neighbour can
+      // spare a bar it restores the stage with no bounds at all, which is the
+      // honest answer — there is nowhere to put it — but on its own it is a
+      // silent one: no bracket appears and nothing says why.
+      if (!stages || !selectionRange || !hasUnplacedWantedStage(next)) {
+        // Local surgery placed everything that is wanted; keep it, since it
+        // preserves the positions the annotator has already confirmed.
+        setStageAssignments(next);
+        if (stages && selectionRange) setStageGridBlocked(false);
+        return;
+      }
+
+      // Something is wanted but has no bounds. Try to place the whole wanted
+      // set at once — a redistribution can succeed where carving from a single
+      // neighbour could not.
+      const absentIds = new Set(next.filter((a) => a.absent).map((a) => a.stageId));
+      const wanted = stages.filter((st) => !absentIds.has(st.target_id));
+      const { assignments, grid, blocked } = computeAutoPrePopulate(
+        wanted,
+        selectionRange,
+        ghostLayerRef.current
+      );
+
+      if (blocked) {
+        // The selection genuinely cannot hold them. Leave the stages listed and
+        // unplaced, and raise the notice again so the annotator can see why the
+        // stage they just re-enabled has no bracket.
+        setStageAssignments(next);
+        setStageGridBlocked(true);
+        return;
+      }
+
+      // Merge the freshly placed bounds back over the absent stages, which keep
+      // their place in the list with no bounds of their own.
+      const placed = new Map(assignments.map((a) => [a.stageId, a]));
+      setStageAssignments(next.map((a) => placed.get(a.stageId) ?? a));
+      setStageGridBlocked(false);
+      if ((GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+        resolutionRef.current = grid;
+        setResolution(grid);
+        showGridNote(grid, wanted.length);
+      }
+    },
+    [selectionRange, showGridNote]
+  );
 
   /** Called by SubPartForm when a stage's sub-part tag is created or updated. */
   const handleSubPartTagUpdate = useCallback((stageId: string, tag: SubPartTag | null) => {
@@ -1815,14 +1898,23 @@ export default function ScoreViewer() {
     session.setStagesComplete(complete);
   }, [stageAssignments, stageGridBlocked]);
 
+  useEffect(() => {
+    stageGridBlockedRef.current = stageGridBlocked;
+  }, [stageGridBlocked]);
+
   // When the committed selection changes, reconcile stage assignments with
   // the new main bracket bounds or (re-)attempt auto-grid pre-population.
   useEffect(() => {
     if (!selectionRange) return;
     const stages = activeSchemaTreeRef.current?.stages;
-    if (stageAssignmentsRef.current.length === 0 && stages?.length) {
+    if (
+      (stageAssignmentsRef.current.length === 0 || stageGridBlockedRef.current) &&
+      stages?.length
+    ) {
       // First selection after concept chosen, or retry after a blocked selection
-      // was extended — attempt auto-grid pre-population.
+      // was extended — attempt auto-grid pre-population. The blocked case must
+      // be named explicitly: since Step 17 it carries unplaced stages, so the
+      // list is no longer empty when the annotator lengthens the selection.
       const { assignments, grid, blocked } = computeAutoPrePopulate(
         stages,
         selectionRange,
@@ -2333,9 +2425,13 @@ export default function ScoreViewer() {
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <Surface layer="container-high" className={styles.toolbar}>
-        <Link to="/" className={styles.backLink}>
+        {/* Where "back" goes depends on how the viewer was reached. Arriving
+            from the review queue (?fragmentId=) returns there; otherwise the
+            corpus browser, which is /corpus since Step 14b moved the public
+            landing page onto / — this link still pointed at / until Step 18. */}
+        <Link to={focusFragmentId ? '/review-queue' : '/corpus'} className={styles.backLink}>
           <Type variant="label-md" as="span">
-            {t('score:viewer.backToBrowse')}
+            {focusFragmentId ? t('score:viewer.backToQueue') : t('score:viewer.backToBrowse')}
           </Type>
         </Link>
 
@@ -2575,6 +2671,7 @@ export default function ScoreViewer() {
             activeStageId={activeStageId}
             onStageActivate={handleStageActivate}
             onToggleAbsent={handleToggleAbsent}
+            stageGridBlocked={stageGridBlocked}
             stageDragActive={stageDragActive}
             subPartTags={subPartTags}
             onSubPartTagUpdate={handleSubPartTagUpdate}

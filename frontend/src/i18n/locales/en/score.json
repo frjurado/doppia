@@ -75,6 +75,7 @@
     "conceptSchemaError": "Could not load concept schema. Try again.",
     "sectionStages": "Stages",
     "stagesHint": "Drag brackets to confirm bounds, or toggle to mark absent.",
+    "stagesBlocked": "This selection is too short to place every stage. Lengthen it, or mark stages absent until the rest fit.",
     "stagesInfoAria": "About stages",
     "sectionProperties": "Properties",
     "sectionHarmony": "Harmony",
@@ -210,6 +211,7 @@
     "pageTitle": "Score Viewer — Doppia",
     "srTitle": "Score Viewer",
     "backToBrowse": "← Browse",
+    "backToQueue": "← Review queue",
     "size": "Size",
     "scale": {
       "small": "Small",

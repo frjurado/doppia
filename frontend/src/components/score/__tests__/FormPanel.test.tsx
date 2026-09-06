@@ -23,6 +23,7 @@ import FormPanel from '../FormPanel';
 import * as conceptApi from '../../../services/conceptApi';
 import type { ConceptSchemaTree, ConceptSearchHit, ConceptSearchPage } from '../../../services/conceptApi';
 import type { AnnotationSession } from '../annotator';
+import type { StageAssignment } from '../stages';
 
 vi.mock('../../../services/conceptApi');
 
@@ -459,5 +460,104 @@ describe('FormPanel Step 13 — PropertyForm', () => {
 
     // The property form must not be visible after clearing.
     expect(screen.queryByTestId('property-form')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 17 — the blocked-stage-grid notice
+// ---------------------------------------------------------------------------
+
+describe('FormPanel — blocked stage grid (Step 17)', () => {
+  const stageTree: ConceptSchemaTree = {
+    concept_id: 'PerfectAuthenticCadence',
+    schemas: [],
+    stages: [
+      {
+        target_id: 'CadentialInitialTonic',
+        target_name: 'Initial Tonic',
+        order: 1,
+        required: false,
+        display_mode: 'stage',
+        containment_mode: 'contiguous',
+        default_weight: 1.0,
+      },
+    ],
+    type_refinement: { show: false, children: [] },
+  };
+
+  /** Unplaced stage — what computeAutoPrePopulate returns when blocked. */
+  const unplaced: StageAssignment = {
+    stageId: 'CadentialInitialTonic',
+    stageName: 'Initial Tonic',
+    order: 1,
+    required: false,
+    displayMode: 'stage',
+    containmentMode: 'contiguous',
+    defaultWeight: 1.0,
+    bounds: null,
+    confirmed: false,
+    absent: false,
+    orphaned: false,
+    error: false,
+  };
+
+  beforeEach(() => {
+    vi.mocked(conceptApi.searchConcepts).mockResolvedValue(makePage([pac, iac]));
+    vi.mocked(conceptApi.getConceptSchemas).mockResolvedValue(stageTree);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows the notice when the grid is blocked', async () => {
+    render(
+      <FormPanel
+        session={makeSession()}
+        flags={defaultFlags}
+        assignments={[unplaced]}
+        stageGridBlocked
+      />
+    );
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stage-grid-blocked')).toBeInTheDocument();
+    }, WAIT_OPTS);
+  });
+
+  it('still lists the stages while blocked, so they can be marked absent', async () => {
+    // The point of the notice: it tells the annotator to mark stages absent,
+    // and the absent toggle lives on a stage card. Before Step 17 a blocked
+    // grid produced an empty assignment list and StageList rendered nothing,
+    // so the advice was impossible to follow.
+    render(
+      <FormPanel
+        session={makeSession()}
+        flags={defaultFlags}
+        assignments={[unplaced]}
+        stageGridBlocked
+      />
+    );
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stage-card-CadentialInitialTonic')).toBeInTheDocument();
+    }, WAIT_OPTS);
+  });
+
+  it('shows no notice when the grid is not blocked', async () => {
+    render(
+      <FormPanel session={makeSession()} flags={defaultFlags} assignments={[unplaced]} />
+    );
+    await searchAndWait('perfect');
+    fireEvent.click(screen.getByTestId('concept-card-PerfectAuthenticCadence'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stage-card-CadentialInitialTonic')).toBeInTheDocument();
+    }, WAIT_OPTS);
+    expect(screen.queryByTestId('stage-grid-blocked')).not.toBeInTheDocument();
   });
 });

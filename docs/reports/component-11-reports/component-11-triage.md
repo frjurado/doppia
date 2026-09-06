@@ -141,6 +141,15 @@ So this is not a broken computation; it is a notice that was specified and never
 
 **Recommendation:** show a note in the stage area when `stageGridBlocked` is true, saying the selection is too short for the concept's stages and offering the remedy (lengthen the selection, or mark stages absent). Small. **Disposition: deferred to Component 12.** Rare in practice, but the failure mode is silent, which is the worst kind — worth pulling forward if anything else touches the stage area first.
 
+**Resolved in Component 12, Step 17 (2026-09-06).** The notice landed, but only
+after fixing the thing that made it hollow. `computeAutoPrePopulate` returned an
+empty assignment list when blocked and `StageList` renders nothing for an empty
+list, so a notice reading "lengthen it or mark stages absent" would have pointed
+at an escape hatch that was not on screen — the absent toggle lives on a stage
+card. Blocked now returns the stages *unplaced* (bounds null, not absent), so the
+cards render, the toggle works, and marking stages absent re-attempts placement
+and clears the notice once the rest fit.
+
 ### 13. Capture extensions — roadmapped, or missing?
 
 **Answer: neither, quite. They are declared, seeded, and never captured — and no component's plan owns building them.**
@@ -236,9 +245,7 @@ Aliases Francisco coined, mostly following Caplin: `Ev.Cad.`
 | Disposition | Items |
 |---|---|
 | **Landed in Component 11** | 1, 2, 3, 4, 5, 7 |
-| **Landed in Component 12** | 10 (button row), 11 (radio/checkbox design check) — Step 14; 8 (short names), 14 (unlabelled brackets) — Step 15 |
-| **Landed in Component 12** (cont.) | 9 (grouping) — Step 16 |
-| **Deferred to Component 12** | 12 (blocked notice) — Step 17 |
+| **Landed in Component 12** | 10 (button row) + 11 (radio/checkbox design check) — Step 14; 8 (short names) + 14 (unlabelled brackets) — Step 15; 9 (grouping) — Step 16; 12 (blocked notice) — Step 17 |
 | **Re-homed to Component 15** | 13 (capture extensions) — see the Component 12 plan, § Decisions |
 | **Phase-2 backlog** | 6 (glossary hierarchy), collapsible property groups, bracket-geometry unification |
 

@@ -107,6 +107,12 @@ export interface FormPanelProps {
 
   /** Stage assignments owned by ScoreViewer; displayed in the stage list. */
   assignments?: StageAssignment[];
+  /**
+   * True when the committed selection is too short to place the concept's
+   * stages even at the finest grid. The stages are still listed (unplaced), so
+   * the annotator can mark ones absent instead of lengthening the selection.
+   */
+  stageGridBlocked?: boolean;
   /** Currently active stage (bidirectional score ↔ form highlighting). */
   activeStageId?: string | null;
   /** Called when the annotator clicks a stage card to activate it. */
@@ -290,6 +296,7 @@ export default function FormPanel({
   onConceptChange,
   onRefinementChange,
   assignments = [],
+  stageGridBlocked = false,
   activeStageId = null,
   onStageActivate,
   onToggleAbsent,
@@ -499,6 +506,13 @@ export default function FormPanel({
               ariaLabel={t('score:formPanel.stagesInfoAria')}
             />
           </div>
+          {stageGridBlocked && (
+            <div className={styles.stageBlockedNotice} data-testid="stage-grid-blocked">
+              <Type variant="body-sm" as="p" className={styles.stageBlockedText}>
+                {t('score:formPanel.stagesBlocked')}
+              </Type>
+            </div>
+          )}
           <StageList
             assignments={assignments}
             activeStageId={activeStageId}
