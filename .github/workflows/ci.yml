@@ -279,6 +279,20 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://postgres:localpassword@localhost/doppia
         run: alembic upgrade head
 
+      # The translation overlay lives in PostgreSQL and is written by the seed,
+      # not by a migration, so an unseeded database has no translation rows at
+      # all — English included. Without this the integration suite tests the
+      # overlay against an empty table and can only assert that nothing is
+      # there. Idempotent (MERGE plus upserts), and it gives the rest of the
+      # suite a database shaped like a real one.
+      - name: Seed all domains and translation overlays
+        env:
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: localpassword
+          DATABASE_URL: postgresql+asyncpg://postgres:localpassword@localhost/doppia
+        run: python scripts/seed.py --all
+
       - name: Create MinIO bucket
         run: |
           python - <<'EOF'

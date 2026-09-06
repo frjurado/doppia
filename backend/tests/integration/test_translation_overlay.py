@@ -94,6 +94,18 @@ class TestSpanishOverlay:
         """
         from sqlalchemy import text
 
+        # Assert there is something to compare first. An EXCEPT over two empty
+        # sets is empty, so on an unseeded database this test would pass while
+        # proving nothing — which is exactly what it did on CI before the
+        # integration job started seeding.
+        english = await db_session.scalar(
+            text("SELECT count(*) FROM concept_translation WHERE language = 'en'")
+        )
+        assert english and english > 0, (
+            "no English concept rows: run scripts/seed.py --all before the "
+            "integration suite"
+        )
+
         rows = await db_session.execute(
             text(
                 "SELECT concept_id FROM concept_translation WHERE language = 'en' "
