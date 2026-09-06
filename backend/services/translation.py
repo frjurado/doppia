@@ -2,7 +2,8 @@
 
 The knowledge graph in Neo4j holds English values only. Localised
 ``name``/``aliases``/``definition`` (concepts), ``name``/``description``
-(property schemas), and ``name`` (property values) live in PostgreSQL
+(property schemas), and ``name``/``short_name``/``description`` (property
+values) live in PostgreSQL
 translation tables keyed by ``(<id>, language)``. The service layer fetches
 the canonical English node from Neo4j and overlays the requested locale here.
 
@@ -41,9 +42,17 @@ class SchemaTranslation:
 
 @dataclass(frozen=True)
 class ValueTranslation:
-    """Localised property-value field from ``property_value_translation``."""
+    """Localised property-value fields from ``property_value_translation``.
+
+    ``short_name`` and ``description`` are optional in the same way they are on
+    the graph node (ADR-039): most values have neither, and a translation row
+    may localise the name without them. ``None`` means "fall back to the
+    English graph value", not "this value has no short name".
+    """
 
     name: str
+    short_name: str | None
+    description: str | None
 
 
 _CONCEPT_SQL = text(
@@ -59,7 +68,7 @@ _SCHEMA_SQL = text(
 )
 
 _VALUE_SQL = text(
-    "SELECT value_id, name "
+    "SELECT value_id, name, short_name, description "
     "FROM property_value_translation "
     "WHERE value_id = ANY(:ids) AND language = :language"
 )
@@ -141,4 +150,11 @@ class TranslationOverlay:
         if language == DEFAULT_LANGUAGE or not ids:
             return {}
         result = await self._db.execute(_VALUE_SQL, {"ids": ids, "language": language})
-        return {row.value_id: ValueTranslation(name=row.name) for row in result}
+        return {
+            row.value_id: ValueTranslation(
+                name=row.name,
+                short_name=row.short_name,
+                description=row.description,
+            )
+            for row in result
+        }

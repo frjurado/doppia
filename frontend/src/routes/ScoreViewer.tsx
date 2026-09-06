@@ -103,7 +103,7 @@ import {
   parseMeiMeterParts,
 } from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
-import { ApiError } from '../services/api';
+import { apiErrorMessage } from '../services/errorMessage';
 import { useStoredFragments } from '../hooks/useStoredFragments';
 
 // ---------------------------------------------------------------------------
@@ -1762,7 +1762,7 @@ export default function ScoreViewer() {
           setFragmentDraftId(response.id);
         }
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
+        setSubmitError(apiErrorMessage(err, t, t('score:viewer.saveDraftError')));
       } finally {
         setIsSavingDraft(false);
       }
@@ -1808,7 +1808,7 @@ export default function ScoreViewer() {
         resetAnnotation();
         showSubmitSuccess();
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.submitError'));
+        setSubmitError(apiErrorMessage(err, t, t('score:viewer.submitError')));
       } finally {
         setIsSubmitting(false);
       }
@@ -1849,7 +1849,7 @@ export default function ScoreViewer() {
         resetAnnotation();
         showSubmitSuccess('score:viewer.saveChangesSuccess');
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
+        setSubmitError(apiErrorMessage(err, t, t('score:viewer.saveDraftError')));
       } finally {
         setIsSavingChanges(false);
       }

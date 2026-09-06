@@ -233,3 +233,88 @@ class DomainYAML(BaseModel):
     """Machine-readable domain key (e.g. 'cadences')."""
     concepts: list[ConceptYAML] = []
     property_schemas: list[PropertySchemaYAML] = []
+
+
+# ---------------------------------------------------------------------------
+# Translation overlay seed files (ADR-006; Component 12 Step 19b)
+# ---------------------------------------------------------------------------
+
+
+class ConceptTranslationYAML(BaseModel):
+    """A concept's localised fields for one language."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    """Concept id. Must exist in a domain file — the seeder refuses unknown ids."""
+    name: str
+    aliases: list[str] = []
+    """Localised abbreviations. Empty means "no alias in this language", which
+    is not the same as inheriting the English one: an alias like "PAC" is an
+    English initialism and its Spanish counterpart is "CAP"."""
+    definition: str | None = None
+
+
+class SchemaTranslationYAML(BaseModel):
+    """A property schema's localised fields for one language."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    description: str | None = None
+
+
+class ValueTranslationYAML(BaseModel):
+    """A property value's localised fields for one language.
+
+    Mirrors ADR-039's three label fields. Omitting ``short_name`` or
+    ``description`` leaves that field null, and the read path then falls back to
+    the English graph value per field — so a partial translation degrades
+    field-by-field rather than dropping the whole row back to English.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    short_name: str | None = None
+    description: str | None = None
+
+
+class TranslationsYAML(BaseModel):
+    """One language's overlay, validated as a whole.
+
+    Lives in ``backend/seed/translations/<language>.yaml``. ADR-006 § "adding a
+    new language is a data migration and a seed file" — this is that seed file.
+
+    ``status`` applies to every row in the file rather than being set per entry:
+    a translation pass is reviewed as a body of work, not string by string, and
+    per-entry status would invite a file whose rows disagree about how much
+    trust they have earned. Promote by editing one line once the pass is
+    reviewed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    language: str
+    """BCP 47 primary subtag. Must be in ``SUPPORTED_LANGUAGES`` and must not
+    be ``en`` — English is written from the domain files themselves, and a
+    second writer for it would be a way to make the two disagree."""
+    status: Literal["machine", "reviewed", "authoritative"] = "machine"
+    """ADR-006 § Translation status. ``machine`` is the honest default for a
+    first pass, including one written by an AI."""
+    concepts: list[ConceptTranslationYAML] = []
+    property_schemas: list[SchemaTranslationYAML] = []
+    property_values: list[ValueTranslationYAML] = []
+
+    @field_validator("language")
+    @classmethod
+    def _reject_english(cls, v: str) -> str:
+        """Reject ``en``: English comes from the domain files, not from here."""
+        if v == "en":
+            raise ValueError(
+                "English translations are written from the domain YAML files; "
+                "a translations/en.yaml would be a second source of truth."
+            )
+        return v

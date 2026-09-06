@@ -34,6 +34,7 @@ import {
 } from '../../services/fragmentApi';
 import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
+import { apiErrorMessage } from '../../services/errorMessage';
 import {
   formatBeat,
   formatFragmentRange,
@@ -397,7 +398,7 @@ export default function FragmentDetailPanel({
         }
       } catch (err) {
         if (!cancelled) {
-          setLoadError(err instanceof ApiError ? err.message : t('score:detailPanel.loadError'));
+          setLoadError(apiErrorMessage(err, t, t('score:detailPanel.loadError')));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -468,7 +469,7 @@ export default function FragmentDetailPanel({
       await deleteFragment(fragment.id, fragment.sub_parts.length > 0);
       onDeleteDone?.(fragment.id);
     } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : t('score:detailPanel.deleteError'));
+      setDeleteError(apiErrorMessage(err, t, t('score:detailPanel.deleteError')));
       setDeleteState('idle');
     }
   }, [fragment, onDeleteDone, t]);
@@ -502,7 +503,7 @@ export default function FragmentDetailPanel({
         harmonySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } else {
         setReviewError(
-          err instanceof ApiError ? err.message : t('score:detailPanel.approvalError')
+          apiErrorMessage(err, t, t('score:detailPanel.approvalError'))
         );
         setReviewPhase('idle');
       }
@@ -526,7 +527,7 @@ export default function FragmentDetailPanel({
       setReviewPhase('idle');
       onReviewDone?.(fragment.id);
     } catch (err) {
-      setReviewError(err instanceof ApiError ? err.message : t('score:detailPanel.rejectionError'));
+      setReviewError(apiErrorMessage(err, t, t('score:detailPanel.rejectionError')));
       setReviewPhase('rejecting');
     }
   }, [fragment, rejectComment, onReviewDone, t]);

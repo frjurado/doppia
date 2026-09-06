@@ -1,0 +1,425 @@
+# Spanish translation overlay (ADR-006; Component 12 Step 19b).
+#
+# status: reviewed — an AI first pass, revised by Francisco 2026-09-06.
+# `authoritative` is reserved for content adapted to the Spanish-language
+# theoretical tradition rather than rendered into Spanish (ADR-006 § status),
+# which this is not yet.
+#
+# English is NOT written from here. It comes from the domain YAML files, and a
+# translations/en.yaml is rejected by the loader so the two cannot disagree.
+#
+# Stub concepts carry no `definition`. Theirs is boilerplate ("Stub: defined in
+# the … domain"), the UI suppresses it, and translating it would only make the
+# placeholder look like content. Their names are translated because those do
+# show — in value labels like "Cierra un Antecedente".
+#
+# ── Settled terminology ─────────────────────────────────────────────────────
+# The terms where Spanish usage divides, and what this corpus uses. Recorded so
+# a later pass extends the vocabulary rather than re-deciding it.
+#
+#   Sentence      → "Sentencia" (Francisco). Avoids the collision with
+#                   *phrase* = frase, which this vocabulary also needs
+#                   (PhraseClosure vs ThemeClosure).
+#   Applied Dominant → "Dominante Secundaria" (Francisco), the standard term in
+#                   Spanish pedagogy, in preference to the calque
+#                   "dominante aplicada". Carried through the prose: "V
+#                   secundaria", "dominantes secundarias de V".
+#   Cadential 6-4 → "6-4 Cadencial" for the property schema, "Sexta-Cuarta
+#                   Cadencial" for the harmonic-functions concept — mirroring
+#                   English, which likewise spells the concept out
+#                   ("Cadential Six-Four") and abbreviates the schema
+#                   ("Cadential 6-4"). Not an inconsistency.
+#   Reopening HC  → "Semicadencia Reabierta" / "SC (reabierta)".
+#   Deceptive     → "Cadencia Rota". "Interrumpida" and "de engaño" circulate.
+#   Evaded        → "Cadencia Evitada".
+#   Way Station   → "Estación de Paso". A metaphor with no settled Spanish
+#                   equivalent; this is a literal rendering.
+#   Closing Section → "Sección Conclusiva".
+#   Standing on the Dominant → "Permanencia sobre la Dominante".
+#
+# Descriptions cross-reference concepts by their translated name, so renaming a
+# concept here means grepping the prose for the old one.
+
+language: es
+status: reviewed
+
+concepts:
+  # ── cadences ──────────────────────────────────────────────────────────────
+  - id: Cadence
+    name: "Cadencia"
+    definition: >-
+      Un cierre que marca el final de una frase, un tema o una sección en la
+      música tonal. Una cadencia avanza normalmente a través de una secuencia
+      de etapas armónicas (tónica inicial, predominante, dominante) hacia un
+      punto de llegada. La morfología concreta y el resultado del cierre
+      determinan el subtipo de cadencia. Referencia: Caplin, W. (2024).
+      Cadence: A Study of Closure in Tonal Music. Oxford University Press.
+
+  - id: AuthenticCadence
+    name: "Cadencia Auténtica"
+    definition: >-
+      Una cadencia cuya dominante se dirige hacia un evento de tónica final.
+      Incluye tanto las formas realizadas (CAP, CAI) como las desviaciones
+      respecto de la resolución esperada (rota, evitada, abandonada).
+
+  - id: AuthenticCadenceRealised
+    name: "Cadencia Auténtica (Realizada)"
+    definition: >-
+      Una Cadencia Auténtica en la que la tónica final esperada llega
+      efectivamente. Lo que la distingue de los subtipos de desviación es
+      morfológico: la cadencia alcanza una tónica en estado fundamental en el
+      punto de llegada.
+
+  - id: PerfectAuthenticCadence
+    name: "Cadencia Auténtica Perfecta"
+    aliases:
+      - CAP
+    definition: >-
+      Una Cadencia Auténtica realizada en la que la voz superior llega al
+      grado 1 y tanto V como I están en estado fundamental. El cierre
+      cadencial más fuerte del sistema tonal.
+
+  - id: ImperfectAuthenticCadence
+    name: "Cadencia Auténtica Imperfecta"
+    aliases:
+      - CAI
+    definition: >-
+      Una Cadencia Auténtica realizada cuya voz superior no llega al grado 1
+      —lo más frecuente es que llegue al grado 3, y menos habitualmente al
+      grado 5—. Más débil que una CAP; característica del antecedente de un
+      período, o de una estación de paso hacia una CAP posterior.
+
+  - id: DeceptiveCadence
+    name: "Cadencia Rota"
+    aliases:
+      - Cad.Rota
+    definition: >-
+      Una Cadencia Auténtica cuya dominante resuelve en un acorde sustituto
+      (lo más común, VI, aunque son posibles otros) en lugar de la tónica
+      esperada. El gesto cadencial es morfológicamente completo hasta la
+      dominante; la sustitución se produce en la llegada cadencial. No debe
+      confundirse con una Cadencia Evitada: la llegada de la Cadencia Rota es
+      el último evento del gesto, mientras que la llegada que habría tenido la
+      Cadencia Evitada queda interrumpida por un nuevo comienzo.
+
+  - id: EvadedCadence
+    name: "Cadencia Evitada"
+    aliases:
+      - Cad.Evit.
+    definition: >-
+      Una Cadencia Auténtica cuya dominante no llega a resolver: la tónica
+      final esperada es sustituida a mitad de camino por una armonía ajena, que
+      normalmente inicia una nueva frase o una repetición, como en la técnica
+      del "one more time". No debe confundirse con una Cadencia Rota, en la
+      que la llegada se oye como el último evento de la cadencia.
+
+  - id: AbandonedCadence
+    name: "Cadencia Abandonada"
+    aliases:
+      - Aband.
+    definition: >-
+      Una Cadencia Auténtica cuya progresión se rompe antes de que llegue a
+      formarse la cadencia propiamente dicha, típicamente por inversión de la
+      dominante o por interrupción de la progresión antes de que la dominante
+      aparezca. Mientras que la Cadencia Evitada falla en la llegada
+      cadencial, la Cadencia Abandonada socava o evita por completo la
+      dominante cadencial.
+
+  - id: HalfCadence
+    name: "Semicadencia"
+    definition: >-
+      Una cadencia que llega a la dominante en lugar de a la tónica. El gesto
+      cadencial cierra sobre la dominante cadencial, que es el punto de llegada
+      y no una preparación para una resolución posterior. Incluye la forma
+      realizada y la Llegada a la Dominante como desviación cadencial.
+
+  - id: HalfCadenceRealised
+    name: "Semicadencia (Realizada)"
+    aliases:
+      - SC
+    definition: >-
+      Una Semicadencia en la que la dominante está en estado fundamental, sin
+      séptima, y se alcanza mediante una progresión cadencial —es decir,
+      precedida por una tónica inicial o por una función predominante—. No debe
+      confundirse con una Llegada a la Dominante, en la que algunos de estos
+      rasgos no están presentes.
+
+  - id: DominantArrival
+    name: "Llegada a la Dominante"
+    aliases:
+      - Lleg.Dom.
+    definition: >-
+      Una dominante que, o bien disuelve el cierre cadencial por inversión o
+      por adición de la séptima, o bien no se alcanza mediante una progresión
+      cadencial sino por medios no cadenciales —por ejemplo, mediante la
+      prolongación directa de V desde una región dominante anterior, o como
+      meta de una secuencia que simplemente desemboca en V—.
+
+  - id: ReopeningHalfCadence
+    name: "Semicadencia Reabierta"
+    aliases:
+      - "SC (reabierta)"
+    definition: >-
+      Una Semicadencia realizada que deshace retrospectivamente el cierre de
+      una Cadencia Auténtica precedente: la CA parece cerrar, pero una llegada
+      posterior a la dominante reabre el proceso cadencial y asume el peso
+      cadencial.
+
+  - id: ClosingSection
+    name: "Sección Conclusiva"
+    definition: >-
+      Una sección poscadencial que sigue a una Cadencia Auténtica realizada y
+      que prolonga la tónica con material conclusivo antes de que comience la
+      frase o el tema siguiente. Se distingue de un tema nuevo por su
+      dependencia retórica y armónica de la cadencia anterior: se oye como algo
+      que viene después de un final, no como un nuevo comienzo, y su armonía
+      prolonga la tónica recién alcanzada.
+
+  - id: StandingOnTheDominant
+    name: "Permanencia sobre la Dominante"
+    definition: >-
+      Una sección poscadencial que sigue a una Semicadencia y que prolonga la
+      dominante, típicamente como cierre de una transición o al final de la
+      sección de desarrollo.
+
+  # Cadence stages (CONTAINS targets).
+  - id: CadentialInitialTonic
+    name: "Tónica Inicial"
+    definition: >-
+      Etapa 1 de una cadencia: la región inicial de tónica desde la que parte
+      el movimiento cadencial. Puede consistir únicamente en una armonía de
+      tónica, en una dominante secundaria de la predominante, o en ambas en
+      sucesión.
+
+  - id: CadentialPreDominant
+    name: "Predominante"
+    definition: >-
+      Etapa 2 de una cadencia: la función predominante que precede a la
+      dominante cadencial. Puede incluir el grado 4, con frecuencia en el bajo
+      (familia de la subdominante: IV, ii, ii6, …), el grado 4 elevado
+      (dominantes secundarias de V, sextas aumentadas), o ambos en sucesión.
+
+  - id: CadentialDominant
+    name: "Dominante"
+    definition: >-
+      Etapa 3 de una cadencia: la dominante cadencial. En la teoría de Caplin
+      debe ser un V o V7 en estado fundamental, opcionalmente precedido por una
+      sexta-cuarta cadencial. La dominante de una Semicadencia es el punto de
+      llegada y debe ser una tríada; la dominante de una Cadencia Auténtica
+      prepara la tónica final (etapa 4).
+
+  - id: CadentialFinalTonic
+    name: "Tónica Final"
+    definition: >-
+      Etapa 4 de una cadencia: la llegada a la tónica en una Cadencia Auténtica
+      (o el acorde sustituto en una Cadencia Rota). Ausente en las
+      semicadencias y en las Cadencias Auténticas evitadas o abandonadas.
+
+  # ── formal-function (stubs: name only) ────────────────────────────────────
+  - id: MainTheme
+    name: "Tema Principal"
+  - id: SubordinateTheme
+    name: "Tema Subordinado"
+  - id: Transition
+    name: "Transición"
+  - id: Coda
+    name: "Coda"
+  - id: Period
+    name: "Período"
+  - id: Sentence
+    name: "Sentencia"           # see header § Settled terminology
+  - id: HybridTheme
+    name: "Tema Híbrido"
+  - id: Antecedent
+    name: "Antecedente"
+  - id: Consequent
+    name: "Consecuente"
+  - id: Continuation
+    name: "Continuación"
+
+  # ── harmonic-functions (stubs: name only) ─────────────────────────────────
+  - id: Tonic
+    name: "Tónica"
+  - id: AppliedDominant
+    name: "Dominante Secundaria"   # see header § Settled terminology
+  - id: CadentialSixFour
+    name: "Sexta-Cuarta Cadencial"
+  - id: SD4Predominant
+    name: "Predominante sobre el Grado 4"
+  - id: SDSharp4Predominant
+    name: "Predominante sobre el Grado 4 Elevado"
+
+  # ── prolongation (stub: name only) ────────────────────────────────────────
+  - id: ContrapuntalCadence
+    name: "Cadencia Contrapuntística"
+
+property_schemas:
+  - id: CadenceFunction
+    name: "Función Cadencial"
+    description: >-
+      El peso funcional de la cadencia dentro de su contexto formal.
+      Mutuamente excluyentes: Independiente cierra una unidad formal por
+      derecho propio; Estación de Paso difiere el cierre hacia una cadencia
+      más fuerte posterior; Alcance Limitado señala un gesto cadencial cuya
+      fuerza de cierre queda contenida en un nivel formal menor, sin fuerza de
+      cierre a nivel de frase o de tema.
+
+  - id: PhraseClosure
+    name: "Cierre de Frase"
+    description: >-
+      La unidad formal de nivel frásico que cierra esta cadencia. Solo tiene
+      sentido cuando la Función Cadencial es Independiente. Se admiten varios
+      valores (por ejemplo, una cadencia que cierra a la vez un Período y el
+      Consecuente). Cada valor remite a un stub de Función Formal.
+      Deliberadamente restringido a un subconjunto caplineano estable.
+
+  - id: ThemeClosure
+    name: "Cierre de Tema"
+    description: >-
+      La unidad formal de nivel temático que cierra esta cadencia. Solo tiene
+      sentido cuando la Función Cadencial es Independiente. Se admiten varios
+      valores. Cada valor remite a un stub de Función Formal. Deliberadamente
+      restringido a un subconjunto caplineano estable.
+
+  - id: ECP
+    name: "Progresión Cadencial Expandida"
+    description: >-
+      Verdadero cuando la cadencia presenta una Progresión Cadencial
+      Expandida: una o más de las etapas cadenciales 1 a 3 aparecen
+      expandidas, creando una progresión cadencial mayor que el tamaño
+      esperado de una cadencia en un contexto dado.
+
+  - id: Covered
+    name: "Cubierta"
+    description: >-
+      Verdadero cuando la voz superior, en la llegada cadencial, queda
+      cubierta por otra voz situada por encima de ella, lo que oscurece el
+      punto real de llegada melódica.
+
+  - id: Unison
+    name: "Unísono"
+    description: >-
+      Verdadero cuando la progresión cadencial se expresa mediante un unísono
+      o una duplicación de octava, quedando el contenido armónico implícito
+      por el contexto.
+
+  - id: Cadential64
+    name: "6-4 Cadencial"
+    description: >-
+      Verdadero cuando la dominante cadencial (etapa 3) viene precedida por
+      una elaboración de sexta-cuarta cadencial. Se modela como BOOL y no como
+      un valor dentro de un grupo de elaboraciones porque la sexta-cuarta
+      cadencial es casi una subetapa de la dominante, estructuralmente
+      distinta de las elaboraciones heterogéneas. Cualquier futura elaboración
+      de la etapa 3 recibirá su propio BOOL con nombre propio (por ejemplo, un
+      pedal de dominante). El concepto Sexta-Cuarta Cadencial del dominio de
+      funciones armónicas es su contrapartida estructural.
+
+  - id: Premature
+    name: "Prematura"
+    description: >-
+      Verdadero cuando una dominante, cadencial o no cadencial, se alcanza
+      prematuramente, antes de que la progresión cadencial esperada se haya
+      completado.
+
+  - id: ReinterpretedAsHC
+    name: "Reinterpretada como Semicadencia"
+    description: >-
+      Verdadero cuando una cadencia morfológicamente auténtica se oye
+      retrospectivamente como portadora del peso funcional de una
+      semicadencia: el caso de la semicadencia reinterpretada en un solo
+      evento. El caso de dos eventos, en el que una semicadencia posterior e
+      independiente deshace el cierre de la Cadencia Auténtica, se modela como
+      el concepto Semicadencia Reabierta, no como esta propiedad.
+
+  - id: HalfCadenceShape
+    name: "Perfil de la Semicadencia"
+    description: >-
+      El perfil de aproximación de una semicadencia realizada. MANY_OF porque
+      en el repertorio se dan perfiles híbridos (por ejemplo, expansivo y
+      luego convergente).
+
+  - id: IACSopranoDegree
+    name: "Grado de la Soprano en la CAI"
+    description: >-
+      El grado de la escala en el que se sitúa la voz superior en la llegada
+      cadencial de una Cadencia Auténtica Imperfecta. Mutuamente excluyentes:
+      grado 3 o grado 5.
+
+  - id: Stage1Components
+    name: "Componentes de la Etapa 1"
+    description: >-
+      Las entidades armónicas presentes en la etapa 1 (Tónica Inicial) de la
+      cadencia. Se admiten varios valores. Cada valor remite a un stub de
+      Función Armónica.
+
+  - id: Stage2Components
+    name: "Componentes de la Etapa 2"
+    description: >-
+      Las entidades armónicas presentes en la etapa 2 (Predominante) de la
+      cadencia. Se admiten varios valores. Cada valor remite a un stub de
+      Función Armónica.
+
+property_values:
+  # CadenceFunction
+  - id: Independent
+    name: "Independiente"
+  - id: WayStation
+    name: "Estación de Paso"    # TERM — see header
+  - id: LimitedScope
+    name: "Alcance Limitado"
+
+  # PhraseClosure
+  - id: ClosesSentence
+    name: "Cierra una Sentencia"
+  - id: ClosesPeriod
+    name: "Cierra un Período"
+  - id: ClosesHybridTheme
+    name: "Cierra un Tema Híbrido"
+  - id: ClosesContinuation
+    name: "Cierra una Continuación"
+  - id: ClosesAntecedent
+    name: "Cierra un Antecedente"
+  - id: ClosesConsequent
+    name: "Cierra un Consecuente"
+
+  # ThemeClosure
+  - id: ClosesMainTheme
+    name: "Cierra un Tema Principal"
+  - id: ClosesTransition
+    name: "Cierra una Transición"
+  - id: ClosesSubordinateTheme
+    name: "Cierra un Tema Subordinado"
+  - id: ClosesCoda
+    name: "Cierra una Coda"
+
+  # IACSopranoDegree
+  - id: SD3
+    name: "Grado 3"
+  - id: SD5
+    name: "Grado 5"
+
+  # HalfCadenceShape
+  - id: Basic
+    name: "Básica"
+  - id: Converging
+    name: "Convergente"
+  - id: Expanding
+    name: "Expansiva"
+
+  # Stage1Components
+  - id: Stage1Tonic
+    name: "Tónica"
+  - id: Stage1AppliedDominant
+    name: "Dominante Secundaria de la Predominante"
+    short_name: "Dominante Secundaria"
+
+  # Stage2Components
+  - id: Stage2SD4
+    name: "Predominante sobre el Grado 4"
+    short_name: "Sobre el Grado 4"
+    description: "IV, ii, ii6, …"
+  - id: Stage2SDSharp4
+    name: "Predominante sobre el Grado ♯4"
+    short_name: "Sobre el Grado ♯4"
+    description: "V secundaria, sextas aumentadas, …"

@@ -983,6 +983,81 @@ class TestConceptServiceSchemaTree:
         assert item.values[0].short_name is None
         assert item.values[0].description is None
 
+    def test_build_schema_item_overlays_value_labels_per_field(self) -> None:
+        """A Spanish row localising only the name leaves the others English.
+
+        The fallback is per field, not per row (Component 12 Step 19b). Most
+        values have no short form at all, so a row-level fallback would blank a
+        short name the graph does have the moment any Spanish row existed.
+        """
+        from services.concepts import _build_schema_item
+        from services.translation import ValueTranslation
+
+        row = {
+            "schema_id": "Stage2Components",
+            "schema_name": "Stage 2 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage2SD4",
+                    "name": "Pre-dominant on Scale Degree 4",
+                    "short_name": "On Scale Degree 4",
+                    "description": "IV, ii, ii6, …",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        value_t = {
+            "Stage2SD4": ValueTranslation(
+                name="Predominante sobre el Grado 4",
+                short_name=None,
+                description=None,
+            )
+        }
+        item = _build_schema_item(row, "es", {}, value_t, {})
+        value = item.values[0]
+
+        assert value.name == "Predominante sobre el Grado 4"
+        assert value.short_name == "On Scale Degree 4"
+        assert value.description == "IV, ii, ii6, …"
+
+    def test_build_schema_item_uses_translated_value_labels(self) -> None:
+        """A fully translated row wins over the English graph values."""
+        from services.concepts import _build_schema_item
+        from services.translation import ValueTranslation
+
+        row = {
+            "schema_id": "Stage2Components",
+            "schema_name": "Stage 2 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage2SD4",
+                    "name": "Pre-dominant on Scale Degree 4",
+                    "short_name": "On Scale Degree 4",
+                    "description": "IV, ii, ii6, …",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        value_t = {
+            "Stage2SD4": ValueTranslation(
+                name="Predominante sobre el Grado 4",
+                short_name="Sobre el Grado 4",
+                description="IV, ii, ii6, …",
+            )
+        }
+        item = _build_schema_item(row, "es", {}, value_t, {})
+        assert item.values[0].short_name == "Sobre el Grado 4"
+
     def test_build_schema_item_marks_stub_reference(self) -> None:
         """A referenced stub is flagged so clients can suppress its boilerplate.
 

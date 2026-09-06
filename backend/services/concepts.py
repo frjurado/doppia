@@ -631,12 +631,18 @@ def _build_schema_item(
             PropertyValueItem(
                 id=v["id"],
                 name=vt.name if vt else v["name"],
-                # Not translated: the translation tables carry `name` only
-                # (ADR-006). A non-English locale therefore falls back to the
-                # English short form and gloss, which is the same fallback the
-                # rest of the payload already uses.
-                short_name=v.get("short_name"),
-                description=v.get("description"),
+                # Per field, not per row (migration 0015). A translation row
+                # localises the name but may leave the short form or the gloss
+                # null — most values have neither — and null there means "use
+                # the English graph value", not "this value has none". Falling
+                # back per row instead would blank a short name the graph does
+                # have, the moment any Spanish row existed.
+                short_name=(
+                    vt.short_name if vt and vt.short_name else v.get("short_name")
+                ),
+                description=(
+                    vt.description if vt and vt.description else v.get("description")
+                ),
                 order=v.get("order"),
                 referenced_concept=ref,
                 translation_missing=is_translation_missing(language, value_t, v["id"]),

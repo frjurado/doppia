@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AuthCard from '../components/auth/AuthCard';
 import { useAuth } from '../components/auth/AuthContext';
-import { ApiError, apiFetch } from '../services/api';
+import { apiFetch } from '../services/api';
+import { apiErrorMessage } from '../services/errorMessage';
 import Type from '../components/ui/Type';
 import styles from '../components/auth/AuthCard.module.css';
 import Button from '../components/ui/Button';
@@ -64,7 +65,7 @@ export default function ResetPassword() {
       });
       setDone(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('errors:unexpected'));
+      setError(apiErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }

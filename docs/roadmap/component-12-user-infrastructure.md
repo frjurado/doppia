@@ -958,6 +958,56 @@ The implementation half of Step 19, scheduled by the decisions above:
 The editorial content is Francisco's; the schema and read-path work is not.
 Sequence accordingly — the columns can land before the rows exist.
 
+**Landed 2026-09-06.** All three pieces, plus the mechanism ADR-006 called for
+but never had.
+
+- **Migration `0015`** adds `short_name` and `description` to
+  `property_value_translation`, and the overlay reads them. The fallback is
+  **per field**: a row that localises only the name keeps the English short
+  form, because null there means "use the graph value", not "this value has no
+  short form". ADR-039 § 4 marked superseded.
+- **Errors translate on `code`** through `apiErrorMessage`. Codes with a fixed
+  meaning read as fully translated text; codes whose message carries specifics
+  an editor needs — which sub-part fell outside its parent, which field failed
+  — interpolate `{{message}}`, so the translated frame wraps the English detail
+  instead of discarding it. An unmapped code degrades to the fallback rather
+  than rendering the raw key, which is what i18next returns for a missing
+  string.
+- **`backend/seed/translations/es.yaml`** is the seed file ADR-006 anticipated.
+  34 concepts, 13 schemas, 22 values — full coverage. Written as an AI first
+  pass at `status: machine`, revised by Francisco the same day and promoted to
+  `reviewed` by editing one line. The loader rejects any id no domain file
+  defines: the overlay tables have no foreign key to the graph, so a typo would
+  otherwise become an orphan row that never surfaces and never errors.
+
+  Francisco's revisions settled three terms: *sentence* → "Sentencia" (not
+  "Oración"), *applied dominant* → "Dominante Secundaria" (the standard Spanish
+  term, not the calque "Dominante Aplicada"), and the `Cadential64` schema
+  shortened to "6-4 Cadencial". He carried the first two through the prose
+  himself. The review surfaced a failure mode worth naming: descriptions
+  cross-reference concepts **by their translated name**, so renaming a concept
+  strands any prose that mentions it — `ReinterpretedAsHC` still pointed at
+  "Semicadencia de Reapertura" after the concept became "Semicadencia
+  Reabierta". Nothing detects that; the file header now says so.
+
+  Not an inconsistency, though it reads like one: the concept is "Sexta-Cuarta
+  Cadencial" while the schema is "6-4 Cadencial". English does the same —
+  "Cadential Six-Four" for the concept, "Cadential 6-4" for the schema.
+
+Two decisions worth naming. `status` is per *file*, not per entry — a
+translation pass is reviewed as a body of work, and per-entry status invites a
+file whose rows disagree about how much trust they have earned. And
+`source_hash` is **not** written for non-English rows: it baselines the English
+text so the staleness job can tell when a translation's source moved, and
+storing the Spanish text's own hash there would make every translation look
+permanently current.
+
+Verification worth keeping: `test_translation_overlay.py` reads what the seed
+actually wrote, including a check that every English concept has a Spanish row.
+A missing row does not error — it renders English with
+`translation_missing: true` — so a half-translated overlay is otherwise
+invisible.
+
 ### Step 20 — M17 + G1: the meter-rule and beat-display conventions
 
 Decided into this component 2026-08-26 (display/coordinate conventions

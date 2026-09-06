@@ -79,6 +79,19 @@ to the English short form and gloss — the same fallback the rest of the payloa
 already uses. Extending the overlays is a separate change, deliberately not
 made here.
 
+> **Superseded 2026-09-06 (Component 12 Step 19b).** Both fields are now
+> translatable: migration `0015` adds `short_name` and `description` to
+> `property_value_translation`, and the overlay reads them.
+>
+> The fallback is **per field, not per row**. A translation row may localise
+> the name and leave the other two null — most values have neither — and null
+> means "use the English graph value" rather than "this value has no short
+> form". Falling back per row would blank a short name the graph does have, the
+> moment any non-English row existed.
+>
+> `source_hash` now covers all three fields, so editing a short form or a gloss
+> marks existing translations stale, which is what that column is for.
+
 ---
 
 ## Consequences

@@ -239,7 +239,14 @@ class TestTranslationOverlay:
             [_Row(schema_id="CadenceFunction", name="Función", description="…")]
         )
         value_session = _FakeSession(
-            [_Row(value_id="Independent", name="Independiente")]
+            [
+                _Row(
+                    value_id="Independent",
+                    name="Independiente",
+                    short_name=None,
+                    description=None,
+                )
+            ]
         )
 
         schema_overlay = TranslationOverlay(schema_session)  # type: ignore[arg-type]
@@ -251,6 +258,31 @@ class TestTranslationOverlay:
         assert schemas["CadenceFunction"].name == "Función"
         assert schemas["CadenceFunction"].description == "…"
         assert values["Independent"].name == "Independiente"
+        # Null here means "fall back to the English graph value" per field, not
+        # "this value has no short form" (migration 0015).
+        assert values["Independent"].short_name is None
+        assert values["Independent"].description is None
+
+    @pytest.mark.asyncio
+    async def test_value_overlay_carries_short_name_and_description(self) -> None:
+        """A Spanish row localises all three label fields, not just the name."""
+        from services.translation import TranslationOverlay
+
+        session = _FakeSession(
+            [
+                _Row(
+                    value_id="Stage2SD4",
+                    name="Predominante sobre el Grado 4",
+                    short_name="Sobre el Grado 4",
+                    description="IV, ii, ii6, …",
+                )
+            ]
+        )
+        overlay = TranslationOverlay(session)  # type: ignore[arg-type]
+        values = await overlay.value_translations(["Stage2SD4"], "es")
+
+        assert values["Stage2SD4"].short_name == "Sobre el Grado 4"
+        assert values["Stage2SD4"].description == "IV, ii, ii6, …"
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +327,40 @@ class TestSeedTranslationParams:
             "value_id": "Independent",
             "language": "en",
             "name": "Independent",
+            "short_name": None,
+            "description": None,
             "status": "authoritative",
             "source_hash": params["source_hash"],
         }
+
+    def test_value_params_carry_the_label_fields(self) -> None:
+        """ADR-039's short form and gloss reach the English row (migration 0015)."""
+        from backend.graph.queries.seed import value_translation_params
+
+        params = value_translation_params(
+            "Stage2SD4",
+            "Pre-dominant on Scale Degree 4",
+            "On Scale Degree 4",
+            "IV, ii, ii6, …",
+        )
+        assert params["short_name"] == "On Scale Degree 4"
+        assert params["description"] == "IV, ii, ii6, …"
+
+    def test_value_hash_covers_all_three_label_fields(self) -> None:
+        """Editing a short form or a gloss must mark translations stale.
+
+        The hash is what the staleness job compares against, so a name-only
+        hash would let a reworded gloss slip past every non-English row.
+        """
+        from backend.graph.queries.seed import value_translation_params
+
+        base = value_translation_params("V", "Name")
+        renamed_short = value_translation_params("V", "Name", "Short", None)
+        renamed_desc = value_translation_params("V", "Name", None, "Gloss")
+
+        assert base["source_hash"] != renamed_short["source_hash"]
+        assert base["source_hash"] != renamed_desc["source_hash"]
+        assert renamed_short["source_hash"] != renamed_desc["source_hash"]
 
     def test_upsert_sql_is_idempotent(self) -> None:
         from backend.graph.queries.seed import (

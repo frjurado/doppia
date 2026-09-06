@@ -1,8 +1,9 @@
 # i18n Surface Inventory (Component 12, Step 19 — M13)
 
 **Date:** 2026-09-06
-**Status:** Inventory complete; **decisions taken 2026-09-06** (Francisco) and
-recorded in § E. Implementation of the agreed items is scheduled as Step 19b.
+**Status:** Inventory complete; decisions taken 2026-09-06 (Francisco) and
+recorded in § E. **Step 19b delivered them** the same day — §§ B, C.1 and C.3
+are closed; § C.2 and the annotation-prose policy remain open by decision.
 **See also:** [`../../adr/ADR-006-internationalisation-strategy.md`](../../adr/ADR-006-internationalisation-strategy.md),
 [`../../adr/ADR-039-property-value-labelling.md`](../../adr/ADR-039-property-value-labelling.md),
 [`../../roadmap/component-12-user-infrastructure.md`](../../roadmap/component-12-user-infrastructure.md)
@@ -28,6 +29,11 @@ ladder, `source_hash` for staleness — and holds **zero Spanish rows**.
 So a reader who switches to Spanish today gets a fully Spanish interface wrapped
 around entirely English musical content. That is the single fact that should
 drive the decision session.
+
+> **No longer true as of Step 19b (2026-09-06).** The concept, schema and value
+> tables now carry Spanish — 34, 13 and 22 rows, `status: reviewed`. The one
+> table still English-only is `fragment_annotation_translation`, which § E.5
+> deliberately deferred.
 
 ---
 
@@ -57,18 +63,20 @@ path. Trivial to fix or to delete along with the spike.
 
 ## B. Editorial content — the actual gap
 
-All four tables exist and are wired; all four contain English only.
+All four tables exist and are wired. **Three now carry Spanish** (Step 19b);
+the fourth is deferred by decision.
 
-| Table | Translatable columns | Rows | Languages |
-|---|---|---:|---|
-| `concept_translation` | `name`, `aliases`, `definition` | 34 | `en` |
-| `property_schema_translation` | `name`, `description` | 13 | `en` |
-| `property_value_translation` | `name` | 22 | `en` |
-| `fragment_annotation_translation` | `prose_annotation` | 2 | `en` |
+| Table | Translatable columns | `en` | `es` | Status |
+|---|---|---:|---:|---|
+| `concept_translation` | `name`, `aliases`, `definition` | 34 | 34 | ✅ `reviewed` |
+| `property_schema_translation` | `name`, `description` | 13 | 13 | ✅ `reviewed` |
+| `property_value_translation` | `name`, `short_name`, `description` | 22 | 22 | ✅ `reviewed` |
+| `fragment_annotation_translation` | `prose_annotation` | 2 | 0 | ⏸ deferred (§ E.5) |
 
-Populating Spanish rows is **data entry against existing machinery**, not
-engineering. It is also the highest-value item on this list: it is what stands
-between the Spanish UI and a Spanish product.
+Populating Spanish rows was **data entry against existing machinery**, not
+engineering — it needed one new seed file (`backend/seed/translations/es.yaml`)
+and a loader, which is exactly what ADR-006 anticipated when it said adding a
+language is "a data migration and a seed file, not a code change".
 
 Note the asymmetry in volume. 34 concepts and 13 schemas are a bounded,
 tractable editorial task. `fragment_annotation_translation` is unbounded — it
@@ -94,6 +102,10 @@ untranslated for now. A Spanish tagger reads "On Scale Degree 4" and
 text left inside an otherwise Spanish property form, which reads as a bug rather
 than as untranslated content.
 
+> **Closed in Step 19b.** Migration `0015` adds both columns; the overlay reads
+> them and falls back **per field**, so a row that localises only the name keeps
+> the English short form rather than blanking it. ADR-039 § 4 marked superseded.
+
 ### C.2 Property schema **group** labels
 
 `closure` and `other` (Step 16) are free-form strings on the
@@ -118,6 +130,13 @@ treat `message` as a developer-facing detail; that means an `errors` namespace
 entry per code and a decision about what to show for unmapped codes.
 **Urgency:** medium. Any real error puts English in front of a Spanish reader,
 and errors are exactly when clarity matters most.
+
+> **Closed in Step 19b.** `apiErrorMessage` translates on `code`, with all 47
+> codes in both locales. The message is not simply discarded: codes whose text
+> carries specifics an editor needs — which sub-part fell outside its parent —
+> interpolate `{{message}}`, so the translated frame wraps the English detail.
+> An unmapped code degrades to the fallback rather than rendering the raw key,
+> which is what i18next returns for a missing string.
 
 ---
 
