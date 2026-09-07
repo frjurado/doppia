@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import uuid
 
-from api.dependencies import AppUser, get_optional_user
+from api.dependencies import AppUser, get_language, get_optional_user
 from api.rate_limiting import READ_ANONYMOUS, limiter
 from api.routes.fragments import get_fragment_service
 from errors import FragmentNotFoundError
@@ -97,6 +97,7 @@ async def public_list_fragments_by_concept(
         description="Maximum items per page (1–200, default 50).",
     ),
     service: FragmentService = Depends(get_fragment_service),
+    language: str = Depends(get_language),
 ) -> ConceptBrowseResponse:
     """Browse approved fragments by concept tag, anonymously.
 
@@ -128,6 +129,7 @@ async def public_list_fragments_by_concept(
         caller_roles=frozenset(),
         cursor=cursor,
         page_size=page_size,
+        language=language,
     )
 
 
@@ -148,6 +150,7 @@ async def public_get_fragment(
     service: FragmentService = Depends(get_fragment_service),
     caller: AppUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
+    language: str = Depends(get_language),
 ) -> FragmentDetailResponse:
     """Return the full record for one approved fragment.
 
@@ -177,7 +180,9 @@ async def public_get_fragment(
         404 ``FRAGMENT_NOT_FOUND``: Fragment does not exist or is not
             ``approved``.
     """
-    result = await service.get(fragment_id, caller_id=None, caller_roles=frozenset())
+    result = await service.get(
+        fragment_id, caller_id=None, caller_roles=frozenset(), language=language
+    )
     if result.status != "approved":
         # Same message and detail as the service's nonexistent-id error so the
         # two cases are indistinguishable to an anonymous caller.

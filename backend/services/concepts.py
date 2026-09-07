@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import json
+import unicodedata
 
 from errors import ConceptNotFoundError
 from graph.queries.concepts import (
@@ -133,8 +134,14 @@ class ConceptService:
         has_more = len(rows) == fetch
         page_rows = rows[:_PAGE_SIZE]
 
+        # Ancestors too, not just the rows themselves: a result's hierarchy path
+        # names concepts that are not in the page, and fetching only the page's
+        # own ids left every ancestor English while the leaf was translated.
+        search_ids: set[str] = {row["id"] for row in page_rows}
+        for row in page_rows:
+            search_ids.update(row.get("hierarchy_path_ids") or [])
         translations = await self._overlay().concept_translations(
-            [row["id"] for row in page_rows], language
+            sorted(search_ids), language
         )
 
         items: list[ConceptSearchItem] = []
@@ -148,7 +155,11 @@ class ConceptService:
                         t.aliases if t and t.aliases is not None else row["aliases"]
                     )
                     or [],
-                    hierarchy_path=row["hierarchy_path"] or [],
+                    hierarchy_path=localise_hierarchy_path(
+                        row["hierarchy_path"],
+                        row.get("hierarchy_path_ids"),
+                        translations,
+                    ),
                     definition=(t.definition if t else row.get("definition")),
                     translation_missing=is_translation_missing(
                         language, translations, row["id"]
@@ -369,8 +380,14 @@ class ConceptService:
                 detail={"concept_id": root_id},
             )
 
-        node_ids = [r["id"] for r in rows]
-        translations = await self._overlay().concept_translations(node_ids, language)
+        # Ancestors included for the same reason as in `search`: a node's path
+        # can reach above the subtree root.
+        node_ids: set[str] = {r["id"] for r in rows}
+        for r in rows:
+            node_ids.update(r.get("hierarchy_path_ids") or [])
+        translations = await self._overlay().concept_translations(
+            sorted(node_ids), language
+        )
 
         structure: list[dict] = []
         for r in rows:
@@ -383,7 +400,11 @@ class ConceptService:
                         t.aliases if t and t.aliases is not None else r["aliases"]
                     )
                     or [],
-                    "hierarchy_path": r["hierarchy_path"] or [],
+                    "hierarchy_path": localise_hierarchy_path(
+                        r["hierarchy_path"],
+                        r.get("hierarchy_path_ids"),
+                        translations,
+                    ),
                     "parent_id": r["parent_id"],
                     "translation_missing": is_translation_missing(
                         language, translations, r["id"]
@@ -391,19 +412,28 @@ class ConceptService:
                 }
             )
 
+        structure.sort(key=lambda node: _sort_key(node["name"]))
+
         if self._redis is not None:
             await set_tree_structure_cache(self._redis, root_id, language, structure)
 
         return structure
 
-    async def get_public_detail(self, concept_id: str) -> ConceptDetailResponse:
+    async def get_public_detail(
+        self, concept_id: str, language: str = DEFAULT_LANGUAGE
+    ) -> ConceptDetailResponse:
         """Assemble the public concept-page payload for one concept.
 
         Runs two Neo4j queries within one session — the detail row (identity,
         flags, hierarchy, parent, children) and the typed relationships — and
         assembles them into a :class:`~models.concepts.ConceptDetailResponse`.
-        English-only: the public glossary carries no translation overlay in
-        Phase 2 (i18n is deferred to Track M / Component 12).
+
+        Localised through the translation overlay (Component 12 Step 19c). This
+        was English-only until then, which made the glossary — the largest
+        reader-facing surface — the one place Spanish content never reached.
+        Every concept name on the page goes through the overlay: the concept
+        itself, its hierarchy path, its parent, its children, and the target of
+        every relationship, so a page cannot be half-translated.
 
         The raw ``definition`` prose is returned as-is together with the
         ``definition_reviewed`` flag; whether to show the prose or a placeholder
@@ -412,6 +442,7 @@ class ConceptService:
 
         Args:
             concept_id: The immutable concept id to resolve.
+            language: Requested response language.
 
         Returns:
             :class:`~models.concepts.ConceptDetailResponse`.
@@ -428,6 +459,24 @@ class ConceptService:
                 )
             rel_rows = await get_concept_relationships(session, concept_id)
 
+        # One overlay read for every concept the page names — itself, its
+        # ancestors, its parent, its children, and every relationship target —
+        # so the page is translated as a whole rather than in patches.
+        overlay_ids = {concept_id}
+        overlay_ids.update(row.get("hierarchy_path_ids") or [])
+        overlay_ids.update(c["id"] for c in row["children"])
+        overlay_ids.update(r["target_id"] for r in rel_rows)
+        if row["parent"] is not None:
+            overlay_ids.add(row["parent"]["id"])
+        translations = await self._overlay().concept_translations(
+            sorted(overlay_ids), language
+        )
+
+        def _name(concept: str, english: str) -> str:
+            """Translated name for a referenced concept, else its English name."""
+            t = translations.get(concept)
+            return t.name if t else english
+
         # Sort relationships deterministically for a stable page: by edge type,
         # then outgoing before incoming, then target name.
         rel_rows.sort(
@@ -443,7 +492,7 @@ class ConceptService:
                 direction=r["direction"],
                 target=ConceptRef(
                     id=r["target_id"],
-                    name=r["target_name"],
+                    name=_name(r["target_id"], r["target_name"]),
                     stub=r["target_stub"],
                 ),
             )
@@ -453,34 +502,43 @@ class ConceptService:
         parent = (
             ConceptRef(
                 id=row["parent"]["id"],
-                name=row["parent"]["name"],
+                name=_name(row["parent"]["id"], row["parent"]["name"]),
                 stub=row["parent"]["stub"],
             )
             if row["parent"] is not None
             else None
         )
         children = [
-            ConceptRef(id=c["id"], name=c["name"], stub=c["stub"])
+            ConceptRef(id=c["id"], name=_name(c["id"], c["name"]), stub=c["stub"])
             for c in row["children"]
         ]
 
+        own = translations.get(concept_id)
         return ConceptDetailResponse(
             id=row["id"],
-            name=row["name"],
-            aliases=row["aliases"] or [],
-            definition=row["definition"],
+            name=own.name if own else row["name"],
+            aliases=(own.aliases if own and own.aliases is not None else row["aliases"])
+            or [],
+            definition=(own.definition if own else row["definition"]),
             domain=row["domain"],
             complexity=row["complexity"],
             stub=row["stub"],
             definition_reviewed=row["definition_reviewed"],
             top_level_taggable=row["top_level_taggable"],
-            hierarchy_path=row["hierarchy_path"] or [],
+            hierarchy_path=localise_hierarchy_path(
+                row["hierarchy_path"], row.get("hierarchy_path_ids"), translations
+            ),
             parent=parent,
             children=children,
             relationships=relationships,
+            translation_missing=is_translation_missing(
+                language, translations, concept_id
+            ),
         )
 
-    async def get_public_index(self) -> ConceptIndexResponse:
+    async def get_public_index(
+        self, language: str = DEFAULT_LANGUAGE
+    ) -> ConceptIndexResponse:
         """Assemble the public browse-by-domain concept index.
 
         Fetch every browsable root (Component 11 Step 4b: no ``IS_SUBTYPE_OF``
@@ -490,12 +548,19 @@ class ConceptService:
         ``Cadence`` + ``ClosingSection`` + ``StandingOnTheDominant``) renders as
         a single heading with several top-level entries, not as several
         "domains". Approved-fragment counts are attached in one batch read.
-        English-only (no translation overlay in the Phase-2 public glossary).
+
+        Localised through the translation overlay (Component 12 Step 19c). This
+        endpoint also backs the fragment browser's concept tree, which takes
+        the public index whenever no ``?root`` narrowing is in play — so it was
+        untranslated there too, not only in the glossary.
 
         Counts come from :meth:`_fetch_fragment_counts` — the same source the
         editor tree uses, read live per request and never cached (Step 8 / M11)
         — so the public index and the editor tree can never disagree, and no
         second count source is introduced here.
+
+        Args:
+            language: Requested response language.
 
         Returns:
             :class:`~models.concepts.ConceptIndexResponse` with one entry per
@@ -513,6 +578,16 @@ class ConceptService:
         all_ids = [node["id"] for nodes in subtrees.values() for node in nodes]
         counts = await self._fetch_fragment_counts(all_ids)
 
+        # One overlay read for the whole forest, ancestors included: a node's
+        # hierarchy path can name a concept that is not itself in the forest.
+        overlay_ids = set(all_ids)
+        for nodes in subtrees.values():
+            for node in nodes:
+                overlay_ids.update(node.get("hierarchy_path_ids") or [])
+        translations = await self._overlay().concept_translations(
+            sorted(overlay_ids), language
+        )
+
         # Group roots by domain, preserving the name-ordered root sequence; a
         # root with no domain (defensive — every seeded concept has one) is
         # bucketed under an empty-string key so it is never silently dropped.
@@ -525,15 +600,30 @@ class ConceptService:
             nodes = [
                 ConceptIndexNode(
                     id=n["id"],
-                    name=n["name"],
-                    aliases=n["aliases"] or [],
-                    hierarchy_path=n["hierarchy_path"] or [],
+                    name=(
+                        translations[n["id"]].name
+                        if n["id"] in translations
+                        else n["name"]
+                    ),
+                    aliases=(
+                        translations[n["id"]].aliases
+                        if n["id"] in translations
+                        and translations[n["id"]].aliases is not None
+                        else n["aliases"]
+                    )
+                    or [],
+                    hierarchy_path=localise_hierarchy_path(
+                        n["hierarchy_path"],
+                        n.get("hierarchy_path_ids"),
+                        translations,
+                    ),
                     parent_id=n["parent_id"],
                     fragment_count=counts.get(n["id"], 0),
                 )
                 for root in roots_by_domain[domain_key]
                 for n in subtrees[root["id"]]
             ]
+            nodes.sort(key=lambda node: _sort_key(node.name))
             domains.append(
                 ConceptIndexDomain(
                     domain=domain_key,
@@ -596,6 +686,58 @@ def _domain_label(domain_key: str) -> str:
 # ---------------------------------------------------------------------------
 # Schema-tree helpers (module-private)
 # ---------------------------------------------------------------------------
+
+
+def _sort_key(name: str) -> str:
+    """Case- and accent-insensitive sort key for a display name.
+
+    The Cypher orders by the *English* name, so once a payload is overlaid the
+    list is no longer in the alphabetical order its contract promises: the
+    Spanish cadence forest came back Abandonada, Auténtica, (Realizada),
+    Cadencia, Rota. Re-sorting on the translated name restores it.
+
+    Accents are folded rather than compared: Python's default ordering puts
+    every accented character after ``z``, which would file "Época" after
+    "Zarzuela". Not full locale collation — that needs ICU — but right for the
+    Latin-script names this corpus uses.
+    """
+    decomposed = unicodedata.normalize("NFD", name)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
+def localise_hierarchy_path(
+    names: list[str] | None,
+    ids: list[str] | None,
+    translations: dict,
+) -> list[str]:
+    """Overlay a hierarchy path's element names, falling back per element.
+
+    The Cypher returns the path twice — as names and as ids — because the path
+    is a list of *display strings* with no key to translate by on its own. The
+    ids are that key (Component 12 Step 19c).
+
+    Falls back per element rather than per path: a path whose middle ancestor
+    has no translation row still localises the rest, which matters because the
+    cadence hierarchy mixes translated concepts with stubs.
+
+    Args:
+        names: English names from the graph, root → leaf.
+        ids: Concept ids in the same order, or ``None`` on a payload predating
+            the id projection.
+        translations: Concept-id → translation map for the requested locale.
+
+    Returns:
+        The path with every element that has a translation replaced, same
+        order and length as ``names``.
+    """
+    names = names or []
+    if not ids or len(ids) != len(names):
+        # No usable key: return the English path rather than a partial one.
+        return list(names)
+    return [
+        (translations[cid].name if cid in translations else name)
+        for name, cid in zip(names, ids)
+    ]
 
 
 def _build_schema_item(

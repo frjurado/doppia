@@ -21,7 +21,13 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
+from api.dependencies import (
+    AppUser,
+    get_current_user,
+    get_language,
+    get_neo4j,
+    require_role,
+)
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import Response
 from models.analysis import (
@@ -105,6 +111,7 @@ async def list_movement_fragments(
     ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
+    language: str = Depends(get_language),
 ) -> FragmentListResponse:
     """Return a cursor-paginated list of fragments tagged on a movement.
 
@@ -140,6 +147,7 @@ async def list_movement_fragments(
         caller_roles=user.roles,
         cursor=cursor,
         page_size=page_size,
+        language=language,
     )
 
 

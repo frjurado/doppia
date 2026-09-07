@@ -213,8 +213,12 @@ function storedResolution(beatStart: number | null, beatEnd: number | null): Res
  * its full name, then a positional fallback — mirroring the fragment viewer
  * (FragmentDetail) so the whole-score stage lane is never nameless.
  */
-function subPartLabel(item: FragmentListItem, index: number): string {
-  return item.primary_concept_alias ?? item.primary_concept_name ?? `Part ${index + 1}`;
+function subPartLabel(
+  item: FragmentListItem,
+  index: number,
+  fallback: (n: number) => string
+): string {
+  return item.primary_concept_alias ?? item.primary_concept_name ?? fallback(index + 1);
 }
 
 /**
@@ -354,7 +358,7 @@ export default function FragmentOverlay({
           return {
             id: sp.id,
             status: sp.status,
-            label: subPartLabel(sp, idx),
+            label: subPartLabel(sp, idx, (n) => t('score:overlay.partN', { number: n })),
             segments: augmented,
           };
         })
@@ -377,7 +381,7 @@ export default function FragmentOverlay({
     }
 
     return result;
-  }, [fragments, ghostLayer, mcIndex, displayState]);
+  }, [fragments, ghostLayer, mcIndex, displayState, t]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

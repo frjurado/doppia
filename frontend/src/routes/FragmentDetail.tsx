@@ -47,6 +47,7 @@ import { EDITORIAL_ROLES } from '../services/roles';
 import { getFragment } from '../services/fragmentApi';
 import {
   formatFragmentRange,
+  rangeLabels,
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../utils/fragmentRange';
@@ -226,7 +227,8 @@ export default function FragmentDetail({ loadFragment, publicMode }: FragmentDet
                       fragment.bar_start,
                       fragment.bar_end,
                       fragment.beat_start,
-                      fragment.beat_end
+                      fragment.beat_end,
+                      rangeLabels(t)
                     ),
                     {
                       sectionLabel: fragment.section_label,

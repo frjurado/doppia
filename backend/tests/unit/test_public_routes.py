@@ -192,6 +192,7 @@ class TestPublicBrowse:
             caller_roles=frozenset(),
             cursor=None,
             page_size=50,
+            language="en",
         )
 
     @pytest.mark.asyncio
@@ -269,8 +270,11 @@ class TestPublicDetail:
         assert body["id"] == str(detail.id)
         assert body["status"] == "approved"
         assert body["data_licence"] == "CC BY-SA 4.0"
+        # Language threads from negotiation into the service (Step 19c, C4):
+        # fragment payloads name concepts, and those names were English
+        # regardless of the reader's locale until then.
         service.get.assert_awaited_once_with(
-            detail.id, caller_id=None, caller_roles=frozenset()
+            detail.id, caller_id=None, caller_roles=frozenset(), language="en"
         )
 
     @pytest.mark.asyncio

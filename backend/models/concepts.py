@@ -394,6 +394,9 @@ class ConceptDetailResponse(BaseModel):
         children: Direct ``IS_SUBTYPE_OF`` children, ordered by name; stub
             children are included but flagged.
         relationships: Typed concept-to-concept relationships (both directions).
+        translation_missing: ``True`` when the requested non-English locale has
+            no translation for this concept and English is served as a fallback
+            (ADR-006 §6). Always ``False`` for English.
     """
 
     id: str
@@ -409,6 +412,7 @@ class ConceptDetailResponse(BaseModel):
     parent: ConceptRef | None = None
     children: list[ConceptRef] = Field(default_factory=list)
     relationships: list[ConceptRelationship] = Field(default_factory=list)
+    translation_missing: bool = False
 
 
 # ---------------------------------------------------------------------------

@@ -76,6 +76,50 @@ function displayEndBeat(beatEnd: number): number {
 }
 
 /**
+ * The four words a range is built from, injected rather than imported.
+ *
+ * This module is a pure formatter with no hook access, and its output is read
+ * by every fragment card, detail panel and stage row — which is how "m." and
+ * "beat" stayed English through Step 19b while everything around them was
+ * translated (Component 12 Step 19c). Injection matches what this file already
+ * does for volta prose in `makeRepeatContextFormatter`; the English default
+ * keeps existing call sites working unchanged.
+ */
+export interface RangeLabels {
+  /** Singular measure abbreviation: "m." (en), "c." (es). */
+  measure: string;
+  /** Plural measure abbreviation: "mm." (en), "cc." (es). */
+  measures: string;
+  /** Singular beat word. */
+  beat: string;
+  /** Plural beat word. */
+  beats: string;
+}
+
+/** English labels — the default, so an unconverted call site is unchanged. */
+export const EN_RANGE_LABELS: RangeLabels = {
+  measure: 'm.',
+  measures: 'mm.',
+  beat: 'beat',
+  beats: 'beats',
+};
+
+/**
+ * Build labels from a translation function.
+ *
+ * Takes `t` as an argument rather than calling a hook, so this stays usable
+ * from non-component code and from tests with no i18n provider.
+ */
+export function rangeLabels(t: (key: string) => string): RangeLabels {
+  return {
+    measure: t('fragments:range.measure'),
+    measures: t('fragments:range.measures'),
+    beat: t('fragments:range.beat'),
+    beats: t('fragments:range.beats'),
+  };
+}
+
+/**
  * Format a fragment's measure/beat range for display.
  *
  * @param barStart  - First measure (@n) of the fragment.
@@ -90,11 +134,14 @@ export function formatFragmentRange(
   barStart: number,
   barEnd: number,
   beatStart: number | null,
-  beatEnd: number | null
+  beatEnd: number | null,
+  labels: RangeLabels = EN_RANGE_LABELS
 ): string {
   // Complete measures: no beats at all.
   if (beatStart === null && beatEnd === null) {
-    return barStart === barEnd ? `m. ${barStart}` : `mm. ${barStart}–${barEnd}`;
+    return barStart === barEnd
+      ? `${labels.measure} ${barStart}`
+      : `${labels.measures} ${barStart}–${barEnd}`;
   }
 
   // A multi-measure end whose exclusive beat_end sits at beat 1 of barEnd
@@ -119,7 +166,9 @@ export function formatFragmentRange(
   const startIsWhole = beatStart === null || beatStart === 1;
   const endIsWhole = effBeatEnd === null;
   if (startIsWhole && endIsWhole) {
-    return barStart === effBarEnd ? `m. ${barStart}` : `mm. ${barStart}–${effBarEnd}`;
+    return barStart === effBarEnd
+      ? `${labels.measure} ${barStart}`
+      : `${labels.measures} ${barStart}–${effBarEnd}`;
   }
 
   // Single measure: both beats share the measure's context.
@@ -127,21 +176,28 @@ export function formatFragmentRange(
     if (beatStart !== null && effBeatEnd !== null && beatStart !== effBeatEnd) {
       const displayEnd = displayEndBeat(effBeatEnd);
       if (displayEnd === beatStart) {
-        return `m. ${barStart}, beat ${formatBeat(beatStart)}`;
+        return `${labels.measure} ${barStart}, ${labels.beat} ${formatBeat(beatStart)}`;
       }
-      return `m. ${barStart}, beats ${formatBeat(beatStart)}–${formatBeat(displayEnd)}`;
+      return (
+        `${labels.measure} ${barStart}, ${labels.beats} ` +
+        `${formatBeat(beatStart)}–${formatBeat(displayEnd)}`
+      );
     }
     const beat = beatStart ?? effBeatEnd;
-    return beat !== null ? `m. ${barStart}, beat ${formatBeat(beat)}` : `m. ${barStart}`;
+    return beat !== null
+      ? `${labels.measure} ${barStart}, ${labels.beat} ${formatBeat(beat)}`
+      : `${labels.measure} ${barStart}`;
   }
 
   // Multiple measures: each beat qualifies only its own measure.
   const startLabel =
-    beatStart !== null ? `m. ${barStart}, beat ${formatBeat(beatStart)}` : `m. ${barStart}`;
+    beatStart !== null
+      ? `${labels.measure} ${barStart}, ${labels.beat} ${formatBeat(beatStart)}`
+      : `${labels.measure} ${barStart}`;
   const endLabel =
     effBeatEnd !== null
-      ? `m. ${effBarEnd}, beat ${formatBeat(displayEndBeat(effBeatEnd))}`
-      : `m. ${effBarEnd}`;
+      ? `${labels.measure} ${effBarEnd}, ${labels.beat} ${formatBeat(displayEndBeat(effBeatEnd))}`
+      : `${labels.measure} ${effBarEnd}`;
   return `${startLabel} – ${endLabel}`;
 }
 
@@ -154,8 +210,14 @@ export function formatFragmentRange(
  * three near-identical i18n templates, which is how the bar label drifted in the
  * first place.
  */
-export function formatBarRange(barStart: number, barEnd: number): string {
-  return barStart === barEnd ? `m. ${barStart}` : `mm. ${barStart}–${barEnd}`;
+export function formatBarRange(
+  barStart: number,
+  barEnd: number,
+  labels: RangeLabels = EN_RANGE_LABELS
+): string {
+  return barStart === barEnd
+    ? `${labels.measure} ${barStart}`
+    : `${labels.measures} ${barStart}–${barEnd}`;
 }
 
 /**

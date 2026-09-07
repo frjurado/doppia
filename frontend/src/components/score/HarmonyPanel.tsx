@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { SelectionRange } from './annotator';
 import {
@@ -75,21 +76,11 @@ const ROOT_ACCIDENTAL_OPTIONS = [
 ];
 
 // Display maps for secondary detail (G6.2) — same vocabulary as the in-score labels (Step 16)
-const QUALITY_DISPLAY: Record<string, string> = {
-  major: 'major',
-  minor: 'minor',
-  diminished: 'dim',
-  augmented: 'aug',
-  'half-diminished': 'ø',
-  'dominant-seventh': 'dom7',
-};
-
-const INVERSION_DISPLAY: Record<number, string> = {
-  0: 'root pos',
-  1: '1st inv',
-  2: '2nd inv',
-  3: '3rd inv',
-};
+// Chord quality and inversion read as vocabulary, not as data: "dim" and
+// "1st inv" are English abbreviations whose Spanish equivalents are neither a
+// translation of the word nor derivable from it ("dism", "1ª inv"). Keyed
+// rather than mapped so both languages can pick their own conventions
+// (Component 12 Step 19c).
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -163,9 +154,9 @@ function eventKey(e: HarmonyEventOut): string {
   return `${e.mn}:${e.volta ?? ''}:${e.beat}`;
 }
 
-function beatLabel(e: HarmonyEventOut): string {
+function beatLabel(e: HarmonyEventOut, t: TFunction): string {
   const beatStr = e.beat % 1 === 0 ? String(e.beat) : e.beat.toFixed(2).replace(/\.?0+$/, '');
-  return `b${beatStr}`;
+  return t('score:harmonyLabel.beatShort', { beat: beatStr });
 }
 
 // Primary human label: "V65/V (G)" — same vocabulary as in-score harmony overlay (Step 16)
@@ -177,15 +168,27 @@ function primaryLabel(e: HarmonyEventOut): string {
 }
 
 // Secondary detail: "root 5 · dim · 1st inv · ext 7"
-function secondaryDetail(e: HarmonyEventOut): string {
+function secondaryDetail(e: HarmonyEventOut, t: TFunction): string {
   const parts: string[] = [];
   if (e.root != null) {
     const acc = e.root_accidental === 'flat' ? '♭' : e.root_accidental === 'sharp' ? '♯' : '';
-    parts.push(`root ${acc}${e.root}`);
+    parts.push(t('score:harmonyLabel.root', { degree: `${acc}${e.root}` }));
   }
-  if (e.quality) parts.push(QUALITY_DISPLAY[e.quality] ?? e.quality);
-  if (e.inversion != null) parts.push(INVERSION_DISPLAY[e.inversion] ?? String(e.inversion));
-  if (e.extensions && e.extensions.length > 0) parts.push(`ext ${e.extensions.join(', ')}`);
+  if (e.quality) {
+    parts.push(
+      t(`score:harmonyLabel.quality.${e.quality}`, { defaultValue: e.quality })
+    );
+  }
+  if (e.inversion != null) {
+    parts.push(
+      t(`score:harmonyLabel.inversion.${e.inversion}`, {
+        defaultValue: String(e.inversion),
+      })
+    );
+  }
+  if (e.extensions && e.extensions.length > 0) {
+    parts.push(t('score:harmonyLabel.ext', { list: e.extensions.join(', ') }));
+  }
   return parts.join(' · ');
 }
 
@@ -708,7 +711,7 @@ export default function HarmonyPanel({
                   const key = eventKey(event);
                   const isEditing = editingKey === key;
                   const isBusy = busyKeys.has(key);
-                  const secondary = secondaryDetail(event);
+                  const secondary = secondaryDetail(event, t);
 
                   return (
                     <li key={key} className={styles.eventCard} data-event-key={key}>
@@ -716,7 +719,7 @@ export default function HarmonyPanel({
                       <div className={styles.eventRow}>
                         <span className={styles.beat}>
                           <Type variant="label-sm" as="span">
-                            {beatLabel(event)}
+                            {beatLabel(event, t)}
                           </Type>
                         </span>
                         <div className={styles.chordBlock}>

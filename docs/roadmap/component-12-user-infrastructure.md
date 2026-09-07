@@ -1008,6 +1008,97 @@ A missing row does not error — it renders English with
 `translation_missing: true` — so a half-translated overlay is otherwise
 invisible.
 
+### Step 19c — Wire the overlay to the surfaces that never had it
+
+Step 19b seeded Spanish and it appeared in exactly one place: the tagging
+tool's concept picker and property form. Francisco listed the surfaces where it
+did not, and the analysis is
+[`../reports/component-12-reports/i18n-untranslated-surfaces.md`](../reports/component-12-reports/i18n-untranslated-surfaces.md).
+
+Three causes, not one. `Depends(get_language)` is on **4 of 55 endpoints**, all
+editorial — every route a reader touches ignores language, including two
+service methods whose docstrings defer i18n "to Track M / Component 12", which
+is this one. `hierarchy_path` is never overlaid even on the endpoints that do
+translate, and cannot be without a change to the Cypher, which returns names
+rather than ids. And six frontend strings are hardcoded, `fragmentRange.ts`
+(`m.`, `mm.`, `beat`) being the widest-reaching.
+
+**The Step 19 inventory was wrong about this and it is worth recording why.**
+Its scan read only `.tsx`, only JSX text nodes and four literal attributes,
+only capitalised text — so `.ts` utilities, template literals, one-character
+labels and lowercase text were all invisible to it. It also never asked which
+endpoints apply the overlay, which is where most of the gap actually was.
+
+Four pieces, C1–C3 in one pass and C4 after:
+
+- **C1 — frontend strings.** The six hardcoded sites through `t()`.
+  `fragmentRange.ts` is a pure function with no hook access, so the shape of
+  its label injection is the one real design decision.
+- **C2 — public glossary honours language.** `get_language` on the three
+  `public_concepts` routes, threaded through `get_public_detail` and
+  `get_public_index`. No cache work: the public index is not cached, unlike
+  the editorial tree whose keys are already language-scoped.
+- **C3 — `hierarchy_path` translatable.** Ids from the three Cypher queries,
+  overlaid by id at the six assembly sites, English name as the per-element
+  fallback. Fixes the tagging-tool breadcrumb and every hierarchy display.
+- **C4 — fragment payloads.** `language` on the `fragments`, `public` and
+  `reviews` routes, and the overlay at the four `FragmentService` hydration
+  sites. The piece that makes aliases read "CAP" outside the picker.
+
+Also in scope: **a test that every response model carrying concept-derived text
+is served by a route taking `get_language`.** Every gap here shares that one
+shape, it is mechanically detectable, and its absence is how the set
+accumulated unnoticed.
+
+Out of scope by earlier decision: annotation prose (§ E.5 of the inventory) and
+group labels (§ C.2, deferred with its strategy settled).
+
+**C1–C3 landed 2026-09-07; C4 next.** Three things the analysis had not
+predicted, each found by an assertion rather than by reading:
+
+- **A second range formatter.** `formatBarRange` — used by the browse cards
+  and glossary example captions — was hardcoded separately from
+  `formatFragmentRange`. Both now take an optional `RangeLabels`, defaulting
+  to English so no call site had to change to keep working.
+- **The harmony vocabulary is larger than "two labels".** `QUALITY_DISPLAY`
+  and `INVERSION_DISPLAY` sit inside the same strings as `root` and `ext`, and
+  their Spanish forms are neither translations of the English words nor
+  derivable from them ("dim" → "dism", "1st inv" → "1ª inv"). Translating half
+  that line would have read as a bug, so the whole cluster is keyed.
+- **Overlaying a list breaks its ordering.** The Cypher orders by the *English*
+  name, so the Spanish forest came back Abandonada, Auténtica, (Realizada),
+  Cadencia, Rota — a list documented as alphabetical, in an alphabet the reader
+  is not seeing. Both the public index and the editorial tree now re-sort on
+  the translated name, accent-folded so "Época" does not file after "Zarzuela".
+
+**C4 landed 2026-09-07, closing 19c.** `language` reaches the `fragments`,
+`public`, `reviews`, `movements` and glossary-examples routes, and the four
+`FragmentService` hydration sites share one `_localised_concepts` helper
+instead of each reading the raw graph values inline. Aliases now read "CAP"
+wherever they appear, and stage names, breadcrumbs and bracket labels are
+Spanish on every fragment surface.
+
+C4 also fixed a C2 defect Francisco found: the Spanish concept page returned
+500. `get_public_concept_service` built the service **without a database
+session** — correct while the page was English-only, and its docstring said so
+— and English short-circuits the overlay, so nothing touched the absent session
+until a Spanish request arrived. Every test passed and the page was broken. The
+unit tests could not catch it because they override the service wholesale; the
+new test calls the dependency function itself.
+
+A second C3 defect from the same review: the overlay fetched only a page's own
+concept ids, so a hierarchy path's *ancestors* stayed English while the leaf
+translated. Both `search` and the tree now include the path ids.
+
+**The `get_language` coverage test landed with C4**, as planned — the routes it
+asserts over are what C4 changed. It walks the live route table (following
+`original_router`, since the versioned API is one included router and a naive
+walk finds nothing) and fails naming any route that returns concept-derived
+text without negotiating a language. It carries a second test asserting the
+matcher saw something, because the first version passed while matching zero
+routes — a green test that checks nothing is worse than no test, and that is
+twice now in this component.
+
 ### Step 20 — M17 + G1: the meter-rule and beat-display conventions
 
 Decided into this component 2026-08-26 (display/coordinate conventions
@@ -1031,6 +1122,27 @@ settle before Exercises reads beat data):
   convention so "beats 1⅔–1" can never render (`displayEndBeat`; mechanism
   on file in `part-8-campaign-triage.md`). The other two M10 pieces (pickup
   numbering, caret at repeats) go to Component 13 (§ Decisions).
+
+### Step 21 — Cross-language concept search
+
+The last step of the component (Francisco, 2026-09-08), and the last thing
+standing between a Spanish tagger and a working tool: typing "cadencia" into
+the concept picker returns nothing. The Neo4j full-text index is
+`FOR (c:Concept) ON EACH [c.name, c.aliases]`, and those properties are
+English; Spanish lives in `concept_translation`.
+
+Sharper than the label gaps 19c closed — a label in the wrong language is read
+past, a search that returns nothing stops the work.
+
+**Needs an ADR before code.** The options are recorded in
+[`../reports/component-12-reports/i18n-untranslated-surfaces.md`](../reports/component-12-reports/i18n-untranslated-surfaces.md)
+§ D2. Option (a) — writing translated names onto the Concept nodes — is out:
+it puts translated text in two stores and ends the overlay's role as the single
+source of truth, which is an ADR-006 commitment. The live choice is **(b)**
+search `concept_translation` for non-English locales, or **(c)** search both
+and merge. The question between them is not cost but whether an English term
+should still find its concept for a Spanish-locale tagger, which is best
+answered against the real picker rather than in advance.
 
 ---
 
@@ -1081,6 +1193,12 @@ not decide them):
 Stated so the boundary is a decision, not a gap:
 
 - **Item 13 — capture extensions** → Component 15 (decision 1 above).
+- **Public property-schema labels** → Component 13 (Francisco, 2026-09-08).
+  A public reader sees `Stage2SD4` where an editor sees "Sobre el Grado 4":
+  `FragmentDetail` passes `disableSchemaFetch={isPublic}` because
+  `getConceptSchemas` is editor-only. The service method already exists and
+  already takes a language, so what is missing is a public route and its
+  auth/rate-limit treatment. Detail in the 19c analysis report § D1.
 - **Stage absent/restore should carve in grid slots, not bars** → later
   consideration (Francisco, 2026-09-06: "too much for right now"). Three
   defects in this one path during Step 17/18 all came from the same root:

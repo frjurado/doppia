@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from api.dependencies import AppUser, get_current_user, require_role
+from api.dependencies import AppUser, get_current_user, get_language, require_role
 from api.routes.fragments import get_fragment_service
 from fastapi import APIRouter, Depends, Query
 from models.fragment import ReviewQueueResponse
@@ -47,6 +47,7 @@ async def get_review_queue(
     ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
+    language: str = Depends(get_language),
 ) -> ReviewQueueResponse:
     """Return submitted fragments the caller is eligible to review.
 
@@ -64,4 +65,5 @@ async def get_review_queue(
         caller_roles=user.roles,
         cursor=cursor,
         page_size=page_size,
+        language=language,
     )

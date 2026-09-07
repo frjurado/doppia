@@ -12,11 +12,38 @@ rows, so adding concepts or languages later does not break them.
 
 from __future__ import annotations
 
+import os
+from typing import AsyncGenerator
+
 import pytest
+import pytest_asyncio
+from neo4j import AsyncDriver, AsyncGraphDatabase
 from services.translation import TranslationOverlay
 from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
+
+
+@pytest_asyncio.fixture
+async def neo4j_async_driver() -> AsyncGenerator[AsyncDriver, None]:
+    """A live async Neo4j driver.
+
+    Every other integration test mocks the driver, so there is no shared
+    fixture to reuse. The glossary tests below need the real graph: the point
+    of them is that the Cypher, the overlay and the assembly agree, and a mock
+    would be asserting the assembly against itself.
+    """
+    driver = AsyncGraphDatabase.driver(
+        os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
+        auth=(
+            os.environ.get("NEO4J_USER", "neo4j"),
+            os.environ.get("NEO4J_PASSWORD", "localpassword"),
+        ),
+    )
+    try:
+        yield driver
+    finally:
+        await driver.close()
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -114,3 +141,93 @@ class TestSpanishOverlay:
         )
         missing = [r[0] for r in rows]
         assert missing == [], f"concepts with no Spanish row: {missing}"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestPublicGlossaryLanguage:
+    """The public glossary honours language — Component 12 Step 19c.
+
+    Until 19c these two service methods were documented English-only, so the
+    largest reader-facing surface was the one place Spanish never reached.
+    These read the live seeded overlay rather than a stub, which is what makes
+    them evidence that the seed, the queries and the assembly agree.
+    """
+
+    async def _service(self, db_session, neo4j_async_driver):  # type: ignore[no-untyped-def]
+        from services.concepts import ConceptService
+
+        return ConceptService(driver=neo4j_async_driver, db=db_session)
+
+    async def test_detail_is_english_by_default(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        svc = await self._service(db_session, neo4j_async_driver)
+        r = await svc.get_public_detail("PerfectAuthenticCadence")
+        assert r.name == "Perfect Authentic Cadence"
+        assert r.translation_missing is False
+
+    async def test_detail_translates_every_name_on_the_page(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """Name, aliases, hierarchy and parent — a page cannot be half-Spanish."""
+        svc = await self._service(db_session, neo4j_async_driver)
+        r = await svc.get_public_detail("PerfectAuthenticCadence", "es")
+
+        assert r.name == "Cadencia Auténtica Perfecta"
+        assert r.aliases == ["CAP"]
+        assert r.hierarchy_path[0] == "Cadencia"
+        assert r.hierarchy_path[-1] == "Cadencia Auténtica Perfecta"
+        assert r.parent is not None
+        assert r.parent.name == "Cadencia Auténtica (Realizada)"
+        assert r.translation_missing is False
+
+    async def test_index_translates_names_and_hierarchy(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """This endpoint also backs the fragment browser's concept tree."""
+        svc = await self._service(db_session, neo4j_async_driver)
+        idx = await svc.get_public_index("es")
+
+        cadences = next(d for d in idx.domains if d.domain == "cadences")
+        names = [n.name for n in cadences.nodes]
+        assert "Cadencia Auténtica Perfecta" in names
+        assert not any(n.startswith("Perfect ") for n in names)
+
+        pac = next(n for n in cadences.nodes if n.id == "PerfectAuthenticCadence")
+        assert pac.hierarchy_path[0] == "Cadencia"
+
+    async def test_index_is_ordered_by_the_translated_name(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """The Cypher orders by the English name; overlaying breaks that order.
+
+        Without a re-sort the Spanish forest came back Abandonada, Auténtica,
+        (Realizada), Cadencia, Rota — alphabetical in a language the reader is
+        not seeing.
+        """
+        from services.concepts import _sort_key
+
+        svc = await self._service(db_session, neo4j_async_driver)
+        for language in ("en", "es"):
+            idx = await svc.get_public_index(language)
+            for domain in idx.domains:
+                keys = [_sort_key(n.name) for n in domain.nodes]
+                assert keys == sorted(keys), f"{domain.domain} unordered in {language}"
+
+    async def test_the_service_the_route_builds_can_read_the_overlay(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """Exercise the DI function, not a hand-built service.
+
+        Every unit test of this route overrides the service wholesale, so a
+        missing dependency in the DI function is invisible to them — which is
+        how the Spanish concept page shipped returning 500. The service was
+        constructed Neo4j-only (correct while the page was English-only), and
+        English short-circuits the overlay, so nothing touched the absent
+        session until a non-English request arrived.
+        """
+        from api.routes.public_concepts import get_public_concept_service
+
+        service = get_public_concept_service(driver=neo4j_async_driver, db=db_session)
+        result = await service.get_public_detail("PerfectAuthenticCadence", "es")
+        assert result.name == "Cadencia Auténtica Perfecta"

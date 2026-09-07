@@ -14,7 +14,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { formatBarRange, formatBeat, formatFragmentRange, qualifyRange } from '../fragmentRange';
+import {
+  formatBarRange,
+  formatBeat,
+  formatFragmentRange,
+  qualifyRange,
+  rangeLabels,
+} from '../fragmentRange';
+import type { RangeLabels } from '../fragmentRange';
 
 describe('formatBeat', () => {
   it('formats a whole beat with no fraction', () => {
@@ -166,5 +173,65 @@ describe('qualifyRange', () => {
     expect(qualifyRange(formatFragmentRange(12, 15, 3, 2), { sectionLabel: 'Trio' })).toBe(
       'Trio, m. 12, beat 3 – m. 15, beat 1'
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Localised labels (Component 12 Step 19c)
+// ---------------------------------------------------------------------------
+
+describe('formatFragmentRange — injected labels', () => {
+  const ES: RangeLabels = {
+    measure: 'c.',
+    measures: 'cc.',
+    beat: 'tiempo',
+    beats: 'tiempos',
+  };
+
+  it('defaults to English when no labels are given', () => {
+    // Every pre-existing call site relies on this, which is why the parameter
+    // is optional rather than required.
+    expect(formatFragmentRange(3, 7, null, null)).toBe('mm. 3–7');
+  });
+
+  it('uses the injected labels for a plain measure range', () => {
+    expect(formatFragmentRange(3, 3, null, null, ES)).toBe('c. 3');
+    expect(formatFragmentRange(3, 7, null, null, ES)).toBe('cc. 3–7');
+  });
+
+  it('uses the singular beat word for one beat', () => {
+    expect(formatFragmentRange(3, 3, 2, 3, ES)).toBe('c. 3, tiempo 2');
+  });
+
+  it('uses the plural beat word for a beat span', () => {
+    expect(formatFragmentRange(3, 3, 2, 4, ES)).toBe('c. 3, tiempos 2–3');
+  });
+
+  it('uses the labels on both sides of a cross-measure range', () => {
+    expect(formatFragmentRange(3, 7, 2, 3, ES)).toBe('c. 3, tiempo 2 – c. 7, tiempo 2');
+  });
+
+  it('applies to formatBarRange too', () => {
+    // The listing surfaces use this one; it was hardcoded separately and is
+    // easy to miss when converting the detail formatter.
+    expect(formatBarRange(3, 7, ES)).toBe('cc. 3–7');
+    expect(formatBarRange(3, 3)).toBe('m. 3');
+  });
+});
+
+describe('rangeLabels', () => {
+  it('reads the four keys from the fragments namespace', () => {
+    const seen: string[] = [];
+    const labels = rangeLabels((key: string) => {
+      seen.push(key);
+      return key.split('.').pop() ?? key;
+    });
+    expect(seen).toEqual([
+      'fragments:range.measure',
+      'fragments:range.measures',
+      'fragments:range.beat',
+      'fragments:range.beats',
+    ]);
+    expect(labels.measures).toBe('measures');
   });
 });

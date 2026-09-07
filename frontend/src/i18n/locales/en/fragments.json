@@ -26,5 +26,16 @@
     "sources": "Sources: {{list}}",
     "partLabel": "Part {{number}}",
     "alsoTagged": "Also tagged"
+  },
+  "range": {
+    "measure": "m.",
+    "measures": "mm.",
+    "beat": "beat",
+    "beats": "beats"
+  },
+  "notation": {
+    "sizeSmall": "S",
+    "sizeMedium": "M",
+    "sizeLarge": "L"
   }
 }

@@ -376,3 +376,76 @@ class TestSeedTranslationParams:
         ):
             assert "ON CONFLICT" in sql
             assert "DO UPDATE" in sql
+
+
+class TestHierarchyPathLocalisation:
+    """``localise_hierarchy_path`` — Component 12 Step 19c."""
+
+    def test_translates_each_element_by_id(self) -> None:
+        from services.concepts import localise_hierarchy_path
+        from services.translation import ConceptTranslation
+
+        translations = {
+            "Cadence": ConceptTranslation("Cadencia", None, None),
+            "AuthenticCadence": ConceptTranslation("Cadencia Auténtica", None, None),
+        }
+        out = localise_hierarchy_path(
+            ["Cadence", "Authentic Cadence"],
+            ["Cadence", "AuthenticCadence"],
+            translations,
+        )
+        assert out == ["Cadencia", "Cadencia Auténtica"]
+
+    def test_falls_back_per_element_not_per_path(self) -> None:
+        """One untranslated ancestor must not drop the whole path to English.
+
+        The cadence hierarchy mixes translated concepts with stubs, so a
+        path-level fallback would show English for paths that are almost
+        entirely translated.
+        """
+        from services.concepts import localise_hierarchy_path
+        from services.translation import ConceptTranslation
+
+        translations = {"Cadence": ConceptTranslation("Cadencia", None, None)}
+        out = localise_hierarchy_path(
+            ["Cadence", "Authentic Cadence"],
+            ["Cadence", "AuthenticCadence"],
+            translations,
+        )
+        assert out == ["Cadencia", "Authentic Cadence"]
+
+    def test_returns_english_when_ids_are_absent_or_mismatched(self) -> None:
+        """No usable key: return the English path rather than a partial one."""
+        from services.concepts import localise_hierarchy_path
+        from services.translation import ConceptTranslation
+
+        translations = {"Cadence": ConceptTranslation("Cadencia", None, None)}
+        names = ["Cadence", "Authentic Cadence"]
+
+        assert localise_hierarchy_path(names, None, translations) == names
+        # A length mismatch means the two lists cannot be zipped safely.
+        assert localise_hierarchy_path(names, ["Cadence"], translations) == names
+
+    def test_empty_path_is_empty(self) -> None:
+        from services.concepts import localise_hierarchy_path
+
+        assert localise_hierarchy_path(None, None, {}) == []
+        assert localise_hierarchy_path([], [], {}) == []
+
+
+class TestDisplayNameSortKey:
+    """``_sort_key`` — ordering an overlaid list by its own alphabet."""
+
+    def test_folds_accents_rather_than_ordering_after_z(self) -> None:
+        """Python's default sort files every accented character after ``z``."""
+        from services.concepts import _sort_key
+
+        names = ["Zarzuela", "Época", "Cadencia"]
+        assert sorted(names, key=_sort_key) == ["Cadencia", "Época", "Zarzuela"]
+        # Without folding, "Época" sorts last — the behaviour this replaces.
+        assert sorted(names) == ["Cadencia", "Zarzuela", "Época"]
+
+    def test_is_case_insensitive(self) -> None:
+        from services.concepts import _sort_key
+
+        assert _sort_key("Cadencia") == _sort_key("cadencia")

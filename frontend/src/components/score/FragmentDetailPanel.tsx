@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { PropertySchema } from '../../services/conceptApi';
 import { getConceptSchemas } from '../../services/conceptApi';
@@ -38,6 +39,7 @@ import { apiErrorMessage } from '../../services/errorMessage';
 import {
   formatBeat,
   formatFragmentRange,
+  rangeLabels,
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../../utils/fragmentRange';
@@ -181,9 +183,13 @@ function harmonyChordLabel(e: HarmonyRow, includeKey = true): string {
   return parts.join(' ') || '—';
 }
 
-function harmonyPositionLabel(e: HarmonyRow): string {
+function harmonyPositionLabel(e: HarmonyRow, t: TFunction): string {
   const v = e.volta != null ? `v${e.volta}` : '';
-  return `m.${e.mn}${v} b${formatBeat(e.beat)}`;
+  return t('score:harmonyLabel.positionMeasureBeat', {
+    measure: e.mn,
+    volta: v,
+    beat: formatBeat(e.beat),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -716,7 +722,8 @@ export default function FragmentDetailPanel({
                     fragment.bar_start,
                     fragment.bar_end,
                     fragment.beat_start,
-                    fragment.beat_end
+                    fragment.beat_end,
+                    rangeLabels(t)
                   ),
                   {
                     sectionLabel: fragment.section_label,
@@ -832,7 +839,7 @@ export default function FragmentDetailPanel({
                   <li key={i} className={styles.harmonyEvent}>
                     <span className={styles.harmonyPosition}>
                       <Type variant="label-sm" as="span">
-                        {harmonyPositionLabel(row)}
+                        {harmonyPositionLabel(row, t)}
                       </Type>
                     </span>
                     <span className={styles.harmonyChord}>
@@ -907,7 +914,13 @@ export default function FragmentDetailPanel({
                             inside its parent fragment, whose range above already
                             carries the section, so repeating "Trio," on every
                             stage would be noise, not clarity. */}
-                        {formatFragmentRange(sp.bar_start, sp.bar_end, sp.beat_start, sp.beat_end)}
+                        {formatFragmentRange(
+                          sp.bar_start,
+                          sp.bar_end,
+                          sp.beat_start,
+                          sp.beat_end,
+                          rangeLabels(t)
+                        )}
                       </Type>
                       {/* Stage properties (M6): the read sidebar showed a
                           stage's name and range but never what was recorded
@@ -1114,7 +1127,7 @@ export default function FragmentDetailPanel({
                                   as="span"
                                   className={styles.harmonyPosition}
                                 >
-                                  {harmonyPositionLabel(row)}
+                                  {harmonyPositionLabel(row, t)}
                                 </Type>
                                 {/* Keys print on every row here, unlike the
                                   harmony list above: this is a list of events

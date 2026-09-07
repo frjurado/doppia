@@ -87,7 +87,7 @@ function ConceptLink({ concept }: { concept: ConceptRef }) {
 // ---------------------------------------------------------------------------
 
 export default function ConceptPage() {
-  const { t } = useTranslation(['public', 'common']);
+  const { t, i18n } = useTranslation(['public', 'common']);
   const { conceptId } = useParams<{ conceptId: string }>();
 
   const [concept, setConcept] = useState<ConceptDetail | null>(null);
@@ -123,7 +123,10 @@ export default function ConceptPage() {
     return () => {
       cancelled = true;
     };
-  }, [conceptId]);
+  // Refetch when the UI language changes: the payload's concept names come
+  // from the server's translation overlay, so switching language must go
+  // back to the API — re-rendering only re-runs the chrome's t() calls.
+  }, [conceptId, i18n.language]);
 
   const groups = useMemo(
     () => (concept ? groupRelationships(concept.relationships) : []),

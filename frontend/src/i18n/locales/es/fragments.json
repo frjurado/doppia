@@ -26,5 +26,16 @@
     "sources": "Fuentes: {{list}}",
     "partLabel": "Parte {{number}}",
     "alsoTagged": "También etiquetado"
+  },
+  "range": {
+    "measure": "c.",
+    "measures": "cc.",
+    "beat": "tiempo",
+    "beats": "tiempos"
+  },
+  "notation": {
+    "sizeSmall": "P",
+    "sizeMedium": "M",
+    "sizeLarge": "G"
   }
 }

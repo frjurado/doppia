@@ -77,7 +77,20 @@ import styles from './FragmentNotation.module.css';
 // ---------------------------------------------------------------------------
 
 export type ScalePreset = 35 | 45 | 55;
-const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'S', 45: 'M', 55: 'L' };
+/**
+ * i18n keys for the staff-size control's one-letter labels.
+ *
+ * Abbreviations, not initials of the English words: Spanish reads P/M/G for
+ * pequeño/mediano/grande, so a `label.charAt(0)` of the translated word would
+ * be wrong in one language or the other. The score viewer's own size control
+ * spells the words out; this one is abbreviated because it sits in a much
+ * tighter row (Component 12 Step 19c).
+ */
+const SCALE_LABEL_KEYS: Record<ScalePreset, string> = {
+  35: 'fragments:notation.sizeSmall',
+  45: 'fragments:notation.sizeMedium',
+  55: 'fragments:notation.sizeLarge',
+};
 /** Default staff size: Medium (Component 9 Step 15). */
 const DEFAULT_SCALE: ScalePreset = 45;
 
@@ -772,7 +785,10 @@ export default function FragmentNotation({
           ariaLabel={t('common:staffSize')}
           value={scale}
           onChange={setScale}
-          options={([35, 45, 55] as const).map((s) => ({ value: s, label: SCALE_LABELS[s] }))}
+          options={([35, 45, 55] as const).map((s) => ({
+            value: s,
+            label: t(SCALE_LABEL_KEYS[s]),
+          }))}
         />
       </div>
 

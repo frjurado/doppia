@@ -187,13 +187,15 @@ CALL {
   MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
   WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 RETURN node.id                       AS id,
        node.name                     AS name,
        coalesce(node.aliases, [])    AS aliases,
        node.definition               AS definition,
        hierarchy_path,
+       hierarchy_path_ids,
        score
 ORDER BY complexity_rank ASC, prereq_depth ASC, score DESC, node.name ASC
 """
@@ -441,12 +443,14 @@ CALL {
   MATCH p = (c)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
   WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 RETURN c.id                        AS id,
        c.name                      AS name,
        coalesce(c.aliases, [])     AS aliases,
-       hierarchy_path
+       hierarchy_path,
+       hierarchy_path_ids
 """
 """Return name, aliases, and hierarchy path for each concept id in one round-trip.
 
@@ -527,13 +531,15 @@ CALL {
   MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(r:Concept)
   WHERE NOT (r)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 RETURN node.id                        AS id,
        node.name                      AS name,
        coalesce(node.aliases, [])     AS aliases,
        parent.id                      AS parent_id,
-       hierarchy_path
+       hierarchy_path,
+       hierarchy_path_ids
 ORDER BY node.name
 """
 """Return all non-stub concepts in the IS_SUBTYPE_OF subtree rooted at root_id.
@@ -684,7 +690,8 @@ CALL {
   MATCH p = (c)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
   WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 OPTIONAL MATCH (c)-[:IS_SUBTYPE_OF]->(parent:Concept)
 CALL {
@@ -708,6 +715,7 @@ RETURN c.id                              AS id,
        coalesce(c.definition_reviewed, false) AS definition_reviewed,
        coalesce(c.top_level_taggable, false)  AS top_level_taggable,
        hierarchy_path,
+       hierarchy_path_ids,
        CASE WHEN parent IS NULL THEN null
             ELSE {id: parent.id, name: parent.name, stub: coalesce(parent.stub, false)}
        END                               AS parent,

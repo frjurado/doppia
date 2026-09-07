@@ -134,7 +134,7 @@ function DomainSection({ domain }: { domain: ConceptIndexDomain }) {
 // ---------------------------------------------------------------------------
 
 export default function GlossaryIndex() {
-  const { t } = useTranslation('public');
+  const { t, i18n } = useTranslation('public');
   usePageTitle(t('glossary.index.pageTitle'));
 
   const [domains, setDomains] = useState<ConceptIndexDomain[] | null>(null);
@@ -162,7 +162,10 @@ export default function GlossaryIndex() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  // Refetch when the UI language changes: the index's concept names come
+  // from the server's translation overlay, so a language switch has to go
+  // back to the API — re-rendering only re-runs the chrome's t() calls.
+  }, [i18n.language]);
 
   return (
     <Surface layer="base" className={styles.page}>

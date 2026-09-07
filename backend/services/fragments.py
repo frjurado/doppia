@@ -23,7 +23,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -64,13 +64,16 @@ from models.roles import ADMIN
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.cache import get_subtree_cache, set_subtree_cache
+from services.concepts import localise_hierarchy_path
 from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
 )
+from services.i18n import DEFAULT_LANGUAGE
 from services.object_storage import StorageClient
 from services.task_dispatch import dispatch_task
 from services.tasks.render_fragment_preview import render_fragment_preview
+from services.translation import TranslationOverlay
 from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -435,6 +438,22 @@ async def enqueue_preview_regeneration_for_movement(
     return len(fragment_ids)
 
 
+@dataclass(frozen=True)
+class LocalisedConcept:
+    """A concept's display text in the requested language.
+
+    Fragment payloads name concepts in three ways — the full name, the alias on
+    a bracket, and the ancestor path — and all three were read straight off the
+    Neo4j node, which holds English only. That is why a stored fragment's
+    bracket said "PAC" while the concept picker two panels away said "CAP"
+    (Component 12 Step 19c, C4).
+    """
+
+    name: str
+    alias: str | None
+    hierarchy_path: list[str]
+
+
 class FragmentService:
     """Business logic for the fragment write surface and review state machine.
 
@@ -454,6 +473,61 @@ class FragmentService:
         self._driver = driver
         self._redis = redis
         self._storage = storage
+
+    async def _localised_concepts(
+        self,
+        concept_ids: Iterable[str],
+        language: str,
+    ) -> dict[str, LocalisedConcept]:
+        """Fetch concepts from Neo4j and overlay their text for ``language``.
+
+        One place rather than four: every fragment-listing path hydrates the
+        same three fields the same way, and before this each did it inline
+        against the raw graph values.
+
+        Ancestors are added to the overlay read because a concept's hierarchy
+        path names concepts that are not themselves tagged — without them the
+        leaf translates and every ancestor stays English.
+
+        Args:
+            concept_ids: Concept ids appearing anywhere in the payload.
+            language: Requested response language.
+
+        Returns:
+            Mapping of concept id → :class:`LocalisedConcept`. Ids Neo4j does
+            not know are absent; callers fall back to the id, as they did
+            before.
+        """
+        ids = list(dict.fromkeys(concept_ids))
+        if not ids:
+            return {}
+
+        async with self._driver.session() as neo_session:
+            rows = await get_concepts_by_ids(neo_session, ids)
+
+        overlay_ids: set[str] = {r["id"] for r in rows}
+        for row in rows:
+            overlay_ids.update(row.get("hierarchy_path_ids") or [])
+        translations = await TranslationOverlay(self._db).concept_translations(
+            sorted(overlay_ids), language
+        )
+
+        out: dict[str, LocalisedConcept] = {}
+        for row in rows:
+            t = translations.get(row["id"])
+            aliases = (
+                t.aliases if t and t.aliases is not None else row.get("aliases")
+            ) or []
+            out[row["id"]] = LocalisedConcept(
+                name=t.name if t else row.get("name", row["id"]),
+                alias=aliases[0] if aliases else None,
+                hierarchy_path=localise_hierarchy_path(
+                    row.get("hierarchy_path"),
+                    row.get("hierarchy_path_ids"),
+                    translations,
+                ),
+            )
+        return out
 
     # ------------------------------------------------------------------
     # Public interface — write path
@@ -874,6 +948,7 @@ class FragmentService:
         fragment_id: uuid.UUID,
         caller_id: str | None,
         caller_roles: frozenset[str],
+        language: str = DEFAULT_LANGUAGE,
     ) -> FragmentDetailResponse:
         """Return the full fragment record with hydrated concept tags, harmony
         events, and nested sub-parts.
@@ -984,21 +1059,16 @@ class FragmentService:
             {t.concept_id for t in parent_tags}
             | {t.concept_id for tags in sub_tags_by_fragment.values() for t in tags}
         )
-        concept_map: dict[str, dict] = {}
-        if all_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
-                    concept_map[c["id"]] = c
+        concept_map = await self._localised_concepts(all_concept_ids, language)
 
         def _hydrate_tag(tag: FragmentConceptTag) -> ConceptTagDetail:
-            data = concept_map.get(tag.concept_id, {})
-            aliases: list[str] = data.get("aliases", [])
+            data = concept_map.get(tag.concept_id)
             return ConceptTagDetail(
                 concept_id=tag.concept_id,
                 is_primary=tag.is_primary,
-                name=data.get("name", tag.concept_id),
-                alias=aliases[0] if aliases else None,
-                hierarchy_path=data.get("hierarchy_path", []),
+                name=data.name if data else tag.concept_id,
+                alias=data.alias if data else None,
+                hierarchy_path=data.hierarchy_path if data else [],
             )
 
         # Slice harmony events from movement_analysis.
@@ -1131,6 +1201,7 @@ class FragmentService:
         caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 100,
+        language: str = DEFAULT_LANGUAGE,
     ) -> FragmentListResponse:
         """Return a cursor-paginated list of top-level fragments for a movement.
 
@@ -1243,14 +1314,11 @@ class FragmentService:
             {t.concept_id for tags in tags_by_frag.values() for t in tags}
             | {t.concept_id for tags in sub_tags_by_frag.values() for t in tags}
         )
-        alias_map: dict[str, str | None] = {}
-        name_map: dict[str, str | None] = {}
-        if all_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
-                    aliases: list[str] = c.get("aliases", [])
-                    alias_map[c["id"]] = aliases[0] if aliases else None
-                    name_map[c["id"]] = c.get("name", c["id"])
+        localised = await self._localised_concepts(all_concept_ids, language)
+        alias_map: dict[str, str | None] = {
+            cid: c.alias for cid, c in localised.items()
+        }
+        name_map: dict[str, str | None] = {cid: c.name for cid, c in localised.items()}
 
         def _primary(
             frag_id: uuid.UUID, tmap: dict
@@ -1322,6 +1390,7 @@ class FragmentService:
         caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 50,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ReviewQueueResponse:
         """Return a cursor-paginated list of submitted fragments awaiting review.
 
@@ -1410,14 +1479,11 @@ class FragmentService:
         all_concept_ids = list(
             {t.concept_id for tags in tags_by_frag.values() for t in tags}
         )
-        alias_map: dict[str, str | None] = {}
-        name_map: dict[str, str | None] = {}
-        if all_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
-                    aliases: list[str] = c.get("aliases", [])
-                    alias_map[c["id"]] = aliases[0] if aliases else None
-                    name_map[c["id"]] = c.get("name", c["id"])
+        localised = await self._localised_concepts(all_concept_ids, language)
+        alias_map: dict[str, str | None] = {
+            cid: c.alias for cid, c in localised.items()
+        }
+        name_map: dict[str, str | None] = {cid: c.name for cid, c in localised.items()}
 
         # Batch movement context: one JOIN query for all unique movement_ids.
         ctx_result = await self._db.execute(
@@ -1500,6 +1566,7 @@ class FragmentService:
         caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 50,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ConceptBrowseResponse:
         """Return a cursor-paginated browse list of fragments for a concept.
 
@@ -1643,7 +1710,7 @@ class FragmentService:
                 include_subtypes=include_subtypes,
             )
 
-        items = await self._hydrate_browse_items(page)
+        items = await self._hydrate_browse_items(page, language)
 
         next_cursor = (
             _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
@@ -1656,7 +1723,7 @@ class FragmentService:
         )
 
     async def _hydrate_browse_items(
-        self, page: list[Fragment]
+        self, page: list[Fragment], language: str = DEFAULT_LANGUAGE
     ) -> list[ConceptBrowseItem]:
         """Turn a list of Fragment rows into browse-card items.
 
@@ -1693,14 +1760,11 @@ class FragmentService:
 
         # Batch Neo4j concept hydration for primary concept IDs.
         primary_concept_ids = list({t.concept_id for t in primary_tag_by_frag.values()})
-        concept_name_map: dict[str, str] = {}
-        concept_alias_map: dict[str, str | None] = {}
-        if primary_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, primary_concept_ids):
-                    aliases: list[str] = c.get("aliases", [])
-                    concept_name_map[c["id"]] = c.get("name", c["id"])
-                    concept_alias_map[c["id"]] = aliases[0] if aliases else None
+        localised = await self._localised_concepts(primary_concept_ids, language)
+        concept_name_map: dict[str, str] = {cid: c.name for cid, c in localised.items()}
+        concept_alias_map: dict[str, str | None] = {
+            cid: c.alias for cid, c in localised.items()
+        }
 
         # Batch movement context.
         ctx_result = await self._db.execute(
@@ -1809,6 +1873,7 @@ class FragmentService:
         include_subtypes: bool = True,
         limit: int = 3,
         seed: int | None = None,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ConceptExamplesResponse:
         """Draw up to ``limit`` random approved example fragments for a concept.
 
@@ -1886,7 +1951,7 @@ class FragmentService:
         result = await self._db.execute(stmt)
         page = list(result.scalars().all())
 
-        examples = await self._hydrate_browse_items(page)
+        examples = await self._hydrate_browse_items(page, language)
         return ConceptExamplesResponse(
             examples=examples,
             concept_id=concept_id,

@@ -34,6 +34,7 @@ import { getPublicConceptExamples } from '../../services/glossaryApi';
 import { getPublicFragment } from '../../services/publicApi';
 import {
   formatBarRange,
+  rangeLabels,
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../../utils/fragmentRange';
@@ -96,7 +97,7 @@ function ExampleCard({ item, expanded, onToggle }: ExampleCardProps) {
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
   // ADR-036: qualified with its movement section where bar numbers restart, so a
   // glossary example never shows a stranger an ambiguous "mm. 12–15".
-  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end), {
+  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end, rangeLabels(t)), {
     sectionLabel: item.section_label,
     repeatContext: item.repeat_context,
     formatRepeatContext: makeRepeatContextFormatter(t),

@@ -11,7 +11,12 @@ import { getPublicConceptIndex } from '../services/glossaryApi';
 import { listPublicFragmentsByConcept } from '../services/publicApi';
 import { useAuth } from '../components/auth/AuthContext';
 import { EDITORIAL_ROLES } from '../services/roles';
-import { formatBarRange, makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
+import {
+  formatBarRange,
+  makeRepeatContextFormatter,
+  qualifyRange,
+  rangeLabels,
+} from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentBrowser.module.css';
 import Button from '../components/ui/Button';
@@ -141,7 +146,7 @@ export function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
   // ADR-036: qualified with its movement section where bar numbers restart
   // ("Trio, mm. 12–15"), so two cards from different sections never read alike.
-  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end), {
+  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end, rangeLabels(t)), {
     sectionLabel: item.section_label,
     repeatContext: item.repeat_context,
     formatRepeatContext: makeRepeatContextFormatter(t),
@@ -275,7 +280,7 @@ export function FragmentCard({ item, onOpen }: FragmentCardProps) {
  * glossary links them into.
  */
 export default function FragmentBrowser() {
-  const { t } = useTranslation(['fragments', 'common']);
+  const { t, i18n } = useTranslation(['fragments', 'common']);
   usePageTitle(t('fragments:browser.pageTitle'));
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -332,7 +337,9 @@ export default function FragmentBrowser() {
         if (err instanceof ApiError) setTreeError(err);
       })
       .finally(() => setTreeLoading(false));
-  }, [rootId, isEditorial]);
+  // The concept tree's names come from the server's overlay, so a language
+  // switch must refetch rather than only re-render.
+  }, [rootId, isEditorial, i18n.language]);
 
   // ---- debounced root search ----
   const handleSearchChange = useCallback((value: string) => {
@@ -396,7 +403,7 @@ export default function FragmentBrowser() {
     setFragments([]);
     setFragmentsNextCursor(null);
     if (conceptId) loadFragments();
-  }, [conceptId, includeSubtypes, statusFilter, isEditorial]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conceptId, includeSubtypes, statusFilter, isEditorial, i18n.language]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const childrenMap = useMemo(() => buildChildrenMap(treeNodes), [treeNodes]);
   const roots = childrenMap.get(null) ?? [];

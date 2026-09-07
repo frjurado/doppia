@@ -27,6 +27,7 @@ from typing import Annotated, Literal
 from api.dependencies import (
     AppUser,
     get_current_user,
+    get_language,
     get_neo4j,
     get_redis,
     get_storage,
@@ -131,6 +132,7 @@ async def list_fragments_by_concept(
     ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
+    language: str = Depends(get_language),
 ) -> ConceptBrowseResponse:
     """Browse fragments by concept tag across the full corpus.
 
@@ -177,6 +179,7 @@ async def list_fragments_by_concept(
         status_filter=status,
         caller_id=user.id,
         caller_roles=user.roles,
+        language=language,
         cursor=cursor,
         page_size=page_size,
     )
@@ -233,6 +236,7 @@ async def get_fragment(
     ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
+    language: str = Depends(get_language),
 ) -> FragmentDetailResponse:
     """Return the full record for one fragment.
 
@@ -275,7 +279,9 @@ async def get_fragment(
     # Phase 1 implements only mode=none; non-default modes are ignored here.
     # The _ prefix silences linters for the intentionally unused parameters.
     _ = context_mode, context_before, context_after
-    return await service.get(fragment_id, caller_id=user.id, caller_roles=user.roles)
+    return await service.get(
+        fragment_id, caller_id=user.id, caller_roles=user.roles, language=language
+    )
 
 
 @router.post(

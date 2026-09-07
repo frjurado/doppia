@@ -34,7 +34,8 @@
   "overlay": {
     "expandFragment": "Expandir fragmento",
     "collapseFragment": "Contraer fragmento",
-    "openDetails": "Abrir detalles del fragmento"
+    "openDetails": "Abrir detalles del fragmento",
+    "partN": "Parte {{number}}"
   },
   "checklist": {
     "heading": "Lista de comprobación",
@@ -268,5 +269,25 @@
     "saveDraftError": "No se pudo guardar el borrador.",
     "incompleteSubmit": "Anotación incompleta — no se puede enviar.",
     "submitError": "No se pudo enviar."
+  },
+  "harmonyLabel": {
+    "positionMeasureBeat": "c.{{measure}}{{volta}} t{{beat}}",
+    "beatShort": "t{{beat}}",
+    "root": "fund. {{degree}}",
+    "ext": "ext {{list}}",
+    "quality": {
+      "major": "mayor",
+      "minor": "menor",
+      "diminished": "dism",
+      "augmented": "aum",
+      "half-diminished": "ø",
+      "dominant-seventh": "dom7"
+    },
+    "inversion": {
+      "0": "fundamental",
+      "1": "1ª inv",
+      "2": "2ª inv",
+      "3": "3ª inv"
+    }
   }
 }
