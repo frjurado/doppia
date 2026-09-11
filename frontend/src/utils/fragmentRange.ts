@@ -9,12 +9,25 @@
  *
  * Semantics note: `beat_end` is stored as the *exclusive* onset bound of the
  * selection (see annotator.ts — "any note whose onset < beatEnd is included").
- * Decided with Francisco (Component 9 G1, 2026-07-01): a *whole-number*
- * beat_end steps back to the last included beat (e.g. exclusive bound 3 → "beat
- * 2", the last beat actually covered), collapsing to a single beat label when
- * that equals beatStart; a *fractional* beat_end (mid-beat) displays the raw
- * bound as-is (e.g. "beats 1–2½") — contradictory-looking at first glance, but
- * it's the phrasing a musician actually reads naturally in each case.
+ * The stored bound and the label are different objects, and the label is prose.
+ *
+ * **Range-label convention** (ADR-005 § "range-label convention", decided with
+ * Francisco 2026-09-10, Component 12 Step 20 / G1): a range names the onset of
+ * the *first and last included unit*. That is the musician's rule at every
+ * granularity — "mm. 5–8" names the first and last included measure, "beats 1–4"
+ * the first and last included beat — and the unit is inferred from the
+ * endpoints' own precision: both whole → a beat, otherwise `1/d` for `d` the
+ * common denominator of their fractions. The displayed end is the stored
+ * exclusive bound stepped back by one unit; landing on the start collapses to a
+ * single-beat label. Because both endpoints are multiples of `1/d`, the stepped
+ * end can never fall below the start — the invariant is a property of the rule,
+ * not a clamp bolted on after it.
+ *
+ * This replaces the two-rule scheme of 2026-07-01 (whole bound → step back a
+ * beat; fractional bound → show as-is), which mixed an inclusive reading of the
+ * end with an exclusive one and so could render "beats 1⅔–1". Its fractional
+ * branch also named points where nothing starts ("beats 1–2½" for a range whose
+ * last onset is beat 2).
  */
 
 /**
@@ -65,14 +78,50 @@ export function formatBeat(beat: number): string {
 }
 
 /**
- * Convert an exclusive beat_end bound to its human-facing display value
- * (Component 9 G1, decided with Francisco 2026-07-01): a whole-number bound
- * steps back one beat to name the last beat actually covered; a fractional
- * bound (mid-beat) is shown unchanged, since it already names a real onset
- * inside the range rather than the excluded next one.
+ * The denominator implied by one beat value: 1 for a whole beat, else the
+ * subdivision it sits on (2½ → 2, 1⅔ → 3).
+ *
+ * Returns null for a fraction outside the recognised vocabulary. Compliant
+ * ADR-005 coordinates never produce one; when it happens the caller shows the
+ * raw bound rather than stepping back by a unit it cannot name.
  */
-function displayEndBeat(beatEnd: number): number {
-  return Number.isInteger(beatEnd) ? beatEnd - 1 : beatEnd;
+function beatDenominator(beat: number): number | null {
+  const frac = beat - Math.floor(beat + 1e-9);
+  if (frac < FRACTION_EPS) return 1;
+  for (const d of FRACTION_DENOMINATORS) {
+    const n = Math.round(frac * d);
+    if (n > 0 && n < d && Math.abs(frac - n / d) < FRACTION_EPS) return d;
+  }
+  return null;
+}
+
+/** Least common multiple of two small positive integers. */
+function lcm(a: number, b: number): number {
+  let x = a;
+  let y = b;
+  while (y !== 0) [x, y] = [y, x % y];
+  return (a * b) / x;
+}
+
+/**
+ * Convert an exclusive beat_end bound to the onset it should display — the last
+ * onset the range includes (ADR-005 § "range-label convention"; see the module
+ * docstring).
+ *
+ * Both endpoints are read, because the unit to step back by is a property of the
+ * *range*, not of its end: [1⅓, 2) is stepped by a third to "1⅔", while [1, 2)
+ * — same bound, whole start — is stepped by a beat to "1". Where the endpoints
+ * live in different measures (a cross-bar range) that inference still holds: the
+ * two numbers together are what says how finely the range was tagged.
+ *
+ * @param beatStart - The range's start beat, or null for a whole-measure start.
+ * @param beatEnd   - The stored exclusive end bound.
+ */
+function displayEndBeat(beatStart: number | null, beatEnd: number): number {
+  const dEnd = beatDenominator(beatEnd);
+  const dStart = beatStart === null ? 1 : beatDenominator(beatStart);
+  if (dEnd === null || dStart === null) return beatEnd; // outside the vocabulary
+  return beatEnd - 1 / lcm(dStart, dEnd);
 }
 
 /**
@@ -127,8 +176,9 @@ export function rangeLabels(t: (key: string) => string): RangeLabels {
  * @param beatStart - Beat within barStart, or null for a complete-measure start.
  * @param beatEnd   - Beat within barEnd (exclusive bound as stored), or null.
  * @returns e.g. "m. 3", "mm. 3–7", "m. 3, beats 2–3" (exclusive bound 4 →
- *   displayed as the last covered beat 3), "m. 3, beats 1–2½" (a fractional
- *   bound displays as-is), "m. 3, beat 2 – m. 7, beat 1".
+ *   the last included onset, beat 3), "m. 3, beats 1–2" (exclusive bound 2½ →
+ *   beat 2, the last onset inside it), "m. 3, beats 1⅓–1⅔" (a range tagged in
+ *   thirds steps back by a third), "m. 3, beat 2 – m. 7, beat 1".
  */
 export function formatFragmentRange(
   barStart: number,
@@ -174,8 +224,15 @@ export function formatFragmentRange(
   // Single measure: both beats share the measure's context.
   if (barStart === effBarEnd) {
     if (beatStart !== null && effBeatEnd !== null && beatStart !== effBeatEnd) {
-      const displayEnd = displayEndBeat(effBeatEnd);
-      if (displayEnd === beatStart) {
+      const displayEnd = displayEndBeat(beatStart, effBeatEnd);
+      // Landing on the start collapses to a single beat. The comparison is
+      // tolerant because the two sides are reached by different arithmetic —
+      // 1 + 2/3 is 1.6666666666666665, 2 - 1/3 is 1.6666666666666667 — and an
+      // exact test renders "beats 1⅔–1⅔" for the very range G1 was about.
+      // FRACTION_EPS is far below the finest gap the beat grid produces (⅛).
+      // `<` rather than `===` also catches a bound whose fraction fell outside
+      // the recognised vocabulary, where no unit could be inferred.
+      if (displayEnd <= beatStart + FRACTION_EPS) {
         return `${labels.measure} ${barStart}, ${labels.beat} ${formatBeat(beatStart)}`;
       }
       return (
@@ -196,7 +253,7 @@ export function formatFragmentRange(
       : `${labels.measure} ${barStart}`;
   const endLabel =
     effBeatEnd !== null
-      ? `${labels.measure} ${effBarEnd}, ${labels.beat} ${formatBeat(displayEndBeat(effBeatEnd))}`
+      ? `${labels.measure} ${effBarEnd}, ${labels.beat} ${formatBeat(displayEndBeat(beatStart, effBeatEnd))}`
       : `${labels.measure} ${effBarEnd}`;
   return `${startLabel} – ${endLabel}`;
 }

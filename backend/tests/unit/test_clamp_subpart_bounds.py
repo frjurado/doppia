@@ -36,47 +36,6 @@ mod = _load()
 Bounds = mod.Bounds
 clamp_to_parent = mod.clamp_to_parent
 measure_end_beat = mod.measure_end_beat
-meter_is_disputed = mod.meter_is_disputed
-candidate_measure_ends = mod.candidate_measure_ends
-
-
-class TestMeterIsDisputed:
-    """The M17 guard: which meters have no agreed beat count."""
-
-    def test_three_eight_is_disputed(self) -> None:
-        # The ghost layer reads one dotted-quarter beat, ingest_analysis three
-        # eighth-note beats. A beat number there denotes no fixed position.
-        assert meter_is_disputed("3/8") is True
-
-    @pytest.mark.parametrize("meter", ["6/8", "9/8", "12/8"])
-    def test_larger_compound_meters_agree(self, meter: str) -> None:
-        # Both rules call these compound, so the clamp is sound in them.
-        assert meter_is_disputed(meter) is False
-
-    @pytest.mark.parametrize("meter", ["4/4", "3/4", "2/4", "2/2", "6/4", "5/8", "7/8"])
-    def test_simple_meters_agree(self, meter: str) -> None:
-        assert meter_is_disputed(meter) is False
-
-    @pytest.mark.parametrize("meter", [None, "", "common", "x/y"])
-    def test_unparseable_is_not_disputed(self, meter: str | None) -> None:
-        # Falls back to 4/4, on which the two rules agree.
-        assert meter_is_disputed(meter) is False
-
-
-class TestCandidateMeasureEnds:
-    """Which measure ends a meter could have, across the readings in play."""
-
-    def test_an_agreed_meter_has_exactly_one(self) -> None:
-        assert candidate_measure_ends("3/4") == [4.0]
-        assert candidate_measure_ends("6/8") == [3.0]
-
-    def test_a_disputed_meter_has_both(self) -> None:
-        # 3/8: one dotted-quarter beat (ends at 2.0) or three eighths (ends 4.0).
-        assert candidate_measure_ends("3/8") == [2.0, 4.0]
-
-    def test_the_agreed_reading_is_measure_end_beat(self) -> None:
-        for meter in ("4/4", "3/4", "2/2", "6/8", "9/8"):
-            assert candidate_measure_ends(meter) == [measure_end_beat(meter)]
 
 
 class TestMeasureEndBeat:
@@ -92,13 +51,14 @@ class TestMeasureEndBeat:
             ("6/8", 3.0),  # compound: two dotted-quarter beats
             ("9/8", 4.0),
             ("12/8", 5.0),
-            # 3/8 counts as one dotted-quarter beat here, following the ghost
-            # layer's isCompoundMeter (unit 8 and count divisible by 3). The
-            # analysis ingest additionally requires count >= 6 and so reads 3/8 as
-            # three beats — a real divergence, but the values this script repairs
-            # were written by the ghost layer, so the ghost layer is the rule to
-            # match. Recorded as a follow-up, not resolved here.
-            ("3/8", 2.0),
+            # 3/8 is three eighth-note beats, not one dotted-quarter beat
+            # covering the bar (Track M17, settled 2026-09-10). Compound needs a
+            # numerator with something to group — count >= 6 — which is the rule
+            # ingest_analysis always applied and ghosts.ts now shares. The
+            # coordinates written under the old reading were converted by
+            # fix_38_beat_coordinates.py, which must run before this script.
+            ("3/8", 4.0),
+            ("3/16", 4.0),  # the same rule below the eighth
         ],
     )
     def test_meters(self, meter: str, expected: float) -> None:

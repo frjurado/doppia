@@ -12,8 +12,11 @@ Two kinds live here:
    - `clamp_subpart_bounds.py` (M7 — stage bounds overflowing their parent fragment)
    - `fix_movement_meter.py` (M18 — curated movement meter contradicting the notation)
    - `renumber_movement_bars.py` (§ 9G — an editorial bar renumbering the edition requires; rewrites `@n` and harmony `mn`, never `mc`)
+   - `fix_38_beat_coordinates.py` (M17 — 3/8 beat coordinates written while the ghost layer read that meter as one dotted-quarter beat)
 
    **Order matters between these.** `fix_movement_meter.py` corrects the movement record; `fix_summary_key_meter.py` reads it (as the fallback for an unreadable MEI) and writes fragment summaries. Run movement-level repairs before fragment-level ones, or the second pass propagates values the first was about to fix — which is exactly how M18 reached 76 fragments.
+
+   `fix_38_beat_coordinates.py` must run **before** `clamp_subpart_bounds.py`. The clamp's `measure_end_beat` now speaks the corrected M17 rule (a 3/8 bar ends at 4.0); run against unconverted rows it would read a legitimate 1⅔ as comfortably inside the bar and leave real overflows in place. It reads the meter from the MEI rather than from `movement.meter`, so it does not itself depend on `fix_movement_meter.py`; the full order for a database that has seen none of these is `fix_movement_meter.py` → `fix_summary_key_meter.py` → `fix_38_beat_coordinates.py` → `clamp_subpart_bounds.py`.
 
 Every script here takes `--dry-run`; use it first, read the diff it prints, then run for real.
 

@@ -187,11 +187,15 @@ describe('isCompoundMeter', () => {
   it('returns false for 4/4', () => expect(isCompoundMeter(4, 4)).toBe(false));
   it('returns false for 3/4', () => expect(isCompoundMeter(3, 4)).toBe(false));
   it('returns false for 2/2', () => expect(isCompoundMeter(2, 2)).toBe(false));
-  it('returns false for 3/8 (not divisible by 3 as compound)', () => {
-    // 3/8 has beatUnit=8 but beatCount=3; 3 % 3 == 0 is true, so it IS classified
-    // as compound (3 eighth-note sub-beats per dotted-quarter beat → 1 beat).
-    // This matches the ADR-005 formula: isCompound = beatUnit==8 && beatCount%3==0.
-    expect(isCompoundMeter(3, 8)).toBe(true);
+  it('returns false for 3/8 — three eighth beats, not one dotted beat', () => {
+    // Track M17, decided 2026-09-10: compound requires a numerator with
+    // something to group (beatCount >= 6), so 3/8 behaves like 3/4. Under the
+    // previous rule it was a single dotted-quarter beat covering the whole bar,
+    // and beat 3 did not exist for a harmony label to land on.
+    expect(isCompoundMeter(3, 8)).toBe(false);
+  });
+  it('returns false for 3/16 — the same rule below the eighth', () => {
+    expect(isCompoundMeter(3, 16)).toBe(false);
   });
 });
 
@@ -200,6 +204,8 @@ describe('subdivisionsPerBeat', () => {
   it('returns 3 for 9/8', () => expect(subdivisionsPerBeat(9, 8)).toBe(3));
   it('returns 2 for 4/4', () => expect(subdivisionsPerBeat(4, 4)).toBe(2));
   it('returns 2 for 3/4', () => expect(subdivisionsPerBeat(3, 4)).toBe(2));
+  it('returns 2 for 3/8 (M17: simple, so the eighth divides in two)', () =>
+    expect(subdivisionsPerBeat(3, 8)).toBe(2));
 });
 
 describe('beatSlotCount', () => {
@@ -217,6 +223,9 @@ describe('beatSlotCount', () => {
   });
   it('returns 3 for 3/4', () => {
     expect(beatSlotCount(3, 4)).toBe(3);
+  });
+  it('returns 3 for 3/8 (M17: simple, three eighth-note beats)', () => {
+    expect(beatSlotCount(3, 8)).toBe(3);
   });
 });
 

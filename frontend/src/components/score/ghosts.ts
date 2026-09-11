@@ -120,9 +120,32 @@ export function walkMeasureKeys(meiDoc: Document): MeasureWalkInfo[] {
 // Compound-meter utilities
 // ---------------------------------------------------------------------------
 
-/** True when time signature indicates compound meter (6/8, 9/8, 12/8). */
+/**
+ * True when the time signature is compound: 6/8, 9/8, 12/8.
+ *
+ * Compound means the beat *groups* its subdivisions — three eighths to a dotted
+ * quarter — which takes both an eighth-note denominator and a numerator with
+ * something to group. `beatCount >= 6` is that second condition, and it is what
+ * excludes **3/8**: three eighths in a bar are three beats, as in 3/4, not one
+ * dotted-quarter beat containing the whole measure (Track M17, decided with
+ * Francisco 2026-09-10; ADR-005 § "compound-meter rule").
+ *
+ * The rule never *manufactures* a one-beat bar: grouping applies only where it
+ * leaves at least two beats. A notated 1/4 or 1/8 bar genuinely has one beat and
+ * is unaffected — the objection is not to one-beat bars but to inferring one
+ * where the notation shows three pulses. Under the previous rule 3/8 was such an
+ * inference, and the consequences were not cosmetic: beat 3
+ * did not exist, so harmony labels for beats 1 and 3 both drew on beat 1 (dozens
+ * of bars in K280/iii), and a beat coordinate written by the tagging tool meant
+ * something different from the same number in a harmony record. The stored
+ * coordinates written under the old rule were converted by
+ * `backend/data_migrations/fix_38_beat_coordinates.py`.
+ *
+ * `ingest_analysis._compute_beat` and `clamp_subpart_bounds.measure_end_beat`
+ * carry the same predicate; the three must agree.
+ */
 export function isCompoundMeter(beatCount: number, beatUnit: number): boolean {
-  return beatUnit === 8 && beatCount % 3 === 0;
+  return beatUnit === 8 && beatCount >= 6 && beatCount % 3 === 0;
 }
 
 /**

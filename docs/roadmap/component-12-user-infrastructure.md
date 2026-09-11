@@ -1122,6 +1122,81 @@ settle before Exercises reads beat data):
   convention so "beats 1⅔–1" can never render (`displayEndBeat`; mechanism
   on file in `part-8-campaign-triage.md`). The other two M10 pieces (pickup
   numbering, caret at repeats) go to Component 13 (§ Decisions).
+  **Decided 2026-09-10 (ADR-005, amendment "range-label convention"):** the
+  label names the *first and last included onset* — the musician's
+  convention at every granularity ("mm. 5–8", "beats 1–4", "the 'and' of
+  4" are all the same rule) — and the unit is inferred from the endpoints'
+  own precision (both whole → a beat; otherwise `1/d`, `d` the common
+  denominator of the fractions). The stored exclusive bound steps back by
+  one unit; equal to the start collapses to a single beat. Because both
+  endpoints are multiples of `1/d`, end ≥ start holds by construction —
+  no clamp. The 2026-07-01 two-rule scheme (whole → step back a beat,
+  fractional → show raw) is withdrawn: mixing an inclusive end with an
+  exclusive one is what produced "1⅔–1". The stored `[beat_start,
+  beat_end)` model is untouched; onset + duration was considered and
+  rejected. Implementation goes to Claude Code (`displayEndBeat` takes
+  both endpoints; test table in the ADR); the exact-last-onset refinement
+  (store the last ghost's onset at commit) is deferred to
+  `phase-2-entry-backlog.md`.
+
+**Landed 2026-09-10.** Both pieces, plus the data pass.
+
+**M17.** `isCompoundMeter` is now `unit === 8 && count >= 6 && count % 3 === 0`,
+and 3/8 is the only signature that moves: every other eighth-note numerator
+divisible by three is already 6 or more. Recorded as an ADR-005 amendment
+("compound-meter rule"), with the superseded formula in the ADR body marked as
+such rather than left to be read as spec. The one-beat question the plan asked
+to settle is answered by the numerator condition itself: grouping applies only
+where it leaves at least two beats, so the rule never *manufactures* a one-beat
+bar. A notated 1/4 or 1/8 bar genuinely has one and is untouched — the objection
+was to inferring one where the notation shows three pulses, not to one-beat bars
+as such.
+
+The claim was checked on a render, not on the predicate. Tagging mode on
+K280/iii, same page, one rule swapped: **192 beat ghosts for 192 measures
+before, 522 after** — one beat per bar against three. In m. 15 the two harmony
+labels `V64` and `V` sat at x = 4 and x = 8 within the bar under the old rule
+(both on beat 1, which is what Francisco saw) and at x = 4 and x = 47 under the
+new one. `ingest_analysis` needed no change; it had required `count >= 6` since
+it was written, and the movement's harmony events are already on beats 1, 2 and
+3 — so the two stores now agree on what "beat 2" means, which is the whole point.
+
+**The data pass** is `backend/data_migrations/fix_38_beat_coordinates.py`.
+Old encoding: the bar's three eighths as subdivisions of one beat (eighth *k* at
+`1 + k/3`, bar end 2.0). New: each eighth a beat (`1 + k`, bar end 4.0). So
+`new = 3 × old − 2` — affine and increasing, so the ADR-005 ordering invariant
+survives it and every number keeps naming the position it named. It reads the
+meter per measure from the MEI (`services.mei_meter.meter_at_mc`) rather than
+from `movement.meter`, so each endpoint converts on its own measure's meter and
+a movement with a mid-piece meter change cannot be mangled. Dry run on staging:
+**48 coordinate pairs in K280/iii** (of 53 fragments; five are whole-measure with
+null beats), no other movement touched.
+
+Idempotence needed thought and is worth recording. Nothing marks which encoding
+a row is in, and the two value spaces overlap at 1 and 2, so the script decides
+per movement from the values: a third can only be the old encoding, and anything
+above 2.0 — or a `beat_start` of exactly 2.0, which the old reading could not
+produce because the bar ended there — can only be the new. A movement showing
+neither is reported and skipped rather than converted twice. That case cannot
+arise in this corpus and would need every coordinate in a 3/8 movement to be a
+bar edge or beat 1.
+
+`clamp_subpart_bounds.py` had refused to touch 3/8 movements while the rule was
+disputed; `meter_is_disputed` and `candidate_measure_ends` are gone with the
+dispute, and `measure_end_beat` now reads 3/8 as 4.0. **It must run after the
+conversion, never before** — against unconverted rows it would read a legitimate
+1⅔ as comfortably inside a bar ending at 4.0 and leave real overflows in place.
+The order is in `backend/data_migrations/README.md`.
+
+**G1** is `displayEndBeat(beatStart, beatEnd)`: the unit stepped back by is a
+property of the *range*, not of its end, so `[1⅓, 2)` steps by a third to "1⅔"
+while `[1, 2)` — same bound — steps by a beat to "1". The ADR's table is the
+test table. Two things the ADR could not have predicted. The collapse comparison
+has to be tolerant: `1 + 2/3` is 1.6666666666666665 and `2 - 1/3` is
+1.6666666666666667, so an exact test renders "beats 1⅔–1⅔" for the very range G1
+was about. And the end-≥-start property is asserted exhaustively over the whole
+beat grid rather than at the six table rows — removing the rule makes that test
+fail on "beats 1½–1", which the six rows alone would not have caught.
 
 ### Step 21 — Cross-language concept search
 
