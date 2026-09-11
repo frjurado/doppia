@@ -1526,3 +1526,55 @@ runs late so the inventory includes this component's own new strings.
 9. **The i18n inventory exists** and its decision session has happened
    (implementation may be deferred — the gate is the decided list, not the
    translations).
+
+---
+
+## Closure — 2026-09-11
+
+**Component complete.** 21 steps, 54 commits on `feature/user-infrastructure`,
+staging on version 106.
+
+### Gate status
+
+| # | Gate | Evidence |
+|---|---|---|
+| 1 | Role model migrated and enforced | `app_user` carries no `role` column; `user_role` holds the grants with `granted_by`/`granted_at`; `require_role` is any-of; `require_owner_or_role` in `services/permissions.py`; invariant wording in `CLAUDE.md` / `CONTRIBUTING.md`; ADR-037 |
+| 2 | Invite-only registration end to end on staging | **Code shipped and unverified here** — see below |
+| 3 | User-state tables migrated and recording | Migration `0012_user_state_tables`; `ExerciseType` / `ExerciseSession` / `ExerciseResult` / `reading_history` |
+| 4 | Data rights real, not decorative | `tests/integration/test_data_rights.py` — export, deletion, and reassignment of `fragment.created_by` / `fragment_review.reviewer_id` to the system user, which the gate required be proven by a test rather than by inspection |
+| 5 | Admin can operate the launch | `api/routes/admin.py` (invites, grants, moderation) with `test_admin_routes.py` and `test_admin_user_management.py` |
+| 6 | Product chrome shipped | Verified on staging 2026-09-11: topbar live, `DESIGN.md` § 7 addendum in place |
+| 7 | Tagging chrome batch closed | Steps 15–18; M4 and M9 struck in Track M |
+| 8 | Conventions settled and the data matches | ADR-005 amendments (compound-meter rule, range-label convention); 48 coordinate pairs converted on staging and idempotent on re-run; `clamp_subpart_bounds` then found **0** repairs across 281 sub-parts; **48/48** converted starts land on a harmony onset, and the beat grid was checked on a real render (3 ghosts per bar, every notehead inside beats 1–3, m. 15 included) |
+| 9 | i18n inventory + decision session | Steps 19 / 19b / 19c; M13 struck |
+
+**Gate 2 is the one exception, and it is a gap in the record rather than a
+known failure.** The implementation is all present — invite endpoints, the
+verification flow, and the Google OAuth PKCE round trip with its `/login`
+entry point — but nothing in this repository records the end-to-end staging
+run the gate asks for (invite → sign-up → verification email → verified
+account, plus OAuth). That run needs a real mailbox and a Google account, so
+it is Francisco's to make or to confirm he already made during Steps 4–5.
+Recorded here rather than assumed, because a gate marked met on the strength
+of the code existing is not a gate.
+
+### What the component grew that its plan did not contain
+
+- **Spanish content, not just a Spanish interface** (19b/19c). Step 19's
+  inventory concluded "UI chrome is done, the gap is data"; that conclusion
+  came from a scan of `.tsx` JSX text which could not have found the
+  counter-evidence, and the real gap was that 4 of 55 endpoints accepted a
+  language at all.
+- **Cross-language concept search** (Step 21, ADR-040), without which a
+  Spanish tagger could read the tool but not search it.
+- **A data pass** for M17, which the plan foresaw, and a second ADR-005
+  amendment for G1, which it did not spell out.
+
+### Carried forward
+
+Everything in § Deferred above stands. The items with named homes:
+Component 13 takes the public property-schema labels (§ D1 of the
+untranslated-surfaces report), the browse-surface consolidation, the
+collection DDL, and M10's remaining two pieces; Component 15 takes capture
+extensions. `fragment_annotation_translation` — machine-translating user
+prose — is the only i18n piece still deferred, with its policy undecided.

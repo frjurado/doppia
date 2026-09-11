@@ -30,8 +30,8 @@ The cadence editor doesn't work properly:
 
 ## Tagging sidebar
 
-- Even more cleanup to be done here: let's delete the text "stage properties" from the text within stages - it's kind of obvious.
-- Stages dynamic ordering: I found the uncanny behavior, what happens is that un-toggled stages are moved to the end of the list, which is confusing. Let's keep that order fixed once set.
+- ~~Even more cleanup to be done here: let's delete the text "stage properties" from the text within stages - it's kind of obvious.~~ **✅ Fixed — M9, Component 12 Step 18 (2026-09-06), `5b310e1`.**
+- ~~Stages dynamic ordering: I found the uncanny behavior, what happens is that un-toggled stages are moved to the end of the list, which is confusing. Let's keep that order fixed once set.~~ **✅ Fixed — M9, Component 12 Step 18 (2026-09-06), `5b310e1`.** The description here turned out to be too simple: the ordering was not "absent stages move to the end" but "cards are ordered by whatever the last placement produced", so the sequence depended on the order the stages were clicked. `orderStageCards` gives the list one deterministic order — score position, with absent stages held in place rather than swept to the end (Francisco's call).
 
 
 ## Info sidebar
@@ -55,9 +55,9 @@ The cadence editor doesn't work properly:
 
 ## Revision workflow
 
-- When selecting an item from the review queue, the sidebar shows it, but the score doesn't scroll to the fragment, which is annoying.
-- You open the queue, click on an item, the score opens, you do your work. Now the "back" button brings you back to the main browser instead of the review queue...
-- Evaded Cadences are not named as such in the review queue, neither in the brackets in score. Why?? (Abandoned Cadence neither...)
+- ~~When selecting an item from the review queue, the sidebar shows it, but the score doesn't scroll to the fragment, which is annoying.~~ **✅ Fixed — M4, Component 12 Step 18 (2026-09-06), `5b310e1`.**
+- ~~You open the queue, click on an item, the score opens, you do your work. Now the "back" button brings you back to the main browser instead of the review queue...~~ **✅ Fixed — M4, Component 12 Step 18 (2026-09-06), `5b310e1`.** The back link is keyed on whether the viewer was opened with a focus fragment.
+- ~~Evaded Cadences are not named as such in the review queue, neither in the brackets in score. Why?? (Abandoned Cadence neither...)~~ **✅ Fixed — M4, Component 12 Step 15 (2026-09-05), `173ffd2`.** The cause was not naming but a missing fallback: those concepts carried no alias, and every label site read `aliases[0]`. The six alias-less concepts were given coined aliases and the label path falls back to the concept name, so no bracket can render nameless.
 
 
 ## Score
@@ -71,7 +71,14 @@ The cadence editor doesn't work properly:
 
 ## I18N
 
-- There are more surfaces to be translated. Make a list per type/complexity/urgency, then let's decide when to implement.
+- ~~There are more surfaces to be translated. Make a list per type/complexity/urgency, then let's decide when to implement.~~ **✅ Done — M13, Component 12 Steps 19/19b/19c (2026-09-06 → 09-07), `71ff536`, `f906cdb`, `54cca03`.** The inventory is
+  [`../component-12-reports/i18n-surface-inventory.md`](../component-12-reports/i18n-surface-inventory.md)
+  and the decision session it fed is recorded in its § E. Implementation went
+  further than the step planned: Spanish *content* was seeded (19b) and then
+  wired to the surfaces the inventory had missed (19c) — the inventory's § A was
+  wrong in a way worth reading, since it scanned only `.tsx` JSX text and never
+  asked which endpoints apply the translation overlay. See
+  [`../component-12-reports/i18n-untranslated-surfaces.md`](../component-12-reports/i18n-untranslated-surfaces.md).
 
 
 ## Real bugs
