@@ -1531,15 +1531,15 @@ runs late so the inventory includes this component's own new strings.
 
 ## Closure — 2026-09-11
 
-**Component complete.** 21 steps, 54 commits on `feature/user-infrastructure`,
-staging on version 106.
+**Component complete**, all nine gates met. 21 steps on
+`feature/user-infrastructure`, merged via PR #32; staging on version 106.
 
 ### Gate status
 
 | # | Gate | Evidence |
 |---|---|---|
 | 1 | Role model migrated and enforced | `app_user` carries no `role` column; `user_role` holds the grants with `granted_by`/`granted_at`; `require_role` is any-of; `require_owner_or_role` in `services/permissions.py`; invariant wording in `CLAUDE.md` / `CONTRIBUTING.md`; ADR-037 |
-| 2 | Invite-only registration end to end on staging | **Code shipped and unverified here** — see below |
+| 2 | Invite-only registration end to end on staging | ✅ Confirmed by Francisco 2026-09-11: the invite cycle had already been run during Steps 4–5, and Google OAuth sign-in was exercised on staging at closure |
 | 3 | User-state tables migrated and recording | Migration `0012_user_state_tables`; `ExerciseType` / `ExerciseSession` / `ExerciseResult` / `reading_history` |
 | 4 | Data rights real, not decorative | `tests/integration/test_data_rights.py` — export, deletion, and reassignment of `fragment.created_by` / `fragment_review.reviewer_id` to the system user, which the gate required be proven by a test rather than by inspection |
 | 5 | Admin can operate the launch | `api/routes/admin.py` (invites, grants, moderation) with `test_admin_routes.py` and `test_admin_user_management.py` |
@@ -1548,15 +1548,20 @@ staging on version 106.
 | 8 | Conventions settled and the data matches | ADR-005 amendments (compound-meter rule, range-label convention); 48 coordinate pairs converted on staging and idempotent on re-run; `clamp_subpart_bounds` then found **0** repairs across 281 sub-parts; **48/48** converted starts land on a harmony onset, and the beat grid was checked on a real render (3 ghosts per bar, every notehead inside beats 1–3, m. 15 included) |
 | 9 | i18n inventory + decision session | Steps 19 / 19b / 19c; M13 struck |
 
-**Gate 2 is the one exception, and it is a gap in the record rather than a
-known failure.** The implementation is all present — invite endpoints, the
-verification flow, and the Google OAuth PKCE round trip with its `/login`
-entry point — but nothing in this repository records the end-to-end staging
-run the gate asks for (invite → sign-up → verification email → verified
-account, plus OAuth). That run needs a real mailbox and a Google account, so
-it is Francisco's to make or to confirm he already made during Steps 4–5.
-Recorded here rather than assumed, because a gate marked met on the strength
+**Gate 2 was the one the repository could not answer for itself**, and it is
+worth recording why rather than only that it passed. The implementation was
+plainly present — invite endpoints, the verification flow, and the Google
+OAuth PKCE round trip with its `/login` entry point — but the gate asks for a
+*run*, not for code: invite → sign-up → verification email → verified account,
+plus OAuth. That needs a real mailbox and a Google account, so no amount of
+reading the repository could close it, and a gate marked met on the strength
 of the code existing is not a gate.
+
+Closed by Francisco on 2026-09-11: the invite cycle had already been run
+during Steps 4–5, and he exercised Google sign-in on staging at closure. The
+ADR-035 concern that prompted the step's "resolve the OAuth wrinkle early"
+warning — no browser-to-Supabase traffic, and a CSP with no `*.supabase.co` —
+therefore holds in practice, not just in design.
 
 ### What the component grew that its plan did not contain
 
