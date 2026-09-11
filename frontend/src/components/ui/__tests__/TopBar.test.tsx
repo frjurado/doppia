@@ -90,9 +90,35 @@ describe('public nav', () => {
     expect(screen.getByRole('link', { name: 'Create account' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /editorial/i })).not.toBeInTheDocument();
   });
+
+  it('lists Glossary before Fragments, as the landing page does', () => {
+    // The two disagreed until 2026-09-11 (Francisco). Presence tests cannot
+    // see an order, so the decision needs its own assertion or the next edit
+    // to this array silently undoes it.
+    renderBar();
+    const glossary = screen.getByRole('link', { name: 'Glossary' });
+    const fragments = screen.getByRole('link', { name: 'Fragments' });
+    const order = glossary.compareDocumentPosition(fragments);
+
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
 
 describe('editorial menu', () => {
+  it('sits with the public nav, not with the account controls', () => {
+    // It names destinations — the corpus, the review queue — the way Glossary
+    // and Fragments do, and the landing page offers the corpus as a door
+    // beside them (Francisco, 2026-09-11). Asserted structurally rather than
+    // on a class name: what matters is that it shares a parent with the nav
+    // links, whatever that element ends up being called.
+    signedIn(['editor']);
+    renderBar();
+    const linksGroup = screen.getByRole('link', { name: 'Glossary' }).parentElement;
+
+    expect(linksGroup).toContainElement(screen.getByRole('button', { name: /editorial/i }));
+    expect(linksGroup).not.toContainElement(screen.getByRole('button', { name: /account|@/i }));
+  });
+
   it('is absent for an anonymous visitor and for a role-less account', () => {
     renderBar();
     expect(screen.queryByRole('button', { name: 'Editorial▾' })).not.toBeInTheDocument();

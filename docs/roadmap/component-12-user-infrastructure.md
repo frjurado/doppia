@@ -299,6 +299,22 @@ downscale, and no surface scrolls horizontally at any width tested.
 Regression-guarded by `frontend/e2e/narrow-width.spec.ts` (5 cases, real
 Verovio WASM). Two follow-ups handed to Step 14, below.
 
+**Amended 2026-09-11 — the shell scrolls by default.** Both layout shells
+carried `overflow: hidden` on their content area, on the assumption that
+every page declares its own scrolling. Four do (`flex: 1; overflow-y:
+auto`) and four deliberately trap it (`height: 100%; overflow: hidden`),
+but Profile and the two admin surfaces declared neither and were therefore
+*clipped*: 960px of profile in a 572px box, with no way to reach the rest.
+Francisco found it on People and Profile and flagged that the surfaces he
+could not test — Moderation, whose content is still short — were the same
+shape of risk.
+
+The fix inverts the default rather than patching the three pages: the shell
+is `overflow-y: auto`, and a page that wants to trap scrolling says so. The
+failure mode of forgetting is now a scrollbar instead of invisible content.
+Guarded in `public-read.spec.ts`, since CSS modules are stubbed under vitest
+and no unit test can see a stylesheet.
+
 ### Step 13 — Topbar redesign
 
 The three editorial links become: **public nav** (Fragments, Glossary — plus
@@ -321,6 +337,38 @@ groups collapse into one frosted-vellum disclosure panel with 44px targets,
 per `DESIGN.md` § 7.4. The progress entry opens a real placeholder page
 (`/progress`) rather than sitting greyed out, since § 7.4 forbids
 shown-and-disabled entries.
+
+**Amended 2026-09-11**, on Francisco's review before closing the component.
+Two of Step 13's arrangements were wrong and are corrected in place rather
+than left as history:
+
+- **Glossary comes before Fragments**, matching the landing page's doors.
+  The two surfaces disagreed about their own order, and the landing one has
+  the argument behind it — the glossary is where a reader who does not yet
+  have the vocabulary starts.
+- **The Editorial menu moved into the left-hand nav group**, in the nav
+  link's type rather than the right-hand chip. It names *destinations* the
+  way Glossary and Fragments do, and the contradiction was visible: the
+  landing page offers the corpus browser as a door beside the other two
+  while the topbar hid the same link behind a non-obvious control among the
+  account settings. It stays a menu — it is role-gated and four entries
+  long — but it now reads as one.
+
+Both are pinned by tests, because presence assertions cannot see an order
+or a grouping and the next edit to either array would otherwise undo the
+decision silently.
+
+A third, smaller correction came out of the same review: "Editorial" sat
+1.6px above the links beside it. The wrapper `.dropdown` was a block, so its
+inline-flex button was laid out on a line box inheriting the bar's 1.6
+line-height (25.6px), taller than the button, which then sat on a baseline
+rather than centring. The wrapper is a flex container now and the button
+inherits the links' line-height; measured, all three labels sit at the same
+y, and the account chip — the same bug, unreported — is centred in the bar
+for the first time. Not covered by a test: the Editorial control is
+role-gated, the e2e suite runs anonymous, and an authenticated fixture is
+more machinery than a pixel warrants. The reason lives in the two CSS
+comments instead.
 
 Decided during the step (see § Decisions 5): the **editorial fragment browser
 shows the same approved-only fragments as the public one** —

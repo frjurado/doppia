@@ -18,9 +18,12 @@ import styles from './TopBar.module.css';
  *
  * The bar is an audience split, not a link list:
  *
- *  - **Public nav** — Fragments, Glossary. Collections / Exercises / Blog join
- *    it as they ship. Unshipped surfaces are *absent*, never greyed out.
- *  - **Editorial menu** — role-gated (editor or admin): the corpus browser
+ *  - **Public nav** — Glossary, Fragments, in the landing page's order.
+ *    Collections / Exercises / Blog join it as they ship. Unshipped surfaces
+ *    are *absent*, never greyed out.
+ *  - **Editorial menu** — sits with the public nav, since it names
+ *    destinations rather than settings; role-gated (editor or admin): the
+ *    corpus browser
  *    (which is how the whole-movement score viewer is reached), the concept
  *    tree, the review queue, and for admins the moderation queue and user
  *    management.
@@ -130,9 +133,13 @@ export default function TopBar() {
   const isAdmin = roles.includes(ADMIN);
   const isEditorial = isAdmin || roles.includes(EDITOR);
 
+  // Glossary before Fragments, matching the landing page's doors (Francisco,
+  // 2026-09-11). The two disagreed, and the landing order is the one with an
+  // argument behind it: the glossary is where a reader who does not yet know
+  // the vocabulary starts, and the fragments are what the vocabulary is for.
   const publicNav: NavItem[] = [
-    { to: '/fragments', label: t('fragments') },
     { to: '/glossary', label: t('glossary') },
+    { to: '/fragments', label: t('fragments') },
   ];
 
   // "Concept tree" is gone: it pointed at the editorial half of a browse
@@ -200,11 +207,17 @@ export default function TopBar() {
                   {item.label}
                 </NavLink>
               ))}
-            </div>
 
-            <div className={styles.actions}>
+              {/* Editorial belongs with the destinations, not with the
+                  account controls. It names places — the corpus, the review
+                  queue — in the same way Glossary and Fragments do, and the
+                  landing page already offers the corpus as a door beside
+                  them; putting it on the right, in a chip, said it was a
+                  setting. It is still a menu because it is role-gated and
+                  four entries long, but it takes the nav link's type
+                  (Francisco, 2026-09-11). */}
               {isEditorial && (
-                <Dropdown label={t('editorial')}>
+                <Dropdown label={t('editorial')} className={styles.navDropdown}>
                   {editorialNav.map((item) => (
                     <NavLink
                       key={item.to}
@@ -218,7 +231,9 @@ export default function TopBar() {
                   ))}
                 </Dropdown>
               )}
+            </div>
 
+            <div className={styles.actions}>
               <LanguageSwitcher />
 
               {authenticated ? (

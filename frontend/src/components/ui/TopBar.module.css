@@ -93,8 +93,15 @@
 /* ─── Dropdowns (Editorial, Account) ───────────────────────────────────────
    Depth from a higher tonal layer, never a border or a hard shadow. */
 
+/* Flex, not block, so the button is a flex item rather than a line-box
+   inline: as a block this wrapper took the bar's 1.6 line-height (25.6px),
+   grew taller than the button inside it, and sat that button on a baseline —
+   which is what left "Editorial" a pixel and a half above the links beside it.
+   `position: relative` is still what `.menu` positions against. */
 .dropdown {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .dropdownButton {
@@ -106,6 +113,13 @@
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+
+  /* A <button> takes `line-height: normal` from the UA sheet where the links
+     beside it inherit the body's 1.6, so its box is shorter than theirs and
+     `align-items: center` centres two boxes of different heights — leaving the
+     label a pixel or so high. Inheriting the same line-height makes the boxes
+     match, which is what actually aligns the text. */
+  line-height: inherit;
   color: var(--color-on-surface-variant);
   background: var(--color-surface-container);
   padding: var(--spacing-1) var(--spacing-4);
@@ -151,6 +165,28 @@
   display: flex;
   flex-direction: column;
   z-index: 20;
+}
+
+/* The Editorial menu sits among the public nav links, so it wears their type
+   rather than the action chip's: same size, no filled background, no padding
+   box. It still carries a caret, which is the whole of what distinguishes a
+   menu from a link here. Its panel hangs from the left edge of its label —
+   `.menu` is right-aligned for the controls at the end of the bar, which would
+   throw this one backwards across the nav. */
+.navDropdown .dropdownButton {
+  font-size: 0.875rem;
+  background: none;
+  padding: 0;
+}
+
+.navDropdown .dropdownButton:hover {
+  background: none;
+  color: var(--color-on-background);
+}
+
+.navDropdown .menu {
+  left: 0;
+  right: auto;
 }
 
 .menuInfo {

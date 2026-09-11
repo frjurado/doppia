@@ -217,6 +217,26 @@ test('anonymous read journey: browse → detail → score + MIDI, no editor affo
   await expect(page.getByRole('button', { name: /submit|approve|reject/i })).toHaveCount(0);
 });
 
+test('the shell scrolls its content rather than clipping it', async ({ page }) => {
+  // The page shell was `overflow: hidden`, so any surface that did not declare
+  // its own scrolling had its bottom silently cut off — Profile and the two
+  // admin pages were unreachable below the fold, and every future page with
+  // more than a screen of content would have joined them. The rule is now that
+  // the shell scrolls by default and a page opts out (`height: 100%;
+  // overflow: hidden`) when it wants to trap its own scrolling.
+  //
+  // This lives in e2e because CSS modules are stubbed under vitest: the unit
+  // tests cannot see a stylesheet, so nothing else can catch the regression.
+  await page.goto('/glossary');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+  const overflowY = await page.locator('main').evaluate((el) => getComputedStyle(el).overflowY);
+
+  expect(overflowY, 'the shell must not clip a page that does not scroll itself').not.toBe(
+    'hidden'
+  );
+});
+
 test('glossary journey: index → concept page → example expand → browse → detail', async ({
   page,
 }) => {
