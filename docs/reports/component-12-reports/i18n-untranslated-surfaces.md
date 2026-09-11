@@ -214,12 +214,22 @@ after the meter-rule work. Not folded into a wiring step: whichever option wins
 changes where translated text is allowed to live, which is an ADR-006 question
 and wants an ADR.
 
-**Leaning (b) or (c); to be decided when the step starts.** Both keep the
-overlay as the single source of truth, which (a) does not — that is what rules
-(a) out rather than its cost. The open question between them is whether English
-results should still surface for a Spanish query: (b) says a locale searches its
-own language, (c) says a tagger who knows the English term should still find the
-concept. That is a usage question, best answered against the real picker.
+**Resolved 2026-09-11 — (c), search both and merge.** Recorded as
+[`../../adr/ADR-040-cross-language-concept-search.md`](../../adr/ADR-040-cross-language-concept-search.md)
+and implemented in Step 21.
+
+The cost column above overstated (c) and understated nothing. The Lucene score
+is the *third* sort key, behind complexity band and prerequisite depth, so
+merging never required two rankers reconciled — union the ids and apply the one
+graph-side ordering. What decided it was the other way round: (b) **fails
+closed**. Concepts are seeded English-first and translated later, so a
+locale-only search makes every newly seeded concept invisible for the length of
+that window, rather than merely untranslated — the failure this section opens
+by naming. A merged search degrades to "found it by its English name".
+
+Also decided: a hit matched only on English is **not** marked as such
+(Francisco) — the picker shows results in the reader's language, and how a row
+was matched is not the reader's problem.
 
 ---
 

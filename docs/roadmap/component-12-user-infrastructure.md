@@ -1219,6 +1219,61 @@ and merge. The question between them is not cost but whether an English term
 should still find its concept for a Spanish-locale tagger, which is best
 answered against the real picker rather than in advance.
 
+**Decided and landed 2026-09-11 — option (c), search both and merge.**
+Recorded as [`../adr/ADR-040-cross-language-concept-search.md`](../adr/ADR-040-cross-language-concept-search.md).
+
+Two measurements moved the choice off where the options table left it. The
+Lucene score turned out to be the **third** sort key, behind complexity band and
+prerequisite depth — both graph properties, language-independent — so the
+"two ranking implementations" cost attributed to (b) is confined to a tie
+bucket, and, more usefully, merging never needed two scorers reconciled: union
+the ids, apply the one existing ordering. And Spanish coverage is total *today*
+(34 of 34 concepts, all 8 alias-carrying ones) but structurally cannot stay so:
+concepts are seeded English-first and translated in a later pass, so every new
+concept has a window in which (b) would make it **unfindable** rather than
+merely untranslated. A merged search degrades to "found it by its English
+name"; a locale-only search degrades to "no results", which is the failure the
+step existed to remove. Francisco: "the failing of b is argument more than
+enough."
+
+**Also decided:** a result matched only on English is *not* marked as such —
+"you show results in Spanish" (Francisco). No badge, no ordering penalty.
+
+**What landed.** English takes the old path untouched. A non-English locale
+unions the full-text ids with a `concept_translation` match, hydrates the union
+through a graph query that **re-applies the stub/taggable/domain filter** — the
+translation table carries a row per concept, abstract roots included, so
+without it a Spanish query would offer something untaggable — and orders it by
+complexity, prerequisite depth, then the accent-folded *translated* name. That
+last key also closes an omission: `search` was the one surface 19c overlaid
+without re-sorting, so Spanish results were until now tie-broken on the English
+name.
+
+Matching mirrors the Neo4j analyser deliberately — whole folded tokens, OR
+across terms — because a substring match on the Spanish side alone would give
+the same typing two behaviours by language. Measured against the live index
+first rather than assumed: "cadence" returns 7, "caden" returns 0, "perfect
+deceptive" returns both. Accent folding is the one intentional divergence, so
+"autentica" finds "Auténtica"; English names carry no diacritics, so nothing
+changes there. One shared `fold` now serves both matching and sorting, because
+a name that sorts under "e" and matches under "é" lands where the reader cannot
+predict.
+
+**A finding worth keeping.** Whole-token matching meets Spanish compounding:
+"Half Cadence" is two tokens so English "cadence" finds it, while
+"Semicadencia" is one, so Spanish "cadencia" does not. The merged search covers
+the case — typing "cadence" in a Spanish session returns *Semicadencia
+(Realizada)*, verified in the picker — but the recall of a bare Spanish stem is
+genuinely narrower than its English counterpart. Not a defect of the merge;
+a property of the vocabulary, and an argument for prefix matching if the
+picker ever feels blunt.
+
+Verified in the tool, not only in tests: with the interface in Spanish,
+"cadencia" returns Cadencia Auténtica Perfecta / Imperfecta, Cadencia Evitada
+and Cadencia Rota, with Spanish aliases (CAP, CAI, Cad.Evit.) and Spanish
+hierarchy paths — the exact query that returned nothing when the step was
+written.
+
 ---
 
 ## Decisions
@@ -1350,6 +1405,7 @@ Part 6  Tagging chrome & conventions (parallel; independent of Parts 1–4)
   Step 18 M9 ordering + M4 review-queue UX
   Step 19 M13 i18n inventory → decision session  ← after 13/15 add strings
   Step 20 M17 meter rule + data pass; G1 convention
+  Step 21 cross-language concept search (ADR-040) ← closes the component
 ```
 
 Steps 15–18 and 20 touch the tagging tool and can start immediately; Step 14
@@ -1368,7 +1424,7 @@ runs late so the inventory includes this component's own new strings.
   moderation/report surface; ADR-035 amendment if the OAuth dance deviates.
 - **New ADRs:** role-model migration (extends ADR-001); data rights
   (export/deletion/system user); the M17 meter rule (or ADR-005-adjacent
-  amendment).
+  amendment); ADR-040 cross-language concept search (Step 21).
 - **`tech-stack-and-database-reference.md`** — user-infrastructure section
   updated: created tables, `self_declared_role` landed, collection DDL
   pointer to Component 13.

@@ -231,3 +231,153 @@ class TestPublicGlossaryLanguage:
         service = get_public_concept_service(driver=neo4j_async_driver, db=db_session)
         result = await service.get_public_detail("PerfectAuthenticCadence", "es")
         assert result.name == "Cadencia Auténtica Perfecta"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestCrossLanguageSearch:
+    """The merged concept search against both live stores — ADR-040, Step 21.
+
+    The unit tests stub each half, so the seam they cannot cover is the one
+    that matters here: that the Neo4j full-text index, the `concept_translation`
+    rows the seed wrote, and the service's union agree about which concepts
+    exist. Requires `python scripts/seed.py --all`.
+    """
+
+    async def _service(self, db_session, neo4j_async_driver):  # type: ignore[no-untyped-def]
+        from services.concepts import ConceptService
+
+        return ConceptService(driver=neo4j_async_driver, db=db_session)
+
+    async def test_the_reported_defect_is_gone(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """ "cadencia" returns Spanish cadences, where it used to return nothing."""
+        svc = await self._service(db_session, neo4j_async_driver)
+        resp = await svc.search(q="cadencia", language="es")
+
+        names = [i.name for i in resp.items]
+        assert names, "seed the Spanish overlay: scripts/seed.py --all"
+        assert "Cadencia Auténtica Perfecta" in names
+        for name in names:
+            assert "Cadence" not in name, f"{name!r} came back untranslated"
+
+    async def test_a_spanish_alias_finds_its_concept(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        # "CAP" exists only in concept_translation; the graph carries "PAC".
+        svc = await self._service(db_session, neo4j_async_driver)
+        resp = await svc.search(q="CAP", language="es")
+
+        assert [i.id for i in resp.items] == ["PerfectAuthenticCadence"]
+        assert resp.items[0].aliases == ["CAP"]
+
+    async def test_an_english_term_still_finds_its_concept_in_spanish(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        # ADR-040 § 2 — the half of the union that a locale-only search drops,
+        # and with it every concept not yet translated.
+        svc = await self._service(db_session, neo4j_async_driver)
+        resp = await svc.search(q="PAC", language="es")
+
+        assert [i.id for i in resp.items] == ["PerfectAuthenticCadence"]
+        assert resp.items[0].name == "Cadencia Auténtica Perfecta"
+
+    async def test_the_union_is_a_superset_of_either_half(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """A Spanish query returns at least what the English one does.
+
+        "cadence" matches every cadence node in the graph, so the Spanish
+        result for the same term must name the same concepts — translated.
+        A regression that dropped the graph half would show here.
+        """
+        svc = await self._service(db_session, neo4j_async_driver)
+        english = await svc.search(q="cadence", language="en")
+        spanish = await svc.search(q="cadence", language="es")
+
+        assert {i.id for i in english.items} <= {i.id for i in spanish.items}
+
+    async def test_matching_is_accent_insensitive(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        svc = await self._service(db_session, neo4j_async_driver)
+        without = await svc.search(q="autentica", language="es")
+        with_accent = await svc.search(q="auténtica", language="es")
+
+        assert {i.id for i in without.items} == {i.id for i in with_accent.items}
+        assert without.items, "expected the authentic cadences"
+
+    async def test_results_are_ordered_on_the_translated_name(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        """Complexity band, then prerequisite depth, then the *translated* name.
+
+        `search` was the one surface Step 19c overlaid without re-sorting, so
+        Spanish results were tie-broken on the English name (ADR-040 § 3).
+
+        The band keys are not on the response, so they are read back from the
+        graph here rather than approximated — an "is it roughly sorted" check
+        would pass on an English-ordered list, which is the exact defect.
+        """
+        from services.concepts import _sort_key
+
+        svc = await self._service(db_session, neo4j_async_driver)
+        resp = await svc.search(q="cadence", language="es")
+        assert len(resp.items) > 1, "need several hits to observe an order"
+
+        ids = [i.id for i in resp.items]
+        async with neo4j_async_driver.session() as session:
+            result = await session.run(
+                """
+                MATCH (n:Concept) WHERE n.id IN $ids
+                CALL {
+                  WITH n
+                  OPTIONAL MATCH (x:Concept)-[:PREREQUISITE_FOR*1..]->(n)
+                  RETURN count(DISTINCT x) AS depth
+                }
+                RETURN n.id AS id,
+                       CASE n.complexity
+                         WHEN 'foundational' THEN 0
+                         WHEN 'intermediate' THEN 1
+                         WHEN 'advanced'     THEN 2
+                         ELSE 99
+                       END AS rank,
+                       depth
+                """,
+                ids=ids,
+            )
+            bands = {r["id"]: (r["rank"], r["depth"]) async for r in result}
+
+        keys = [(*bands[i.id], _sort_key(i.name)) for i in resp.items]
+        assert keys == sorted(keys), f"merged order is wrong: {keys}"
+
+        # And the ordering is genuinely the Spanish one: sorting the same
+        # items on their English names would give a different sequence, so
+        # this cannot pass by coincidence.
+        english = await svc.search(q="cadence", language="en")
+        assert [i.id for i in english.items] != ids, (
+            "English and Spanish returned the same order — the re-sort is "
+            "not observable on this data, so this test proves nothing"
+        )
+
+    async def test_no_result_is_a_concept_the_picker_may_not_tag(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        # concept_translation carries a row per concept, abstract roots
+        # included, so the union is re-filtered graph-side (ADR-040 § 2).
+        svc = await self._service(db_session, neo4j_async_driver)
+        resp = await svc.search(q="cadencia", language="es")
+
+        ids = {i.id for i in resp.items}
+        assert "Cadence" not in ids
+        assert "AuthenticCadence" not in ids
+
+    async def test_english_results_are_unchanged(
+        self, db_session, neo4j_async_driver
+    ) -> None:  # type: ignore[no-untyped-def]
+        # ADR-040 § 1 — the common path keeps its relevance ordering.
+        svc = await self._service(db_session, neo4j_async_driver)
+        resp = await svc.search(q="perfect authentic", language="en")
+
+        assert resp.items[0].id == "PerfectAuthenticCadence"
+        assert resp.items[0].name == "Perfect Authentic Cadence"

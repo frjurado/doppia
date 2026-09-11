@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from services.i18n import DEFAULT_LANGUAGE
+from services.i18n import DEFAULT_LANGUAGE, tokenize
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,6 +71,12 @@ _VALUE_SQL = text(
     "SELECT value_id, name, short_name, description "
     "FROM property_value_translation "
     "WHERE value_id = ANY(:ids) AND language = :language"
+)
+
+_CONCEPT_SEARCH_SQL = text(
+    "SELECT concept_id, name, aliases "
+    "FROM concept_translation "
+    "WHERE language = :language"
 )
 
 
@@ -130,6 +136,47 @@ class TranslationOverlay:
             )
             for row in result
         }
+
+    async def search_concept_ids(self, q: str, language: str) -> set[str]:
+        """Concept ids whose translated name or aliases match ``q`` (ADR-040 § 2).
+
+        The Spanish half of the merged concept search. Matching mirrors the
+        Neo4j full-text index deliberately — whole folded tokens, OR across the
+        query's terms — so that the same typing behaves the same way in both
+        languages; see :func:`services.i18n.tokenize` for what that costs and
+        what it buys.
+
+        **The match runs in Python over every row for the locale**, rather than
+        in SQL. Two reasons, both about being honest at this size. Accent
+        folding in Postgres needs the ``unaccent`` extension and an index to go
+        with it, which is a migration and an operational dependency for a table
+        holding a few dozen rows; and the fold used to *match* must be the same
+        one used to *sort* the merged result (``_sort_key``), which is Python.
+        One rule, one place. ADR-040 § 6 records the size at which this stops
+        being the right trade and what replaces it.
+
+        Args:
+            q: The raw user query.
+            language: Requested response language.
+
+        Returns:
+            Matching concept ids; empty for the canonical English path (whose
+            text is on the Neo4j nodes already) or for a query with no tokens.
+        """
+        if language == DEFAULT_LANGUAGE:
+            return set()
+        wanted = tokenize(q)
+        if not wanted:
+            return set()
+        result = await self._db.execute(_CONCEPT_SEARCH_SQL, {"language": language})
+        matched: set[str] = set()
+        for row in result:
+            tokens = tokenize(row.name)
+            for alias in row.aliases or ():
+                tokens |= tokenize(alias)
+            if wanted & tokens:
+                matched.add(row.concept_id)
+        return matched
 
     async def schema_translations(
         self, ids: list[str], language: str

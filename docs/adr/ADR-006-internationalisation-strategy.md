@@ -77,6 +77,8 @@ The `source_hash` column stores a hash of the English source text at the time of
 
 **The seeding script populates English records in these tables** for every concept it seeds. English is the first entry in the translation table, not a special-cased column. This means the service layer's translation overlay logic works identically for all languages, including English.
 
+**Searching this overlay** — the case where "the graph holds English only" stops being invisible to the user, because the concept picker's full-text index covers the graph's English `name`/`aliases` and so cannot match a Spanish term. Resolved without weakening this decision: `ADR-040-cross-language-concept-search.md` searches both stores and unions the result for a non-English locale, writing nothing to Neo4j. The alternative — indexing translated names on the nodes — was rejected precisely because it would end this section's single-source commitment.
+
 ### 4. Long-form prose: sibling records with status tracking
 
 **Blog posts:** a translated post is a sibling record, not a column on the original. The `blog_post` table gains `language` (default `'en'`) and `source_post_id` (self-referencing foreign key, null if original). Translated posts can be editorially adapted, not just mechanically rendered.

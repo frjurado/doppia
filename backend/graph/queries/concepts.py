@@ -680,6 +680,129 @@ async def search_concepts(
 
 
 # ---------------------------------------------------------------------------
+# Merged cross-language search  (async — ADR-040, non-English locales only)
+# ---------------------------------------------------------------------------
+
+_SEARCH_CONCEPT_IDS = """\
+CALL db.index.fulltext.queryNodes("concept_search", $q)
+YIELD node
+WHERE node.stub = false AND node.top_level_taggable = true
+  AND ($domain IS NULL OR node.domain = $domain)
+RETURN collect(node.id) AS ids
+"""
+"""Ids of the English full-text matches, unpaged (ADR-040 § 2).
+
+The English half of a merged search. It is deliberately *not*
+``_SEARCH_CONCEPTS`` with a large limit: the merged path orders the union by
+the translated name, so a page of the English ordering names nothing useful,
+and the score this query drops is the one the merged path does not use
+(ADR-040 § 3). Bounded by ADR-040 § 6.
+
+Parameters:
+    q      — Lucene query string (must be non-empty)
+    domain — exact domain filter, or ``null`` for all domains
+"""
+
+_CONCEPTS_FOR_SEARCH_BY_IDS = """\
+MATCH (node:Concept)
+WHERE node.id IN $ids
+  AND node.stub = false AND node.top_level_taggable = true
+  AND ($domain IS NULL OR node.domain = $domain)
+CALL {
+  WITH node
+  OPTIONAL MATCH (x:Concept)-[:PREREQUISITE_FOR*1..]->(node)
+  RETURN count(DISTINCT x) AS prereq_depth
+}
+CALL {
+  WITH node
+  MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
+  WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
+  WITH p ORDER BY length(p) DESC LIMIT 1
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
+}
+RETURN node.id                       AS id,
+       node.name                     AS name,
+       coalesce(node.aliases, [])    AS aliases,
+       node.definition               AS definition,
+       hierarchy_path,
+       hierarchy_path_ids,
+       CASE node.complexity
+         WHEN 'foundational' THEN 0
+         WHEN 'intermediate' THEN 1
+         WHEN 'advanced'     THEN 2
+         ELSE 99
+       END                           AS complexity_rank,
+       prereq_depth
+"""
+"""Search rows for an explicit id set, carrying their ordering keys (ADR-040).
+
+Same projection as ``_SEARCH_CONCEPTS`` minus the relevance score, plus the two
+keys the caller needs to order by: ``complexity_rank`` and ``prereq_depth``.
+Unordered — the merged path sorts in the service, where the translated name
+that forms the final key is known.
+
+**The stub/taggable/domain filter is repeated here on purpose.** The ids reaching
+this query include PostgreSQL matches, and ``concept_translation`` carries a row
+for every concept in the graph, stubs and non-taggable nodes among them. Without
+this clause a Spanish query would surface concepts the English one filters out —
+the picker would offer something untaggable.
+
+Parameters:
+    ids    — concept ids to hydrate
+    domain — exact domain filter, or ``null`` for all domains
+"""
+
+
+async def search_concept_ids(
+    session: _AsyncSession,
+    *,
+    q: str,
+    domain: str | None,
+) -> set[str]:
+    """Return the ids of every English full-text match, unpaged (ADR-040 § 2).
+
+    Args:
+        session: An open async Neo4j session.
+        q: Lucene query string (non-empty).
+        domain: Exact domain name to filter by, or ``None`` for all domains.
+
+    Returns:
+        The matching concept ids; empty when nothing matched.
+    """
+    result = await session.run(_SEARCH_CONCEPT_IDS, q=q, domain=domain)
+    row = await result.single()
+    if row is None:
+        return set()
+    return set(row["ids"])
+
+
+async def get_concepts_for_search_by_ids(
+    session: _AsyncSession,
+    *,
+    ids: list[str],
+    domain: str | None,
+) -> list[dict[str, Any]]:
+    """Hydrate search rows for an explicit id set, with their ordering keys.
+
+    Args:
+        session: An open async Neo4j session.
+        ids: Concept ids to hydrate; an empty list returns an empty result
+            without querying.
+        domain: Exact domain name to filter by, or ``None`` for all domains.
+
+    Returns:
+        List of result dicts with keys ``id``, ``name``, ``aliases``,
+        ``definition``, ``hierarchy_path``, ``hierarchy_path_ids``,
+        ``complexity_rank`` and ``prereq_depth``. Unordered.
+    """
+    if not ids:
+        return []
+    result = await session.run(_CONCEPTS_FOR_SEARCH_BY_IDS, ids=ids, domain=domain)
+    return await result.data()
+
+
+# ---------------------------------------------------------------------------
 # Public concept detail  (async — used by GET /api/v1/public/concepts/{id})
 # ---------------------------------------------------------------------------
 
