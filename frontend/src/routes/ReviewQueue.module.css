@@ -17,7 +17,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-width: 640px;
+  max-width: var(--width-list);
   width: 100%;
   margin: 0 auto;
 }
@@ -56,21 +56,4 @@
 .loadMore {
   padding: var(--spacing-3) var(--spacing-4);
   flex-shrink: 0;
-}
-
-.loadMoreButton {
-  border: none;
-  cursor: pointer;
-  padding: var(--spacing-2) var(--spacing-4);
-  background: var(--color-surface-container);
-  width: 100%;
-}
-
-.loadMoreButton:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.loadMoreButton:hover:not(:disabled) {
-  background: var(--color-surface-container-high);
 }

@@ -33,6 +33,7 @@ from models.browse import (
     MovementResponse,
     WorkResponse,
 )
+from models.roles import ADMIN, EDITOR
 from services.browse import (
     get_movement_mei_url,
     list_composers,
@@ -49,7 +50,7 @@ router = APIRouter(tags=["Browse"])
 @router.get(
     "/composers",
     response_model=list[ComposerResponse],
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List all composers",
     response_description="Composers ordered alphabetically by sort_name.",
 )
@@ -70,7 +71,7 @@ async def get_composers(
 @router.get(
     "/composers/{composer_slug}/corpora",
     response_model=list[CorpusResponse],
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List corpora for a composer",
     response_description="Corpora for the given composer with work counts.",
 )
@@ -102,7 +103,7 @@ async def get_corpora(
 @router.get(
     "/composers/{composer_slug}/corpora/{corpus_slug}/works",
     response_model=list[WorkResponse],
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List works in a corpus",
     response_description="Works in the corpus ordered by catalogue_number.",
 )
@@ -140,7 +141,7 @@ async def get_works(
 @router.get(
     "/movements/{movement_id}/mei-url",
     response_model=MeiUrlResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Get a signed MEI URL for a movement",
     response_description=(
         "A short-lived signed URL for the movement's normalised MEI file."
@@ -180,7 +181,7 @@ async def get_mei_url(
 @router.get(
     "/works/{work_id}/movements",
     response_model=list[MovementResponse],
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List movements for a work",
     response_description=(
         "Movements ordered by movement_number, with signed incipit URLs."

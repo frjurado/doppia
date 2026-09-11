@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import BrowseAccordion from '../components/browse/BrowseAccordion';
@@ -8,21 +7,12 @@ import MovementCard from '../components/browse/MovementCard';
 import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useBrowseSelection } from '../hooks/useBrowseSelection';
 import { formatKeyName } from '../utils/keyName';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './CorpusBrowser.module.css';
-
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, [query]);
-  return matches;
-}
+import Button from '../components/ui/Button';
 
 /**
  * Main corpus browsing page.
@@ -67,7 +57,11 @@ export default function CorpusBrowser() {
   } = selection;
 
   return (
-    <Surface layer="base" className={styles.page} data-has-footer={selectedMovement ? 'true' : 'false'}>
+    <Surface
+      layer="base"
+      className={styles.page}
+      data-has-footer={selectedMovement ? 'true' : 'false'}
+    >
       {isMobile ? (
         <BrowseAccordion selection={selection} />
       ) : (
@@ -127,7 +121,9 @@ export default function CorpusBrowser() {
                   </Type>
                 </BrowseItem>
               )}
-              emptyLabel={composerSlug ? t('browse:empty.noCorpora') : t('browse:empty.selectComposer')}
+              emptyLabel={
+                composerSlug ? t('browse:empty.noCorpora') : t('browse:empty.selectComposer')
+              }
               error={corporaError}
               onRetry={retryCorpora}
             />
@@ -215,8 +211,8 @@ export default function CorpusBrowser() {
                 </Type>
               )}
             </div>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               className={styles.ctaButton}
               onClick={() => {
                 const qs = selectedMovement.key_signature
@@ -225,8 +221,10 @@ export default function CorpusBrowser() {
                 navigate(`/scores/${selectedMovement.id}${qs}`);
               }}
             >
-              <Type variant="label-md" as="span">{t('browse:openForTagging')}</Type>
-            </button>
+              <Type variant="label-md" as="span">
+                {t('browse:openForTagging')}
+              </Type>
+            </Button>
           </div>
         </div>
       )}

@@ -29,27 +29,6 @@
   gap: 1px;
 }
 
-/* Mirrors ScoreViewer's .sizeButton treatment (Step 17 / F7): transparent
-   base, primary text on hover, solid primary when active. */
-.scaleBtn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 2px var(--spacing-3);
-  min-width: 28px;
-  text-align: center;
-  color: var(--color-on-surface-variant);
-}
-
-.scaleBtn:hover {
-  color: var(--color-primary);
-}
-
-.scaleBtnActive {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-}
-
 /* Score + bracket overlay wrapper.
    overflow: visible — brackets must never be clipped (Step 15); the SVG is
    rendered at the measured container width, so nothing overflows horizontally.
@@ -102,18 +81,59 @@
 }
 
 /* Main fragment bracket — above the score, one segment per system row.
-   Mirrors the tagging tool's MainBracket visual (primary, 0px radius). */
+   This viewer only ever shows *stored* fragments, so the bracket takes the
+   committed treatment: square serifs at each end (M5 ask 1), the same shape
+   the tagging tool now gives a stored bracket. */
 .mainBracket {
   position: absolute;
   background-color: var(--color-primary);
 }
 
-/* Individual sub-part bracket bar */
+.mainBracket::before,
+.mainBracket::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  width: 2px;
+  height: 5px;
+  background-color: inherit;
+}
+
+.mainBracket::before {
+  left: 0;
+}
+
+.mainBracket::after {
+  right: 0;
+}
+
+/* Individual sub-part bracket bar.
+   Serifs here too (M5 ask 1): adjacent sub-parts abut, and without an end mark
+   two of them read as one continuous bar. Below the staff the serif rises
+   toward the music, mirroring the main bracket's downward one. */
 .subPartBracket {
   position: absolute;
   height: 4px;
   background: var(--color-primary);
   opacity: 0.55;
+}
+
+.subPartBracket::before,
+.subPartBracket::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  width: 2px;
+  height: 4px;
+  background-color: inherit;
+}
+
+.subPartBracket::before {
+  left: 0;
+}
+
+.subPartBracket::after {
+  right: 0;
 }
 
 .subPartBracket[data-status='approved'] {
@@ -129,13 +149,32 @@
   opacity: 0.4;
 }
 
-/* Short label above the bracket bar */
+/* An internal boundary is marked once, by the following bracket's left serif
+   (see `serifSides`). */
+.noSerifRight::after {
+  content: none;
+}
+
+/* Short label below the bracket bar.
+   It sat above, at top: -16px — which put it in the harmony label lane between
+   the staff and the bracket. A label always goes on the far side of its
+   bracket from the staff (M5 ask 3), so for a below-staff bracket that is
+   downward. The font-size is set inline from the optical scale: below `sm` the
+   notation is scaled down but a fixed 10px label was not, which is
+   DESIGN.md § 7.7 item 2. */
+
+/* Second row, applied by useStaggeredLabels only to the labels that would
+   otherwise collide with their left-hand neighbour (M5 ask 4). */
+.subPartLabel[data-label-row='1'] {
+  margin-top: 14px;
+}
+
 .subPartLabel {
   position: absolute;
-  top: -16px;
+  top: 100%;
+  margin-top: 3px;
   left: 0;
   font-family: var(--font-label);
-  font-size: 10px;
   color: var(--color-on-surface-variant);
   white-space: nowrap;
 }
@@ -147,27 +186,6 @@
   align-items: center;
   gap: var(--spacing-2);
   padding-top: var(--spacing-2);
-}
-
-.transportButton {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 4px var(--spacing-2);
-  font-size: 14px;
-  line-height: 1;
-  color: var(--color-on-surface);
-  min-width: 28px;
-  text-align: center;
-}
-
-.transportButton:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.transportButton:not(:disabled):hover {
-  background: var(--color-surface-container-high);
 }
 
 .positionDisplay {

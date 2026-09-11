@@ -25,6 +25,7 @@ from backend.seed.schemas import (
     ContainsEntryYAML,
     PropertySchemaRefYAML,
     PropertySchemaYAML,
+    TranslationsYAML,
 )
 
 # ---------------------------------------------------------------------------
@@ -69,8 +70,16 @@ ON MATCH SET  d.name = $name
 
 _MERGE_PROPERTY_VALUE = """\
 MERGE (pv:PropertyValue {id: $id})
-ON CREATE SET pv.name = $name, pv.aliases = $aliases, pv.references = $references
-ON MATCH SET  pv.name = $name, pv.aliases = $aliases, pv.references = $references
+ON CREATE SET pv.name        = $name,
+              pv.short_name  = $short_name,
+              pv.description = $description,
+              pv.aliases     = $aliases,
+              pv.references  = $references
+ON MATCH SET  pv.name        = $name,
+              pv.short_name  = $short_name,
+              pv.description = $description,
+              pv.aliases     = $aliases,
+              pv.references  = $references
 """
 
 # ---------------------------------------------------------------------------
@@ -227,6 +236,8 @@ def merge_property_value(
     session: _Session,
     pv_id: str,
     name: str,
+    short_name: str | None,
+    description: str | None,
     aliases: list[str],
     references: str | None,
 ) -> None:
@@ -235,7 +246,9 @@ def merge_property_value(
     Args:
         session: An open synchronous Neo4j session.
         pv_id: The PropertyValue id.
-        name: Human-readable label.
+        name: Human-readable label, absolute (readable without its schema).
+        short_name: The same label with the schema's context elided, or ``None``.
+        description: Per-value help text, or ``None``.
         aliases: Alternative labels (may be empty).
         references: Concept id this value points back to, or ``None``.
     """
@@ -243,6 +256,8 @@ def merge_property_value(
         _MERGE_PROPERTY_VALUE,
         id=pv_id,
         name=name,
+        short_name=short_name,
+        description=description,
         aliases=aliases,
         references=references,
     )
@@ -267,7 +282,15 @@ def merge_property_schema(session: _Session, schema: PropertySchemaYAML) -> None
         required=schema.required,
     )
     for pv in schema.values:
-        merge_property_value(session, pv.id, pv.name, pv.aliases, pv.references)
+        merge_property_value(
+            session,
+            pv.id,
+            pv.name,
+            pv.short_name,
+            pv.description,
+            pv.aliases,
+            pv.references,
+        )
         session.run(
             _MERGE_HAS_VALUE_EDGE,
             schema_id=schema.id,
@@ -453,11 +476,14 @@ ON CONFLICT (schema_id, language) DO UPDATE SET
 
 _UPSERT_PROPERTY_VALUE_TRANSLATION = """\
 INSERT INTO property_value_translation
-    (value_id, language, name, status, source_hash)
+    (value_id, language, name, short_name, description, status, source_hash)
 VALUES
-    (%(value_id)s, %(language)s, %(name)s, %(status)s, %(source_hash)s)
+    (%(value_id)s, %(language)s, %(name)s, %(short_name)s, %(description)s,
+     %(status)s, %(source_hash)s)
 ON CONFLICT (value_id, language) DO UPDATE SET
     name        = EXCLUDED.name,
+    short_name  = EXCLUDED.short_name,
+    description = EXCLUDED.description,
     status      = EXCLUDED.status,
     source_hash = EXCLUDED.source_hash
 """
@@ -505,14 +531,37 @@ def schema_translation_params(schema: PropertySchemaYAML) -> dict[str, Any]:
     }
 
 
-def value_translation_params(value_id: str, name: str) -> dict[str, Any]:
-    """Build the English ``property_value_translation`` upsert params for a value."""
+def value_translation_params(
+    value_id: str,
+    name: str,
+    short_name: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Build the English ``property_value_translation`` upsert params for a value.
+
+    The hash covers all three label fields (migration 0015), so editing a short
+    form or a gloss marks existing non-English rows stale — which is the point
+    of ``source_hash``. Rows written before 0015 carry a name-only hash; the
+    next full seed rewrites them, so the baseline corrects itself rather than
+    needing a data migration.
+
+    Args:
+        value_id: The PropertyValue id.
+        name: The absolute English label.
+        short_name: The context-elided English label, or ``None``.
+        description: The English per-value gloss, or ``None``.
+
+    Returns:
+        Parameter dict for ``_UPSERT_PROPERTY_VALUE_TRANSLATION``.
+    """
     return {
         "value_id": value_id,
         "language": "en",
         "name": name,
+        "short_name": short_name,
+        "description": description,
         "status": _ENGLISH_STATUS,
-        "source_hash": english_source_hash(name),
+        "source_hash": english_source_hash(name, short_name, description),
     }
 
 
@@ -546,5 +595,116 @@ def upsert_property_schema_translation(
         for pv in schema.values:
             cur.execute(
                 _UPSERT_PROPERTY_VALUE_TRANSLATION,
-                value_translation_params(pv.id, pv.name),
+                value_translation_params(pv.id, pv.name, pv.short_name, pv.description),
             )
+
+
+# ---------------------------------------------------------------------------
+# Non-English translation overlays (ADR-006; Component 12 Step 19b)
+# ---------------------------------------------------------------------------
+#
+# Written from ``backend/seed/translations/<language>.yaml`` rather than from
+# the domain files, because a translation has a different lifecycle from the
+# content it translates: it is authored separately, reviewed separately, and
+# carries a status the English row never does.
+#
+# ``source_hash`` is deliberately NOT written here. On an English row it is a
+# baseline of that row's own text; the staleness job compares a translation
+# against the *English* hash to decide whether the source has moved underneath
+# it. Writing the Spanish text's own hash into that column would make every
+# translation look permanently current. Leaving it null marks the row as never
+# yet baselined, which is the truth until the staleness job first runs.
+
+_UPSERT_CONCEPT_TRANSLATION_LOCALE = """\
+INSERT INTO concept_translation
+    (concept_id, language, name, aliases, definition, status)
+VALUES
+    (%(concept_id)s, %(language)s, %(name)s, %(aliases)s, %(definition)s, %(status)s)
+ON CONFLICT (concept_id, language) DO UPDATE SET
+    name       = EXCLUDED.name,
+    aliases    = EXCLUDED.aliases,
+    definition = EXCLUDED.definition,
+    status     = EXCLUDED.status
+"""
+
+_UPSERT_SCHEMA_TRANSLATION_LOCALE = """\
+INSERT INTO property_schema_translation
+    (schema_id, language, name, description, status)
+VALUES
+    (%(schema_id)s, %(language)s, %(name)s, %(description)s, %(status)s)
+ON CONFLICT (schema_id, language) DO UPDATE SET
+    name        = EXCLUDED.name,
+    description = EXCLUDED.description,
+    status      = EXCLUDED.status
+"""
+
+_UPSERT_VALUE_TRANSLATION_LOCALE = """\
+INSERT INTO property_value_translation
+    (value_id, language, name, short_name, description, status)
+VALUES
+    (%(value_id)s, %(language)s, %(name)s, %(short_name)s, %(description)s, %(status)s)
+ON CONFLICT (value_id, language) DO UPDATE SET
+    name        = EXCLUDED.name,
+    short_name  = EXCLUDED.short_name,
+    description = EXCLUDED.description,
+    status      = EXCLUDED.status
+"""
+
+
+def upsert_translations(
+    pg_conn: Any, translations: TranslationsYAML
+) -> tuple[int, int, int]:
+    """Upsert one language's overlay rows.
+
+    Args:
+        pg_conn: An open psycopg2 connection (transaction managed by the caller).
+        translations: The validated overlay file.
+
+    Returns:
+        ``(concepts, schemas, values)`` row counts written.
+    """
+    language = translations.language
+    status = translations.status
+
+    with pg_conn.cursor() as cur:  # type: ignore[attr-defined]
+        for concept in translations.concepts:
+            cur.execute(
+                _UPSERT_CONCEPT_TRANSLATION_LOCALE,
+                {
+                    "concept_id": concept.id,
+                    "language": language,
+                    "name": concept.name,
+                    "aliases": list(concept.aliases),
+                    "definition": concept.definition,
+                    "status": status,
+                },
+            )
+        for schema in translations.property_schemas:
+            cur.execute(
+                _UPSERT_SCHEMA_TRANSLATION_LOCALE,
+                {
+                    "schema_id": schema.id,
+                    "language": language,
+                    "name": schema.name,
+                    "description": schema.description,
+                    "status": status,
+                },
+            )
+        for value in translations.property_values:
+            cur.execute(
+                _UPSERT_VALUE_TRANSLATION_LOCALE,
+                {
+                    "value_id": value.id,
+                    "language": language,
+                    "name": value.name,
+                    "short_name": value.short_name,
+                    "description": value.description,
+                    "status": status,
+                },
+            )
+
+    return (
+        len(translations.concepts),
+        len(translations.property_schemas),
+        len(translations.property_values),
+    )

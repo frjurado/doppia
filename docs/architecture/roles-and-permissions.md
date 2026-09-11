@@ -1,7 +1,10 @@
 # Roles & Permissions — Phase 2 Design Reference
 
-**Status:** decisions agreed 2026-07-14 (Phase 2 planning); to be implemented
-in Phase 2 Component 12 (see `../roadmap/phase-2.md`). This document is the
+**Status:** decisions agreed 2026-07-14 (Phase 2 planning); implementation
+under way in Phase 2 Component 12 (see `../roadmap/phase-2.md`). **§ 1 is
+implemented** — `user_role`, the role constants, any-of `require_role`,
+`require_owner_or_role`, and the § 3 verification gate all landed in Part 1
+(migration `0010`, ADR-037), with one recorded delta noted below. This document is the
 authoritative reference for the role model, permission patterns, registration
 flow, moderation, and data rights. The Phase 1 auth mechanics (Supabase JWT
 validation, dev bypass, RLS posture) remain documented in
@@ -47,13 +50,31 @@ admin). This replaces Phase 1's single `role` column on `app_user`.
   row; `anonymous` is the absence of authentication. Role names are constants
   in one module, mirroring the relationship-type-constants convention.
 
+  *Granting implemented in Component 12 Step 10:* `/admin/users` — list,
+  invite, grant, revoke, all `require_role(ADMIN)`. Grants are idempotent and
+  re-granting a held role deliberately does **not** rewrite `granted_by` /
+  `granted_at`: the audit trail records the original grant, not the last time
+  someone clicked. The one guard is that an admin cannot revoke their **own**
+  `admin` role — an instance can end up with no admin at all and there is no
+  self-service path back. Revoking somebody else's is allowed; it is a normal,
+  reversible act.
+
 - **Migration:** at the start of Component 12, migrate `app_user.role` into
   `user_role` rows and drop the column. Record as an ADR (extending ADR-001)
   when implemented.
 
-- **`require_role()` semantics become any-of:** `require_role("editor",
-  "admin")` passes if the user holds *any* listed role. Existing call sites
-  keep working (single-argument calls are unchanged in behaviour).
+- **`require_role()` semantics become any-of:** `require_role(EDITOR, ADMIN)`
+  passes if the user holds *any* listed role.
+
+  **Delta recorded at implementation (2026-08-27):** "single-argument calls are
+  unchanged in behaviour" was not accurate. Phase 1's `require_role` was a
+  *hierarchy* (`_ROLE_HIERARCHY = {"editor": 1, "admin": 2}`), so
+  `require_role("editor")` admitted an admin; under any-of it does not. Rather
+  than restore an implicit admin-passes-everything rule — which would also hand
+  admin the author-only capabilities § 2 withholds — every call site was audited
+  and enumerated explicitly against the matrix: `require_role(EDITOR, ADMIN)`
+  across the tagging surface, `require_role(ADMIN)` for corpus and admin
+  operations. See ADR-037.
 
 ### Ownership: the second — and only other — permission mechanism
 
@@ -166,6 +187,15 @@ author-role-gated and need no moderation pipeline.
 
 - **Report action:** any registered user can report a shared collection
   (reason enum + optional free text). One open report per user per resource.
+  *Implemented in Component 12 Step 11:* `moderation_report` (migration `0014`)
+  and `services/moderation.py`. The **one-open-report rule is a partial unique
+  index** on `(reporter_id, resource_ref) WHERE status = 'open'`, not
+  application logic — two simultaneous reports would both pass a
+  check-then-insert. Partial on purpose: once a report is resolved the same
+  person may report the same resource again, because it may have changed.
+  Filing is verification-gated. `file_report` **ships without a route**:
+  nothing is reportable until Component 13's shared collections, so 12 delivers
+  the schema, the service and the queue, and 13 wires the button.
 
   ```sql
   CREATE TABLE moderation_report (
@@ -186,6 +216,13 @@ author-role-gated and need no moderation pipeline.
   private; owner keeps it and is notified with the reason). No deletion of
   user content by moderation; no bans in v1 — an admin can revoke
   verification/disable the account via Supabase in egregious cases.
+  *Implemented in Component 12 Step 11:* `/admin/moderation`, oldest first
+  (a queue is worked from the front), filterable by status. **Only dismissal
+  is offered** — unpublish-share needs a shared collection to unpublish and
+  arrives with Component 13 as the first `actioned` outcome;
+  `resolve_report(resolution)` already takes the outcome, so that is a second
+  route rather than a change to the service. Resolving records who and when,
+  and a second resolution is refused so the first one's audit trail survives.
 - The `resource_ref` string keeps the table generic for future reportable
   surfaces without migration.
 
@@ -196,6 +233,11 @@ author-role-gated and need no moderation pipeline.
 - **Export:** a self-service endpoint producing one JSON document — profile,
   collections (with annotations), exercise history, reading history. No
   editorial content (fragments/reviews belong to the platform record).
+  *Implemented in Component 12 Step 8:* `GET /api/v1/users/me/export`, rate
+  limited in the write category, with a "Download my data" control on the
+  profile page. The exporter is a **registry** of named sections, so
+  Component 13 adds collections by calling `register_section` rather than by
+  editing it (ADR-038).
 - **Deletion:** account deletion
   - *deletes* user-owned content: collections, exercise history, reading
     history, profile, reports filed;
@@ -205,8 +247,23 @@ author-role-gated and need no moderation pipeline.
     shapes foreign keys — `fragment.created_by` and
     `fragment_review.reviewer_id` must tolerate reassignment, so it is
     decided now, before Component 12 writes the schema.
+  *Implemented in Component 12 Step 9 (ADR-038):* `DELETE /api/v1/users/me`.
+  Five foreign keys are reassigned to the `deleted-user` system account
+  (`00000000-0000-0000-0000-0000000000ff`, seeded by migration `0013`) —
+  `fragment.created_by`, `fragment_review.reviewer_id`, both
+  `translator_id` columns, and `user_role.granted_by` — before the row is
+  deleted; everything else cascades. PostgreSQL commits first, the Supabase
+  Auth user is removed after. The **deletion UI is deliberately not built
+  yet**: the destructive-action treatment has no `DESIGN.md` precedent until
+  the Step 14 design pass adds one.
 - **Reading history is opt-in, default off** (per
-  `project-architecture.md` § User state).
+  `project-architecture.md` § User state). *Implemented in Component 12: the
+  consent is `app_user.reading_history_opt_in` (migration 0011, editable on the
+  profile page), the log is `reading_history` (migration 0012), and recording
+  is server-side on the public fragment-detail route with the consent enforced
+  inside the insert statement. Withdrawing consent stops future recording; it
+  does not erase what is already there — that is what export and deletion are
+  for.*
 - Imported (snapshot-copied) collections belong to the importer and are
   unaffected by the source owner's deletion — a side benefit of the
   snapshot-copy decision (see `../roadmap/phase-2.md` Component 13).

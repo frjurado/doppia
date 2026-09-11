@@ -1,3 +1,6 @@
+/* Page scaffold for the public read path. The topbar owns its own styling
+   (TopBar.module.css) since Component 12 Step 13; only the frame is here. */
+
 .layout {
   height: 100%;
   display: flex;
@@ -5,51 +8,16 @@
   overflow: hidden;
 }
 
-.bar {
-  display: flex;
-  align-items: baseline;
-  gap: var(--spacing-6);
-  padding: 0 var(--spacing-6);
-  height: 48px;
-  background-color: var(--color-surface-container-low);
-  flex-shrink: 0;
-}
-
-.wordmark {
-  font-family: var(--font-serif);
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--color-primary);
-  text-decoration: none;
-  letter-spacing: -0.01em;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
-.wordmark:hover {
-  color: var(--color-primary-container);
-}
-
-.tagline {
-  font-family: var(--font-sans);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-on-surface-variant);
-}
-
-.actions {
-  margin-left: auto;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-4);
-}
-
+/* The shell scrolls by default. A page that wants to trap its own scrolling
+   says so — `height: 100%; overflow: hidden` on its root, as the browse and
+   review surfaces do — and a page that simply lays content out gets a scrollbar
+   without having to ask. It was `overflow: hidden` here, which made forgetting
+   silently clip the bottom of the page: Profile and the two admin surfaces were
+   unreachable below the fold, and any new page with more than a screen of
+   content would have joined them. */
 .content {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }

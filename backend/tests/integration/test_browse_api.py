@@ -27,7 +27,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.fixtures.builders import HARMONIES_TSV_PATH
-from tests.integration.helpers import delete_test_composer
+from tests.integration.helpers import delete_test_composer, delete_test_storage_objects
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _MEI_DIR = _FIXTURES / "mei"
@@ -123,23 +123,33 @@ class TestBrowseApi:
         integration_test_client: AsyncClient,
         db_session: AsyncSession,
     ) -> None:
-        """Upload the browse-test Mozart corpus before each test; clean up after."""
-        # Suppress Celery task dispatch — no broker running in CI.
-        with (
-            patch("services.ingestion.generate_incipit"),
-            patch("services.ingestion.ingest_movement_analysis"),
-        ):
-            resp = await integration_test_client.post(
-                f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
-                headers={"Authorization": "Bearer admin-token"},
-                files={"archive": ("corpus.zip", _build_zip(), "application/zip")},
-            )
-        assert resp.status_code == 201, resp.text
+        """Upload the browse-test Mozart corpus before each test; clean up after.
 
-        yield
+        The teardown is in a ``finally`` because a failed upload still leaves
+        rows behind. The ingestion route creates composer, corpus and work
+        before it writes any MEI, so an upload that dies at the storage step —
+        exactly what happens when MinIO is not running — returns 500 with
+        those three rows committed. Asserting the status code before ``yield``
+        would then skip cleanup and leak them, once per run.
+        """
+        try:
+            # Suppress Celery task dispatch — no broker running in CI.
+            with (
+                patch("services.ingestion.generate_incipit"),
+                patch("services.ingestion.ingest_movement_analysis"),
+            ):
+                resp = await integration_test_client.post(
+                    f"/api/v1/composers/{_COMPOSER_SLUG}/corpora/piano-sonatas/upload",
+                    headers={"Authorization": "Bearer admin-token"},
+                    files={"archive": ("corpus.zip", _build_zip(), "application/zip")},
+                )
+            assert resp.status_code == 201, resp.text
 
-        await delete_test_composer(db_session, _COMPOSER_SLUG)
-        await db_session.commit()
+            yield
+        finally:
+            await delete_test_composer(db_session, _COMPOSER_SLUG)
+            await db_session.commit()
+            await delete_test_storage_objects(_COMPOSER_SLUG)
 
     # ------------------------------------------------------------------
     # GET /api/v1/composers

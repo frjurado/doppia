@@ -329,15 +329,3 @@
   padding: var(--spacing-3) var(--spacing-4);
   flex-shrink: 0;
 }
-
-.loadMoreButton {
-  width: 100%;
-  border: none;
-  padding: var(--spacing-2) var(--spacing-4);
-  background: var(--color-surface-container);
-  cursor: pointer;
-}
-
-.loadMoreButton:hover {
-  background: var(--color-surface-container-high);
-}

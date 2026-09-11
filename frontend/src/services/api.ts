@@ -111,7 +111,7 @@ export async function apiFetch<T>(
     // verbatim display, and both mean the same thing to the user: sign in
     // again. Substitute one translated string here, once, rather than at each
     // call site that renders ApiError.message. Clearing the stored token also
-    // fixes the account-badge-vs-login-link state: the next NavBar render (any
+    // fixes the account-badge-vs-login-link state: the next TopBar render (any
     // navigation) then correctly shows the login link (I1/I2 root cause).
     if (response.status === 401) {
       clearToken();

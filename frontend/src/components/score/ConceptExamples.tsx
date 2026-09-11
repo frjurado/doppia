@@ -34,11 +34,13 @@ import { getPublicConceptExamples } from '../../services/glossaryApi';
 import { getPublicFragment } from '../../services/publicApi';
 import {
   formatBarRange,
+  rangeLabels,
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../../utils/workTitle';
 import styles from './ConceptExamples.module.css';
+import Button from '../ui/Button';
 
 /** The glossary draws three inline examples (Step 3 default). */
 const EXAMPLE_LIMIT = 3;
@@ -95,7 +97,7 @@ function ExampleCard({ item, expanded, onToggle }: ExampleCardProps) {
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
   // ADR-036: qualified with its movement section where bar numbers restart, so a
   // glossary example never shows a stranger an ambiguous "mm. 12–15".
-  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end), {
+  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end, rangeLabels(t)), {
     sectionLabel: item.section_label,
     repeatContext: item.repeat_context,
     formatRepeatContext: makeRepeatContextFormatter(t),
@@ -241,11 +243,11 @@ export default function ConceptExamples({ conceptId }: ConceptExamplesProps) {
           {t('glossary.examples.heading')}
         </Type>
         {status === 'ready' && examples.length > 1 && (
-          <button type="button" className={styles.shuffleButton} onClick={shuffle}>
+          <Button variant="tertiary" size="sm" onClick={shuffle}>
             <Type variant="label-sm" as="span">
               {t('glossary.examples.shuffle')}
             </Type>
-          </button>
+          </Button>
         )}
       </div>
 

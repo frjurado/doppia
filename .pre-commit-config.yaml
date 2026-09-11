@@ -30,5 +30,8 @@ repos:
           - pydantic==2.10.3
           - neo4j==5.26.0
         entry: python scripts/seed.py --all --dry-run
-        files: ^backend/seed/domains/.*\.yaml$
+        # Translation overlays too: the dry-run resolves their ids against the
+        # domain files, and an id no domain defines becomes an orphan row that
+        # never surfaces and never errors at runtime (Component 12 Step 19b).
+        files: ^backend/seed/(domains|translations)/.*\.yaml$
         pass_filenames: false

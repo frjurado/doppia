@@ -71,7 +71,7 @@ each fix starts warm.
 
 | Item | What & why deferred | Pointer |
 |---|---|---|
-| **G1 — beat-range display convention** | `displayEndBeat` can render "beats 1⅔–1" (end < start) for sub-beat ranges ending on a whole bound. Display-only; Francisco chose a permanent convention review over another partial patch. Minimal clamp is on file if it starts to hurt. | `part-8-campaign-triage.md` § deferrals table (mechanism incl. file/lines) |
+| ~~**G1 — beat-range display convention**~~ | ✅ Decided — Component 12 Step 20 (ADR-005 amendment, 2026-09-10): the label names the first and last *included onset*, unit inferred from the endpoints' precision; end ≥ start by construction, no clamp. **Residual (phase 2, low):** the rule infers the last onset rather than knowing it; the exact version records the last included ghost's onset at commit time as a display-only field, backfilled from the timemap. Only worth doing if a real render ever contradicts its bracket. | ADR-005 § "range-label convention"; `component-12-user-infrastructure.md` § Step 20 |
 | **Pickup / partial-bar beat numbering** | Transport shows "beat 1" for a pickup; the right fix is meter-aware offsets through the ADR-005 beat encoding — ADR-005/ADR-015-adjacent design work, touches stored-coordinate questions. | same table |
 | **Caret at repeat barlines** | Hold-at-last-anchor is correct but inelegant; the polished version needs synthetic barline anchors in `buildCaretTrack`. Cosmetic. | same table |
 | **Fragment edit/lifecycle UI** | No Edit affordance from the fragment viewer / no clear annotator lifecycle after approval; investigation answered in the triage report, UI deferred. | `part-8-campaign-triage.md` § fragment edit lifecycle |

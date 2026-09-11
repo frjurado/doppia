@@ -187,13 +187,15 @@ CALL {
   MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
   WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 RETURN node.id                       AS id,
        node.name                     AS name,
        coalesce(node.aliases, [])    AS aliases,
        node.definition               AS definition,
        hierarchy_path,
+       hierarchy_path_ids,
        score
 ORDER BY complexity_rank ASC, prereq_depth ASC, score DESC, node.name ASC
 """
@@ -244,10 +246,13 @@ WITH ps, schema_order, schema_group, collect(
     THEN {
       id: pv.id,
       name: pv.name,
+      short_name: pv.short_name,
+      description: pv.description,
       order: rv.order,
       referenced_concept_id: ref.id,
       referenced_concept_name: ref.name,
-      referenced_concept_definition: ref.definition
+      referenced_concept_definition: ref.definition,
+      referenced_concept_stub: ref.stub
     }
     ELSE null
   END
@@ -261,7 +266,6 @@ RETURN ps.id          AS schema_id,
        schema_group   AS group,
        [v IN raw_values WHERE v IS NOT NULL] AS values
 ORDER BY
-  CASE WHEN schema_group IS NULL THEN 1 ELSE 0 END,
   coalesce(schema_order, 9999),
   ps.name
 """
@@ -271,9 +275,12 @@ For each schema, the values list is hydrated with name and optional
 VALUE_REFERENCES concept info (id, name, definition).  BOOL schemas have
 an empty values list.
 
-Schemas are sorted by (group, order, name) per ADR-023: schemas with a
-non-null group come first, ordered by their declared order within the group;
-ungrouped schemas follow, also ordered by their declared order.  Values within
+Schemas are sorted by (order, name) per ADR-023 as amended: a schema's
+declared order alone fixes its position, whether or not it carries a group.
+Groups cluster contiguous runs of that single sequence, so an ungrouped
+schema can sit between two groups — which is how ``ECP`` stays inline while
+``other`` remains last.  Group members must therefore hold contiguous order
+values, or the group renders as two clusters under one heading.  Values within
 each schema are sorted by their HAS_VALUE edge order (nulls last), then name.
 """
 
@@ -347,7 +354,8 @@ async def get_concept_property_schemas(
     ``cardinality``, ``required``, ``order``, ``group``, ``values``
     (list of value dicts, empty for BOOL).
 
-    Each value dict has: ``id``, ``name``, ``order``, ``referenced_concept_id``,
+    Each value dict has: ``id``, ``name``, ``short_name``, ``description``,
+    ``order``, ``referenced_concept_id``,
     ``referenced_concept_name``, ``referenced_concept_definition`` (last three
     may be ``None`` when the value carries no VALUE_REFERENCES edge).
 
@@ -356,7 +364,7 @@ async def get_concept_property_schemas(
         concept_id: The concept id to resolve schemas for.
 
     Returns:
-        List of schema dicts sorted by (grouped-first, order, name) per ADR-023.
+        List of schema dicts sorted by (order, name) per ADR-023 as amended.
     """
     result = await session.run(_GET_CONCEPT_PROPERTY_SCHEMAS, concept_id=concept_id)
     return await result.data()
@@ -435,12 +443,14 @@ CALL {
   MATCH p = (c)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
   WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 RETURN c.id                        AS id,
        c.name                      AS name,
        coalesce(c.aliases, [])     AS aliases,
-       hierarchy_path
+       hierarchy_path,
+       hierarchy_path_ids
 """
 """Return name, aliases, and hierarchy path for each concept id in one round-trip.
 
@@ -521,13 +531,15 @@ CALL {
   MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(r:Concept)
   WHERE NOT (r)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 RETURN node.id                        AS id,
        node.name                      AS name,
        coalesce(node.aliases, [])     AS aliases,
        parent.id                      AS parent_id,
-       hierarchy_path
+       hierarchy_path,
+       hierarchy_path_ids
 ORDER BY node.name
 """
 """Return all non-stub concepts in the IS_SUBTYPE_OF subtree rooted at root_id.
@@ -668,6 +680,129 @@ async def search_concepts(
 
 
 # ---------------------------------------------------------------------------
+# Merged cross-language search  (async — ADR-040, non-English locales only)
+# ---------------------------------------------------------------------------
+
+_SEARCH_CONCEPT_IDS = """\
+CALL db.index.fulltext.queryNodes("concept_search", $q)
+YIELD node
+WHERE node.stub = false AND node.top_level_taggable = true
+  AND ($domain IS NULL OR node.domain = $domain)
+RETURN collect(node.id) AS ids
+"""
+"""Ids of the English full-text matches, unpaged (ADR-040 § 2).
+
+The English half of a merged search. It is deliberately *not*
+``_SEARCH_CONCEPTS`` with a large limit: the merged path orders the union by
+the translated name, so a page of the English ordering names nothing useful,
+and the score this query drops is the one the merged path does not use
+(ADR-040 § 3). Bounded by ADR-040 § 6.
+
+Parameters:
+    q      — Lucene query string (must be non-empty)
+    domain — exact domain filter, or ``null`` for all domains
+"""
+
+_CONCEPTS_FOR_SEARCH_BY_IDS = """\
+MATCH (node:Concept)
+WHERE node.id IN $ids
+  AND node.stub = false AND node.top_level_taggable = true
+  AND ($domain IS NULL OR node.domain = $domain)
+CALL {
+  WITH node
+  OPTIONAL MATCH (x:Concept)-[:PREREQUISITE_FOR*1..]->(node)
+  RETURN count(DISTINCT x) AS prereq_depth
+}
+CALL {
+  WITH node
+  MATCH p = (node)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
+  WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
+  WITH p ORDER BY length(p) DESC LIMIT 1
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
+}
+RETURN node.id                       AS id,
+       node.name                     AS name,
+       coalesce(node.aliases, [])    AS aliases,
+       node.definition               AS definition,
+       hierarchy_path,
+       hierarchy_path_ids,
+       CASE node.complexity
+         WHEN 'foundational' THEN 0
+         WHEN 'intermediate' THEN 1
+         WHEN 'advanced'     THEN 2
+         ELSE 99
+       END                           AS complexity_rank,
+       prereq_depth
+"""
+"""Search rows for an explicit id set, carrying their ordering keys (ADR-040).
+
+Same projection as ``_SEARCH_CONCEPTS`` minus the relevance score, plus the two
+keys the caller needs to order by: ``complexity_rank`` and ``prereq_depth``.
+Unordered — the merged path sorts in the service, where the translated name
+that forms the final key is known.
+
+**The stub/taggable/domain filter is repeated here on purpose.** The ids reaching
+this query include PostgreSQL matches, and ``concept_translation`` carries a row
+for every concept in the graph, stubs and non-taggable nodes among them. Without
+this clause a Spanish query would surface concepts the English one filters out —
+the picker would offer something untaggable.
+
+Parameters:
+    ids    — concept ids to hydrate
+    domain — exact domain filter, or ``null`` for all domains
+"""
+
+
+async def search_concept_ids(
+    session: _AsyncSession,
+    *,
+    q: str,
+    domain: str | None,
+) -> set[str]:
+    """Return the ids of every English full-text match, unpaged (ADR-040 § 2).
+
+    Args:
+        session: An open async Neo4j session.
+        q: Lucene query string (non-empty).
+        domain: Exact domain name to filter by, or ``None`` for all domains.
+
+    Returns:
+        The matching concept ids; empty when nothing matched.
+    """
+    result = await session.run(_SEARCH_CONCEPT_IDS, q=q, domain=domain)
+    row = await result.single()
+    if row is None:
+        return set()
+    return set(row["ids"])
+
+
+async def get_concepts_for_search_by_ids(
+    session: _AsyncSession,
+    *,
+    ids: list[str],
+    domain: str | None,
+) -> list[dict[str, Any]]:
+    """Hydrate search rows for an explicit id set, with their ordering keys.
+
+    Args:
+        session: An open async Neo4j session.
+        ids: Concept ids to hydrate; an empty list returns an empty result
+            without querying.
+        domain: Exact domain name to filter by, or ``None`` for all domains.
+
+    Returns:
+        List of result dicts with keys ``id``, ``name``, ``aliases``,
+        ``definition``, ``hierarchy_path``, ``hierarchy_path_ids``,
+        ``complexity_rank`` and ``prereq_depth``. Unordered.
+    """
+    if not ids:
+        return []
+    result = await session.run(_CONCEPTS_FOR_SEARCH_BY_IDS, ids=ids, domain=domain)
+    return await result.data()
+
+
+# ---------------------------------------------------------------------------
 # Public concept detail  (async — used by GET /api/v1/public/concepts/{id})
 # ---------------------------------------------------------------------------
 
@@ -678,7 +813,8 @@ CALL {
   MATCH p = (c)-[:IS_SUBTYPE_OF*0..]->(root:Concept)
   WHERE NOT (root)-[:IS_SUBTYPE_OF]->(:Concept)
   WITH p ORDER BY length(p) DESC LIMIT 1
-  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path
+  RETURN [n IN reverse(nodes(p)) | n.name] AS hierarchy_path,
+         [n IN reverse(nodes(p)) | n.id]   AS hierarchy_path_ids
 }
 OPTIONAL MATCH (c)-[:IS_SUBTYPE_OF]->(parent:Concept)
 CALL {
@@ -702,6 +838,7 @@ RETURN c.id                              AS id,
        coalesce(c.definition_reviewed, false) AS definition_reviewed,
        coalesce(c.top_level_taggable, false)  AS top_level_taggable,
        hierarchy_path,
+       hierarchy_path_ids,
        CASE WHEN parent IS NULL THEN null
             ELSE {id: parent.id, name: parent.name, stub: coalesce(parent.stub, false)}
        END                               AS parent,

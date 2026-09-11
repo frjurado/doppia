@@ -96,13 +96,14 @@ async def browse_client() -> AsyncGenerator[tuple[AsyncClient, Any, Any], None]:
     """
     from api.dependencies import AppUser, get_current_user, get_storage
     from models.base import get_db
+    from models.roles import EDITOR
     from services.object_storage import StorageClient
     from sqlalchemy.ext.asyncio import AsyncSession
 
     app = _build_app()
     mock_db = AsyncMock(spec=AsyncSession)
     mock_storage = AsyncMock(spec=StorageClient)
-    dev_user = AppUser(id="test-user", role="editor", email="test@test.com")
+    dev_user = AppUser(id="test-user", roles=frozenset({EDITOR}), email="test@test.com")
 
     async def _get_db() -> AsyncGenerator[AsyncSession, None]:
         yield mock_db  # type: ignore[misc]

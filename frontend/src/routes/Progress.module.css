@@ -1,0 +1,22 @@
+/* Progress placeholder — Component 12 Step 13. */
+
+.page {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-10) var(--spacing-5);
+}
+
+.inner {
+  /* --width-reading (DESIGN.md § 7.3); a literal until Step 14 tokenises the
+     width scale (F10). */
+  max-width: var(--width-reading);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-4);
+}
+
+.body {
+  max-width: var(--width-prose);
+  color: var(--color-on-surface-variant);
+}

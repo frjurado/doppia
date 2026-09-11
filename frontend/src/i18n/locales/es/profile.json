@@ -1,0 +1,32 @@
+{
+  "title": "Tu cuenta",
+  "email": "Correo electrónico",
+  "emailUnverified": "Aún sin confirmar.",
+  "grantedRoles": "Roles concedidos",
+  "noGrantedRoles": "Ninguno",
+  "grantedRolesHint": "Los roles los concede un administrador y no se pueden cambiar aquí.",
+  "displayName": "Nombre visible",
+  "selfDeclaredRole": "¿Cómo te describirías?",
+  "preferNotToSay": "Prefiero no decirlo",
+  "role_student": "Estudiante",
+  "role_educator": "Docente",
+  "role_researcher": "Investigador/a",
+  "role_hobbyist": "Aficionado/a",
+  "role_professional_musician": "Músico/a profesional",
+  "role_other": "Otro",
+  "readingHistory": "Guardar un historial de lo que leo",
+  "readingHistoryHint": "Desactivado por defecto. Si lo activas, se registran los fragmentos que abres para que puedas volver a encontrarlos. Puedes desactivarlo cuando quieras.",
+  "save": "Guardar cambios",
+  "saving": "Guardando…",
+  "saved": "Guardado.",
+  "unverifiedBlocked": "Confirma tu dirección de correo antes de cambiar tu perfil.",
+  "yourData": "Tus datos",
+  "exportHint": "Descárgalo todo: tu perfil, tu historial de ejercicios y tu historial de lectura, en un solo archivo JSON. Los fragmentos y las revisiones con los que has contribuido forman parte del registro editorial compartido y no se incluyen.",
+  "export": "Descargar mis datos",
+  "exporting": "Preparando…",
+  "progress": {
+    "pageTitle": "Progreso — Doppia",
+    "heading": "Progreso",
+    "body": "Tu progreso aparecerá aquí cuando los ejercicios estén disponibles. Todavía no se registra nada."
+  }
+}

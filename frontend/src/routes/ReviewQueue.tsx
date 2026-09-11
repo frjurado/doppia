@@ -11,6 +11,7 @@ import { ReviewQueueItem, ReviewQueueResponse, listReviewQueue } from '../servic
 import { makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './ReviewQueue.module.css';
+import Button from '../components/ui/Button';
 
 /**
  * Reviewer work-queue page (Component 7, Step 13).
@@ -141,10 +142,13 @@ export default function ReviewQueue() {
                 <div className={styles.itemRow}>
                   {/* Concept alias badge + bar range */}
                   <div className={styles.itemPrimary}>
-                    {item.primary_concept_alias && (
+                    {/* `alias ?? name`: six taggable cadence concepts have no
+                        alias, and a queue row identified only by bar range is
+                        the same nameless-bracket bug in another surface. */}
+                    {(item.primary_concept_alias ?? item.primary_concept_name) && (
                       <span className={styles.aliasBadge}>
                         <Type variant="label-sm" as="span">
-                          {item.primary_concept_alias}
+                          {item.primary_concept_alias ?? item.primary_concept_name}
                         </Type>
                       </span>
                     )}
@@ -182,16 +186,17 @@ export default function ReviewQueue() {
           {/* Load more */}
           {nextCursor && !isLoading && (
             <div className={styles.loadMore}>
-              <button
-                type="button"
-                className={styles.loadMoreButton}
+              <Button
+                variant="secondary"
+                size="sm"
+                fullWidth
                 onClick={handleLoadMore}
                 disabled={isLoadingMore}
               >
                 <Type variant="label-sm" as="span">
                   {isLoadingMore ? t('common:loading') : t('common:loadMore')}
                 </Type>
-              </button>
+              </Button>
             </div>
           )}
         </Surface>

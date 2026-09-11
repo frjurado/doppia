@@ -107,12 +107,13 @@ async def _purge_leaked_test_fixtures(
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def _seed_dev_users(_db_engine: AsyncEngine) -> AsyncGenerator[None, None]:
-    """Seed synthetic dev user rows so fragment.created_by and
-    fragment_review.reviewer_id FK constraints pass in integration tests.
+    """Seed synthetic dev user rows and their role grants.
 
-    The dev auth bypass uses hardcoded UUIDs that don't exist in app_user.
-    Both fragment.created_by and fragment_review.reviewer_id have FK → app_user.id,
-    so real rows are required for the dev tokens' UUIDs.
+    Two reasons the rows must exist. First, ``fragment.created_by`` and
+    ``fragment_review.reviewer_id`` both have FK → ``app_user.id``, and the dev
+    auth bypass uses hardcoded UUIDs. Second, since ADR-037 roles are read from
+    ``user_role`` on every path including the bypass, so without the grants the
+    dev editor authenticates and is then refused by ``require_role``.
     """
     factory = async_sessionmaker(
         _db_engine, class_=AsyncSession, expire_on_commit=False
@@ -120,9 +121,17 @@ async def _seed_dev_users(_db_engine: AsyncEngine) -> AsyncGenerator[None, None]
     async with factory() as session:
         await session.execute(
             text(
-                "INSERT INTO app_user (id, email, role) VALUES "
-                "('00000000-0000-0000-0000-000000000001', 'dev@local', 'editor'), "
-                "('00000000-0000-0000-0000-000000000002', 'admin@local', 'admin') "
+                "INSERT INTO app_user (id, email) VALUES "
+                "('00000000-0000-0000-0000-000000000001', 'dev@local'), "
+                "('00000000-0000-0000-0000-000000000002', 'admin@local') "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO user_role (user_id, role) VALUES "
+                "('00000000-0000-0000-0000-000000000001', 'editor'), "
+                "('00000000-0000-0000-0000-000000000002', 'admin') "
                 "ON CONFLICT DO NOTHING"
             )
         )

@@ -58,7 +58,7 @@ def _make_request(
 
 def test_key_is_user_scoped_when_authenticated() -> None:
     """An authenticated caller keys on the JWT sub, not the IP."""
-    user = AppUser(id="sub-abc", role="editor", email="e@test")
+    user = AppUser(id="sub-abc", roles=frozenset({"editor"}), email="e@test")
     request = _make_request(client=("203.0.113.7", 1), user=user)
     assert get_user_or_ip(request) == "user:sub-abc"
 
@@ -103,7 +103,9 @@ def _build_limited_app(limit: str) -> FastAPI:
     async def _attach_user(request: Request, call_next):  # type: ignore[no-untyped-def]
         uid = request.headers.get("X-Test-User")
         request.state.user = (
-            AppUser(id=uid, role="editor", email="e@test") if uid else None
+            AppUser(id=uid, roles=frozenset({"editor"}), email="e@test")
+            if uid
+            else None
         )
         return await call_next(request)
 

@@ -171,6 +171,15 @@ Same generator, notation hidden; presentation differences only:
 Supersedes the "shape open" note in `tech-stack-and-database-reference.md`
 § User infrastructure tables.
 
+**Status (2026-08-29):** `exercise_type`, `exercise_session` and
+`exercise_result` were created verbatim from this sketch by Component 12
+Step 7 (Alembic migration `0012`); ORM models are in
+`backend/models/user_state.py`. `exercise_type` is **empty** — it exists only
+as the foreign-key target `exercise_session` requires, and this component
+seeds it from YAML. `exercise_activation` was deliberately **not** created:
+nothing references it, and its status vocabulary is a question for this
+component, not the last one.
+
 ```sql
 CREATE TABLE exercise_type (          -- seeded from YAML
     id            TEXT PRIMARY KEY,   -- 'cadence-identification'
@@ -253,10 +262,19 @@ presentations (notation, listening). Recorded for later, mostly from
 - **Adaptive difficulty (Elo/IRT)** — Phase 3, gated on accumulated
   `exercise_result` data; enabled by the item-level recording above.
 
-**Capture-extensions triage:** the unimplemented capture-extensions concept
-(`../architecture/capture_extensions.md`; needed by evaded cadence, closing
-section, standing on the dominant) may constrain which concepts are cleanly
-exercisable — triage during implementation of this component.
+**Capture extensions are built here, not merely triaged** (decided 2026-08-26,
+Component 12 planning; recorded in `phase-2.md` § Decisions Log and
+`component-12-user-infrastructure.md` § Decisions 1). The unimplemented
+capture-extensions concept (`../architecture/capture_extensions.md`; needed by
+evaded cadence, closing section, standing on the dominant) was triage item 13
+and briefly sat with Component 12; it is tagging *capture* work unrelated to
+user infrastructure, and this is the component where its absence bites, since
+exercisability depends on it.
+
+Accepted cost of the move: `ReopeningHalfCadence` fragments tagged before this
+component keep missing their constitutive pointer. Triage which concepts are
+cleanly exercisable as part of building the two capturing types, rather than as
+a separate pass.
 
 ---
 

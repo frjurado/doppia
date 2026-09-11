@@ -389,13 +389,13 @@ Use standard HTTP status codes precisely:
 
 ### Role enforcement
 
-Role checks use the `require_role()` middleware factory, never hardcoded role strings in route handlers:
+Role checks use the `require_role()` dependency factory with constants from `backend/models/roles.py`, never hardcoded role strings in route handlers:
 
 ```python
 # Correct — pass require_role() in the router decorator's dependencies list
 @router.post(
     "/fragments/{id}/approve",
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
 )
 async def approve_fragment(id: UUID) -> Fragment:
     ...
@@ -403,11 +403,26 @@ async def approve_fragment(id: UUID) -> Fragment:
 # Wrong — do not do this
 @router.post("/fragments/{id}/approve")
 async def approve_fragment(id: UUID, user: AppUser = Depends(get_current_user)):
-    if user.role not in ("editor", "admin"):
+    if ADMIN not in user.roles:
         raise HTTPException(status_code=403, ...)
 ```
 
-The `require_role()` function lives in `backend/api/dependencies.py`. Adding a new role in Phase 2 means adding a constant — no route handler changes required.
+`require_role()` is **any-of**, not a hierarchy: it passes if the caller holds any
+listed role. Name every role the permission matrix
+(`docs/architecture/roles-and-permissions.md` § 2) admits — an admin does *not*
+pass `require_role(EDITOR)` implicitly. Roles are read from the `user_role` table
+on every request, not from a JWT claim (ADR-037); `registered` is implicit in
+holding an account and `anonymous` is an empty role set.
+
+Ownership checks — "the owner of this collection, or an admin" — use
+`require_owner_or_role()` from `backend/services/permissions.py`. It lives in the
+service layer because it needs the loaded ORM object, which a route dependency
+does not have. `require_verified()` sits beside it as a precondition on
+content-creating actions.
+
+`require_role()` lives in `backend/api/dependencies.py`. Adding a new role means
+adding a constant to `models/roles.py` and naming it at the call sites the matrix
+gives it.
 
 ---
 
@@ -419,7 +434,7 @@ These are not style preferences. Violating them silently breaks data integrity a
 
 **The `summary` JSONB schema is versioned and treated as a published API.** See `docs/architecture/fragment-schema.md` for the full versioning policy. Never change field names, types, or structure without incrementing `version` and writing a migration script. The AI reasoning layer in Phase 3 will consume this structure directly.
 
-**`require_role()` is the only permitted way to enforce roles.** No inline role checks in route handlers. No role logic in service functions (services are called from within an already-authenticated request context).
+**`require_role()` and `require_owner_or_role()` are the only permitted permission mechanisms.** No inline role or ownership checks anywhere else — not in route handlers, not in service functions. `require_role()` is a route dependency; `require_owner_or_role()` is a service-layer function because ownership needs the loaded resource. The two layers are by design, not an inconsistency.
 
 **Pydantic validates before every database write.** Nothing reaches Neo4j, PostgreSQL, or Redis without first passing through a Pydantic model. If a payload bypasses Pydantic, that is a bug, not a shortcut.
 

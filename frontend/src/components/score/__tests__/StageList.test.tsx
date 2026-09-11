@@ -127,7 +127,11 @@ describe('StageList — ordering (Component 9 G2)', () => {
     ]);
   });
 
-  it('groups absent (unbounded) stages after positioned ones', () => {
+  it('keeps an absent (unbounded) stage in its place in the sequence', () => {
+    // Changed in Component 12 Step 18 (M9). Absent stages used to be grouped
+    // after every positioned one, so disabling a stage threw its card to the
+    // bottom of the list. It now holds its slot: stage `a` has schema order 0,
+    // so it stays above `b` even with no bounds to sort by.
     renderList([
       makeStage({
         stageId: 'a',
@@ -143,7 +147,37 @@ describe('StageList — ordering (Component 9 G2)', () => {
       }),
     ]);
     const cards = screen.getAllByTestId(/^stage-card-/);
-    expect(cards.map((c) => c.dataset['testid'])).toEqual(['stage-card-b', 'stage-card-a']);
+    expect(cards.map((c) => c.dataset['testid'])).toEqual(['stage-card-a', 'stage-card-b']);
+  });
+
+  it('places an absent stage between the positioned stages it sits between', () => {
+    // The M9 case as reported: four stages, the second disabled. Its card must
+    // stay second rather than jumping past the third and fourth.
+    renderList([
+      makeStage({
+        stageId: 'one',
+        order: 1,
+        bounds: { barStart: 1, beatStart: null, barEnd: 1, beatEnd: null },
+      }),
+      makeStage({ stageId: 'two', order: 2, bounds: null, absent: true, required: false }),
+      makeStage({
+        stageId: 'three',
+        order: 3,
+        bounds: { barStart: 3, beatStart: null, barEnd: 3, beatEnd: null },
+      }),
+      makeStage({
+        stageId: 'four',
+        order: 4,
+        bounds: { barStart: 4, beatStart: null, barEnd: 4, beatEnd: null },
+      }),
+    ]);
+    const cards = screen.getAllByTestId(/^stage-card-/);
+    expect(cards.map((c) => c.dataset['testid'])).toEqual([
+      'stage-card-one',
+      'stage-card-two',
+      'stage-card-three',
+      'stage-card-four',
+    ]);
   });
 });
 

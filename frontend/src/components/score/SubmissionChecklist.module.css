@@ -76,6 +76,7 @@
 
 /* ── Actions ─────────────────────────────────────────────────────────────── */
 
+/* Decisions: stacked full-width, most consequential last. */
 .actions {
   display: flex;
   flex-direction: column;
@@ -83,51 +84,24 @@
   margin-top: var(--spacing-1);
 }
 
-/* Base button — text-button style, full width, 0px radius */
-.saveDraftButton,
-.submitButton {
-  width: 100%;
-  padding: var(--spacing-2) var(--spacing-3);
-  border: none;
-  border-radius: var(--border-radius);
-  cursor: pointer;
-  text-align: center;
-  transition: background-color 0.1s ease;
-}
-
 /* Save Draft: subtle tonal fill */
-.saveDraftButton {
-  background-color: var(--color-surface-container-high);
-  color: var(--color-on-background);
-}
-
-.saveDraftButton:disabled {
-  background-color: var(--color-surface-container);
-  color: var(--color-on-surface-variant);
-  cursor: not-allowed;
-}
-
-.saveDraftButton:hover:not(:disabled) {
-  background-color: var(--color-surface-container-highest);
-}
 
 /* Submit for Review: muted when not ready, primary-blue when all items clear */
-.submitButton {
-  background-color: var(--color-surface-container-high);
-  color: var(--color-on-surface-variant);
-  cursor: not-allowed;
+
+/* ── Lifecycle chrome (triage item 10) ────────────────────────────────────
+   Cancel and Delete, moved down from the old panel header so the panel has one
+   action block. Kept off the decisions above by a spacing step rather than a
+   rule (DESIGN.md § 6), and de-ranked by not being full-width — the same
+   subordinate row the fragment detail panel uses. Delete takes the trailing
+   edge: in create mode it is the row's only control and still sits as far from
+   Submit as the panel allows. */
+.chromeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-6);
 }
 
-.submitButtonReady {
-  background-color: var(--color-primary);
-  color: var(--color-on-primary);
-  cursor: pointer;
-}
-
-.submitButtonReady:hover:not(:disabled) {
-  background-color: var(--color-primary-container);
-}
-
-.submitButton:disabled {
-  opacity: 0.6;
+.destructiveAction {
+  margin-left: auto;
 }

@@ -987,6 +987,12 @@ the open question being what the rule for "compound" should be at all (perhaps:
 disallow one-beat time signatures). Deferred to the post-Component-11 issues
 triage by his decision, not resolved here.
 
+**Resolved 2026-09-10, Component 12 Step 20.** Compound now requires
+`count >= 6` — recorded in ADR-005 § "compound-meter rule" — so `measure_end_beat`
+reads 3/8 as 4.0 and the refusal this note anticipated (`meter_is_disputed`) is
+gone. The data pass it called for is `fix_38_beat_coordinates.py`, and it must
+run *before* `clamp_subpart_bounds.py`.
+
 ---
 
 ## Part 4 — Track M: Editor Follow-Through + Editorial Sweep

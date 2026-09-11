@@ -23,7 +23,7 @@ See docs/roadmap/component-11-concept-glossary.md § Step 1.
 
 from __future__ import annotations
 
-from api.dependencies import get_neo4j
+from api.dependencies import get_language, get_neo4j
 from api.rate_limiting import GRAPH_ANONYMOUS, READ_ANONYMOUS, limiter
 from api.routes.fragments import get_fragment_service
 from fastapi import APIRouter, Depends, Path, Query, Request
@@ -40,21 +40,29 @@ router = APIRouter(prefix="/public/concepts", tags=["Public"])
 
 def get_public_concept_service(
     driver: AsyncDriver = Depends(get_neo4j),
+    db: AsyncSession = Depends(get_db),
 ) -> ConceptService:
     """Construct a :class:`~services.concepts.ConceptService` for the public path.
 
     Separated from the route handler so tests can override it via
-    ``app.dependency_overrides[get_public_concept_service]``. The public concept
-    detail is English-only and touches only Neo4j, so neither the SQLAlchemy
-    session (translation overlay / fragment counts) nor Redis is wired in.
+    ``app.dependency_overrides[get_public_concept_service]``.
+
+    The SQLAlchemy session is required since Component 12 Step 19c: the
+    translation overlay lives in PostgreSQL, and the concept page reads it for
+    every name it shows. Before that this service was Neo4j-only, and wiring
+    the overlay without the session raised
+    ``AttributeError: 'NoneType' object has no attribute 'execute'`` on any
+    non-English request — English short-circuits the overlay and so never
+    touched it.
 
     Args:
         driver: Async Neo4j driver (injected by ``get_neo4j``).
+        db: Async SQLAlchemy session (injected by ``get_db``) for the overlay.
 
     Returns:
-        A :class:`~services.concepts.ConceptService` bound to the driver.
+        A :class:`~services.concepts.ConceptService` bound to the driver and db.
     """
-    return ConceptService(driver)
+    return ConceptService(driver, db=db)
 
 
 def get_public_index_service(
@@ -91,18 +99,21 @@ def get_public_index_service(
 async def public_list_concept_index(
     request: Request,
     service: ConceptService = Depends(get_public_index_service),
+    language: str = Depends(get_language),
 ) -> ConceptIndexResponse:
     """Return the public browse-by-domain concept index, anonymously.
 
     Args:
         request: The incoming request (used by the rate limiter).
         service: Public index service (injected; driver + db).
+        language: Negotiated response language (``?language=`` or
+            ``Accept-Language``).
 
     Returns:
         :class:`~models.concepts.ConceptIndexResponse` — one entry per domain
         root, each with its flat subtree and per-concept approved counts.
     """
-    return await service.get_public_index()
+    return await service.get_public_index(language)
 
 
 @router.get(
@@ -126,6 +137,7 @@ async def public_get_concept(
         ),
     ),
     service: ConceptService = Depends(get_public_concept_service),
+    language: str = Depends(get_language),
 ) -> ConceptDetailResponse:
     """Return the full public glossary payload for one concept, anonymously.
 
@@ -133,6 +145,8 @@ async def public_get_concept(
         request: The incoming request (used by the rate limiter).
         concept_id: The immutable concept id to read.
         service: Public concept service (injected).
+        language: Negotiated response language (``?language=`` or
+            ``Accept-Language``).
 
     Returns:
         :class:`~models.concepts.ConceptDetailResponse` with the concept's
@@ -141,7 +155,7 @@ async def public_get_concept(
     Raises:
         404 ``CONCEPT_NOT_FOUND``: No concept with ``concept_id`` exists.
     """
-    return await service.get_public_detail(concept_id)
+    return await service.get_public_detail(concept_id, language)
 
 
 @router.get(
@@ -183,6 +197,7 @@ async def public_get_concept_examples(
         ),
     ),
     service: FragmentService = Depends(get_fragment_service),
+    language: str = Depends(get_language),
 ) -> ConceptExamplesResponse:
     """Draw up to ``limit`` random approved example fragments for a concept.
 
@@ -208,4 +223,5 @@ async def public_get_concept_examples(
         include_subtypes=include_subtypes,
         limit=limit,
         seed=seed,
+        language=language,
     )

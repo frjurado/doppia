@@ -15,6 +15,20 @@
 > reading `localStorage` synchronously. The code blocks below are the Phase-1
 > record; see [ADR-035](../adr/ADR-035-httponly-refresh-token-session.md) for the
 > current design.
+>
+> **Phase-2 supersession (2026-08-28, Component 12 Step 5).** The Scope section
+> below excludes registration and password reset "per ADR-001". Both now exist
+> and that exclusion is **superseded**: `/register`, `/auth/verify-email`,
+> `/auth/forgot-password` and `/auth/reset-password` ship alongside a Google
+> sign-in path on `/login`, all proxied through the backend `/api/v1/auth`
+> router. Registration is gated by `REGISTRATION_MODE` rather than by absence,
+> so the "accounts are managed via the Supabase dashboard" note holds only while
+> that flag reads `invite`. The card chrome moved to a shared
+> `components/auth/AuthCard` (with `Login.module.css` folded into
+> `AuthCard.module.css`) when four more pages joined the same visual family —
+> the CSS quoted below is the Phase-1 record, not the current file layout.
+> Everything else in this spec — the underline inputs, the gradient CTA, the
+> 0px radius, `noValidate` — still describes what ships.
 
 ## Scope
 

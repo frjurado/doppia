@@ -75,6 +75,15 @@ class HarmonyNotReviewedError(ConflictError): ...
 class AuthorizationError(DoppiaError):
     """The caller is authenticated but lacks the required role."""
 
+class EmailNotVerifiedError(DoppiaError):
+    """The caller's email address has not been confirmed.
+
+    Distinct from AuthorizationError: the caller may hold every role the
+    action needs, but an unverified account cannot create content at all
+    (roles-and-permissions.md § 3). Its own code lets the frontend offer
+    "resend verification" rather than a generic permission message.
+    """
+
 class GraphIntegrityError(DoppiaError):
     """An invariant of the knowledge graph has been violated.
 
@@ -351,10 +360,15 @@ All `DoppiaError` subclasses are registered with FastAPI at startup. The mapping
 | `ConceptNotFoundError` | 404 | `CONCEPT_NOT_FOUND` |
 | `CollectionNotFoundError` | 404 | `COLLECTION_NOT_FOUND` |
 | `UserNotFoundError` | 404 | `USER_NOT_FOUND` |
+| `ModerationReportNotFoundError` | 404 | `MODERATION_REPORT_NOT_FOUND` |
 | `FragmentAlreadyApprovedError` | 409 | `FRAGMENT_ALREADY_APPROVED` |
+| `ReportAlreadyOpenError` | 409 | `REPORT_ALREADY_OPEN` |
+| `ReportAlreadyResolvedError` | 409 | `REPORT_ALREADY_RESOLVED` |
+| `SelfAdminRevocationError` | 409 | `SELF_ADMIN_REVOCATION` |
 | `HarmonyNotReviewedError` | 422 | `HARMONY_NOT_REVIEWED` |
 | `FragmentValidationError` | 422 | `FRAGMENT_VALIDATION_ERROR` |
 | `AuthorizationError` | 403 | `FORBIDDEN` |
+| `EmailNotVerifiedError` | 403 | `EMAIL_NOT_VERIFIED` |
 | `GraphIntegrityError` | 500 | `GRAPH_INTEGRITY_ERROR` |
 | (any other `DoppiaError`) | 500 | `INTERNAL_ERROR` |
 
@@ -394,6 +408,7 @@ _STATUS_MAP: dict[type[DoppiaError], int] = {
     FragmentAlreadyApprovedError: 409,
     HarmonyNotReviewedError: 422,
     AuthorizationError: 403,
+    EmailNotVerifiedError: 403,
     GraphIntegrityError: 500,
 }
 
@@ -426,6 +441,7 @@ Every exception handler logs before returning the response. The log level depend
 | `NotFoundError` | `INFO` | Normal; no operator action needed |
 | `ConflictError` | `INFO` | Normal; client state mismatch |
 | `AuthorizationError` | `WARNING` | May indicate probing or misconfigured client |
+| `EmailNotVerifiedError` | `INFO` | Normal; the account has not confirmed its address yet |
 | `500` catch-all | `ERROR` | Unexpected; always investigate |
 
 Infrastructure error logs must include enough context to diagnose the failure without exposing credentials: the database type, the operation attempted, and any safe `detail` fields from the exception.

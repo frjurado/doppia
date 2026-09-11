@@ -1,0 +1,159 @@
+/* Shared chrome for the two admin pages (user management, moderation queue).
+   Editorial pacing, tonal layering, 0px radius, no 1px rules — DESIGN.md
+   sections 2–5. Rows are separated by tonal alternation and vertical space
+   rather than by dividers. */
+
+.page {
+  padding: var(--spacing-10) var(--spacing-8);
+  max-width: var(--width-listing);
+}
+
+.title {
+  color: var(--color-primary);
+  margin: 0 0 var(--spacing-2);
+}
+
+.lede {
+  color: var(--color-on-surface-variant);
+  margin: 0 0 var(--spacing-8);
+  max-width: var(--width-prose);
+}
+
+.panel {
+  padding: var(--spacing-6) var(--spacing-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-6);
+  margin-bottom: var(--spacing-8);
+}
+
+.sectionTitle {
+  color: var(--color-primary);
+  margin: 0;
+}
+
+/* Underline inputs, per the design system. */
+.input {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: 0 1px 0 0 var(--color-outline);
+  padding: var(--spacing-2) 0;
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  color: var(--color-on-background);
+  outline: none;
+  flex: 1 1 16rem;
+}
+
+.input:focus {
+  box-shadow: 0 1px 0 0 var(--color-primary);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-4);
+  align-items: flex-end;
+}
+
+/* A list, not a table: a table would want rules to stay legible. */
+.rows {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2) var(--spacing-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4) var(--spacing-4);
+  background: var(--color-surface-container-low);
+}
+
+/* Alternation carries the row boundary where a rule is forbidden. */
+.row:nth-child(even) {
+  background: var(--color-surface-container);
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  min-width: 16rem;
+}
+
+.rowMeta {
+  color: var(--color-on-surface-variant);
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  align-items: center;
+}
+
+/* Role chips: held roles are filled, offered ones are outlined by tone. */
+.roleChip {
+  padding: var(--spacing-1) var(--spacing-3);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+}
+
+.roleChipOff {
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface-variant);
+}
+
+.roleChip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.roleChip:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.error {
+  color: var(--color-error);
+  margin: 0;
+}
+
+.notice {
+  color: var(--color-primary);
+  margin: 0;
+}
+
+.empty {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+  padding: var(--spacing-6) 0;
+}
+
+.filters {
+  display: flex;
+  gap: var(--spacing-2);
+  flex-wrap: wrap;
+}
+
+.filterActive {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}

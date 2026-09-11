@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from api.dependencies import AppUser, get_current_user, require_role
+from api.dependencies import AppUser, get_current_user, get_language, require_role
 from api.routes.fragments import get_fragment_service
 from fastapi import APIRouter, Depends, Query
 from models.fragment import ReviewQueueResponse
+from models.roles import ADMIN, EDITOR
 from services.fragments import FragmentService
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/reviews", tags=["Reviews"])
 @router.get(
     "/queue",
     response_model=ReviewQueueResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List fragments awaiting review",
     response_description=(
         "Cursor-paginated list of submitted top-level fragments not created by "
@@ -46,6 +47,7 @@ async def get_review_queue(
     ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
+    language: str = Depends(get_language),
 ) -> ReviewQueueResponse:
     """Return submitted fragments the caller is eligible to review.
 
@@ -60,7 +62,8 @@ async def get_review_queue(
     """
     return await service.list_for_review(
         caller_id=user.id,
-        caller_role=user.role,
+        caller_roles=user.roles,
         cursor=cursor,
         page_size=page_size,
+        language=language,
     )

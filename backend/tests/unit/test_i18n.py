@@ -239,7 +239,14 @@ class TestTranslationOverlay:
             [_Row(schema_id="CadenceFunction", name="Función", description="…")]
         )
         value_session = _FakeSession(
-            [_Row(value_id="Independent", name="Independiente")]
+            [
+                _Row(
+                    value_id="Independent",
+                    name="Independiente",
+                    short_name=None,
+                    description=None,
+                )
+            ]
         )
 
         schema_overlay = TranslationOverlay(schema_session)  # type: ignore[arg-type]
@@ -251,6 +258,31 @@ class TestTranslationOverlay:
         assert schemas["CadenceFunction"].name == "Función"
         assert schemas["CadenceFunction"].description == "…"
         assert values["Independent"].name == "Independiente"
+        # Null here means "fall back to the English graph value" per field, not
+        # "this value has no short form" (migration 0015).
+        assert values["Independent"].short_name is None
+        assert values["Independent"].description is None
+
+    @pytest.mark.asyncio
+    async def test_value_overlay_carries_short_name_and_description(self) -> None:
+        """A Spanish row localises all three label fields, not just the name."""
+        from services.translation import TranslationOverlay
+
+        session = _FakeSession(
+            [
+                _Row(
+                    value_id="Stage2SD4",
+                    name="Predominante sobre el Grado 4",
+                    short_name="Sobre el Grado 4",
+                    description="IV, ii, ii6, …",
+                )
+            ]
+        )
+        overlay = TranslationOverlay(session)  # type: ignore[arg-type]
+        values = await overlay.value_translations(["Stage2SD4"], "es")
+
+        assert values["Stage2SD4"].short_name == "Sobre el Grado 4"
+        assert values["Stage2SD4"].description == "IV, ii, ii6, …"
 
 
 # ---------------------------------------------------------------------------
@@ -295,9 +327,40 @@ class TestSeedTranslationParams:
             "value_id": "Independent",
             "language": "en",
             "name": "Independent",
+            "short_name": None,
+            "description": None,
             "status": "authoritative",
             "source_hash": params["source_hash"],
         }
+
+    def test_value_params_carry_the_label_fields(self) -> None:
+        """ADR-039's short form and gloss reach the English row (migration 0015)."""
+        from backend.graph.queries.seed import value_translation_params
+
+        params = value_translation_params(
+            "Stage2SD4",
+            "Pre-dominant on Scale Degree 4",
+            "On Scale Degree 4",
+            "IV, ii, ii6, …",
+        )
+        assert params["short_name"] == "On Scale Degree 4"
+        assert params["description"] == "IV, ii, ii6, …"
+
+    def test_value_hash_covers_all_three_label_fields(self) -> None:
+        """Editing a short form or a gloss must mark translations stale.
+
+        The hash is what the staleness job compares against, so a name-only
+        hash would let a reworded gloss slip past every non-English row.
+        """
+        from backend.graph.queries.seed import value_translation_params
+
+        base = value_translation_params("V", "Name")
+        renamed_short = value_translation_params("V", "Name", "Short", None)
+        renamed_desc = value_translation_params("V", "Name", None, "Gloss")
+
+        assert base["source_hash"] != renamed_short["source_hash"]
+        assert base["source_hash"] != renamed_desc["source_hash"]
+        assert renamed_short["source_hash"] != renamed_desc["source_hash"]
 
     def test_upsert_sql_is_idempotent(self) -> None:
         from backend.graph.queries.seed import (
@@ -313,3 +376,76 @@ class TestSeedTranslationParams:
         ):
             assert "ON CONFLICT" in sql
             assert "DO UPDATE" in sql
+
+
+class TestHierarchyPathLocalisation:
+    """``localise_hierarchy_path`` — Component 12 Step 19c."""
+
+    def test_translates_each_element_by_id(self) -> None:
+        from services.concepts import localise_hierarchy_path
+        from services.translation import ConceptTranslation
+
+        translations = {
+            "Cadence": ConceptTranslation("Cadencia", None, None),
+            "AuthenticCadence": ConceptTranslation("Cadencia Auténtica", None, None),
+        }
+        out = localise_hierarchy_path(
+            ["Cadence", "Authentic Cadence"],
+            ["Cadence", "AuthenticCadence"],
+            translations,
+        )
+        assert out == ["Cadencia", "Cadencia Auténtica"]
+
+    def test_falls_back_per_element_not_per_path(self) -> None:
+        """One untranslated ancestor must not drop the whole path to English.
+
+        The cadence hierarchy mixes translated concepts with stubs, so a
+        path-level fallback would show English for paths that are almost
+        entirely translated.
+        """
+        from services.concepts import localise_hierarchy_path
+        from services.translation import ConceptTranslation
+
+        translations = {"Cadence": ConceptTranslation("Cadencia", None, None)}
+        out = localise_hierarchy_path(
+            ["Cadence", "Authentic Cadence"],
+            ["Cadence", "AuthenticCadence"],
+            translations,
+        )
+        assert out == ["Cadencia", "Authentic Cadence"]
+
+    def test_returns_english_when_ids_are_absent_or_mismatched(self) -> None:
+        """No usable key: return the English path rather than a partial one."""
+        from services.concepts import localise_hierarchy_path
+        from services.translation import ConceptTranslation
+
+        translations = {"Cadence": ConceptTranslation("Cadencia", None, None)}
+        names = ["Cadence", "Authentic Cadence"]
+
+        assert localise_hierarchy_path(names, None, translations) == names
+        # A length mismatch means the two lists cannot be zipped safely.
+        assert localise_hierarchy_path(names, ["Cadence"], translations) == names
+
+    def test_empty_path_is_empty(self) -> None:
+        from services.concepts import localise_hierarchy_path
+
+        assert localise_hierarchy_path(None, None, {}) == []
+        assert localise_hierarchy_path([], [], {}) == []
+
+
+class TestDisplayNameSortKey:
+    """``_sort_key`` — ordering an overlaid list by its own alphabet."""
+
+    def test_folds_accents_rather_than_ordering_after_z(self) -> None:
+        """Python's default sort files every accented character after ``z``."""
+        from services.concepts import _sort_key
+
+        names = ["Zarzuela", "Época", "Cadencia"]
+        assert sorted(names, key=_sort_key) == ["Cadencia", "Época", "Zarzuela"]
+        # Without folding, "Época" sorts last — the behaviour this replaces.
+        assert sorted(names) == ["Cadencia", "Zarzuela", "Época"]
+
+    def test_is_case_insensitive(self) -> None:
+        from services.concepts import _sort_key
+
+        assert _sort_key("Cadencia") == _sort_key("cadencia")

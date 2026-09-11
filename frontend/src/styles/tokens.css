@@ -57,6 +57,17 @@
   --spacing-10: 2.5rem;
   --spacing-12: 3rem;
 
+  /* Layout widths (F10). The set is fixed by DESIGN.md 7.3; these tokens are
+     the rename of the magic numbers that were scattered across route CSS.
+     Semantic, not a t-shirt scale: pick by what the surface *is*. Below `sm`
+     every cap yields to the viewport (DESIGN.md 7.3). */
+  --width-prose: 62ch; /* definition and annotation body text */
+  --width-form: 400px; /* login, register, single-purpose forms */
+  --width-list: 640px; /* list panels, review queue, profile column */
+  --width-reading: 720px; /* glossary index, concept page */
+  --width-listing: 880px; /* public fragment browse, admin tables */
+  --width-wide: 1280px; /* fragment detail, score viewer */
+
   /* Shape — 0px everywhere, non-negotiable */
   --border-radius: 0px;
 

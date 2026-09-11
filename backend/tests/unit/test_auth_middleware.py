@@ -31,14 +31,43 @@ _TEST_SUPABASE_URL = "https://test-project.supabase.co"
 _TEST_ISSUER = f"{_TEST_SUPABASE_URL}/auth/v1"
 
 
+# Role grants keyed by JWT ``sub``, standing in for the ``user_role`` table.
+# Since ADR-037 the token carries no role claim, so a test declares what a
+# caller holds here rather than in the token it mints.
+_EDITOR_SUB = "11111111-1111-4111-8111-111111111111"
+_ADMIN_SUB = "22222222-2222-4222-8222-222222222222"
+_REGISTERED_SUB = "33333333-3333-4333-8333-333333333333"
+_ES256_SUB = "44444444-4444-4444-8444-444444444444"
+
+_TEST_GRANTS: dict[str, frozenset[str]] = {
+    _EDITOR_SUB: frozenset({"editor"}),
+    _ES256_SUB: frozenset({"editor"}),
+    _ADMIN_SUB: frozenset({"admin"}),
+    _REGISTERED_SUB: frozenset(),
+}
+
+
+async def _fake_load_roles(_db: object, user_id: str) -> frozenset[str]:
+    """Stand in for ``services.users.load_roles`` against :data:`_TEST_GRANTS`.
+
+    Args:
+        _db: The mock session (unused).
+        user_id: The caller's ``sub``.
+
+    Returns:
+        The declared grants, or an empty set for an unknown caller — which is
+        exactly what a registered account with no grants looks like.
+    """
+    return _TEST_GRANTS.get(user_id, frozenset())
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def _make_token(
-    sub: str = "user-uuid-1",
-    role: str = "editor",
+    sub: str = _EDITOR_SUB,
     email: str = "editor@test.com",
     *,
     secret: str = _TEST_SECRET,
@@ -48,8 +77,8 @@ def _make_token(
     """Mint a synthetic JWT signed with the test secret.
 
     Args:
-        sub: The ``sub`` claim (user ID).
-        role: Placed in ``app_metadata.role`` as Supabase does.
+        sub: The ``sub`` claim (user ID). Roles are looked up by this value in
+            :data:`_TEST_GRANTS`, standing in for the ``user_role`` table.
         email: The ``email`` claim.
         secret: Signing secret; override to produce a wrong-secret token.
         exp_offset: Seconds added to ``now()`` for the ``exp`` claim.
@@ -63,7 +92,7 @@ def _make_token(
     payload: dict = {
         "sub": sub,
         "email": email,
-        "app_metadata": {"role": role},
+        "user_metadata": {"email_verified": True},
         "exp": int(time.time()) + exp_offset,
     }
     if iss is not None:
@@ -96,8 +125,7 @@ def _make_es256_token(
     private_key: object,
     kid: str,
     *,
-    sub: str = "user-uuid-es256",
-    role: str = "editor",
+    sub: str = _ES256_SUB,
     email: str = "editor-es256@test.com",
     exp_offset: int = 3600,
     iss: str | None = _TEST_ISSUER,
@@ -108,7 +136,6 @@ def _make_es256_token(
         private_key: The EC private key from :func:`_make_es256_jwks`.
         kid: The key id to place in the JWT header (must match the JWKS entry).
         sub: The ``sub`` claim.
-        role: Placed in ``app_metadata.role`` as Supabase does.
         email: The ``email`` claim.
         exp_offset: Seconds added to ``now()`` for the ``exp`` claim.
         iss: The ``iss`` claim; pass ``None`` to omit.
@@ -119,7 +146,7 @@ def _make_es256_token(
     payload: dict = {
         "sub": sub,
         "email": email,
-        "app_metadata": {"role": role},
+        "user_metadata": {"email_verified": True},
         "exp": int(time.time()) + exp_offset,
     }
     if iss is not None:
@@ -157,6 +184,7 @@ def _build_app() -> FastAPI:
     )
     from api.router import router as api_router
     from models.base import get_db
+    from models.roles import ADMIN, EDITOR
 
     # Test-only protected route — not part of the production router.
     # Use the classic `= Depends(...)` syntax; AppUser is a dataclass
@@ -165,9 +193,17 @@ def _build_app() -> FastAPI:
 
     @_test_router.get("/api/v1/protected")
     async def _protected(
-        user: AppUser = require_role("editor"),
+        user: AppUser = require_role(EDITOR, ADMIN),
     ) -> dict:
-        return {"user_id": user.id, "role": user.role}
+        return {"user_id": user.id, "roles": sorted(user.roles)}
+
+    # An editor-only route, mirroring a capability the permission matrix gives
+    # to editors alone: under any-of, an admin does *not* pass it.
+    @_test_router.get("/api/v1/editor-only")
+    async def _editor_only(
+        user: AppUser = require_role(EDITOR),
+    ) -> dict:
+        return {"user_id": user.id, "roles": sorted(user.roles)}
 
     app = FastAPI(lifespan=_noop_lifespan)
     app.add_exception_handler(HTTPException, http_exception_handler)
@@ -204,8 +240,9 @@ async def supabase_client(
     Sets ``AUTH_MODE=supabase`` and ``SUPABASE_JWT_SECRET=<test-secret>``
     so the full HS256 validation path runs without a live Supabase project.
 
-    Includes a ``GET /api/v1/protected`` route (editor-only) to exercise
-    ``require_role``.
+    Includes ``GET /api/v1/protected`` (editor or admin) and
+    ``GET /api/v1/editor-only`` (editor alone) to exercise ``require_role``,
+    with the ``user_role`` lookup stubbed by :func:`_fake_load_roles`.
 
     Yields:
         An ``httpx.AsyncClient`` pointed at ``http://test``.
@@ -214,6 +251,7 @@ async def supabase_client(
     monkeypatch.setenv("AUTH_MODE", "supabase")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", _TEST_SECRET)
     monkeypatch.setenv("SUPABASE_URL", _TEST_SUPABASE_URL)
+    monkeypatch.setattr("api.dependencies.load_roles", _fake_load_roles)
 
     app = _build_app()
     async with AsyncClient(
@@ -245,6 +283,8 @@ async def es256_client(
     monkeypatch.setenv("AUTH_MODE", "supabase")
     monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
     monkeypatch.setenv("SUPABASE_URL", _TEST_SUPABASE_URL)
+
+    monkeypatch.setattr("api.dependencies.load_roles", _fake_load_roles)
 
     private_key, jwks, kid = _make_es256_jwks()
 
@@ -319,7 +359,6 @@ async def test_missing_sub_claim_rejected(supabase_client: AsyncClient) -> None:
     """A JWT with no 'sub' claim returns 401."""
     payload = {
         "email": "nosub@test.com",
-        "app_metadata": {"role": "editor"},
         "exp": int(time.time()) + 3600,
         "iss": _TEST_ISSUER,
     }
@@ -393,7 +432,7 @@ async def test_es256_valid_token_accepted(es256_client: AsyncClient) -> None:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
-    assert response.json()["role"] == "editor"
+    assert response.json()["roles"] == ["editor"]
 
 
 async def test_es256_unknown_kid_rejected(es256_client: AsyncClient) -> None:
@@ -439,26 +478,26 @@ async def test_es256_expired_token_rejected(es256_client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_require_role_editor_with_editor_token(
+async def test_require_role_admits_a_granted_editor(
     supabase_client: AsyncClient,
 ) -> None:
-    """An editor-role token satisfies require_role("editor")."""
-    token = _make_token(sub="editor-uuid", role="editor")
+    """A caller granted ``editor`` in user_role passes require_role(EDITOR, ADMIN)."""
+    token = _make_token(sub=_EDITOR_SUB)
     response = await supabase_client.get(
         "/api/v1/protected",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["user_id"] == "editor-uuid"
-    assert body["role"] == "editor"
+    assert body["user_id"] == _EDITOR_SUB
+    assert body["roles"] == ["editor"]
 
 
-async def test_require_role_editor_with_admin_token(
+async def test_require_role_admits_an_admin_where_the_matrix_lists_admin(
     supabase_client: AsyncClient,
 ) -> None:
-    """An admin-role token also satisfies require_role("editor") (higher rank)."""
-    token = _make_token(role="admin")
+    """An admin passes a route that names ADMIN among its accepted roles."""
+    token = _make_token(sub=_ADMIN_SUB)
     response = await supabase_client.get(
         "/api/v1/protected",
         headers={"Authorization": f"Bearer {token}"},
@@ -466,11 +505,33 @@ async def test_require_role_editor_with_admin_token(
     assert response.status_code == 200
 
 
-async def test_require_role_editor_with_insufficient_role(
+async def test_require_role_is_any_of_not_a_hierarchy(
     supabase_client: AsyncClient,
 ) -> None:
-    """A token with an unrecognised/low role is rejected with 403."""
-    token = _make_token(role="viewer")
+    """An admin is refused by an editor-only route.
+
+    This is the Component 12 semantic change (ADR-037): ``require_role`` was a
+    hierarchy in which admin outranked editor, and is now any-of. Every route
+    that both roles may reach names them both; nothing grants admin a capability
+    the permission matrix withholds.
+    """
+    token = _make_token(sub=_ADMIN_SUB)
+    response = await supabase_client.get(
+        "/api/v1/editor-only",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+async def test_require_role_refuses_a_caller_with_no_grants(
+    supabase_client: AsyncClient,
+) -> None:
+    """A registered account holding no roles is rejected with 403.
+
+    Default-deny for every new registration falls out of this: an account
+    created by Component 12's sign-up flow has no ``user_role`` rows at all.
+    """
+    token = _make_token(sub=_REGISTERED_SUB)
     response = await supabase_client.get(
         "/api/v1/protected",
         headers={"Authorization": f"Bearer {token}"},

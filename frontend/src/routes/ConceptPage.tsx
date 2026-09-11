@@ -16,7 +16,7 @@
  *  4. Inline example fragments (Step 6, ConceptExamples) — a shuffleable draw
  *     of approved fragments, each expandable to a full render.
  *  5. A link into the anonymous fragment browse for this concept
- *     (`/public/concepts?concept=<id>`).
+ *     (`/fragments?concept=<id>`).
  *
  * Two states diverge from that shape:
  *  - **Stub concept** — leads with the honest "domain not yet modelled" banner,
@@ -87,7 +87,7 @@ function ConceptLink({ concept }: { concept: ConceptRef }) {
 // ---------------------------------------------------------------------------
 
 export default function ConceptPage() {
-  const { t } = useTranslation(['public', 'common']);
+  const { t, i18n } = useTranslation(['public', 'common']);
   const { conceptId } = useParams<{ conceptId: string }>();
 
   const [concept, setConcept] = useState<ConceptDetail | null>(null);
@@ -123,7 +123,10 @@ export default function ConceptPage() {
     return () => {
       cancelled = true;
     };
-  }, [conceptId]);
+  // Refetch when the UI language changes: the payload's concept names come
+  // from the server's translation overlay, so switching language must go
+  // back to the API — re-rendering only re-runs the chrome's t() calls.
+  }, [conceptId, i18n.language]);
 
   const groups = useMemo(
     () => (concept ? groupRelationships(concept.relationships) : []),
@@ -322,7 +325,7 @@ export default function ConceptPage() {
         {!concept.stub && (
           <div className={styles.browse}>
             <Link
-              to={`/public/concepts?concept=${encodeURIComponent(concept.id)}`}
+              to={`/fragments?concept=${encodeURIComponent(concept.id)}`}
               className={styles.browseLink}
             >
               <Type variant="body-lg" as="span">

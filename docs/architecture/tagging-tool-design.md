@@ -51,7 +51,7 @@ Five layers stack on top of the Verovio render. Layers 1 and 2 carry over direct
 
 **Layer 2 — Measure / beat / sub-beat ghost layer.** The transparent SVG ghost overlay from the prototype: measure ghosts for the main fragment selection, beat and sub-beat ghosts for sub-measure precision. Governed by the resolution toggle (see §5). Sits over the staff.
 
-**Layer 3 — Main bracket track.** A single coloured bracket rendered above the staff once `fragmentSet` is true. Has gradient-zone drag handles at both endpoints (from the prototype). Colour is fixed across all annotations (e.g. system accent colour).
+**Layer 3 — Main bracket track.** ~~A single coloured bracket rendered above the staff once `fragmentSet` is true. Has gradient-zone drag handles at both endpoints (from the prototype). Colour is fixed across all annotations (e.g. system accent colour).~~ **Removed in M5 (Component 12 Step 14, 2026-09-03).** The layer restated what Layer 2 already showed: the ghost overlay fills the committed selection (`.ghost.dark`) and renders the endpoint drag handles (`.ghost-handle-*`), and this bracket's own gradient zones were cosmetic duplicates of them — its source said so. It cost an above-staff lane, and above-staff vertical stack is what pushes a system's brackets into its neighbour. The committed selection is Layer 2's to show; brackets above the staff are now only *stored* fragments'.
 
 **Layer 4 — Stage bracket track.** Rendered below the staff once `conceptSet` is true and the concept has `CONTAINS` edges. One bracket per stage, each in a distinct colour keyed to the stage concept. See §4 for pre-population and §6 for the split-handle interaction.
 
@@ -367,7 +367,9 @@ If the children differ only in property values (not in stage structure), Type Re
 
 ### 7.3 Stage list
 
-Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, **ordered by physical position in the score** (bar, then beat; absent stages grouped last) — not by the abstract `order` edge property (Component 9 G2). During a split-handle drag the display order **freezes** at its pre-drag state, resorting once on release, so cards never jump around mid-gesture (Component 9 Part 8 item 4).
+Shown when the selected concept (including any Type Refinement) has `CONTAINS` edges. One card per stage, **ordered by physical position in the score** (bar, then beat) — not by the abstract `order` edge property (Component 9 G2). An **unplaced stage keeps its slot in the sequence**, inserted ahead of the first card whose `order` follows its own; it is not grouped at the end. (Absent stages were grouped last until Component 12 Step 18: disabling the second of four stages threw its card to the bottom of the list, which is M9. For contiguous stages — every stage the corpus defines — position order and schema order coincide, so this moves only the unplaced cards and leaves G2's intent intact.) During a split-handle drag the display order **freezes** at its pre-drag state, resorting once on release, so cards never jump around mid-gesture (Component 9 Part 8 item 4).
+
+When the committed selection is too short to place the concept's stages even at sub-beat resolution, the stages are listed **unplaced** rather than not listed at all, under a notice saying so. The absent toggle lives on a stage card, so an empty list would make "mark stages absent" — the alternative to lengthening the selection — impossible to act on (Component 12 Step 17). Marking stages absent re-attempts placement with the stages that remain, and the notice clears once they fit.
 
 Each card shows *(trimmed to essentials, Part 8 item 4 — the "Stages" interaction explanation lives behind an (i) hover affordance on the section heading rather than a permanent paragraph)*:
 
@@ -480,7 +482,7 @@ This section maps each design section above to the shipped modules. It is update
 |---|---|
 | §2 State model (concurrent flags) | `frontend/src/components/score/selection.ts` |
 | §3 Layer 2 — Ghost overlay | `frontend/src/components/score/ghosts.ts` |
-| §3 Layer 3 — Main bracket track | `frontend/src/components/score/MainBracket.tsx` |
+| §3 Layer 3 — Main bracket track | *removed in M5; the committed selection is shown by Layer 2. Segment projection lives in `frontend/src/components/score/bracketSegments.ts`* |
 | §3 Layer 4 — Stage bracket track | `frontend/src/components/score/StageBrackets.tsx` |
 | §4 Stage pre-population and grid snapping | `frontend/src/components/score/stages.ts` |
 | §5 Selection grid (resolution toggle) | `frontend/src/components/score/ghosts.ts` (layer switching), `frontend/src/components/score/annotator.ts` (toggle handler) |

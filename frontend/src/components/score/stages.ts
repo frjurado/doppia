@@ -411,6 +411,43 @@ export function prePopulateStages(
 // ---------------------------------------------------------------------------
 
 /**
+ * True when a stage's bounds cover a non-empty span of music.
+ *
+ * Stage bounds are half-open — a stage runs from its start up to, but not
+ * including, the next stage's start — and a null beat means the bar's own edge:
+ * `beatStart: null` is the bar's first beat, `beatEnd: null` its end. Comparing
+ * `(bar, beat)` pairs under that reading is the only way to see an empty span,
+ * because bar numbers alone cannot: `m2b(null) .. m2b1` counts as one bar and
+ * holds zero beats.
+ *
+ * Also catches inverted bounds (`barEnd < barStart`), which is the whole-bar
+ * form of the same defect.
+ */
+function stageBoundsHaveExtent(b: StageBounds): boolean {
+  const startBar = b.barStart;
+  const startBeat = b.beatStart ?? 1; // null start = the bar's first beat
+  const endBar = b.barEnd;
+  const endBeat = b.beatEnd ?? Number.POSITIVE_INFINITY; // null end = the bar's end
+
+  if (endBar !== startBar) return endBar > startBar;
+  return endBeat > startBeat;
+}
+
+/**
+ * Bars to carve out of a donor of `donorBars` for a stage of `stageWeight`.
+ *
+ * Clamped so the donor keeps at least one bar. `canDonate` already refuses a
+ * donor narrower than two bars, so this is the second line of defence rather
+ * than the first — it holds the invariant if a future caller forgets that
+ * check. Removing either one lets a one-bar donor give away its only bar and
+ * end up inverted (`barEnd === barStart - 1`).
+ */
+function carveBars(donorBars: number, stageWeight: number, totalWeight: number): number {
+  const proportional = Math.max(1, Math.round((donorBars * stageWeight) / totalWeight));
+  return Math.min(proportional, donorBars - 1);
+}
+
+/**
  * Toggle the absent state of an optional stage.
  *
  * When a stage is marked absent:
@@ -487,64 +524,78 @@ export function toggleStageAbsent(
     const prevActive = sorted.slice(0, idx).reverse().find(a => !a.absent);
     const nextActive = sorted.slice(idx + 1).find(a => !a.absent);
 
-    const donor = prevActive ?? nextActive;
-    if (!donor) {
-      return assignments.map(a =>
+    // A donor can only give space it has: carving one bar out of a one-bar
+    // neighbour used to leave that neighbour at barEnd = barStart - 1, an
+    // inverted bracket that nothing downstream rejects — not the Pydantic
+    // write model, not the sub-part containment check, not a DB constraint.
+    // Prefer the nearest neighbour, but fall through to the other side when
+    // the nearest is too narrow to split.
+    const canDonate = (a: StageAssignment | undefined): boolean =>
+      !!a?.bounds && a.bounds.barEnd - a.bounds.barStart + 1 >= 2;
+
+    const donor = canDonate(prevActive)
+      ? prevActive
+      : canDonate(nextActive)
+        ? nextActive
+        : undefined;
+
+    /** Restore the stage with no bounds — the caller re-places it (see below). */
+    const restoreUnplaced = () =>
+      assignments.map(a =>
         a.stageId === stageId
           ? { ...a, absent: false, confirmed: true }
           : a,
       );
+
+    if (!donor || !donor.bounds) return restoreUnplaced();
+
+    const donorBars = donor.bounds.barEnd - donor.bounds.barStart + 1;
+    const totalWeight = stage.defaultWeight + donor.defaultWeight || 1;
+    const stageBars = carveBars(donorBars, stage.defaultWeight, totalWeight);
+
+    // The restored stage inherits the donor's old outer boundary exactly
+    // (bar, beat, key); the newly created shared boundary between donor
+    // and restored stage is measure-aligned (§6A.4).
+    const restoredBounds: StageBounds = donor === prevActive
+      ? {
+          barStart: donor.bounds.barEnd - stageBars + 1,
+          beatStart: null,
+          barEnd: donor.bounds.barEnd,
+          beatEnd: donor.bounds.beatEnd,
+          keyEnd: donor.bounds.keyEnd,
+        }
+      : {
+          barStart: donor.bounds.barStart,
+          beatStart: donor.bounds.beatStart,
+          keyStart: donor.bounds.keyStart,
+          barEnd: donor.bounds.barStart + stageBars - 1,
+          beatEnd: null,
+        };
+
+    const newDonorBounds: StageBounds = donor === prevActive
+      ? { ...donor.bounds, barEnd: donor.bounds.barEnd - stageBars, beatEnd: null, keyEnd: undefined }
+      : { ...donor.bounds, barStart: donor.bounds.barStart + stageBars, beatStart: null, keyStart: undefined };
+
+    // This carve counts whole bars, but stages are laid out on whatever grid
+    // the selection needed — often beats. A donor spanning "two bars" may hold
+    // only two beats across a barline (m1b3 .. m2b1), and taking a bar from it
+    // then hands the restored stage a whole measure and leaves the donor with
+    // nothing: m2b1 .. m2b1, zero beats wide, still listed as present. Bar
+    // counting cannot see that, so check the actual extents and bail out if
+    // either is empty. Restoring unplaced is the honest fallback — the toggle
+    // handler re-places the whole wanted set on the correct grid, which is what
+    // this situation calls for anyway.
+    if (!stageBoundsHaveExtent(restoredBounds) || !stageBoundsHaveExtent(newDonorBounds)) {
+      return restoreUnplaced();
     }
 
     return assignments.map(a => {
       if (a.stageId === stageId) {
-        // Restore from donor based on weight proportion.
-        if (!donor.bounds) {
-          return { ...a, absent: false, confirmed: true };
-        }
-        const donorBars = donor.bounds.barEnd - donor.bounds.barStart + 1;
-        const totalWeight = stage.defaultWeight + donor.defaultWeight || 1;
-        const stageBars = Math.max(1, Math.round(donorBars * stage.defaultWeight / totalWeight));
-
-        // The restored stage inherits the donor's old outer boundary exactly
-        // (bar, beat, key); the newly created shared boundary between donor
-        // and restored stage is measure-aligned (§6A.4).
-        const restoredBounds: StageBounds = donor === prevActive
-          ? {
-              barStart: donor.bounds.barEnd - stageBars + 1,
-              beatStart: null,
-              barEnd: donor.bounds.barEnd,
-              beatEnd: donor.bounds.beatEnd,
-              keyEnd: donor.bounds.keyEnd,
-            }
-          : {
-              barStart: donor.bounds.barStart,
-              beatStart: donor.bounds.beatStart,
-              keyStart: donor.bounds.keyStart,
-              barEnd: donor.bounds.barStart + stageBars - 1,
-              beatEnd: null,
-            };
-
-        return {
-          ...a,
-          absent: false,
-          bounds: restoredBounds,
-          confirmed: true,
-        };
+        return { ...a, absent: false, bounds: restoredBounds, confirmed: true };
       }
-
-      if (a.stageId === donor.stageId && donor.bounds) {
-        const donorBars = donor.bounds.barEnd - donor.bounds.barStart + 1;
-        const totalWeight = stage.defaultWeight + donor.defaultWeight || 1;
-        const stageBars = Math.max(1, Math.round(donorBars * stage.defaultWeight / totalWeight));
-
-        const newDonorBounds: StageBounds = donor === prevActive
-          ? { ...donor.bounds, barEnd: donor.bounds.barEnd - stageBars, beatEnd: null, keyEnd: undefined }
-          : { ...donor.bounds, barStart: donor.bounds.barStart + stageBars, beatStart: null, keyStart: undefined };
-
+      if (a.stageId === donor.stageId) {
         return { ...a, bounds: newDonorBounds };
       }
-
       return a;
     });
   }
@@ -620,4 +671,98 @@ export function reconcileWithNewConcept(
   }
 
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Stage-card display order (Component 12 Step 18, M9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Order stage cards for the sidebar list.
+ *
+ * Placed stages sort by physical position in the score — bar, then beat, then
+ * schema order as the tiebreak — which is the rule
+ * `tagging-tool-design.md` §"Stage list" fixed in Component 9 G2: the list
+ * should read top-to-bottom the way the stages lie in the music.
+ *
+ * What changed in Step 18 is where an *unplaced* stage goes. Absent stages have
+ * no bounds to sort by and used to be grouped after every positioned one, so
+ * disabling the second of four stages threw its card to the bottom of the list
+ * (M9). Each unplaced stage now keeps its slot in the sequence instead: it is
+ * inserted ahead of the first card whose schema order follows its own. For
+ * contiguous stages — every stage the corpus defines — position order and
+ * schema order coincide, so this only moves the absent cards.
+ *
+ * Pure and total: every input assignment appears exactly once in the output.
+ */
+export function orderStageCards(assignments: StageAssignment[]): StageAssignment[] {
+  const placed = assignments
+    .filter(a => a.bounds)
+    .sort((a, b) => {
+      const ab = a.bounds!;
+      const bb = b.bounds!;
+      if (ab.barStart !== bb.barStart) return ab.barStart - bb.barStart;
+      const aBeat = ab.beatStart ?? 0;
+      const bBeat = bb.beatStart ?? 0;
+      if (aBeat !== bBeat) return aBeat - bBeat;
+      return a.order - b.order;
+    });
+
+  const unplaced = assignments.filter(a => !a.bounds).sort((a, b) => a.order - b.order);
+
+  const out = [...placed];
+  for (const stage of unplaced) {
+    const at = out.findIndex(a => a.order > stage.order);
+    if (at === -1) out.push(stage);
+    else out.splice(at, 0, stage);
+  }
+  return out;
+}
+
+/**
+ * Build unplaced assignments — one per stage, with no bounds.
+ *
+ * Used when the committed selection is too short to place the concept's stages
+ * even at sub-beat resolution. Returning the stages unplaced rather than
+ * returning nothing is what lets the sidebar list them, which is the only place
+ * the annotator can mark a stage absent; a notice telling someone to "mark
+ * stages absent" over an empty list would be advice they cannot take
+ * (Component 12 Step 17).
+ *
+ * `absent: false` — these stages are wanted, just unplaceable so far.
+ * `computeStagesComplete` therefore reports false while any remain, which is
+ * correct: the fragment is not ready to submit.
+ */
+export function buildUnplacedStages(stages: ContainsStage[]): StageAssignment[] {
+  return [...stages]
+    .sort((a, b) => a.order - b.order)
+    .map(stage => ({
+      stageId: stage.target_id,
+      stageName: stage.target_name,
+      order: stage.order,
+      required: stage.required,
+      displayMode: stage.display_mode,
+      containmentMode: stage.containment_mode,
+      defaultWeight: stage.default_weight,
+      bounds: null,
+      confirmed: false,
+      absent: false,
+      orphaned: false,
+      error: false,
+    }));
+}
+
+/**
+ * True when some stage is wanted but has nowhere to sit.
+ *
+ * "Wanted" means neither absent nor orphaned: the annotator expects a bracket
+ * for it. A wanted stage with no bounds is the state `toggleStageAbsent`
+ * produces when it restores a stage and no neighbour can spare a bar — correct,
+ * since the alternative is inverted geometry, but invisible on its own. The
+ * toggle handler tests this to decide whether to re-attempt placement across
+ * the whole wanted set and, failing that, to raise the blocked notice
+ * (Component 12 Step 17/18).
+ */
+export function hasUnplacedWantedStage(assignments: StageAssignment[]): boolean {
+  return assignments.some(a => !a.absent && !a.orphaned && !a.bounds);
 }

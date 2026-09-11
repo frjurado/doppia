@@ -10,9 +10,11 @@
  *  MANY_OF → checkbox group (≤2 values) or compact multi-select popover (>2 values)
  *  BOOL    → binary on/off toggle; null = never-touched initial state (ADR-019)
  *
- * Ordering (ADR-023): schemas are rendered in the order returned by the server,
- * which sorts by (grouped-first, order, name). Schemas sharing the same `group`
- * label are rendered as a contiguous cluster with a visible group label.
+ * Ordering (ADR-023 as amended): schemas are rendered in the order returned by
+ * the server, which sorts by (order, name) alone. Schemas sharing the same
+ * `group` label are rendered as a contiguous cluster with a visible group label;
+ * an ungrouped schema may sit between two groups, which is how `ECP` stays
+ * inline while `other` stays last. We cluster contiguous runs and never re-sort.
  * Required schemas are marked with * but are not separated from optional ones
  * by position — a required schema may appear inside the same group as optional ones.
  *
@@ -28,7 +30,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PropertySchema } from '../../services/conceptApi';
+import type { PropertySchema, PropertyValue } from '../../services/conceptApi';
+import InfoHint from '../ui/InfoHint';
 import Type from '../ui/Type';
 import styles from './PropertyForm.module.css';
 
@@ -63,9 +66,66 @@ export interface PropertyFormProps {
 // ---------------------------------------------------------------------------
 
 /** Field name label and optional description shown above each control. */
+/**
+ * The label to print for a value.
+ *
+ * `short_name` where the seed provides one, because every surface that shows a
+ * value prints its schema name beside it — "On Scale Degree 4" under
+ * "Stage 2 Components". `name` stays the absolute form for the context-free
+ * consumers (exports, Component 15 distractors) and is the fallback here.
+ */
+function valueLabel(pv: PropertyValue): string {
+  return pv.short_name ?? pv.name;
+}
+
+/**
+ * Help text for a value's ⓘ, or null when there is nothing worth showing.
+ *
+ * The ⓘ used to render the *referenced concept* — which for these values is a
+ * placeholder in an unwritten domain, so it showed a title that merely repeated
+ * the value and a body reading "Stub: defined in the harmonic-functions
+ * domain." Now the value's own `description` is the help, and a referenced
+ * concept contributes only when it is not a stub and actually has a definition.
+ */
+function valueHelp(pv: PropertyValue): string | null {
+  if (pv.description) return pv.description;
+  const ref = pv.referenced_concept;
+  if (ref && !ref.stub && ref.definition) return ref.definition;
+  return null;
+}
+
+/**
+ * Leading mark on an option row (triage item 11).
+ *
+ * A ONE_OF group and a MANY_OF group were rendering identically. Under a 0px
+ * radius the usual circle-vs-square distinction is unavailable, so the
+ * *selected* mark carries it instead, and it carries it the same way in the
+ * inline rows and in the dropdown:
+ *
+ *   MANY_OF  — the well fills, exactly like the BOOL toggle's "on" state.
+ *              A multi-select is a row of independent booleans, so it should
+ *              look like one.
+ *   ONE_OF   — a solid mark centred inside the well: the square counterpart
+ *              of a radio button's dot.
+ *
+ * Only the well changes colour. The row keeps its tonal layer, as the BOOL
+ * toggle's row does.
+ */
+function OptionIndicator({ selected, multiple }: { selected: boolean; multiple: boolean }) {
+  const state = selected
+    ? multiple
+      ? styles.optionIndicatorCheckOn
+      : styles.optionIndicatorRadioOn
+    : '';
+  return (
+    <span className={[styles.optionIndicator, state].filter(Boolean).join(' ')} aria-hidden="true">
+      {selected && multiple ? '✓' : ''}
+    </span>
+  );
+}
+
 function FieldMeta({ schema }: { schema: PropertySchema }) {
   const { t } = useTranslation('score');
-  const [descOpen, setDescOpen] = useState(false);
 
   return (
     <div className={styles.fieldMeta}>
@@ -79,27 +139,14 @@ function FieldMeta({ schema }: { schema: PropertySchema }) {
           </span>
         )}
         {schema.description && (
-          <button
-            type="button"
-            className={styles.descButton}
-            aria-label={t('propertyForm.aboutAria', { name: schema.name })}
-            aria-expanded={descOpen}
-            onMouseEnter={() => setDescOpen(true)}
-            onMouseLeave={() => setDescOpen(false)}
-            onClick={() => setDescOpen((o) => !o)}
-            data-testid={`desc-btn-${schema.id}`}
-          >
-            ⓘ
-          </button>
+          <InfoHint
+            text={schema.description}
+            ariaLabel={t('propertyForm.aboutAria', { name: schema.name })}
+            buttonTestId={`desc-btn-${schema.id}`}
+            panelTestId={`desc-panel-${schema.id}`}
+          />
         )}
       </span>
-      {schema.description && descOpen && (
-        <div className={styles.descFloating} role="tooltip" data-testid={`desc-panel-${schema.id}`}>
-          <Type variant="label-sm" as="span">
-            {schema.description}
-          </Type>
-        </div>
-      )}
     </div>
   );
 }
@@ -132,7 +179,6 @@ interface OptionDropdownProps {
 function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownProps) {
   const { t } = useTranslation('score');
   const [open, setOpen] = useState(false);
-  const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const selectedIds: string[] = multiple
@@ -221,57 +267,30 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
           >
             {schema.values.map((pv) => {
               const isSelected = selectedIds.includes(pv.id);
-              const isInfoOpen = infoOpenId === pv.id;
-              const hasRef = !!pv.referenced_concept;
+              const help = valueHelp(pv);
               return (
                 <div key={pv.id}>
                   <div
-                    className={[styles.optionLabel, isSelected ? styles.optionLabelSelected : '']
-                      .filter(Boolean)
-                      .join(' ')}
+                    className={styles.optionLabel}
                     role={multiple ? 'checkbox' : 'option'}
                     aria-selected={isSelected}
                     aria-checked={multiple ? isSelected : undefined}
                     onClick={() => handleOptionClick(pv.id)}
                     data-testid={`dropdown-option-${schema.id}-${pv.id}`}
                   >
-                    <Type
-                      variant="label-md"
-                      as="span"
-                      className={isSelected ? styles.optionTextSelected : styles.optionText}
-                    >
-                      {pv.name}
+                    <OptionIndicator selected={isSelected} multiple={multiple} />
+                    <Type variant="label-md" as="span" className={styles.optionText}>
+                      {valueLabel(pv)}
                     </Type>
-                    {hasRef && (
-                      <button
-                        type="button"
-                        className={styles.infoButton}
-                        aria-label={t('propertyForm.infoAria', {
-                          name: pv.referenced_concept!.name,
-                        })}
-                        aria-expanded={isInfoOpen}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInfoOpenId(isInfoOpen ? null : pv.id);
-                        }}
-                        data-testid={`info-btn-${pv.id}`}
-                      >
-                        ⓘ
-                      </button>
+                    {help !== null && (
+                      <InfoHint
+                        text={help}
+                        ariaLabel={t('propertyForm.infoAria', { name: valueLabel(pv) })}
+                        buttonTestId={`info-btn-${pv.id}`}
+                        panelTestId={`info-panel-${pv.id}`}
+                      />
                     )}
                   </div>
-                  {hasRef && isInfoOpen && (
-                    <div className={styles.infoPanel} data-testid={`info-panel-${pv.id}`}>
-                      <Type variant="label-md" as="span" className={styles.infoTitle}>
-                        {pv.referenced_concept!.name}
-                      </Type>
-                      {pv.referenced_concept!.definition && (
-                        <Type variant="label-sm" as="span" className={styles.infoDef}>
-                          {pv.referenced_concept!.definition}
-                        </Type>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -285,7 +304,6 @@ function OptionDropdown({ schema, value, multiple, onChange }: OptionDropdownPro
 /** ONE_OF: radio group (≤2 values) or compact single-select popover (>2 values). */
 function OneOfField({ schema, value, onChange }: FieldProps) {
   const { t } = useTranslation('score');
-  const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const selected = typeof value === 'string' ? value : null;
 
   if (schema.values.length > 2) {
@@ -299,16 +317,10 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
       <div className={styles.optionGroup} role="radiogroup" aria-label={schema.name}>
         {schema.values.map((pv) => {
           const isChecked = selected === pv.id;
-          const isInfoOpen = infoOpenId === pv.id;
-          const hasRef = !!pv.referenced_concept;
+          const help = valueHelp(pv);
           return (
             <div key={pv.id}>
-              <label
-                className={[styles.optionLabel, isChecked ? styles.optionLabelSelected : '']
-                  .filter(Boolean)
-                  .join(' ')}
-                data-testid={`radio-${schema.id}-${pv.id}`}
-              >
+              <label className={styles.optionLabel} data-testid={`radio-${schema.id}-${pv.id}`}>
                 <input
                   type="radio"
                   name={schema.id}
@@ -317,43 +329,21 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
                   onChange={() => {}}
                   onClick={() => onChange(schema.id, isChecked ? null : pv.id)}
                   className={styles.hiddenInput}
-                  aria-label={pv.name}
+                  aria-label={valueLabel(pv)}
                 />
-                <Type
-                  variant="label-md"
-                  as="span"
-                  className={isChecked ? styles.optionTextSelected : styles.optionText}
-                >
-                  {pv.name}
+                <OptionIndicator selected={isChecked} multiple={false} />
+                <Type variant="label-md" as="span" className={styles.optionText}>
+                  {valueLabel(pv)}
                 </Type>
-                {hasRef && (
-                  <button
-                    type="button"
-                    className={styles.infoButton}
-                    aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
-                    aria-expanded={isInfoOpen}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setInfoOpenId(isInfoOpen ? null : pv.id);
-                    }}
-                    data-testid={`info-btn-${pv.id}`}
-                  >
-                    ⓘ
-                  </button>
+                {help !== null && (
+                  <InfoHint
+                    text={help}
+                    ariaLabel={t('propertyForm.infoAria', { name: valueLabel(pv) })}
+                    buttonTestId={`info-btn-${pv.id}`}
+                    panelTestId={`info-panel-${pv.id}`}
+                  />
                 )}
               </label>
-              {hasRef && isInfoOpen && (
-                <div className={styles.infoPanel} data-testid={`info-panel-${pv.id}`}>
-                  <Type variant="label-md" as="span" className={styles.infoTitle}>
-                    {pv.referenced_concept!.name}
-                  </Type>
-                  {pv.referenced_concept!.definition && (
-                    <Type variant="label-sm" as="span" className={styles.infoDef}>
-                      {pv.referenced_concept!.definition}
-                    </Type>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
@@ -365,7 +355,6 @@ function OneOfField({ schema, value, onChange }: FieldProps) {
 /** MANY_OF: checkbox group (≤2 values) or compact multi-select popover (>2 values). */
 function ManyOfField({ schema, value, onChange }: FieldProps) {
   const { t } = useTranslation('score');
-  const [infoOpenId, setInfoOpenId] = useState<string | null>(null);
   const selected: string[] = Array.isArray(value) ? value : [];
 
   if (schema.values.length > 2) {
@@ -385,58 +374,30 @@ function ManyOfField({ schema, value, onChange }: FieldProps) {
       <div className={styles.optionGroup} role="group" aria-label={schema.name}>
         {schema.values.map((pv) => {
           const isChecked = selected.includes(pv.id);
-          const isInfoOpen = infoOpenId === pv.id;
-          const hasRef = !!pv.referenced_concept;
+          const help = valueHelp(pv);
           return (
             <div key={pv.id}>
-              <label
-                className={[styles.optionLabel, isChecked ? styles.optionLabelSelected : '']
-                  .filter(Boolean)
-                  .join(' ')}
-                data-testid={`checkbox-${schema.id}-${pv.id}`}
-              >
+              <label className={styles.optionLabel} data-testid={`checkbox-${schema.id}-${pv.id}`}>
                 <input
                   type="checkbox"
                   className={styles.hiddenInput}
                   checked={isChecked}
                   onChange={() => toggle(pv.id)}
-                  aria-label={pv.name}
+                  aria-label={valueLabel(pv)}
                 />
-                <Type
-                  variant="label-md"
-                  as="span"
-                  className={isChecked ? styles.optionTextSelected : styles.optionText}
-                >
-                  {pv.name}
+                <OptionIndicator selected={isChecked} multiple />
+                <Type variant="label-md" as="span" className={styles.optionText}>
+                  {valueLabel(pv)}
                 </Type>
-                {hasRef && (
-                  <button
-                    type="button"
-                    className={styles.infoButton}
-                    aria-label={t('propertyForm.infoAria', { name: pv.referenced_concept!.name })}
-                    aria-expanded={isInfoOpen}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setInfoOpenId(isInfoOpen ? null : pv.id);
-                    }}
-                    data-testid={`info-btn-${pv.id}`}
-                  >
-                    ⓘ
-                  </button>
+                {help !== null && (
+                  <InfoHint
+                    text={help}
+                    ariaLabel={t('propertyForm.infoAria', { name: valueLabel(pv) })}
+                    buttonTestId={`info-btn-${pv.id}`}
+                    panelTestId={`info-panel-${pv.id}`}
+                  />
                 )}
               </label>
-              {hasRef && isInfoOpen && (
-                <div className={styles.infoPanel} data-testid={`info-panel-${pv.id}`}>
-                  <Type variant="label-md" as="span" className={styles.infoTitle}>
-                    {pv.referenced_concept!.name}
-                  </Type>
-                  {pv.referenced_concept!.definition && (
-                    <Type variant="label-sm" as="span" className={styles.infoDef}>
-                      {pv.referenced_concept!.definition}
-                    </Type>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
@@ -461,13 +422,17 @@ function BoolField({ schema, value, onChange }: FieldProps) {
   const { t } = useTranslation('score');
   const current = typeof value === 'boolean' ? value : null;
   const nextValue: boolean | null = current === null ? true : current === true ? false : true;
-  const indicator = current === true ? '✓' : '✗';
+  const indicator = current === true ? '\u2713' : '\u2717';
 
+  // The whole row is the target, not just the mark (triage item 11): a BOOL is
+  // one option of a MANY_OF group with the group left out, so it takes the same
+  // row, the same 16px mark and the same label type. Before this it was the odd
+  // one out — a 24px mark you had to hit exactly, beside a smaller label.
   return (
     <div className={styles.boolInlineField} data-testid={`field-${schema.id}`}>
       <button
         type="button"
-        className={`${styles.boolToggle} ${current === true ? styles.boolToggleOn : styles.boolToggleOff}`}
+        className={styles.boolRow}
         onClick={() => onChange(schema.id, nextValue)}
         aria-label={t('propertyForm.boolAria', {
           name: schema.name,
@@ -480,9 +445,31 @@ function BoolField({ schema, value, onChange }: FieldProps) {
         })}
         data-testid={`bool-toggle-${schema.id}`}
       >
-        {indicator}
+        <span
+          className={[styles.optionIndicator, current === true ? styles.optionIndicatorCheckOn : '']
+            .filter(Boolean)
+            .join(' ')}
+          aria-hidden="true"
+        >
+          {indicator}
+        </span>
+        <Type variant="label-md" as="span" className={styles.optionText}>
+          {schema.name}
+        </Type>
       </button>
-      <FieldMeta schema={schema} />
+      {schema.required && (
+        <span className={styles.required} aria-label={t('requiredAria')}>
+          *
+        </span>
+      )}
+      {schema.description && (
+        <InfoHint
+          text={schema.description}
+          ariaLabel={t('propertyForm.aboutAria', { name: schema.name })}
+          buttonTestId={`desc-btn-${schema.id}`}
+          panelTestId={`desc-panel-${schema.id}`}
+        />
+      )}
     </div>
   );
 }
@@ -504,8 +491,9 @@ function SchemaField({ schema, value, onChange }: FieldProps) {
 
 // ---------------------------------------------------------------------------
 // Group schemas into contiguous sections by their `group` label (ADR-023).
-// The server already delivers schemas in (grouped-first, order, name) order;
-// we only need to detect group boundaries and cluster them visually.
+// The server already delivers schemas in (order, name) order; we only detect
+// group boundaries and cluster them visually. Never re-sort here — the server's
+// sequence is what puts an ungrouped schema between two groups.
 // ---------------------------------------------------------------------------
 
 interface SchemaSection {

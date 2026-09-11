@@ -1,8 +1,18 @@
-"""SQLAlchemy ORM model for user infrastructure.
+"""SQLAlchemy ORM models for user infrastructure.
 
-Only ``app_user`` is created in Phase 1. The deferred tables (collection,
-collection_fragment, exercise_result, reading_history) and the deferred
-``self_declared_role`` column are defined in Phase 2 documents.
+``app_user`` mirrors the subset of Supabase Auth fields the application needs;
+``user_role`` carries role grants, one row per (user, role) pair.
+
+Phase 1 stored a single ``role`` string on ``app_user``. Component 12 replaced
+it with the join table: a user holds a *set* of roles (editor + author + admin
+are independent grants), and each grant carries its own audit trail. The
+``registered`` role is implicit in having an account and is never stored;
+``anonymous`` is the absence of a session. See ADR-037 and
+``docs/architecture/roles-and-permissions.md`` § 1.
+
+Per-user *state* lives in ``models/user_state.py`` (exercises, reading
+history); ``collection`` / ``collection_fragment`` are deferred to Component 13,
+where they can be designed against real use.
 
 Note: the table is named ``app_user`` rather than ``user`` because ``USER``
 is a SQL reserved keyword (an alias for ``CURRENT_USER`` in PostgreSQL);
@@ -15,17 +25,32 @@ import uuid
 from datetime import datetime
 
 from models.base import Base
-from sqlalchemy import DateTime, String, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
+
+#: The system user that inherits a deleted account's editorial contributions.
+#: Fixed and seeded by migration 0013, so every environment has the same id and
+#: a reassignment target always exists. Chosen from the all-zero block because
+#: a real Supabase id is a random v4 and can never collide with it; not the nil
+#: UUID, which code elsewhere is entitled to read as "unset".
+SYSTEM_USER_ID: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-0000000000ff")
+
+#: The system user's address. ``.invalid`` is reserved by RFC 2606 and can
+#: never be registered, so this can never collide with a real account.
+SYSTEM_USER_EMAIL = "deleted-user@doppia.invalid"
 
 
 class AppUser(Base):
     """Registered user account.
 
-    Phase 1 creates trusted annotators and admins only. Reader-facing user
-    features (self_declared_role, collections, exercise history) are deferred
-    to Phase 2 when their consumers exist.
+    Roles are not an attribute of the account: they live in
+    :class:`UserRole`. An account with no ``user_role`` rows is a plain
+    registered user, which is the default for every new registration.
+
+    ``self_declared_role`` is unrelated to that: it is how the user describes
+    themselves, is optional, and grants nothing. The two are deliberately not
+    named alike anywhere they meet in the API.
     """
 
     __tablename__ = "app_user"
@@ -37,13 +62,50 @@ class AppUser(Base):
     )
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    role: Mapped[str] = mapped_column(
+    self_declared_role: Mapped[str | None] = mapped_column(
         String,
+        nullable=True,
+        comment="Self-reported, optional, no authorisation meaning (see roles.py)",
+    )
+    reading_history_opt_in: Mapped[bool] = mapped_column(
+        Boolean,
         nullable=False,
-        server_default="user",
-        comment="user | editor | admin",
+        server_default=text("false"),
     )
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class UserRole(Base):
+    """A single role grant, with its audit trail.
+
+    The composite primary key ``(user_id, role)`` makes a grant idempotent —
+    granting a role twice is a no-op rather than a duplicate row. ``granted_by``
+    is nullable because the migrated Phase 1 grants and the seeded dev users
+    have no granting admin to point at.
+    """
+
+    __tablename__ = "user_role"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        comment="editor | author | admin (see models/roles.py)",
+    )
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id"),
+        nullable=True,
+    )
+    granted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),

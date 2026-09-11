@@ -5,9 +5,16 @@
   overflow: hidden;
 }
 
+/* The shell scrolls by default. A page that wants to trap its own scrolling
+   says so — `height: 100%; overflow: hidden` on its root, as the browse and
+   review surfaces do — and a page that simply lays content out gets a scrollbar
+   without having to ask. It was `overflow: hidden` here, which made forgetting
+   silently clip the bottom of the page: Profile and the two admin surfaces were
+   unreachable below the fold, and any new page with more than a screen of
+   content would have joined them. */
 .content {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }

@@ -135,6 +135,12 @@ class UserNotFoundError(NotFoundError):
     code = ErrorCode.USER_NOT_FOUND
 
 
+class ModerationReportNotFoundError(NotFoundError):
+    """The requested moderation report does not exist."""
+
+    code = ErrorCode.MODERATION_REPORT_NOT_FOUND
+
+
 # ── Conflict errors ───────────────────────────────────────────────────────────
 
 
@@ -154,6 +160,33 @@ class HarmonyNotReviewedError(ConflictError):
     code = ErrorCode.HARMONY_NOT_REVIEWED
 
 
+class ReportAlreadyOpenError(ConflictError):
+    """This reporter already has an open report against this resource.
+
+    One open report per user per resource (``roles-and-permissions.md`` § 4):
+    a second one adds no information and would let one person flood the queue.
+    """
+
+    code = ErrorCode.REPORT_ALREADY_OPEN
+
+
+class ReportAlreadyResolvedError(ConflictError):
+    """The report has already been dismissed or actioned."""
+
+    code = ErrorCode.REPORT_ALREADY_RESOLVED
+
+
+class SelfAdminRevocationError(ConflictError):
+    """An admin tried to revoke their own admin role.
+
+    Not an authorisation failure — the caller is an admin and the request is
+    well formed. It is refused as a state guard: an instance can end up with no
+    admin at all, and there is no self-service path back.
+    """
+
+    code = ErrorCode.SELF_ADMIN_REVOCATION
+
+
 # ── Auth errors ───────────────────────────────────────────────────────────────
 
 
@@ -161,6 +194,19 @@ class AuthorizationError(DoppiaError):
     """The caller is authenticated but lacks the required role."""
 
     code = ErrorCode.FORBIDDEN
+
+
+class EmailNotVerifiedError(DoppiaError):
+    """The caller's email address has not been confirmed.
+
+    Distinct from ``AuthorizationError``: the caller may hold every role the
+    action needs, but an unverified account cannot create content at all
+    (``docs/architecture/roles-and-permissions.md`` § 3). Maps to HTTP 403 with
+    its own code so the frontend can offer "resend verification" rather than a
+    generic permission message.
+    """
+
+    code = ErrorCode.EMAIL_NOT_VERIFIED
 
 
 # ── Integrity errors ──────────────────────────────────────────────────────────

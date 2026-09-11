@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import FragmentDetailPanel from '../components/score/FragmentDetailPanel';
+import SegmentedControl, { ToggleButton } from '../components/ui/SegmentedControl';
+import IconButton from '../components/ui/IconButton';
+import Button from '../components/ui/Button';
 import FragmentOverlay from '../components/score/FragmentOverlay';
-import MainBracket from '../components/score/MainBracket';
 import StageBrackets from '../components/score/StageBrackets';
 import PlaybackCaret from '../components/score/PlaybackCaret';
 import {
@@ -40,7 +42,9 @@ import type {
   SubPartTag,
 } from '../components/score/stages';
 import {
+  buildUnplacedStages,
   chooseStageGrid,
+  hasUnplacedWantedStage,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -99,7 +103,7 @@ import {
   parseMeiMeterParts,
 } from '../utils/meiParsing';
 import { ResolutionIcon } from '../components/score/ResolutionIcons';
-import { ApiError } from '../services/api';
+import { apiErrorMessage } from '../services/errorMessage';
 import { useStoredFragments } from '../hooks/useStoredFragments';
 
 // ---------------------------------------------------------------------------
@@ -315,7 +319,10 @@ function TransposeSelect({ id, options, value, onChange, sourceKey }: TransposeS
  * excluded sibling endings.
  *
  * blocked is true when the selection cannot fit stages even at sub-beat
- * resolution — the caller should surface a UI note and keep assignments empty.
+ * resolution. The assignments come back *unplaced* (bounds null) rather than
+ * empty, so the sidebar can still list the stages: marking one absent is the
+ * annotator's alternative to lengthening the selection, and the absent toggle
+ * only exists on a rendered stage card (Step 17).
  */
 function computeAutoPrePopulate(
   stages: ContainsStage[],
@@ -355,7 +362,7 @@ function computeAutoPrePopulate(
     beatPositions.length < stages.length &&
     subBeatPositions.length < stages.length;
 
-  if (blocked) return { assignments: [], grid, blocked: true };
+  if (blocked) return { assignments: buildUnplacedStages(stages), grid, blocked: true };
 
   let assignments: StageAssignment[];
   if (grid === 'measure') {
@@ -639,7 +646,7 @@ export default function ScoreViewer() {
   const prevScoreKeyRef = useRef<string | null>(null);
 
   // ── Annotation state (Step 11) ────────────────────────────────────────────
-  // Exposed to React render tree so MainBracket and future Part 4/5 panels
+  // Exposed to React render tree so StageBrackets and future Part 4/5 panels
   // can react to selection and flag changes.
   const [ghostLayer, setGhostLayer] = useState<GhostLayer | null>(null);
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null);
@@ -683,6 +690,11 @@ export default function ScoreViewer() {
   // True when the committed selection is too short for the chosen concept's
   // stages even at sub-beat resolution (Step 2 auto-grid; Step 3 will clamp).
   const [stageGridBlocked, setStageGridBlocked] = useState(false);
+  // Mirrored so the placement guards can ask "are these stages placed yet?"
+  // without depending on the state. Since Step 17 a blocked grid yields a
+  // non-empty list of *unplaced* stages, so an empty list no longer means
+  // "needs pre-population" on its own — blocked does too.
+  const stageGridBlockedRef = useRef(false);
   // Brief inline note shown when pre-population auto-switches the resolution.
   const [gridAutoSwitchNote, setGridAutoSwitchNote] = useState<string | null>(null);
   const gridNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -746,7 +758,7 @@ export default function ScoreViewer() {
 
   // While a stored fragment is being edited (fragmentDraftId is its id, set by
   // the session-build effect), hide its stored bracket so it does not render
-  // twice — once as the live editing MainBracket and once as the stored overlay
+  // twice — once as the live editing overlay and once as the stored overlay
   // bracket, which sat at a slightly different height and duplicated the label.
   const overlayFragments = useMemo(
     () =>
@@ -766,6 +778,26 @@ export default function ScoreViewer() {
       setSelectedFragmentId(focusFragmentId);
     }
   }, [focusFragmentId, storedFragments]);
+
+  // Scroll the score to the fragment the review queue sent us to (Step 18, M4).
+  // Opening the panel alone left the reviewer looking at bar 1 of a long
+  // movement with no clue where the fragment was. The bracket is the anchor: it
+  // only exists once Verovio has rendered and the overlay has positioned it, so
+  // this watches for the element rather than firing with the panel.
+  const didScrollToFocusRef = useRef(false);
+  useEffect(() => {
+    if (!focusFragmentId || didScrollToFocusRef.current) return;
+    const container = scorePanelRef.current;
+    if (!container) return;
+
+    const bracket = container.querySelector<HTMLElement>(
+      `[data-fragment-id="${CSS.escape(focusFragmentId)}"]`
+    );
+    if (!bracket) return;
+
+    didScrollToFocusRef.current = true;
+    bracket.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+  });
   // Incremented to force a session rebuild when the edit flow is triggered
   // while already in tag mode (tagMode change alone wouldn't fire the effect).
   const [sessionRebuildKey, setSessionRebuildKey] = useState(0);
@@ -1236,7 +1268,7 @@ export default function ScoreViewer() {
         return;
       }
 
-      if (stageAssignmentsRef.current.length === 0) {
+      if (stageAssignmentsRef.current.length === 0 || stageGridBlockedRef.current) {
         if (!selectionRange) {
           setStageAssignments([]);
           setStageGridBlocked(false);
@@ -1300,7 +1332,7 @@ export default function ScoreViewer() {
           return;
         }
 
-        if (stageAssignmentsRef.current.length === 0) {
+        if (stageAssignmentsRef.current.length === 0 || stageGridBlockedRef.current) {
           if (!selectionRange) {
             setStageAssignments([]);
             setStageGridBlocked(false);
@@ -1342,9 +1374,62 @@ export default function ScoreViewer() {
   }, []);
 
   /** Called by StageList absent toggle. */
-  const handleToggleAbsent = useCallback((stageId: string, absent: boolean) => {
-    setStageAssignments((prev) => toggleStageAbsent(prev, stageId, absent));
-  }, []);
+  const handleToggleAbsent = useCallback(
+    (stageId: string, absent: boolean) => {
+      const next = toggleStageAbsent(stageAssignmentsRef.current, stageId, absent);
+      const stages = activeSchemaTreeRef.current?.stages;
+
+      // Every toggle changes how many stages want room, so both directions have
+      // to be re-evaluated — not just the blocked one. Marking absent frees
+      // space and can clear the notice; re-enabling asks for space back and can
+      // bring it back.
+      //
+      // toggleStageAbsent does local surgery: it hands an absent stage's space
+      // to a neighbour and carves it back on restore. When no neighbour can
+      // spare a bar it restores the stage with no bounds at all, which is the
+      // honest answer — there is nowhere to put it — but on its own it is a
+      // silent one: no bracket appears and nothing says why.
+      if (!stages || !selectionRange || !hasUnplacedWantedStage(next)) {
+        // Local surgery placed everything that is wanted; keep it, since it
+        // preserves the positions the annotator has already confirmed.
+        setStageAssignments(next);
+        if (stages && selectionRange) setStageGridBlocked(false);
+        return;
+      }
+
+      // Something is wanted but has no bounds. Try to place the whole wanted
+      // set at once — a redistribution can succeed where carving from a single
+      // neighbour could not.
+      const absentIds = new Set(next.filter((a) => a.absent).map((a) => a.stageId));
+      const wanted = stages.filter((st) => !absentIds.has(st.target_id));
+      const { assignments, grid, blocked } = computeAutoPrePopulate(
+        wanted,
+        selectionRange,
+        ghostLayerRef.current
+      );
+
+      if (blocked) {
+        // The selection genuinely cannot hold them. Leave the stages listed and
+        // unplaced, and raise the notice again so the annotator can see why the
+        // stage they just re-enabled has no bracket.
+        setStageAssignments(next);
+        setStageGridBlocked(true);
+        return;
+      }
+
+      // Merge the freshly placed bounds back over the absent stages, which keep
+      // their place in the list with no bounds of their own.
+      const placed = new Map(assignments.map((a) => [a.stageId, a]));
+      setStageAssignments(next.map((a) => placed.get(a.stageId) ?? a));
+      setStageGridBlocked(false);
+      if ((GRID_RANK[grid] ?? 0) > (GRID_RANK[resolutionRef.current] ?? 0)) {
+        resolutionRef.current = grid;
+        setResolution(grid);
+        showGridNote(grid, wanted.length);
+      }
+    },
+    [selectionRange, showGridNote]
+  );
 
   /** Called by SubPartForm when a stage's sub-part tag is created or updated. */
   const handleSubPartTagUpdate = useCallback((stageId: string, tag: SubPartTag | null) => {
@@ -1677,7 +1762,7 @@ export default function ScoreViewer() {
           setFragmentDraftId(response.id);
         }
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
+        setSubmitError(apiErrorMessage(err, t, t('score:viewer.saveDraftError')));
       } finally {
         setIsSavingDraft(false);
       }
@@ -1723,7 +1808,7 @@ export default function ScoreViewer() {
         resetAnnotation();
         showSubmitSuccess();
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.submitError'));
+        setSubmitError(apiErrorMessage(err, t, t('score:viewer.submitError')));
       } finally {
         setIsSubmitting(false);
       }
@@ -1764,7 +1849,7 @@ export default function ScoreViewer() {
         resetAnnotation();
         showSubmitSuccess('score:viewer.saveChangesSuccess');
       } catch (err) {
-        setSubmitError(err instanceof ApiError ? err.message : t('score:viewer.saveDraftError'));
+        setSubmitError(apiErrorMessage(err, t, t('score:viewer.saveDraftError')));
       } finally {
         setIsSavingChanges(false);
       }
@@ -1813,14 +1898,23 @@ export default function ScoreViewer() {
     session.setStagesComplete(complete);
   }, [stageAssignments, stageGridBlocked]);
 
+  useEffect(() => {
+    stageGridBlockedRef.current = stageGridBlocked;
+  }, [stageGridBlocked]);
+
   // When the committed selection changes, reconcile stage assignments with
   // the new main bracket bounds or (re-)attempt auto-grid pre-population.
   useEffect(() => {
     if (!selectionRange) return;
     const stages = activeSchemaTreeRef.current?.stages;
-    if (stageAssignmentsRef.current.length === 0 && stages?.length) {
+    if (
+      (stageAssignmentsRef.current.length === 0 || stageGridBlockedRef.current) &&
+      stages?.length
+    ) {
       // First selection after concept chosen, or retry after a blocked selection
-      // was extended — attempt auto-grid pre-population.
+      // was extended — attempt auto-grid pre-population. The blocked case must
+      // be named explicitly: since Step 17 it carries unplaced stages, so the
+      // list is no longer empty when the annotator lengthens the selection.
       const { assignments, grid, blocked } = computeAutoPrePopulate(
         stages,
         selectionRange,
@@ -1870,7 +1964,7 @@ export default function ScoreViewer() {
   // (zoom / resize / font change), any committed selection and its associated
   // state survive. The new session is seeded with the logical coordinates from
   // the old session so it re-highlights the ghosts on the new geometry and
-  // MainBracket / StageBrackets re-derive their pixel bounds automatically.
+  // StageBrackets re-derives its pixel bounds automatically.
   // A full reset happens only when the score changes (movementId or tagMode).
   //
   // The effect depends on `svgPages` (array reference changes on each update)
@@ -1948,7 +2042,7 @@ export default function ScoreViewer() {
     if (!shouldReproject) {
       // Full reset — new score, tagMode change, no committed fragment, or edit.
       // State resets are batched with the subsequent setGhostLayer call so
-      // MainBracket sees a single coherent update.
+      // the overlays see a single coherent update.
       setSelectionRange(null);
       setCommittedSelection(null);
       setAnnotationFlags({
@@ -1976,7 +2070,7 @@ export default function ScoreViewer() {
     //   subPartTags — keyed by stageId (stable strings)
     //   proseAnnotation — free text, independent of geometry
     //   fragmentDraftId — API draft UUID, still valid for the same fragment
-    // MainBracket and StageBrackets re-derive pixel positions from the fresh
+    // StageBrackets re-derives pixel positions from the fresh
     // ghostLayer on the next render automatically.
 
     // Build the new ghost layer over the currently rendered SVG.
@@ -2331,34 +2425,32 @@ export default function ScoreViewer() {
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <Surface layer="container-high" className={styles.toolbar}>
-        <Link to="/" className={styles.backLink}>
+        {/* Where "back" goes depends on how the viewer was reached. Arriving
+            from the review queue (?fragmentId=) returns there; otherwise the
+            corpus browser, which is /corpus since Step 14b moved the public
+            landing page onto / — this link still pointed at / until Step 18. */}
+        <Link to={focusFragmentId ? '/review-queue' : '/corpus'} className={styles.backLink}>
           <Type variant="label-md" as="span">
-            {t('score:viewer.backToBrowse')}
+            {focusFragmentId ? t('score:viewer.backToQueue') : t('score:viewer.backToBrowse')}
           </Type>
         </Link>
 
         {/* Centred controls group — middle column of the 1fr/auto/1fr grid */}
         <div className={styles.toolbarControls}>
           {/* Staff size presets */}
-          <div className={styles.staffSizeControl} role="group" aria-label={t('common:staffSize')}>
+          <div className={styles.staffSizeControl}>
             <Type variant="label-md" as="span" style={{ color: 'var(--color-on-surface-variant)' }}>
               {t('score:viewer.size')}
             </Type>
-            {([35, 45, 55] as ScalePreset[]).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={[styles.sizeButton, scale === s ? styles.sizeButtonActive : '']
-                  .filter(Boolean)
-                  .join(' ')}
-                onClick={() => handleScaleChange(s)}
-                aria-pressed={scale === s}
-              >
-                <Type variant="label-sm" as="span">
-                  {t(`score:${SCALE_LABEL_KEYS[s]}`)}
-                </Type>
-              </button>
-            ))}
+            <SegmentedControl
+              ariaLabel={t('common:staffSize')}
+              value={scale}
+              onChange={handleScaleChange}
+              options={([35, 45, 55] as ScalePreset[]).map((s) => ({
+                value: s,
+                label: t(`score:${SCALE_LABEL_KEYS[s]}`),
+              }))}
+            />
           </div>
 
           {/* Transposition select */}
@@ -2395,38 +2487,25 @@ export default function ScoreViewer() {
               >
                 {t('score:viewer.selectLabel')}
               </Type>
-              {(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => {
-                const ARIA_LABELS: Record<ResolutionMode, string> = {
-                  measure: t('score:viewer.resolutionAria.measure'),
-                  beat: t('score:viewer.resolutionAria.beat'),
-                  subbeat: t('score:viewer.resolutionAria.subbeat'),
-                };
-                return (
-                  <button
-                    key={resMode}
-                    type="button"
-                    className={[
-                      styles.resolutionButton,
-                      resolution === resMode ? styles.resolutionButtonActive : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                    onClick={() => {
-                      resolutionRef.current = resMode;
-                      setResolution(resMode);
-                    }}
-                    aria-pressed={resolution === resMode}
-                    aria-label={ARIA_LABELS[resMode]}
-                    title={ARIA_LABELS[resMode]}
-                  >
+              <SegmentedControl
+                ariaLabel={t('score:viewer.selectLabel')}
+                value={resolution}
+                onChange={(resMode) => {
+                  resolutionRef.current = resMode;
+                  setResolution(resMode);
+                }}
+                options={(['measure', 'beat', 'subbeat'] as ResolutionMode[]).map((resMode) => ({
+                  value: resMode,
+                  ariaLabel: t(`score:viewer.resolutionAria.${resMode}`),
+                  label: (
                     <ResolutionIcon
                       mode={resMode}
                       beatCount={globalMeter[0]}
                       beatUnit={globalMeter[1]}
                     />
-                  </button>
-                );
-              })}
+                  ),
+                }))}
+              />
             </div>
           )}
           {/* Brief note shown when pre-population auto-drops the resolution grid. */}
@@ -2447,18 +2526,12 @@ export default function ScoreViewer() {
             the ghost layer is ready. */}
         {status === 'ready' && (
           <div className={styles.toolbarRight}>
-            <button
-              type="button"
-              className={[styles.tagButton, tagMode === 'tag' ? styles.tagButtonActive : '']
-                .filter(Boolean)
-                .join(' ')}
+            <ToggleButton
+              pressed={tagMode === 'tag'}
               onClick={() => setTagMode(tagMode === 'view' ? 'tag' : 'view')}
-              aria-pressed={tagMode === 'tag'}
             >
-              <Type variant="label-sm" as="span">
-                {tagMode === 'tag' ? t('score:viewer.done') : t('score:viewer.tag')}
-              </Type>
-            </button>
+              {tagMode === 'tag' ? t('score:viewer.done') : t('score:viewer.tag')}
+            </ToggleButton>
           </div>
         )}
       </Surface>
@@ -2537,7 +2610,7 @@ export default function ScoreViewer() {
             {/* Fragment overlay: houses all annotation visuals (brackets, labels).
                 Overlays are always HTML elements above the SVG, never injected
                 into Verovio's SVG output (CLAUDE.md §"Verovio SVG overlay rule").
-                Step 11: MainBracket (Layer 3) renders once fragmentSet is true.
+                Step 11: the ghost layer marks the committed selection.
                 Step 14: StageBrackets (Layer 4) renders once conceptSet is true
                          and the concept has CONTAINS edges. */}
             <FragmentOverlay
@@ -2545,13 +2618,9 @@ export default function ScoreViewer() {
               ghostLayer={ghostLayer}
               mcIndex={mcIndexRef.current}
               onBracketClick={setSelectedFragmentId}
+              dimmed={selectionRange !== null}
+              selectedFragmentId={selectedFragmentId}
             >
-              <MainBracket
-                selection={selectionRange}
-                layer={ghostLayer}
-                fragmentSet={annotationFlags.fragmentSet}
-                resolution={resolution}
-              />
               <StageBrackets
                 assignments={stageAssignments}
                 selection={selectionRange}
@@ -2602,6 +2671,7 @@ export default function ScoreViewer() {
             activeStageId={activeStageId}
             onStageActivate={handleStageActivate}
             onToggleAbsent={handleToggleAbsent}
+            stageGridBlocked={stageGridBlocked}
             stageDragActive={stageDragActive}
             subPartTags={subPartTags}
             onSubPartTagUpdate={handleSubPartTagUpdate}
@@ -2673,49 +2743,43 @@ export default function ScoreViewer() {
             {t('score:viewer.audioUnavailablePre')}
             <code>{SOUNDFONT_ENV_VAR}</code>
             {t('score:viewer.audioUnavailablePost')}
-            <button type="button" className={styles.retryButton} onClick={play}>
+            <Button variant="tertiary" size="sm" onClick={play}>
               {t('common:retry')}
-            </button>
+            </Button>
           </Type>
         ) : (
           <>
             {/* Rewind to top (Step 20): clears an armed play-from-position
                 origin so the next Play starts at the movement top. Disabled
                 while playing or already at the top. */}
-            <button
-              type="button"
-              className={styles.transportButton}
+            <IconButton
               onClick={handleRewind}
               disabled={!isPlaybackAvailable || isPlaying || playbackOriginMs === 0}
-              aria-label={t('score:viewer.rewindAria')}
+              ariaLabel={t('score:viewer.rewindAria')}
               title={t('score:viewer.rewindAria')}
             >
               ⏮
-            </button>
+            </IconButton>
 
             {/* Play / Pause */}
-            <button
-              type="button"
-              className={styles.transportButton}
+            <IconButton
               onClick={isPlaying ? pause : play}
               disabled={!isPlaybackAvailable || isLoadingInstrument}
-              aria-label={isPlaying ? t('common:pause') : t('common:play')}
+              ariaLabel={isPlaying ? t('common:pause') : t('common:play')}
             >
               {isPlaying ? '⏸' : '▶'}
-            </button>
+            </IconButton>
 
             {/* Stop */}
-            <button
-              type="button"
-              className={styles.transportButton}
+            <IconButton
               onClick={handleStop}
               disabled={
                 !isPlaybackAvailable || playbackStatus === 'ready' || playbackStatus === 'idle'
               }
-              aria-label={t('common:stop')}
+              ariaLabel={t('common:stop')}
             >
               ⏹
-            </button>
+            </IconButton>
 
             {/* Position display: MEI @n bar and beat-in-denominator-unit.
                 Uses displayPosition (from bar schedule) when available;

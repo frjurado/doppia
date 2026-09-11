@@ -21,7 +21,13 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from api.dependencies import AppUser, get_current_user, get_neo4j, require_role
+from api.dependencies import (
+    AppUser,
+    get_current_user,
+    get_language,
+    get_neo4j,
+    require_role,
+)
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import Response
 from models.analysis import (
@@ -35,6 +41,7 @@ from models.analysis import (
 )
 from models.base import get_db
 from models.fragment import FragmentListResponse
+from models.roles import ADMIN, EDITOR
 from neo4j import AsyncDriver
 from services.analysis import MovementAnalysisService
 from services.fragments import FragmentService
@@ -76,7 +83,7 @@ def get_fragment_service(
 @router.get(
     "/{movement_id}/fragments",
     response_model=FragmentListResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List stored fragments for a movement",
     response_description=(
         "Cursor-paginated list of top-level fragments for the movement, each "
@@ -104,6 +111,7 @@ async def list_movement_fragments(
     ),
     service: FragmentService = Depends(get_fragment_service),
     user: Annotated[AppUser, Depends(get_current_user)] = None,
+    language: str = Depends(get_language),
 ) -> FragmentListResponse:
     """Return a cursor-paginated list of fragments tagged on a movement.
 
@@ -136,16 +144,17 @@ async def list_movement_fragments(
     return await service.list_for_movement(
         movement_id,
         caller_id=user.id,
-        caller_role=user.role,
+        caller_roles=user.roles,
         cursor=cursor,
         page_size=page_size,
+        language=language,
     )
 
 
 @router.get(
     "/{movement_id}/analysis/events",
     response_model=list[HarmonyEventOut],
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Read harmony events for a movement",
     response_description="List of harmony events, optionally filtered by bar range.",
 )
@@ -213,7 +222,7 @@ async def get_harmony_events(
     "/{movement_id}/analysis/events",
     response_model=HarmonyEventOut,
     status_code=201,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Insert a new harmony event",
     response_description="The newly inserted event with provenance flags set.",
 )
@@ -243,7 +252,7 @@ async def insert_harmony_event(
     "/{movement_id}/analysis/events/delete",
     status_code=204,
     response_class=Response,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Delete a harmony event",
     response_description="No content — event removed successfully.",
 )
@@ -272,7 +281,7 @@ async def delete_harmony_event(
 @router.patch(
     "/{movement_id}/analysis/events/boundary",
     response_model=HarmonyEventOut,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Move an event's beat position",
     response_description="The updated event with new beat and provenance flags.",
 )
@@ -302,7 +311,7 @@ async def move_harmony_boundary(
 @router.patch(
     "/{movement_id}/analysis/events/chord",
     response_model=HarmonyEventOut,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Edit chord fields on an existing event",
     response_description="The updated event with new chord fields and provenance flags.",
 )
@@ -333,7 +342,7 @@ async def edit_harmony_chord(
 @router.post(
     "/{movement_id}/analysis/events/confirm",
     response_model=HarmonyEventOut,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Confirm a harmony event as reviewed",
     response_description="The event with reviewed=True; no other field changed.",
 )
@@ -363,7 +372,7 @@ async def confirm_harmony_event(
 @router.post(
     "/{movement_id}/analysis/events/confirm-batch",
     response_model=list[HarmonyEventOut],
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Confirm many harmony events as reviewed, atomically",
     response_description="The events that were matched and confirmed.",
 )

@@ -405,6 +405,10 @@ class ReviewQueueItem(BaseModel):
     status: str
     primary_concept_id: str | None
     primary_concept_alias: str | None
+    # Carried so the queue can fall back to it: not every taggable concept
+    # declares an alias, and a row labelled by alias alone is nameless for
+    # those. Every other fragment payload already ships both.
+    primary_concept_name: str | None = None
     created_by: uuid.UUID | None
     submitted_at: datetime
 

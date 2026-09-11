@@ -1,0 +1,14 @@
+/* A tonal strip, not a bordered alert: DESIGN.md's no-line rule applies here
+   too, so the notice is defined by sitting a container-high band against the
+   surface below it. */
+.banner {
+  padding: var(--spacing-3) var(--spacing-6);
+  color: var(--color-on-surface-variant);
+  text-align: center;
+}
+
+.link {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

@@ -54,13 +54,9 @@
   display: none;
 }
 
-/* …except on a BOOL, which is the one control with no placeholder to fall back
-   on: its ✓/✗ toggle carries no text at all, so suppressing the label left the
-   Dominant stage's "Cadential 6-4" as a bare unlabelled tick. The name is also
-   not redundant there — it names something other than the stage. */
-.form[data-hide-labels='true'] .boolInlineField .fieldMeta {
-  display: flex;
-}
+/* A BOOL needs no exception here any more: since triage item 11 its name is
+   part of the control itself, not a field label, so hiding field labels cannot
+   leave it as a bare unlabelled tick. */
 
 /* Schema name line — bold label with optional required marker and inline ⓘ.
    Inline (not flex) so the ⓘ trails after the last word when the name wraps. */
@@ -76,38 +72,6 @@
   margin-left: 0.15em;
 }
 
-/* ⓘ button that reveals the schema description on hover / click.
-   Inline after the name text, muted so it doesn't compete for attention. */
-.descButton {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  padding: 0;
-  margin-left: 0.3em;
-  line-height: 1;
-  vertical-align: middle;
-}
-
-.descButton:hover {
-  color: var(--color-on-surface);
-}
-
-/* Floating description panel — absolutely positioned below the name row,
-   does not push sibling controls down. */
-.descFloating {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
-  z-index: 10;
-  padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--color-surface-container-high);
-  color: var(--color-on-surface-variant);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-
 /* ── Option controls (shared between radio and checkbox groups) ──────────── */
 
 /* Container for radio group or checkbox group. */
@@ -117,38 +81,83 @@
   gap: var(--spacing-2);
 }
 
-/* Individual label element wrapping the hidden input + option text + ⓘ.
-   The background provides the selected / hover state rather than a border. */
+/* One option row: mark, text, and an optional ⓘ. Flat — the row carries no
+   fill of its own (triage item 11). It used to sit on `surface-container`,
+   which inside a stage's `surface-container-highest` well read as a stack of
+   pale rectangles inside a grey one, and in the plain panel section read as
+   nothing at all, because there the two tones were identical. The BOOL row was
+   always flat; the option rows now match it.
+
+   `position: relative` is the positioning contract InfoHint depends on — its
+   panel spans this row, so a two-word explanation and a two-sentence one give
+   the same rectangle. */
 .optionLabel {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
-  padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--color-surface-container);
+  padding: var(--spacing-2) 0;
+  background: none;
   cursor: pointer;
-
-  /* 0px border-radius per DESIGN.md */
 }
 
+/* Hover is the only fill, and it is transient — the affordance for a row whose
+   whole width is the target. */
 .optionLabel:hover {
   background-color: var(--color-surface-container-high);
 }
 
-.optionLabelSelected {
-  background-color: var(--color-primary);
-}
-
-.optionLabelSelected:hover {
-  background-color: var(--color-primary);
-}
-
-/* Option text colour — flips to on-primary when the option is selected. */
+/* Option text colour. It does not change with selection — the mark carries
+   the state, so the row's type stays put. */
 .optionText {
   color: var(--color-on-surface);
 }
 
-.optionTextSelected {
+/* ── Option marks (triage item 11) ────────────────────────────────────────
+   A ONE_OF group and a MANY_OF group rendered identically: same row, same
+   tonal fill, native input visually hidden. The fix is a leading mark, not a
+   filled row and not explanatory prose — a control that has to tell you how it
+   works has already failed.
+
+   Only the well changes colour, the way the BOOL toggle above does. Filling
+   the whole row with `primary` (the first attempt) drowned the ⓘ buttons
+   sitting inside it and made a property form read as a wall of blue. */
+.optionIndicator {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+
+  /* An empty well has to read on every tone it sits on: `surface-container`
+     in a panel section, `surface-container-highest` inside a stage's sub-part
+     well. A tonal step cannot do both — against the stage well the mark simply
+     disappeared — so it is a white card with the sanctioned ghost outline
+     (DESIGN.md § 4), which lifts off any of the warm layers. */
+  background-color: var(--color-surface-container-lowest);
+  box-shadow: inset 0 0 0 1px var(--color-outline-variant);
+  color: var(--color-on-surface-variant);
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+/* MANY_OF selected — the BOOL toggle's "on" state exactly. A multi-select is
+   a row of independent booleans and should read as one. */
+.optionIndicatorCheckOn {
+  background-color: var(--color-primary);
+  box-shadow: none;
   color: var(--color-on-primary);
+}
+
+/* ONE_OF selected — a solid mark centred in the well rather than a filled
+   well: the square counterpart of a radio button's dot. Painted with a
+   background rather than a child element so the well stays one box. */
+.optionIndicatorRadioOn {
+  background-image: linear-gradient(var(--color-primary), var(--color-primary));
+  background-size: 50% 50%;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* Visually-hidden native input — the label background carries the state cue. */
@@ -209,88 +218,35 @@
   overflow-y: auto;
 }
 
-/* ── BOOL inline toggle ───────────────────────────────────────────────────── */
+/* ── BOOL row ─────────────────────────────────────────────────────────────
+   A BOOL is one option of a MANY_OF group with the group left out, so it takes
+   the option row wholesale: same 16px mark, same label type, whole row
+   clickable. Only the wrapper differs, because the required marker and the ⓘ
+   sit outside the button — a <button> cannot contain another button. */
 
-/* One-row layout: toggle button left, field meta (name + ⓘ) right. */
 .boolInlineField {
+  position: relative;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: var(--spacing-2);
 }
 
-/* Square toggle cycling null → true → false → null. */
-.boolToggle {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+.boolRow {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: center;
-  background-color: var(--color-surface-container);
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) 0;
+  background: none;
   border: 0;
   cursor: pointer;
-  color: var(--color-on-surface-variant);
-  font-size: 0.875rem;
-  line-height: 1;
+  text-align: left;
+  font-family: inherit;
 }
 
-.boolToggle:hover {
-  background-color: var(--color-surface-container-high);
-}
-
-.boolToggleOn {
-  background-color: var(--color-primary);
-  color: var(--color-on-primary);
-}
-
-.boolToggleOn:hover {
-  background-color: var(--color-primary);
-}
-
-.boolToggleOff {
-  background-color: var(--color-surface-container-high);
-  color: var(--color-on-surface);
-}
-
-.boolToggleOff:hover {
+.boolRow:hover {
   background-color: var(--color-surface-container-high);
 }
 
 /* ── VALUE_REFERENCES info panel ─────────────────────────────────────────── */
-
-/* Small ⓘ button inside an option label. Stops propagation to prevent the
-   label click from activating the hidden input while the info is toggling. */
-.infoButton {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  padding: 0 var(--spacing-1);
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.infoButton:hover {
-  color: var(--color-on-surface);
-}
-
-/* Inline panel that expands below the option label when ⓘ is clicked.
-   No floating / absolute positioning — pushes content down inline. */
-.infoPanel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-1);
-  padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--color-surface-container-high);
-}
-
-.infoTitle {
-  color: var(--color-on-surface);
-  font-weight: 600;
-}
-
-.infoDef {
-  color: var(--color-on-surface-variant);
-}

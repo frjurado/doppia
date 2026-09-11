@@ -247,3 +247,50 @@ describe('SubmissionChecklist — Draft saved indicator', () => {
     expect(screen.queryByText('Draft saved')).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — the panel's single action row (triage item 10)
+// ---------------------------------------------------------------------------
+
+describe('SubmissionChecklist — lifecycle actions', () => {
+  it('shows no lifecycle actions when the caller supplies no handlers', () => {
+    // A read-only embedding must not sprout a Delete control.
+    renderChecklist({ flags: allTrue });
+    expect(screen.queryByRole('button', { name: /delete/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /cancel/i })).toBeNull();
+  });
+
+  it('offers Delete but not Cancel while creating', () => {
+    // Create mode has nothing to cancel back to — Delete clears the working
+    // annotation instead.
+    renderChecklist({ flags: allTrue, onDeleteFragment: vi.fn(), onCancelEdit: vi.fn() });
+    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /cancel/i })).toBeNull();
+  });
+
+  it('offers both Cancel and Delete while editing a stored fragment', () => {
+    renderChecklist({
+      flags: allTrue,
+      editMode: true,
+      onDeleteFragment: vi.fn(),
+      onCancelEdit: vi.fn(),
+    });
+    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+  });
+
+  it('calls the delete handler when Delete is clicked', () => {
+    const onDeleteFragment = vi.fn();
+    renderChecklist({ flags: allTrue, onDeleteFragment });
+    fireEvent.click(screen.getByRole('button', { name: /delete/i }));
+    expect(onDeleteFragment).toHaveBeenCalledTimes(1);
+  });
+
+  it('freezes the constructive actions while a delete is in flight', () => {
+    // Submit and Save draft must not race a delete of the same fragment.
+    renderChecklist({ flags: allTrue, isDeleting: true, onDeleteFragment: vi.fn() });
+    expect(screen.getByRole('button', { name: /submit for review/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /save draft/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /delete/i })).toBeDisabled();
+  });
+});

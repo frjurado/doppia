@@ -7,6 +7,7 @@ network and no live project.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import httpx
@@ -22,7 +23,7 @@ _TOKEN_BODY = {
     "user": {
         "id": "user-1",
         "email": "editor@test.com",
-        "app_metadata": {"role": "editor"},
+        "email_confirmed_at": "2026-08-01T00:00:00Z",
     },
 }
 
@@ -58,7 +59,8 @@ async def test_password_grant_parses_session(
     assert session.refresh_token == "refresh-xyz"
     assert session.expires_in == 3600
     assert session.user_id == "user-1"
-    assert session.role == "editor"
+    # The grant reports verification; roles are read from user_role, not here.
+    assert session.email_verified is True
 
 
 async def test_password_grant_bad_credentials_maps_to_401(
@@ -124,3 +126,297 @@ async def test_unconfigured_supabase_url_maps_to_503(
     with pytest.raises(SupabaseAuthError) as exc:
         await supabase_auth.password_grant("editor@test.com", "pw")
     assert exc.value.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# OAuth (PKCE) — Component 12 Step 4
+# ---------------------------------------------------------------------------
+
+
+def test_pkce_challenge_is_the_s256_of_the_verifier() -> None:
+    """The challenge must be base64url(SHA-256(verifier)), unpadded.
+
+    Supabase verifies this relation on the exchange; getting the encoding wrong
+    fails only at the very end of a live round trip, which is an expensive place
+    to discover a typo.
+    """
+    import base64
+    import hashlib
+
+    verifier, challenge = supabase_auth.generate_pkce_pair()
+    expected = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+        .decode("ascii")
+        .rstrip("=")
+    )
+    assert challenge == expected
+    assert "=" not in challenge
+
+
+def test_pkce_pair_is_fresh_each_time() -> None:
+    """Two flows must not share a verifier."""
+    assert (
+        supabase_auth.generate_pkce_pair()[0] != supabase_auth.generate_pkce_pair()[0]
+    )
+
+
+def test_authorize_url_carries_provider_pkce_and_the_configured_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The return address comes from PUBLIC_APP_URL, never from a caller."""
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia-staging.fly.dev/")
+    url = supabase_auth.oauth_authorize_url("google", "chal-123")
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+
+    assert parsed.netloc == "test-project.supabase.co"
+    assert parsed.path == "/auth/v1/authorize"
+    assert query["provider"] == ["google"]
+    assert query["code_challenge"] == ["chal-123"]
+    assert query["code_challenge_method"] == ["s256"]
+    assert query["redirect_to"] == ["https://doppia-staging.fly.dev/auth/callback"]
+
+
+def test_authorize_url_rejects_an_unsupported_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The provider name is interpolated into a URL; the set is closed."""
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia-staging.fly.dev")
+    with pytest.raises(ValueError):
+        supabase_auth.oauth_authorize_url("github", "chal-123")
+
+
+def test_public_app_url_refuses_to_guess_outside_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unset PUBLIC_APP_URL in staging is a 503, not a localhost redirect."""
+    monkeypatch.delenv("PUBLIC_APP_URL", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    with pytest.raises(SupabaseAuthError) as exc:
+        supabase_auth.public_app_url()
+    assert exc.value.status_code == 503
+
+
+def test_public_app_url_falls_back_to_the_vite_origin_locally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PUBLIC_APP_URL", raising=False)
+    monkeypatch.setenv("ENVIRONMENT", "local")
+    assert supabase_auth.public_app_url() == "http://localhost:5173"
+
+
+async def test_pkce_grant_posts_the_code_and_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exchange is a server-side token grant, not a browser round trip."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["grant_type"] = request.url.params.get("grant_type")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json=_TOKEN_BODY)
+
+    _mock_httpx(monkeypatch, handler)
+    session = await supabase_auth.pkce_grant("auth-code-1", "verifier-1")
+
+    assert seen["grant_type"] == "pkce"
+    assert seen["body"] == {"auth_code": "auth-code-1", "code_verifier": "verifier-1"}
+    assert session.refresh_token == "refresh-xyz"
+
+
+async def test_pkce_grant_bad_code_maps_to_401_invalid_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A used or mismatched code is an expired sign-in, not bad credentials."""
+    _mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(400, json={"error": "invalid_request"}),
+    )
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.pkce_grant("stale-code", "verifier-1")
+    assert exc.value.status_code == 401
+    assert exc.value.code == "invalid_grant"
+
+
+async def test_password_reset_link_returns_to_the_page_that_can_act_on_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recovery email must land on /auth/reset-password, not the generic
+    callback: the SPA route is what renders the set-a-new-password form, and
+    the redirect target is the only thing that tells it why the user arrived.
+    """
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["redirect_to"] = request.url.params.get("redirect_to")
+        return httpx.Response(200, json={})
+
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia-staging.fly.dev")
+    _mock_httpx(monkeypatch, handler)
+    await supabase_auth.request_password_reset("someone@test.com")
+
+    assert seen["path"] == "/auth/v1/recover"
+    assert seen["redirect_to"] == "https://doppia-staging.fly.dev/auth/reset-password"
+
+
+async def test_verify_email_link_redeems_the_token_hash_server_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The browser carries an opaque hash; the session is established here.
+
+    This is what keeps ADR-035 intact on the email-link path: Supabase's own
+    verify endpoint would redirect back with the session in the URL.
+    """
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json=_TOKEN_BODY)
+
+    _mock_httpx(monkeypatch, handler)
+    session = await supabase_auth.verify_email_link("hash-abc", "recovery")
+
+    assert seen["path"] == "/auth/v1/verify"
+    assert seen["body"] == {"type": "recovery", "token_hash": "hash-abc"}
+    assert session.refresh_token == "refresh-xyz"
+
+
+async def test_verify_email_link_rejects_an_unknown_type() -> None:
+    """The type is forwarded to Supabase as the kind of token being redeemed."""
+    with pytest.raises(ValueError):
+        await supabase_auth.verify_email_link("hash-abc", "magiclink")
+
+
+async def test_verify_email_link_maps_a_used_link_to_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Email links are single-use, so a reload of a consumed one must fail."""
+    _mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(401, json={"error": "invalid_token"}),
+    )
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.verify_email_link("stale-hash", "invite")
+    assert exc.value.status_code == 401
+
+
+# ── Admin: account deletion (Component 12 Step 9) ─────────────────────────────
+
+
+async def test_delete_auth_user_uses_the_service_role_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admin authority comes from the service-role key, not the caller's token."""
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["apikey"] = request.headers.get("apikey")
+        seen["authorization"] = request.headers.get("authorization")
+        return httpx.Response(200, json={})
+
+    _mock_httpx(monkeypatch, handler)
+    await supabase_auth.delete_auth_user("user-1")
+
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/auth/v1/admin/users/user-1"
+    assert seen["apikey"] == "service-key"
+    assert seen["authorization"] == "Bearer service-key"
+
+
+async def test_delete_auth_user_treats_a_missing_user_as_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deletion must be idempotent: a retry after a partial failure has to work."""
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    _mock_httpx(monkeypatch, lambda request: httpx.Response(404, json={}))
+
+    await supabase_auth.delete_auth_user("already-gone")
+
+
+async def test_delete_auth_user_requires_the_service_role_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing key is a visible 503, never a silent skip.
+
+    A deletion that quietly left the auth user alive would be worse than a
+    failure the caller can see and retry.
+    """
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.delete_auth_user("user-1")
+    assert exc.value.status_code == 503
+
+
+async def test_delete_auth_user_maps_an_unreachable_service_to_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    _mock_httpx(monkeypatch, lambda request: httpx.Response(500, text="boom"))
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.delete_auth_user("user-1")
+    assert exc.value.status_code == 503
+
+
+# ── Admin: invitations (Component 12 Step 10) ─────────────────────────────────
+
+
+async def test_invite_user_posts_with_our_own_return_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``redirect_to`` is a server-side constant, never caller-supplied.
+
+    Supabase does not validate the target at issue time, so a caller-supplied
+    one would make this an open redirect — the same reasoning as the OAuth
+    authorize URL.
+    """
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia.example")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["apikey"] = request.headers.get("apikey")
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "user-9"})
+
+    _mock_httpx(monkeypatch, handler)
+    await supabase_auth.invite_user("newcomer@test.com")
+
+    assert seen["path"] == "/auth/v1/invite"
+    assert seen["apikey"] == "service-key"
+    assert seen["body"] == {
+        "email": "newcomer@test.com",
+        "redirect_to": "https://doppia.example/auth/reset-password",
+    }
+
+
+async def test_invite_user_requires_admin_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia.example")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.invite_user("newcomer@test.com")
+    assert exc.value.status_code == 503
+
+
+async def test_invite_user_surfaces_an_already_registered_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Supabase refuses an address that already has an account; so do we."""
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://doppia.example")
+    _mock_httpx(
+        monkeypatch,
+        lambda request: httpx.Response(422, json={"error": "email_exists"}),
+    )
+    with pytest.raises(SupabaseAuthError) as exc:
+        await supabase_auth.invite_user("already@test.com")
+    assert exc.value.status_code == 422

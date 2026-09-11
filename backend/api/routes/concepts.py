@@ -23,6 +23,7 @@ from models.concepts import (
     ConceptSearchResponse,
     ConceptTreeResponse,
 )
+from models.roles import ADMIN, EDITOR
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.concepts import ConceptService
@@ -76,7 +77,7 @@ def get_concept_tree_service(
 @router.get(
     "/search",
     response_model=ConceptSearchResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Search concepts by name or alias",
     response_description=(
         "Matching taggable concepts ordered by relevance, with hierarchy paths "
@@ -122,7 +123,7 @@ async def search_concepts(
 @router.get(
     "/tree",
     response_model=ConceptTreeResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Get the IS_SUBTYPE_OF subtree for a concept",
     response_description=(
         "Flat list of all non-stub concepts in the subtree rooted at "
@@ -173,7 +174,7 @@ async def get_concept_tree(
 @router.get(
     "/roots",
     response_model=ConceptRootsResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="List all domain root concepts",
     response_description=(
         "All non-stub concepts with no IS_SUBTYPE_OF parent, sorted alphabetically. "
@@ -201,7 +202,7 @@ async def list_concept_roots(
 @router.get(
     "/{concept_id}/schemas",
     response_model=ConceptSchemaTreeResponse,
-    dependencies=[require_role("editor")],
+    dependencies=[require_role(EDITOR, ADMIN)],
     summary="Get schema tree for a concept",
     response_description=(
         "Property schemas (with hydrated values), CONTAINS stage structure, "

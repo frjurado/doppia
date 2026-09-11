@@ -22,10 +22,18 @@ there is no defensible automatic value for those, and none exist in the corpus.
 Beat pairs are re-normalised after clamping so the ADR-005 wire invariant (both
 null or both set, ordered within a bar) still holds.
 
-Sub-parts in a **3/8** movement are reported and deferred, not repaired: the
-corpus has two disagreeing readings of that meter's beat count (Track M17), so a
-beat number there does not yet denote a fixed position and the clamp would
-destroy real extent. See :func:`meter_is_disputed`.
+**3/8 movements were deferred by earlier runs and are not any more.** While the
+corpus held two disagreeing readings of that meter's beat count (Track M17) a
+beat number there denoted no fixed position, so this script reported those
+sub-parts and left them alone rather than destroy real extent on the strength of
+a disputed rule. M17 settled on 2026-09-10 — 3/8 is simple, three eighth-note
+beats (ADR-005 § "compound-meter rule") — and the deferral came out with it.
+
+**Run order:** ``fix_38_beat_coordinates.py`` must run first. It converts the
+coordinates those movements stored under the old reading; this script's
+``measure_end_beat`` now speaks the new one, and run against unconverted rows it
+would read a legitimate 1⅔ as inside a bar ending at 4.0 and leave real
+overflows in place.
 
 Idempotent: re-running after a successful run reports zero changes.
 
@@ -79,56 +87,16 @@ def _parse_meter(meter: str | None) -> tuple[int, int]:
     return 4, 4
 
 
-def meter_is_disputed(meter: str | None) -> bool:
-    """True when the corpus has no agreed beat count for this meter (Track M17).
-
-    The frontend ghost layer reads a meter as compound when ``unit == 8`` and
-    ``count % 3 == 0``; ``ingest_analysis`` additionally requires ``count >= 6``.
-    They therefore disagree on **3/8** and nothing else: one dotted-quarter beat
-    per bar (measure ends at 2.0) against three eighth-note beats (ends at 4.0).
-
-    A beat number in such a movement does not denote a fixed position until that
-    is settled, so this script refuses to adjudicate: it reports those sub-parts
-    and leaves them alone. Two things go wrong if it does not. A legitimate
-    ``beat_end`` of 3.0 looks out of bounds under the one-beat reading and gets
-    truncated — real extent destroyed on the strength of the disputed rule. And
-    rewriting a measure-level ``(null, null)`` into explicit beats freezes the
-    current reading into data that reads as "whole measure" under either rule
-    while the explicit pair would not survive the flip.
-
-    Both hazards are real on staging: K279/iii and K280/iii are 3/8, and K280/iii
-    is where Francisco first saw M17 (harmony labels for beats 1 and 3 both
-    drawing on beat 1).
-    """
-    count, unit = _parse_meter(meter)
-    return unit == 8 and count % 3 == 0 and count < 6
-
-
-def candidate_measure_ends(meter: str | None) -> list[float]:
-    """Every measure end this meter could have under the readings in play.
-
-    One value for an agreed meter; for a disputed one (:func:`meter_is_disputed`)
-    both — the compound reading the ghost layer applies and the simple reading
-    ``ingest_analysis`` and DCML apply. A sub-part is only worth *reporting* as
-    blocked on M17 when its repair differs between them; most sub-parts in a 3/8
-    movement need no repair under either reading and should stay silent, or the
-    report drowns the rows that matter (91 lines against the 2 that do).
-    """
-    count, unit = _parse_meter(meter)
-    if meter_is_disputed(meter):
-        return [float(count // 3 + 1), float(count + 1)]
-    return [measure_end_beat(meter)]
-
-
 def measure_end_beat(meter: str | None) -> float:
     """Exclusive beat upper bound of a full measure in the given meter (ADR-005).
 
     ``numBeats + 1``: the value ``beat_end`` takes for a bound at the end of its
-    measure. Compound meters count the dotted beat (6/8 has two), matching
-    ``beatSlotCount`` / ``isCompoundMeter`` in the frontend ghost layer — the code
-    that wrote the values this script repairs, so the rule to follow. Where the
-    two readings of "compound" disagree the caller must not reach this function
-    at all: see :func:`meter_is_disputed`.
+    measure. Compound meters count the dotted beat (6/8 has two), and compound
+    requires a numerator with something to group — ``count >= 6`` — so 3/8 is
+    three eighth-note beats ending at 4.0, not one dotted beat ending at 2.0
+    (Track M17, settled 2026-09-10; ADR-005 § "compound-meter rule"). The same
+    predicate lives in ``ghosts.ts`` ``isCompoundMeter`` and in
+    ``ingest_analysis._compute_beat``; the three must agree.
 
     Args:
         meter: Meter as stored on the movement, e.g. ``"3/4"``. Unparseable or
@@ -138,7 +106,7 @@ def measure_end_beat(meter: str | None) -> float:
         The exclusive upper bound, e.g. 4.0 for 3/4 and 3.0 for 6/8.
     """
     count, unit = _parse_meter(meter)
-    beats = count // 3 if (unit == 8 and count % 3 == 0) else count
+    beats = count // 3 if (unit == 8 and count >= 6 and count % 3 == 0) else count
     return float(max(1, beats) + 1)
 
 
@@ -225,7 +193,6 @@ async def _run(dry_run: bool) -> int:
     checked = 0
     changed = 0
     skipped = 0
-    deferred = 0
     try:
         async with AsyncSession(engine) as session:
             rows = (
@@ -271,24 +238,6 @@ async def _run(dry_run: bool) -> int:
                     row.p_beat_start,
                     row.p_beat_end,
                 )
-                if meter_is_disputed(row.meter):
-                    # Not a repair decision this script is entitled to make: the
-                    # beat scale itself is unsettled (M17). Report only the rows
-                    # whose outcome actually depends on which reading wins — a
-                    # sub-part that needs no repair either way is not blocked.
-                    outcomes = {
-                        clamp_to_parent(child, parent, end)
-                        for end in candidate_measure_ends(row.meter)
-                    }
-                    if outcomes != {child}:
-                        deferred += 1
-                        print(
-                            f"  DEFER {row.slug:20} {row.id}  {_fmt(child)}"
-                            f"  — repair depends on the disputed {row.meter} beat"
-                            f" count (M17)"
-                        )
-                    continue
-
                 measure_end = measure_end_beat(row.meter)
                 clamped = clamp_to_parent(child, parent, measure_end)
 
@@ -336,19 +285,11 @@ async def _run(dry_run: bool) -> int:
     finally:
         await engine.dispose()
 
-    print(
-        f"\n{checked} sub-part(s) checked; {changed} clamped; "
-        f"{skipped} skipped; {deferred} deferred."
-    )
+    print(f"\n{checked} sub-part(s) checked; {changed} clamped; " f"{skipped} skipped.")
     if dry_run:
         print("[dry-run] nothing written.")
     if skipped:
         print("Skipped sub-parts need an editorial decision — see the list above.")
-    if deferred:
-        print(
-            "Deferred sub-parts are in a meter whose beat count is disputed "
-            "(Track M17); re-run this script once that is settled."
-        )
     return 1 if skipped else 0
 
 

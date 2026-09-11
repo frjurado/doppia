@@ -10,11 +10,45 @@
 
 /* ── Parent bracket bar ──────────────────────────────────────────────────── */
 
+/* A stored bracket is a *committed* span, and its end treatment says so: a
+   short square serif dropped toward the staff at each end (M5 ask 1). The live
+   selection bracket keeps a gradient fade instead, which reads as "this end is
+   grabbable". One visual property, one meaning — and with two adjacent stored
+   fragments the serifs are also what make the boundary between them legible,
+   which plain bars never did.
+
+   Drawn with pseudo-elements: the bar already hosts a label child, and serifs
+   are decoration that must never take pointer events. */
 .storedBracket {
   position: absolute;
   pointer-events: none;
 
   /* No border-radius — 0px everywhere (DESIGN.md). */
+}
+
+.storedBracket::before,
+.storedBracket::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  width: 2px;
+  height: 5px;
+  background-color: inherit;
+}
+
+.storedBracket::before {
+  left: 0;
+}
+
+.storedBracket::after {
+  right: 0;
+}
+
+/* While a live selection or edit is on screen, stored brackets recede (M5
+   ask 2). The answer to "which one am I editing" is to quiet everything else
+   rather than to shout louder. */
+.dimmed {
+  opacity: 0.35;
 }
 
 /* ── Sub-part bracket bar ─────────────────────────────────────────────────── */
@@ -23,12 +57,42 @@
    expanded.  Sits in the same lane as live stage brackets (StageBrackets.tsx).
    Uses the same status colour classes as .storedBracket.
    Slightly reduced opacity to visually distinguish sub-parts from parents. */
+
+/* Thinner than a parent, so rank reads off weight even where status colour
+   happens to match. Serifs too — a stored sub-part is just as committed. */
 .subPartBracket {
   position: absolute;
   pointer-events: none;
   opacity: 0.85;
 
   /* No border-radius — 0px everywhere (DESIGN.md). */
+}
+
+/* Below the staff the serif rises *toward* the music: a bracket's ends always
+   turn in towards what they enclose, whichever side of the staff it sits on. */
+.subPartBracket::before,
+.subPartBracket::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  width: 2px;
+  height: 4px;
+  background-color: inherit;
+}
+
+.subPartBracket::before {
+  left: 0;
+}
+
+.subPartBracket::after {
+  right: 0;
+}
+
+/* An internal boundary is marked once, by the following bracket's left serif
+   (see `serifSides`). Two marks in one place composited darker than a real
+   serif, because the status colours are translucent. */
+.noSerifRight::after {
+  content: none;
 }
 
 /* ── Per-status colours ──────────────────────────────────────────────────── */
@@ -55,14 +119,18 @@
 
 /* ── Alias label ─────────────────────────────────────────────────────────── */
 
-/* Concept alias text (e.g. "PAC") rendered below the bracket bar at its left
-   edge.  Uses Public Sans label-sm (11px) to match stage labels (StageBrackets.
-   module.css).  pointer-events: none — decorative, does not capture clicks. */
+/* Concept alias text (e.g. "PAC") at the bracket's left edge.  Uses Public
+   Sans label-sm (11px) to match stage labels (StageBrackets.module.css).
+   pointer-events: none — decorative, does not capture clicks.
+
+   Sits **above** the bar, not below (M5 ask 3). Hanging downward put it in the
+   live selection bracket's lane, every time, by construction. The rule now is
+   that a label always goes on the far side of its bracket from the staff. */
 .aliasLabel {
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   left: 0;
-  margin-top: 2px;
+  margin-bottom: 2px;
   font-family: var(--font-label, 'Public Sans', sans-serif);
   font-size: 0.6875rem; /* 11px — label-sm */
   font-weight: 500;
@@ -70,6 +138,14 @@
   pointer-events: none;
   line-height: 1;
   color: var(--color-primary, #3f5f77);
+}
+
+/* Below-staff brackets label downward — the same rule, mirrored. */
+.subPartBracket .aliasLabel {
+  top: 100%;
+  bottom: auto;
+  margin-top: 6px;
+  margin-bottom: 0;
 }
 
 /* ── Click target (Step 11 / Step 12) ───────────────────────────────────── */

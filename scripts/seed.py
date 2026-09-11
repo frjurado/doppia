@@ -63,8 +63,9 @@ from backend.graph.queries.seed import (  # noqa: E402
     merge_value_references_edge,
     upsert_concept_translation,
     upsert_property_schema_translation,
+    upsert_translations,
 )
-from backend.seed.schemas import DomainYAML  # noqa: E402
+from backend.seed.schemas import DomainYAML, TranslationsYAML  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Repository layout
@@ -103,6 +104,8 @@ class SeedStats:
     stubs_by_domain: dict[str, int] = field(default_factory=dict)
     concept_translations_seeded: int = 0
     schema_translations_seeded: int = 0
+    locale_rows: dict[str, tuple[int, int, int]] = field(default_factory=dict)
+    """Per-language overlay row counts: language → (concepts, schemas, values)."""
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +220,71 @@ def _load_domain_files(args: argparse.Namespace) -> list[DomainYAML]:
 # ---------------------------------------------------------------------------
 
 
+def _load_translation_files(
+    concept_ids: frozenset[str] | set[str],
+    schema_ids: frozenset[str] | set[str],
+    value_ids: frozenset[str] | set[str],
+) -> list[TranslationsYAML]:
+    """Load and validate every ``backend/seed/translations/*.yaml``.
+
+    Every id in an overlay must name something the domain files define. A
+    translation for an unknown id is almost always a typo, and because the
+    overlay tables have no foreign key to the graph it would otherwise become
+    an orphan row that never surfaces and never errors — the failure mode being
+    that the translation silently does not appear.
+
+    Args:
+        concept_ids: Concept ids defined across the loaded domain files.
+        schema_ids: Property schema ids defined across the loaded domain files.
+        value_ids: Property value ids defined across the loaded domain files.
+
+    Returns:
+        One validated model per overlay file, ordered by language.
+
+    Raises:
+        SystemExit: On a validation error or an unknown id (exit code 1).
+    """
+    directory = _REPO_ROOT / "backend" / "seed" / "translations"
+    if not directory.is_dir():
+        return []
+
+    loaded: list[TranslationsYAML] = []
+    for path in sorted(directory.glob("*.yaml")):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        try:
+            model = TranslationsYAML.model_validate(raw)
+        except ValidationError as exc:
+            print(
+                f"[seed] ERROR: {path.name} failed validation:",
+                file=sys.stderr,
+            )
+            print(exc, file=sys.stderr)
+            sys.exit(1)
+
+        unknown: list[str] = []
+        unknown += [c.id for c in model.concepts if c.id not in concept_ids]
+        unknown += [s.id for s in model.property_schemas if s.id not in schema_ids]
+        unknown += [v.id for v in model.property_values if v.id not in value_ids]
+        if unknown:
+            print(
+                f"[seed] ERROR: {path.name} translates {len(unknown)} id(s) that no "
+                f"domain file defines: {', '.join(sorted(unknown))}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        print(
+            f"[seed] Validated {path.name} "
+            f"({model.language}, status={model.status}): "
+            f"{len(model.concepts)} concept(s), "
+            f"{len(model.property_schemas)} schema(s), "
+            f"{len(model.property_values)} value(s)"
+        )
+        loaded.append(model)
+
+    return loaded
+
+
 def _build_known_ids(
     domains: list[DomainYAML],
 ) -> tuple[frozenset[str], frozenset[str]]:
@@ -236,6 +304,24 @@ def _build_known_ids(
         for schema in domain.property_schemas:
             schema_ids.add(schema.id)
     return frozenset(concept_ids), frozenset(schema_ids)
+
+
+def _build_known_value_ids(domains: list[DomainYAML]) -> frozenset[str]:
+    """Collect every PropertyValue id across the loaded domain files.
+
+    Args:
+        domains: Validated domain models.
+
+    Returns:
+        The set of value ids, used to reject overlay entries for ids that do
+        not exist.
+    """
+    return frozenset(
+        value.id
+        for domain in domains
+        for schema in domain.property_schemas
+        for value in schema.values
+    )
 
 
 def _check_references(
@@ -529,6 +615,11 @@ def _print_summary(stats: SeedStats) -> None:
         f"{stats.concept_translations_seeded} concept(s), "
         f"{stats.schema_translations_seeded} schema(s)"
     )
+    for language, (c, sc, v) in sorted(stats.locale_rows.items()):
+        print(
+            f"[seed]   {language} overlay        : "
+            f"{c} concept(s), {sc} schema(s), {v} value(s)"
+        )
     if stats.stubs_by_domain:
         print("[seed]   Stub counts by domain:")
         for dom, count in sorted(stats.stubs_by_domain.items()):
@@ -614,6 +705,17 @@ def main() -> None:
 
     # ── Reference resolution ─────────────────────────────────────────────────
     concept_ids, schema_ids = _build_known_ids(domains)
+    value_ids = _build_known_value_ids(domains)
+
+    # Overlays are validated with the domains so a bad translation file fails
+    # the run before anything is written, dry-run included. They are only
+    # *applied* to a full run: --domain loads a subset, and an overlay checked
+    # against a subset would reject every id belonging to the other domains.
+    translations = (
+        _load_translation_files(concept_ids, schema_ids, value_ids)
+        if args.all_domains
+        else []
+    )
     refs_ok = _check_references(domains, concept_ids, schema_ids, args.dry_run)
     if not refs_ok:
         sys.exit(2)
@@ -681,6 +783,14 @@ def main() -> None:
                 )
                 # Commit this domain's English translation rows only after its
                 # Neo4j seeding has succeeded (logical atomicity, ADR-006).
+                pg_conn.commit()
+
+            # Non-English overlays last: they reference ids the domain pass has
+            # just written, and they are a pure PostgreSQL write with no Neo4j
+            # counterpart to stay atomic with.
+            for overlay in translations:
+                counts = upsert_translations(pg_conn, overlay)
+                stats.locale_rows[overlay.language] = counts
                 pg_conn.commit()
 
             _print_summary(stats)

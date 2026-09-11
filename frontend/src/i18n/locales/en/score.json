@@ -34,7 +34,8 @@
   "overlay": {
     "expandFragment": "Expand fragment",
     "collapseFragment": "Collapse fragment",
-    "openDetails": "Open fragment details"
+    "openDetails": "Open fragment details",
+    "partN": "Part {{number}}"
   },
   "checklist": {
     "heading": "Checklist",
@@ -75,6 +76,7 @@
     "conceptSchemaError": "Could not load concept schema. Try again.",
     "sectionStages": "Stages",
     "stagesHint": "Drag brackets to confirm bounds, or toggle to mark absent.",
+    "stagesBlocked": "This selection is too short to place every stage. Lengthen it, or mark stages absent until the rest fit.",
     "stagesInfoAria": "About stages",
     "sectionProperties": "Properties",
     "sectionHarmony": "Harmony",
@@ -210,6 +212,7 @@
     "pageTitle": "Score Viewer — Doppia",
     "srTitle": "Score Viewer",
     "backToBrowse": "← Browse",
+    "backToQueue": "← Review queue",
     "size": "Size",
     "scale": {
       "small": "Small",
@@ -266,5 +269,25 @@
     "saveDraftError": "Failed to save draft.",
     "incompleteSubmit": "Incomplete annotation — cannot submit.",
     "submitError": "Failed to submit."
+  },
+  "harmonyLabel": {
+    "positionMeasureBeat": "m.{{measure}}{{volta}} b{{beat}}",
+    "beatShort": "b{{beat}}",
+    "root": "root {{degree}}",
+    "ext": "ext {{list}}",
+    "quality": {
+      "major": "major",
+      "minor": "minor",
+      "diminished": "dim",
+      "augmented": "aug",
+      "half-diminished": "ø",
+      "dominant-seventh": "dom7"
+    },
+    "inversion": {
+      "0": "root pos",
+      "1": "1st inv",
+      "2": "2nd inv",
+      "3": "3rd inv"
+    }
   }
 }

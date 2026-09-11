@@ -27,17 +27,14 @@ export const BEAT_SCALE = 100;
 /** Max 99 beats per measure. */
 export const MEASURE_SCALE = 10_000;
 
-export const encodeBeat = (m: number, b: number): number =>
-  MEASURE_SCALE * m + BEAT_SCALE * b;
+export const encodeBeat = (m: number, b: number): number => MEASURE_SCALE * m + BEAT_SCALE * b;
 
 export const encodeSubBeat = (m: number, b: number, sb: number): number =>
   MEASURE_SCALE * m + BEAT_SCALE * b + sb;
 
-export const decodeMeasure = (n: number): number =>
-  Math.floor(n / MEASURE_SCALE);
+export const decodeMeasure = (n: number): number => Math.floor(n / MEASURE_SCALE);
 
-export const decodeBeat = (n: number): number =>
-  Math.floor((n % MEASURE_SCALE) / BEAT_SCALE);
+export const decodeBeat = (n: number): number => Math.floor((n % MEASURE_SCALE) / BEAT_SCALE);
 
 export const decodeSubBeat = (n: number): number => n % BEAT_SCALE;
 
@@ -109,7 +106,7 @@ export function walkMeasureKeys(meiDoc: Document): MeasureWalkInfo[] {
 
     const endingN = getEndingN(el);
     const baseKey = measureGhostKey(barN, endingN);
-    const cnt     = seenBaseKeys.get(baseKey) ?? 0;
+    const cnt = seenBaseKeys.get(baseKey) ?? 0;
     seenBaseKeys.set(baseKey, cnt + 1);
     const key = cnt === 0 ? baseKey : `${baseKey}#${cnt}`;
 
@@ -123,9 +120,32 @@ export function walkMeasureKeys(meiDoc: Document): MeasureWalkInfo[] {
 // Compound-meter utilities
 // ---------------------------------------------------------------------------
 
-/** True when time signature indicates compound meter (6/8, 9/8, 12/8). */
+/**
+ * True when the time signature is compound: 6/8, 9/8, 12/8.
+ *
+ * Compound means the beat *groups* its subdivisions — three eighths to a dotted
+ * quarter — which takes both an eighth-note denominator and a numerator with
+ * something to group. `beatCount >= 6` is that second condition, and it is what
+ * excludes **3/8**: three eighths in a bar are three beats, as in 3/4, not one
+ * dotted-quarter beat containing the whole measure (Track M17, decided with
+ * Francisco 2026-09-10; ADR-005 § "compound-meter rule").
+ *
+ * The rule never *manufactures* a one-beat bar: grouping applies only where it
+ * leaves at least two beats. A notated 1/4 or 1/8 bar genuinely has one beat and
+ * is unaffected — the objection is not to one-beat bars but to inferring one
+ * where the notation shows three pulses. Under the previous rule 3/8 was such an
+ * inference, and the consequences were not cosmetic: beat 3
+ * did not exist, so harmony labels for beats 1 and 3 both drew on beat 1 (dozens
+ * of bars in K280/iii), and a beat coordinate written by the tagging tool meant
+ * something different from the same number in a harmony record. The stored
+ * coordinates written under the old rule were converted by
+ * `backend/data_migrations/fix_38_beat_coordinates.py`.
+ *
+ * `ingest_analysis._compute_beat` and `clamp_subpart_bounds.measure_end_beat`
+ * carry the same predicate; the three must agree.
+ */
 export function isCompoundMeter(beatCount: number, beatUnit: number): boolean {
-  return beatUnit === 8 && beatCount % 3 === 0;
+  return beatUnit === 8 && beatCount >= 6 && beatCount % 3 === 0;
 }
 
 /**
@@ -143,9 +163,7 @@ export function subdivisionsPerBeat(beatCount: number, beatUnit: number): number
  * 9/8 → 3 beats, 12/8 → 4 beats.
  */
 export function beatSlotCount(beatCount: number, beatUnit: number): number {
-  return isCompoundMeter(beatCount, beatUnit)
-    ? Math.floor(beatCount / 3)
-    : beatCount;
+  return isCompoundMeter(beatCount, beatUnit) ? Math.floor(beatCount / 3) : beatCount;
 }
 
 /**
@@ -161,11 +179,7 @@ export function beatSlotCount(beatCount: number, beatUnit: number): number {
  *   beat=0, subBeat=1 → 1.333…
  *   beat=1, subBeat=2 → 2.667…
  */
-export function beatToFloat(
-  beat0: number,
-  subBeat0: number,
-  subDiv: number,
-): number {
+export function beatToFloat(beat0: number, subBeat0: number, subDiv: number): number {
   // beat_start uses 1-indexed beat numbers (MEI convention).
   return beat0 + 1 + subBeat0 / subDiv;
 }
@@ -194,7 +208,7 @@ export function beatToFloat(
 export function getMeterForMeasure(
   meiMeasure: Element,
   beatCount: number,
-  beatUnit: number,
+  beatUnit: number
 ): [beatCount: number, beatUnit: number] {
   const localSig = meiMeasure.querySelector('meterSig');
   if (localSig) {
@@ -296,7 +310,7 @@ export function computeBeatBoundaries(
   measureStartTime: number,
   beatCount: number,
   beatUnit: number,
-  notes: NotePositionInput[],
+  notes: NotePositionInput[]
 ): BeatBoundaryOutput {
   const compound = isCompoundMeter(beatCount, beatUnit);
   const subDiv = subdivisionsPerBeat(beatCount, beatUnit);
@@ -307,10 +321,10 @@ export function computeBeatBoundaries(
   const beatLefts: number[] = new Array(numBeats).fill(mRight);
   const beatRights: number[] = new Array(numBeats).fill(mRight);
   const subBeatLefts: number[][] = Array.from({ length: numBeats }, () =>
-    new Array(subDiv).fill(mRight),
+    new Array(subDiv).fill(mRight)
   );
   const subBeatRights: number[][] = Array.from({ length: numBeats }, () =>
-    new Array(subDiv).fill(mRight),
+    new Array(subDiv).fill(mRight)
   );
 
   // Per beat / sub-beat: the center-x of the LEFTMOST notehead at that metric
@@ -320,10 +334,10 @@ export function computeBeatBoundaries(
   const beatLeftSeen: number[] = new Array(numBeats).fill(Infinity);
   const beatCenters: number[] = new Array(numBeats).fill(NaN);
   const subBeatLeftSeen: number[][] = Array.from({ length: numBeats }, () =>
-    new Array(subDiv).fill(Infinity),
+    new Array(subDiv).fill(Infinity)
   );
   const subBeatCenters: number[][] = Array.from({ length: numBeats }, () =>
-    new Array(subDiv).fill(NaN),
+    new Array(subDiv).fill(NaN)
   );
 
   beatLefts[0] = mLeft;
@@ -339,7 +353,7 @@ export function computeBeatBoundaries(
     const measureLocalOnset = note.scoreTimeOnset - measureStartTime;
 
     // Convert to raw slot index (eighth-note grid for compound, denominator grid for simple).
-    const rawSlot = Math.floor(measureLocalOnset * beatUnit / 4.0);
+    const rawSlot = Math.floor((measureLocalOnset * beatUnit) / 4.0);
 
     // Beat-level index with compound-meter correction.
     const beatIdx = compound ? Math.floor(rawSlot / subDiv) : rawSlot;
@@ -355,8 +369,8 @@ export function computeBeatBoundaries(
           0,
           Math.min(
             subDiv - 1,
-            Math.floor((measureLocalOnset * beatUnit / 4.0 - beatIdx) * subDiv),
-          ),
+            Math.floor(((measureLocalOnset * beatUnit) / 4.0 - beatIdx) * subDiv)
+          )
         );
 
     // Track leftmost notehead x per beat and per sub-beat.
@@ -447,7 +461,7 @@ export interface MeasureGhostEntry {
   /** Ghost bounds — top/height span the staff lines only (not note content). */
   bounds: GhostBounds;
   /** Min rawTop across the system, including note content above the staff.
-   *  Used by MainBracket to anchor the bracket above the highest note. */
+   *  Used by resolveSegments to anchor a bracket above the highest note. */
   systemTop: number;
   /**
    * 0-indexed document-order render position among SVG-matched measures.
@@ -527,7 +541,6 @@ export type ResolutionMode = 'measure' | 'beat' | 'subbeat';
 
 /** Fixed width (px) of each drag handle ghost element placed outside the selection. */
 export const HANDLE_GHOST_W = 32;
-
 
 // ---------------------------------------------------------------------------
 // GhostLayer class
@@ -630,9 +643,13 @@ export class GhostLayer {
    * Call showHandles() to make them visible on hover.
    */
   positionHandles(
-    leftEdge: number, leftTop: number, leftHeight: number,
-    rightEdge: number, rightTop: number, rightHeight: number,
-    opacity: number,
+    leftEdge: number,
+    leftTop: number,
+    leftHeight: number,
+    rightEdge: number,
+    rightTop: number,
+    rightHeight: number,
+    opacity: number
   ): void {
     this._handleOpacity = opacity;
     Object.assign(this._leftHandle.style, {
@@ -689,8 +706,12 @@ export class GhostLayer {
    * §"Resolution toggle": "ghost construction is not re-run on toggle").
    */
   setResolution(mode: ResolutionMode): void {
-    const active = (layer: HTMLElement) => { layer.style.pointerEvents = 'auto'; };
-    const inactive = (layer: HTMLElement) => { layer.style.pointerEvents = 'none'; };
+    const active = (layer: HTMLElement) => {
+      layer.style.pointerEvents = 'auto';
+    };
+    const inactive = (layer: HTMLElement) => {
+      layer.style.pointerEvents = 'none';
+    };
 
     if (mode === 'measure') {
       active(this._measureLayer);
@@ -789,8 +810,7 @@ export function noteheadLeftEdge(svgNote: Element, containerLeft: number): numbe
  */
 function resolveNoteheadEl(svgNote: Element): Element | null {
   return (
-    svgNote.querySelector(':scope > g.noteHead') ??
-    svgNote.querySelector(':scope > g.notehead')
+    svgNote.querySelector(':scope > g.noteHead') ?? svgNote.querySelector(':scope > g.notehead')
   );
 }
 
@@ -843,11 +863,7 @@ function applyGhostBounds(el: HTMLElement, bounds: GhostBounds): void {
   });
 }
 
-function createGhostEl(
-  className: string,
-  bounds: GhostBounds,
-  dataKey: string,
-): HTMLElement {
+function createGhostEl(className: string, bounds: GhostBounds, dataKey: string): HTMLElement {
   const el = document.createElement('div');
   el.className = className;
   el.dataset['key'] = dataKey;
@@ -932,10 +948,10 @@ function parsePpqPerQn(meiDoc: Document): number {
   for (const tag of ['note', 'chord', 'rest']) {
     const els = meiDoc.getElementsByTagName(tag);
     for (let i = 0; i < els.length; i++) {
-      const dur    = parseInt(els[i].getAttribute('dur')     ?? '', 10);
+      const dur = parseInt(els[i].getAttribute('dur') ?? '', 10);
       const durPpq = parseInt(els[i].getAttribute('dur.ppq') ?? '', 10);
       if (!isNaN(dur) && dur > 0 && !isNaN(durPpq) && durPpq > 0) {
-        return Math.round(durPpq * dur / 4);
+        return Math.round((durPpq * dur) / 4);
       }
     }
   }
@@ -952,16 +968,12 @@ function parsePpqPerQn(meiDoc: Document): number {
  * At system starts these decorations appear before the first note and would
  * otherwise give a ghost that starts too far to the left.
  */
-function adjustedMLeft(
-  measureSvgEl: Element,
-  rawMLeft: number,
-  containerLeft: number,
-): number {
+function adjustedMLeft(measureSvgEl: Element, rawMLeft: number, containerLeft: number): number {
   let adjusted = rawMLeft;
   for (const cls of ['clef', 'keySig', 'meterSig']) {
     const decoEls = measureSvgEl.querySelectorAll(
       `:scope > g.${cls}, :scope > g[class*="${cls}"], ` +
-      `g.staff > g.${cls}, g.staff > g[class*="${cls}"]`,
+        `g.staff > g.${cls}, g.staff > g[class*="${cls}"]`
     );
     for (const deco of decoEls) {
       const r = deco.getBoundingClientRect();
@@ -984,10 +996,10 @@ function adjustedMLeft(
 function rightEdgeFromBarline(
   measureSvgEl: Element,
   rawRight: number,
-  containerLeft: number,
+  containerLeft: number
 ): number {
   const barlines = measureSvgEl.querySelectorAll(
-    ':scope > g.barLine, :scope > g[class*="barLine"]',
+    ':scope > g.barLine, :scope > g[class*="barLine"]'
   );
   if (barlines.length === 0) return rawRight;
   const last = barlines[barlines.length - 1]!;
@@ -1005,31 +1017,31 @@ function rightEdgeFromBarline(
 const SYSTEM_GAP_PX = 80;
 
 interface MeasureInfo {
-  measureId:        string;
-  svgMeasure:       Element;
-  meiMeasure:       Element;
-  mLeft:            number;
-  mRight:           number;
-  rawTop:           number;
-  rawBottom:        number;
-  barN:             number;
-  endingN:          number | null;
+  measureId: string;
+  svgMeasure: Element;
+  meiMeasure: Element;
+  mLeft: number;
+  mRight: number;
+  rawTop: number;
+  rawBottom: number;
+  barN: number;
+  endingN: number | null;
   /**
    * Deduplicated measure ghost key — equal to measureGhostKey(barN, endingN)
    * unless another earlier-rendered measure shares the same base key, in which
    * case a '#N' suffix disambiguates (G2.3: section-reset @n values).
    */
-  key:              string;
+  key: string;
   /**
    * 0-indexed position of this measure among all rendered measures (those with
    * a matching SVG element). Used as the measure component of beat/subbeat
    * encoded keys so that measures with duplicate @n values (section-reset
    * numbering) still produce distinct integer keys in the beat/subbeat indexes.
    */
-  renderOrder:      number;
-  noteInputs:       NotePositionInput[];
-  beatCount:        number;
-  beatUnit:         number;
+  renderOrder: number;
+  noteInputs: NotePositionInput[];
+  beatCount: number;
+  beatUnit: number;
   measureStartTime: number;
 }
 
@@ -1047,28 +1059,28 @@ interface MeasureInfo {
  */
 function staffLineBounds(
   measures: MeasureInfo[],
-  containerRect: DOMRect,
+  containerRect: DOMRect
 ): { top: number; bottom: number } {
   let top = Infinity;
   let bottom = -Infinity;
 
   for (const info of measures) {
     const staffEls = info.svgMeasure.querySelectorAll(
-      ':scope > g.staff, :scope > g.staffGrp > g.staff',
+      ':scope > g.staff, :scope > g.staffGrp > g.staff'
     );
     for (const staffEl of staffEls) {
       const linePaths = staffEl.querySelectorAll(':scope > path');
       if (linePaths.length === 0) continue;
       const firstRect = linePaths[0]!.getBoundingClientRect();
-      const lastRect  = linePaths[linePaths.length - 1]!.getBoundingClientRect();
-      top    = Math.min(top,    firstRect.top    - containerRect.top);
-      bottom = Math.max(bottom, lastRect.bottom  - containerRect.top);
+      const lastRect = linePaths[linePaths.length - 1]!.getBoundingClientRect();
+      top = Math.min(top, firstRect.top - containerRect.top);
+      bottom = Math.max(bottom, lastRect.bottom - containerRect.top);
     }
   }
 
   if (!isFinite(top) || !isFinite(bottom)) {
     return {
-      top:    measures.reduce((mn, m) => Math.min(mn, m.rawTop),    Infinity),
+      top: measures.reduce((mn, m) => Math.min(mn, m.rawTop), Infinity),
       bottom: measures.reduce((mx, m) => Math.max(mx, m.rawBottom), -Infinity),
     };
   }
@@ -1098,7 +1110,7 @@ function collectLayerNotes(
   ppqPerQn: number,
   container: HTMLElement,
   containerRect: DOMRect,
-  out: NotePositionInput[],
+  out: NotePositionInput[]
 ): void {
   function processEl(el: Element, ppq: number): number {
     const tag = el.tagName.toLowerCase();
@@ -1111,9 +1123,9 @@ function collectLayerNotes(
           const svgNote = container.querySelector(`[id="${noteId}"]`);
           if (svgNote) {
             out.push({
-              xLeft:             noteheadLeftEdge(svgNote, containerRect.left),
-              xCenter:           noteheadCenter(svgNote, containerRect.left),
-              scoreTimeOnset:    ppq / ppqPerQn,
+              xLeft: noteheadLeftEdge(svgNote, containerRect.left),
+              xCenter: noteheadCenter(svgNote, containerRect.left),
+              scoreTimeOnset: ppq / ppqPerQn,
               scoreTimeDuration: durPpq / ppqPerQn,
             });
           }
@@ -1134,9 +1146,9 @@ function collectLayerNotes(
             const svgNote = container.querySelector(`[id="${noteId}"]`);
             if (svgNote) {
               out.push({
-                xLeft:             noteheadLeftEdge(svgNote, containerRect.left),
-                xCenter:           noteheadCenter(svgNote, containerRect.left),
-                scoreTimeOnset:    ppq / ppqPerQn,
+                xLeft: noteheadLeftEdge(svgNote, containerRect.left),
+                xCenter: noteheadCenter(svgNote, containerRect.left),
+                scoreTimeOnset: ppq / ppqPerQn,
                 scoreTimeDuration: durPpq / ppqPerQn,
               });
             }
@@ -1182,10 +1194,7 @@ function collectLayerNotes(
  * @param meiText   Normalised MEI content string for the loaded score.
  * @param tk        Verovio toolkit instance; getTimesForElement is called per note.
  */
-export function buildGhosts(
-  container: HTMLElement,
-  meiText: string,
-): GhostLayer {
+export function buildGhosts(container: HTMLElement, meiText: string): GhostLayer {
   const layer = new GhostLayer(container);
 
   const meiDoc = new DOMParser().parseFromString(meiText, 'text/xml');
@@ -1209,35 +1218,33 @@ export function buildGhosts(
   // Updated for every document measure, before the skip guards below, so a
   // change inside an unrendered measure is not lost.
   let curBeatCount = globalBeatCount;
-  let curBeatUnit  = globalBeatUnit;
+  let curBeatUnit = globalBeatUnit;
 
   for (const walk of walkMeasureKeys(meiDoc)) {
     const meiMeasure = walk.el;
 
-    [curBeatCount, curBeatUnit] = getMeterForMeasure(
-      meiMeasure, curBeatCount, curBeatUnit,
-    );
+    [curBeatCount, curBeatUnit] = getMeterForMeasure(meiMeasure, curBeatCount, curBeatUnit);
 
-    const measureId  = getMeiId(meiMeasure);
+    const measureId = getMeiId(meiMeasure);
     if (!measureId) continue;
 
     const svgMeasure = container.querySelector(`[id="${measureId}"]`);
     if (!svgMeasure) continue;
 
     const measureRect = svgMeasure.getBoundingClientRect();
-    const mLeft0    = measureRect.left   - containerRect.left;
-    const mRightRaw = measureRect.right  - containerRect.left;
-    const rawTop    = measureRect.top    - containerRect.top;
+    const mLeft0 = measureRect.left - containerRect.left;
+    const mRightRaw = measureRect.right - containerRect.left;
+    const rawTop = measureRect.top - containerRect.top;
     const rawBottom = measureRect.bottom - containerRect.top;
 
     // Adjust left past system decorations; clamp right to closing barline.
-    const mLeft  = adjustedMLeft(svgMeasure, mLeft0, containerRect.left);
+    const mLeft = adjustedMLeft(svgMeasure, mLeft0, containerRect.left);
     const mRight = rightEdgeFromBarline(svgMeasure, mRightRaw, containerRect.left);
 
     const { barN, endingN, key } = walk;
 
     const beatCount = curBeatCount;
-    const beatUnit  = curBeatUnit;
+    const beatUnit = curBeatUnit;
 
     // scoreTimeOnset from PPQ accumulation is 0-indexed from measure start, so
     // measureStartTime = 0 (computeBeatBoundaries subtracts it for localOnset).
@@ -1255,10 +1262,21 @@ export function buildGhosts(
     }
 
     measureInfos.push({
-      measureId, svgMeasure, meiMeasure,
-      mLeft, mRight, rawTop, rawBottom,
-      barN, endingN, key, renderOrder: renderOrder++,
-      noteInputs, beatCount, beatUnit, measureStartTime,
+      measureId,
+      svgMeasure,
+      meiMeasure,
+      mLeft,
+      mRight,
+      rawTop,
+      rawBottom,
+      barN,
+      endingN,
+      key,
+      renderOrder: renderOrder++,
+      noteInputs,
+      beatCount,
+      beatUnit,
+      measureStartTime,
     });
   }
 
@@ -1272,7 +1290,7 @@ export function buildGhosts(
   for (const info of measureInfos) {
     const midY = (info.rawTop + info.rawBottom) / 2;
     if (currentSystem.length > 0) {
-      const prev     = currentSystem[currentSystem.length - 1]!;
+      const prev = currentSystem[currentSystem.length - 1]!;
       const prevMidY = (prev.rawTop + prev.rawBottom) / 2;
       if (Math.abs(midY - prevMidY) > SYSTEM_GAP_PX) {
         systems.push(currentSystem);
@@ -1288,7 +1306,7 @@ export function buildGhosts(
   for (const system of systems) {
     // Staff-line bounds: first staff line to last staff line, no note content.
     // Computed first so the result can cap systemTop below.
-    const sBounds     = staffLineBounds(system, containerRect);
+    const sBounds = staffLineBounds(system, containerRect);
     const ghostHeight = sBounds.bottom - sBounds.top;
 
     // systemTop: bracket anchor above the system. Raw measure tops include high
@@ -1297,23 +1315,36 @@ export function buildGhosts(
     // the bracket clears their bottom edge, but cap at 60px to prevent absurdly
     // tall decorations from pushing the bracket off-screen (Step 6, Component 7).
     const rawSystemTop = system.reduce((mn, m) => Math.min(mn, m.rawTop), Infinity);
-    const systemTop    = Math.max(rawSystemTop, sBounds.top - 60);
+    const systemTop = Math.max(rawSystemTop, sBounds.top - 60);
 
     for (const info of system) {
-      const { mLeft, mRight, barN, endingN, key: mKey, renderOrder,
-              noteInputs, beatCount, beatUnit, measureStartTime } = info;
+      const {
+        mLeft,
+        mRight,
+        barN,
+        endingN,
+        key: mKey,
+        renderOrder,
+        noteInputs,
+        beatCount,
+        beatUnit,
+        measureStartTime,
+      } = info;
 
       // Measure ghost spans staff lines only.
       const msrBounds: GhostBounds = {
-        left:   mLeft,
-        top:    sBounds.top,
-        width:  mRight - mLeft,
+        left: mLeft,
+        top: sBounds.top,
+        width: mRight - mLeft,
         height: ghostHeight,
       };
       const msrEl = createGhostEl('ghost ghost-measure', msrBounds, mKey);
       layer._appendMeasureGhost(msrEl);
       layer.measureIndex.set(mKey, {
-        el: msrEl, barN, endingN, key: mKey,
+        el: msrEl,
+        barN,
+        endingN,
+        key: mKey,
         bounds: msrBounds,
         systemTop,
         renderOrder,
@@ -1321,7 +1352,12 @@ export function buildGhosts(
 
       const subDiv = subdivisionsPerBeat(beatCount, beatUnit);
       const bb = computeBeatBoundaries(
-        mLeft, mRight, measureStartTime, beatCount, beatUnit, noteInputs,
+        mLeft,
+        mRight,
+        measureStartTime,
+        beatCount,
+        beatUnit,
+        noteInputs
       );
 
       // §6A.7 — empty measure (no note onsets): the only-struck-beats rule
@@ -1331,34 +1367,53 @@ export function buildGhosts(
       if (bb.struckBeats.size === 0) {
         const fullExtent = bb.numBeats + 1;
         const synthBounds: GhostBounds = {
-          left: mLeft, top: sBounds.top, width: mRight - mLeft, height: ghostHeight,
+          left: mLeft,
+          top: sBounds.top,
+          width: mRight - mLeft,
+          height: ghostHeight,
         };
         // No noteheads to center on: fall back to the measure center.
         const synthCenter = mLeft + (mRight - mLeft) / 2;
 
         const bKey = encodeBeat(renderOrder, 0);
-        const bEl  = createGhostEl('ghost ghost-beat', synthBounds, `${bKey}`);
+        const bEl = createGhostEl('ghost ghost-beat', synthBounds, `${bKey}`);
         layer._appendBeatGhost(bEl);
         layer.beatIndex.set(bKey, {
-          el: bEl, barN, endingN, measureKey: mKey,
-          beatIdx: 0, encodedKey: bKey, beatFloat: 1.0, endFloat: fullExtent,
-          synthetic: true, bounds: synthBounds, noteheadCenter: synthCenter,
+          el: bEl,
+          barN,
+          endingN,
+          measureKey: mKey,
+          beatIdx: 0,
+          encodedKey: bKey,
+          beatFloat: 1.0,
+          endFloat: fullExtent,
+          synthetic: true,
+          bounds: synthBounds,
+          noteheadCenter: synthCenter,
         });
 
         const sbKey = encodeSubBeat(renderOrder, 0, 0);
-        const sbEl  = createGhostEl('ghost ghost-subbeat', synthBounds, `${sbKey}`);
+        const sbEl = createGhostEl('ghost ghost-subbeat', synthBounds, `${sbKey}`);
         layer._appendSubBeatGhost(sbEl);
         layer.subBeatIndex.set(sbKey, {
-          el: sbEl, barN, endingN, measureKey: mKey,
-          beatIdx: 0, subBeatIdx: 0, encodedKey: sbKey,
-          beatFloat: 1.0, endFloat: fullExtent,
-          synthetic: true, bounds: synthBounds, noteheadCenter: synthCenter,
+          el: sbEl,
+          barN,
+          endingN,
+          measureKey: mKey,
+          beatIdx: 0,
+          subBeatIdx: 0,
+          encodedKey: sbKey,
+          beatFloat: 1.0,
+          endFloat: fullExtent,
+          synthetic: true,
+          bounds: synthBounds,
+          noteheadCenter: synthCenter,
         });
         continue;
       }
 
       for (const b of bb.struckBeats) {
-        const bLeft  = bb.beatLefts[b];
+        const bLeft = bb.beatLefts[b];
         const bRight = bb.beatRights[b];
         if (bRight <= bLeft) continue;
 
@@ -1366,10 +1421,13 @@ export function buildGhosts(
         // Use renderOrder (not barN) as the measure component so that
         // measures with duplicate @n values (section-reset numbering) produce
         // distinct encoded keys in the beat and sub-beat indexes (G2.3).
-        const encKey    = encodeBeat(renderOrder, b);
+        const encKey = encodeBeat(renderOrder, b);
 
         const beatBounds: GhostBounds = {
-          left: bLeft, top: sBounds.top, width: bRight - bLeft, height: ghostHeight,
+          left: bLeft,
+          top: sBounds.top,
+          width: bRight - bLeft,
+          height: ghostHeight,
         };
         // Leftmost-notehead center for label centering; fall back to ghost center
         // if it is somehow undefined for a struck beat.
@@ -1379,24 +1437,33 @@ export function buildGhosts(
         const beatEl = createGhostEl('ghost ghost-beat', beatBounds, `${encKey}`);
         layer._appendBeatGhost(beatEl);
         layer.beatIndex.set(encKey, {
-          el: beatEl, barN, endingN, measureKey: mKey,
-          beatIdx: b, encodedKey: encKey, beatFloat,
+          el: beatEl,
+          barN,
+          endingN,
+          measureKey: mKey,
+          beatIdx: b,
+          encodedKey: encKey,
+          beatFloat,
           endFloat: beatFloat + 1,
-          bounds: beatBounds, noteheadCenter: beatCenter,
+          bounds: beatBounds,
+          noteheadCenter: beatCenter,
         });
 
         for (let sb = 0; sb < subDiv; sb++) {
           if (!bb.struckSubBeats.has(b * 100 + sb)) continue;
 
-          const sbLeft  = bb.subBeatLefts[b]?.[sb] ?? bLeft;
+          const sbLeft = bb.subBeatLefts[b]?.[sb] ?? bLeft;
           const sbRight = bb.subBeatRights[b]?.[sb] ?? bRight;
           if (sbRight <= sbLeft) continue;
 
-          const sbFloat  = beatToFloat(b, sb, subDiv);
+          const sbFloat = beatToFloat(b, sb, subDiv);
           const sbEncKey = encodeSubBeat(renderOrder, b, sb);
 
           const sbBounds: GhostBounds = {
-            left: sbLeft, top: sBounds.top, width: sbRight - sbLeft, height: ghostHeight,
+            left: sbLeft,
+            top: sBounds.top,
+            width: sbRight - sbLeft,
+            height: ghostHeight,
           };
           const sbCenter = Number.isFinite(bb.subBeatCenters[b]?.[sb])
             ? bb.subBeatCenters[b]![sb]!
@@ -1404,11 +1471,17 @@ export function buildGhosts(
           const sbEl = createGhostEl('ghost ghost-subbeat', sbBounds, `${sbEncKey}`);
           layer._appendSubBeatGhost(sbEl);
           layer.subBeatIndex.set(sbEncKey, {
-            el: sbEl, barN, endingN, measureKey: mKey,
-            beatIdx: b, subBeatIdx: sb,
-            encodedKey: sbEncKey, beatFloat: sbFloat,
+            el: sbEl,
+            barN,
+            endingN,
+            measureKey: mKey,
+            beatIdx: b,
+            subBeatIdx: sb,
+            encodedKey: sbEncKey,
+            beatFloat: sbFloat,
             endFloat: sbFloat + 1 / subDiv,
-            bounds: sbBounds, noteheadCenter: sbCenter,
+            bounds: sbBounds,
+            noteheadCenter: sbCenter,
           });
         }
       }

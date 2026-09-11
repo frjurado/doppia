@@ -149,7 +149,7 @@ async function renderAndMeasure(page: Page, subParts: unknown[]): Promise<Geomet
     route.fulfill({ status: 200, contentType: 'application/xml', body: MEI })
   );
 
-  await page.goto(`/public/fragments/${FRAGMENT_ID}`);
+  await page.goto(`/fragments/${FRAGMENT_ID}`);
   // Verovio (real WASM) must finish before any geometry exists.
   await expect(page.locator('[class*="svgPage"] svg .note').first()).toBeAttached({
     timeout: 60_000,

@@ -39,7 +39,9 @@ import type { SelectionRange } from '../annotator';
 import type { StageAssignment } from '../stages';
 import type { BeatSlot } from '../stages';
 import {
+  buildUnplacedStages,
   chooseStageGrid,
+  hasUnplacedWantedStage,
   computeStagesComplete,
   prePopulateStages,
   prePopulateStagesAtGrid,
@@ -338,6 +340,140 @@ describe('toggleStageAbsent', () => {
     // After restore, A and B should not overlap.
     const a = restored.find(a => a.stageId === 'A')!;
     expect(a.bounds!.barEnd).toBeLessThan(b.bounds!.barStart);
+  });
+
+  // ── Bounds stay valid through any toggle sequence (Step 18) ──────────────
+  //
+  // Restoring a stage carves bars out of a neighbour. A one-bar neighbour has
+  // no bar to spare, and the carve used to take it anyway, leaving the donor at
+  // barEnd === barStart - 1. Nothing downstream rejects that: the write model
+  // validates only `ge=0` and within-bar beat ordering, sub-part containment
+  // reads an inverted range as trivially contained, and the table has no check
+  // constraint — so an inverted bracket reached the database.
+
+  /** Every stage either has no bounds, or bounds that span at least one bar. */
+  function expectValidBounds(assignments: StageAssignment[]) {
+    for (const a of assignments) {
+      if (!a.bounds) continue;
+      expect(
+        a.bounds.barEnd,
+        `${a.stageId} has inverted bounds ${a.bounds.barStart}-${a.bounds.barEnd}`
+      ).toBeGreaterThanOrEqual(a.bounds.barStart);
+    }
+  }
+
+  /** Four one-bar stages over bars 1-4 — what a 4-bar cadence selection gives. */
+  function makeFourOneBarStages() {
+    const stages = [
+      makeStage('S1', 1, 1, false),
+      makeStage('S2', 2, 1, false),
+      makeStage('S3', 3, 1, false),
+      makeStage('S4', 4, 1, false),
+    ];
+    return prePopulateStages(stages, makeSelection(1, 4));
+  }
+
+  it('never produces inverted bounds, whatever the toggle order', () => {
+    const sequences: Array<Array<[string, boolean]>> = [
+      [['S2', true], ['S3', true], ['S3', false], ['S2', false]],
+      [['S2', true], ['S3', true], ['S2', false], ['S3', false]],
+      [['S1', true], ['S2', true], ['S1', false], ['S2', false]],
+      [['S3', true], ['S1', true], ['S3', false], ['S1', false]],
+      [['S4', true], ['S4', false]],
+    ];
+
+    for (const sequence of sequences) {
+      let state = makeFourOneBarStages();
+      for (const [stageId, absent] of sequence) {
+        state = toggleStageAbsent(state, stageId, absent);
+        expectValidBounds(state);
+      }
+    }
+  });
+
+  it('leaves a restored stage unplaced when no neighbour can spare a bar', () => {
+    // Two one-bar stages: disabling one gives its bar to the other, which then
+    // spans two bars and can donate. Shrink the selection so the survivor holds
+    // a single bar and the restore has nowhere to take space from.
+    const stages = [makeStage('S1', 1, 1, false), makeStage('S2', 2, 1, false)];
+    const assignments = prePopulateStages(stages, makeSelection(1, 2));
+
+    const absent = toggleStageAbsent(assignments, 'S2', true);
+    // S1 now covers both bars, so it *can* donate and the restore succeeds.
+    const restored = toggleStageAbsent(absent, 'S2', false);
+    expectValidBounds(restored);
+    expect(restored.find(a => a.stageId === 'S2')!.bounds).not.toBeNull();
+  });
+
+  it('restores a stage unplaced rather than inverted when nothing can donate', () => {
+    // The contract ScoreViewer's toggle handler depends on. Three one-bar
+    // stages fill a three-bar selection exactly; a fourth has nowhere to go.
+    // No neighbour can spare a bar, so the restore yields a stage that is
+    // *wanted but unplaced* — bounds null, absent false. Refusing to place it
+    // is right (the alternative is the inverted geometry fixed above), but it
+    // is silent on its own: the caller must notice and raise the blocked
+    // notice, or the annotator sees a stage with no bracket and no reason.
+    const placed = prePopulateStages(
+      [makeStage('S1', 1, 1, false), makeStage('S2', 2, 1, false), makeStage('S3', 3, 1, false)],
+      makeSelection(1, 3)
+    );
+    const withFourth: StageAssignment[] = [
+      ...placed,
+      {
+        stageId: 'S4',
+        stageName: 'S4',
+        order: 4,
+        required: false,
+        displayMode: 'stage',
+        containmentMode: 'contiguous',
+        defaultWeight: 1.0,
+        bounds: null,
+        confirmed: false,
+        absent: true,
+        orphaned: false,
+        error: false,
+      },
+    ];
+
+    const restored = toggleStageAbsent(withFourth, 'S4', false);
+    const s4 = restored.find(a => a.stageId === 'S4')!;
+
+    expect(s4.absent).toBe(false);
+    expect(s4.bounds).toBeNull();
+    expectValidBounds(restored);
+    // The other three keep the positions they already had.
+    expect(restored.find(a => a.stageId === 'S1')!.bounds).toEqual(
+      placed.find(a => a.stageId === 'S1')!.bounds
+    );
+
+    // And the fragment is not submittable while a wanted stage has no bounds.
+    expect(computeStagesComplete(restored)).toBe(false);
+  });
+
+  it('hasUnplacedWantedStage detects the state that must raise the notice', () => {
+    const placed = prePopulateStages(
+      [makeStage('S1', 1, 1, false), makeStage('S2', 2, 1, false)],
+      makeSelection(1, 2)
+    );
+    expect(hasUnplacedWantedStage(placed)).toBe(false);
+
+    // Absent stages have no bounds, but they are not wanted — not a problem.
+    const absent = toggleStageAbsent(placed, 'S2', true);
+    expect(hasUnplacedWantedStage(absent)).toBe(false);
+
+    // A wanted stage with no bounds is.
+    const stranded = placed.map(a => (a.stageId === 'S2' ? { ...a, bounds: null } : a));
+    expect(hasUnplacedWantedStage(stranded)).toBe(true);
+  });
+
+  it('buildUnplacedStages marks stages wanted, not absent', () => {
+    // The blocked state (Step 17): stages listed so they can be toggled, but
+    // none placed. They must read as wanted so completeness stays false.
+    const built = buildUnplacedStages([makeStage('S1', 1, 1, false), makeStage('S2', 2, 1, false)]);
+    expect(built.map(a => a.stageId)).toEqual(['S1', 'S2']);
+    expect(built.every(a => a.bounds === null)).toBe(true);
+    expect(built.every(a => !a.absent)).toBe(true);
+    expect(computeStagesComplete(built)).toBe(false);
   });
 });
 
@@ -643,5 +779,109 @@ describe('ADR-005 beat-symmetry invariant', () => {
     expect(second.bounds!.keyStart).toBe(firstBounds.keyStart);
     // Second's own end boundary keeps its precision.
     expect(second.bounds!.beatEnd).toBe(3.0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Beat-grid absent/restore — bar counting is not a measure of available space
+// ---------------------------------------------------------------------------
+
+describe('toggleStageAbsent on a beat grid', () => {
+  /**
+   * Francisco's report: 4/4, a measure and a half selected (six beats), PAC.
+   * Pre-population lays the four stages out 2+2+1+1. Disabling Initial Tonic
+   * hands its two beats to Pre-dominant, which then holds all of bar 1.
+   * Re-enabling used to give Initial Tonic the *whole* of bar 1 and leave
+   * Pre-dominant at `m2b1 .. m2b1` — zero beats wide, still listed as present.
+   *
+   * The cause is that the carve counts whole bars while the stages sit on a
+   * beat grid. Pre-dominant spans `m1b3 .. m2b1`: two bars by the count, two
+   * beats in reality. Taking "one bar" from it takes far more than it has.
+   */
+  function sixBeatLayout() {
+    const positions: BeatSlot[] = [
+      { barN: 1, beatFloat: 1 },
+      { barN: 1, beatFloat: 2 },
+      { barN: 1, beatFloat: 3 },
+      { barN: 1, beatFloat: 4 },
+      { barN: 2, beatFloat: 1 },
+      { barN: 2, beatFloat: 2 },
+    ];
+    const selection = {
+      ...makeSelection(1, 2),
+      beatStart: 1,
+      beatEnd: 3,
+    } as SelectionRange;
+    const stages = [
+      makeStage('InitialTonic', 1, 1, false),
+      makeStage('PreDominant', 2, 1, false),
+      makeStage('Dominant', 3, 1, false),
+      makeStage('FinalTonic', 4, 1, false),
+    ];
+    return { positions, selection, stages };
+  }
+
+  /** A stage covers real music: (bar, beat) end strictly after (bar, beat) start. */
+  function expectNonEmptyExtents(assignments: StageAssignment[]) {
+    for (const a of assignments) {
+      if (!a.bounds) continue;
+      const { barStart, beatStart, barEnd, beatEnd } = a.bounds;
+      const startBeat = beatStart ?? 1;
+      const endBeat = beatEnd ?? Number.POSITIVE_INFINITY;
+      const nonEmpty = barEnd !== barStart ? barEnd > barStart : endBeat > startBeat;
+      expect(
+        nonEmpty,
+        `${a.stageId} spans nothing: m${barStart}b${beatStart} .. m${barEnd}b${beatEnd}`
+      ).toBe(true);
+    }
+  }
+
+  it('leaves no zero-width stage when a stage is disabled and re-enabled', () => {
+    const { positions, selection, stages } = sixBeatLayout();
+    const laid = prePopulateStagesAtGrid(stages, selection, positions);
+    expectNonEmptyExtents(laid);
+
+    const absent = toggleStageAbsent(laid, 'InitialTonic', true);
+    expectNonEmptyExtents(absent);
+
+    const restored = toggleStageAbsent(absent, 'InitialTonic', false);
+    expectNonEmptyExtents(restored);
+  });
+
+  it('restores unplaced rather than carving a bar out of a two-beat donor', () => {
+    // Pre-dominant holds m1b1..m2b1 after absorbing — "two bars", four beats.
+    // A whole-bar carve would empty it, so the restore declines and hands the
+    // decision back to the caller, which re-places the wanted set on the grid.
+    const { positions, selection, stages } = sixBeatLayout();
+    const laid = prePopulateStagesAtGrid(stages, selection, positions);
+    const absent = toggleStageAbsent(laid, 'InitialTonic', true);
+    const restored = toggleStageAbsent(absent, 'InitialTonic', false);
+
+    const it0 = restored.find(a => a.stageId === 'InitialTonic')!;
+    expect(it0.absent).toBe(false);
+    expect(it0.bounds).toBeNull();
+    expect(hasUnplacedWantedStage(restored)).toBe(true);
+
+    // Pre-dominant is untouched — it keeps the space it absorbed.
+    expect(restored.find(a => a.stageId === 'PreDominant')!.bounds).toEqual(
+      absent.find(a => a.stageId === 'PreDominant')!.bounds
+    );
+  });
+
+  it('re-placing the wanted set recovers the original layout', () => {
+    // The recovery ScoreViewer performs once hasUnplacedWantedStage reports true.
+    const { positions, selection, stages } = sixBeatLayout();
+    const laid = prePopulateStagesAtGrid(stages, selection, positions);
+    const absent = toggleStageAbsent(laid, 'InitialTonic', true);
+    const restored = toggleStageAbsent(absent, 'InitialTonic', false);
+
+    const placed = new Map(
+      prePopulateStagesAtGrid(stages, selection, positions).map(a => [a.stageId, a])
+    );
+    const merged = restored.map(a => placed.get(a.stageId) ?? a);
+
+    expectNonEmptyExtents(merged);
+    expect(hasUnplacedWantedStage(merged)).toBe(false);
+    expect(merged.map(a => a.bounds)).toEqual(laid.map(a => a.bounds));
   });
 });

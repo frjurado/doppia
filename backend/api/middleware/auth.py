@@ -10,7 +10,8 @@ authentication requirements via the ``require_role()`` dependency.
 
 A development bypass is available when both ``ENVIRONMENT=local`` and
 ``AUTH_MODE=local`` are set: the literal token ``dev-token`` is accepted
-without JWT validation.
+without JWT validation. The bypass grants an *identity*, not roles — those come
+from ``user_role`` on every path alike (ADR-037).
 
 Supabase uses ES256 (asymmetric) JWT signing on new projects. The JWKS is
 fetched at startup (``main.py``) from the JWKS endpoint:
@@ -43,12 +44,22 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
+# The dev identities' roles are *not* set here: like every other caller, the
+# bypass path resolves them from ``user_role`` in ``get_current_user``. Run
+# ``scripts/seed_dev_users.py`` to create the accounts and their grants — without
+# it the dev editor authenticates but holds no roles.
 _DEV_TOKENS: dict[str, AppUser] = {
     "dev-token": AppUser(
-        id="00000000-0000-0000-0000-000000000001", role="editor", email="dev@local"
+        id="00000000-0000-0000-0000-000000000001",
+        roles=frozenset(),
+        email="dev@local",
+        email_verified=True,
     ),
     "admin-token": AppUser(
-        id="00000000-0000-0000-0000-000000000002", role="admin", email="admin@local"
+        id="00000000-0000-0000-0000-000000000002",
+        roles=frozenset(),
+        email="admin@local",
+        email_verified=True,
     ),
 }
 
@@ -165,10 +176,41 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return _make_401("Token is missing the required 'sub' claim.")
 
         email: str = payload.get("email", "")
-        role: str = payload.get("app_metadata", {}).get("role", "")
 
-        request.state.user = AppUser(id=sub, role=role, email=email)
+        # Roles are deliberately not read from the token. Supabase's
+        # ``app_metadata.role`` was the Phase 1 source of truth; since ADR-037 the
+        # ``user_role`` table is, and ``get_current_user`` loads it per request.
+        user_metadata: dict = payload.get("user_metadata") or {}
+        request.state.user = AppUser(
+            id=sub,
+            roles=frozenset(),
+            email=email,
+            email_verified=_email_verified(payload),
+            declared_role=user_metadata.get("self_declared_role"),
+        )
         return await call_next(request)
+
+
+def _email_verified(payload: dict) -> bool:
+    """Return whether the token says the caller's email address is confirmed.
+
+    Supabase surfaces confirmation two ways depending on project age and grant
+    type: ``user_metadata.email_verified`` (set by the auth system on email
+    signups) and an ``email_confirmed_at`` timestamp. Either is accepted; a token
+    carrying neither is treated as unverified, which is the safe default — the
+    only consequence is that content creation is refused until the address is
+    confirmed (``services.permissions.require_verified``).
+
+    Args:
+        payload: The decoded JWT claims.
+
+    Returns:
+        ``True`` if the token attests a confirmed address.
+    """
+    if payload.get("email_confirmed_at"):
+        return True
+    user_metadata = payload.get("user_metadata") or {}
+    return bool(user_metadata.get("email_verified"))
 
 
 def _resolve_jwk(jwks: dict, token: str) -> object:

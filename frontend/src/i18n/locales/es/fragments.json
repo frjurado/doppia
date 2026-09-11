@@ -7,6 +7,7 @@
     "searchPlaceholder": "Busca la raíz de un concepto…",
     "searchAria": "Buscar raíces de conceptos",
     "searchToBrowse": "Busca un concepto para explorar",
+    "noConcepts": "Todavía no hay conceptos que explorar.",
     "includeSubtypes": "Incluir subtipos",
     "loadingFragments": "Cargando fragmentos…",
     "noApprovedFound": "No se encontraron fragmentos aprobados",
@@ -25,5 +26,16 @@
     "sources": "Fuentes: {{list}}",
     "partLabel": "Parte {{number}}",
     "alsoTagged": "También etiquetado"
+  },
+  "range": {
+    "measure": "c.",
+    "measures": "cc.",
+    "beat": "tiempo",
+    "beats": "tiempos"
+  },
+  "notation": {
+    "sizeSmall": "P",
+    "sizeMedium": "M",
+    "sizeLarge": "G"
   }
 }

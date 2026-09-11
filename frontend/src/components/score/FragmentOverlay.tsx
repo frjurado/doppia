@@ -3,12 +3,12 @@
  *
  * Combines two distinct overlay layers:
  *
- *  1. **Live annotation overlays** (children) — MainBracket and StageBrackets
+ *  1. **Live annotation overlays** (children) — StageBrackets
  *     are passed from ScoreViewer and rendered inside this component unchanged.
  *
  *  2. **Stored-fragment brackets** — fetched fragments are projected from
  *     logical bar/beat coordinates onto the ghost spatial index at render time
- *     (same approach as MainBracket/StageBrackets) so they survive zoom,
+ *     (same approach as StageBrackets) so they survive zoom,
  *     resize, and font changes without any extra wiring.
  *
  * Step 11 adds the full visual treatment:
@@ -44,11 +44,17 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GhostLayer, ResolutionMode } from './ghosts';
-import { resolveSegments } from './MainBracket';
-import type { BracketSegment } from './MainBracket';
+import { resolveSegments, serifSides } from './bracketSegments';
+import type { BracketSegment } from './bracketSegments';
 import type { FragmentListItem } from '../../services/fragmentApi';
 import type { SelectionRange } from './annotator';
 import { measureKeysForMcRange } from './selection';
+import {
+  ABOVE_STORED as STORED_BRACKET_ABOVE_SYSTEM_PX,
+  BELOW_SUB_PART as SUB_BRACKET_BELOW_STAFF_GAP,
+  STORED_BRACKET_H,
+  SUB_BRACKET_H,
+} from './bracketLanes';
 import styles from './FragmentOverlay.module.css';
 import bracketStyles from './StoredBrackets.module.css';
 
@@ -56,23 +62,11 @@ import bracketStyles from './StoredBrackets.module.css';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Stored parent-bracket height in pixels (thinner than the live bracket at 5px). */
-const STORED_BRACKET_H = 4;
-
-/**
- * Distance stored brackets sit above systemTop.  Slightly higher than the live
- * bracket (BRACKET_ABOVE_SYSTEM_PX = 9) so stored brackets and the live
- * selection bracket are visually distinct layers and do not overlap.
- */
-const STORED_BRACKET_ABOVE_SYSTEM_PX = 16;
-
-/** Sub-part bracket height in pixels. */
-const SUB_BRACKET_H = 4;
-
-/** Gap below the last staff-line bottom before the sub-part bracket top (px).
- *  Matches StageBrackets.tsx BELOW_STAFF_GAP so stored sub-parts sit in the
- *  same lane as live stage brackets (below the harmony label lane at +6px). */
-const SUB_BRACKET_BELOW_STAFF_GAP = 20;
+/* Every offset below comes from the shared lane table (M5). Two of them used
+   to be local constants that had drifted into collisions: stored brackets sat
+   3px under the live bracket, close enough to read as one two-tone bar, and
+   stored sub-parts deliberately matched StageBrackets' BELOW_STAFF_GAP and so
+   landed in the live stage lane. See bracketLanes.ts. */
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -107,7 +101,7 @@ export interface StoredFragmentDisplayState {
 // ---------------------------------------------------------------------------
 
 export interface FragmentOverlayProps {
-  /** Live annotation overlays (MainBracket, StageBrackets). */
+  /** Live annotation overlays (StageBrackets). */
   children?: React.ReactNode;
   /**
    * Top-level stored fragments for the current movement.  Populated by
@@ -134,6 +128,26 @@ export interface FragmentOverlayProps {
    * both toggles collapse (if the fragment has sub-parts) and opens the panel.
    */
   onBracketClick?: (fragmentId: string) => void;
+  /**
+   * True while a live selection or edit is on screen. Every stored bracket
+   * recedes, because none of them is the subject (M5 ask 2) — focus by
+   * quieting the rest rather than by emphasising the subject.
+   */
+  dimmed?: boolean;
+  /**
+   * The stored fragment currently open in the side panel, if any.
+   *
+   * Two things follow from it, and both used to be wrong because they were
+   * tracked separately from selection:
+   *
+   *  - **Its sub-parts are the expanded ones, and only its.** Expansion was
+   *    a per-fragment toggle independent of selection, so opening B left A's
+   *    stages on screen, and clicking A a second time selected it while
+   *    switching its stages *off*.
+   *  - **Everything else dims**, so the selected fragment is legible among
+   *    its neighbours.
+   */
+  selectedFragmentId?: string | null;
   /** Test hook. Defaults to 'fragment-overlay'. */
   'data-testid'?: string;
 }
@@ -199,8 +213,12 @@ function storedResolution(beatStart: number | null, beatEnd: number | null): Res
  * its full name, then a positional fallback — mirroring the fragment viewer
  * (FragmentDetail) so the whole-score stage lane is never nameless.
  */
-function subPartLabel(item: FragmentListItem, index: number): string {
-  return item.primary_concept_alias ?? item.primary_concept_name ?? `Part ${index + 1}`;
+function subPartLabel(
+  item: FragmentListItem,
+  index: number,
+  fallback: (n: number) => string
+): string {
+  return item.primary_concept_alias ?? item.primary_concept_name ?? fallback(index + 1);
 }
 
 /**
@@ -252,6 +270,8 @@ export default function FragmentOverlay({
   ghostLayer,
   mcIndex,
   onBracketClick,
+  dimmed = false,
+  selectedFragmentId = null,
   'data-testid': testId,
 }: FragmentOverlayProps) {
   const { t } = useTranslation('score');
@@ -262,20 +282,9 @@ export default function FragmentOverlay({
   // (collapse toggle; Phase 2 filter panel).  Missing entries fall back to
   // the default below, so newly fetched fragments are always visible without
   // an initialisation step.
-  const [displayState, setDisplayState] = useState<Map<string, StoredFragmentDisplayState>>(
-    new Map()
-  );
-
-  // ── Collapse toggle ───────────────────────────────────────────────────────
-
-  const toggleCollapsed = (id: string) => {
-    setDisplayState((prev) => {
-      const current = prev.get(id) ?? { show: true, category_filter: [], collapsed: true };
-      const next = new Map(prev);
-      next.set(id, { ...current, collapsed: !current.collapsed });
-      return next;
-    });
-  };
+  // `show` and `category_filter` are read by the Phase 2 filter UI; `collapsed`
+  // is no longer part of this state, being derived from `selectedFragmentId`.
+  const [displayState] = useState<Map<string, StoredFragmentDisplayState>>(new Map());
 
   // ── Projection ────────────────────────────────────────────────────────────
   //
@@ -349,7 +358,7 @@ export default function FragmentOverlay({
           return {
             id: sp.id,
             status: sp.status,
-            label: subPartLabel(sp, idx),
+            label: subPartLabel(sp, idx, (n) => t('score:overlay.partN', { number: n })),
             segments: augmented,
           };
         })
@@ -358,7 +367,13 @@ export default function FragmentOverlay({
       result.push({
         id: frag.id,
         status: frag.status,
-        alias: frag.primary_concept_alias,
+        // `alias ?? name`, never alias alone. Six of the ten taggable cadence
+        // concepts declare no alias, so an alias-only label left their brackets
+        // silently nameless. The sub-part path in this same file has always
+        // fallen back — its docstring says "the whole-score stage lane is never
+        // nameless"; the parent path never got the same treatment (Component 11
+        // triage item 14).
+        alias: frag.primary_concept_alias ?? frag.primary_concept_name,
         hasSubParts: frag.sub_parts.length > 0,
         segments,
         subPartProjections,
@@ -366,21 +381,35 @@ export default function FragmentOverlay({
     }
 
     return result;
-  }, [fragments, ghostLayer, mcIndex, displayState]);
+  }, [fragments, ghostLayer, mcIndex, displayState, t]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className={styles.overlay} aria-hidden="true" data-testid={testId ?? 'fragment-overlay'}>
-      {/* Layer 1+2: live annotation overlays (MainBracket, StageBrackets). */}
+      {/* Layer 1+2: live annotation overlays (StageBrackets). */}
       {children}
 
       {/* Layer 5: stored-fragment brackets.
           Each fragment projects to one bracket segment per SVG system row.
           Sub-part brackets appear below the staff when the fragment is expanded. */}
       {projected.flatMap(({ id, status, alias, hasSubParts, segments, subPartProjections }) => {
-        const state = displayState.get(id);
-        const collapsed = state?.collapsed ?? true;
+        // A boundary carries one serif, drawn by whichever bracket begins
+        // there. Decided per fragment: a parent's own segments never abut each
+        // other (they are one per system row), but its sub-parts tile it.
+        const parentSerifs = serifSides(
+          segments.map((seg) => ({ left: seg.left, right: seg.right, lane: seg.systemTop }))
+        );
+        const subSpans = subPartProjections.flatMap(({ segments: spSegs }) =>
+          spSegs.map((seg) => ({ left: seg.left, right: seg.right, lane: seg.systemBottom }))
+        );
+        const subSerifs = serifSides(subSpans);
+        let subIdx = -1;
+        // Derived, not toggled: the open fragment is the expanded one.
+        const collapsed = id !== selectedFragmentId;
+        // A selection focuses one fragment, so the others recede; a live edit
+        // focuses none of them, so they all do.
+        const recede = dimmed || (selectedFragmentId !== null && id !== selectedFragmentId);
 
         // ── Parent bracket segments ─────────────────────────────────────────
         const parentElements = segments.map((seg, i) => {
@@ -390,7 +419,14 @@ export default function FragmentOverlay({
           return (
             <div
               key={`${id}-seg${i}`}
-              className={`${bracketStyles.storedBracket} ${statusClass(status)}`}
+              className={[
+                bracketStyles.storedBracket,
+                statusClass(status),
+                recede ? bracketStyles.dimmed : '',
+                parentSerifs[i]?.right === false ? bracketStyles.noSerifRight : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
               style={{ left: seg.left, top, width, height: STORED_BRACKET_H }}
               data-fragment-id={id}
               data-testid={i === 0 ? `stored-bracket-${id}` : `stored-bracket-${id}-${i}`}
@@ -420,7 +456,10 @@ export default function FragmentOverlay({
                   className={bracketStyles.clickTarget}
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (hasSubParts) toggleCollapsed(id);
+                    // Selecting is the only thing a click does now. Expansion
+                    // follows from it, so there is nothing to toggle — that
+                    // second, independent toggle is what let one fragment's
+                    // stages stay on screen while another was selected.
                     if (onBracketClick !== undefined) onBracketClick(id);
                   }}
                   {...(seg.isFirst ? {} : { tabIndex: -1, 'aria-hidden': true })}
@@ -446,13 +485,21 @@ export default function FragmentOverlay({
           : subPartProjections.flatMap(
               ({ id: spId, status: spStatus, label: spLabel, segments: spSegs }) =>
                 spSegs.map((seg, i) => {
+                  subIdx += 1;
                   const top = seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP;
                   const width = seg.right - seg.left;
                   if (width <= 0) return null;
                   return (
                     <div
                       key={`${spId}-sub-seg${i}`}
-                      className={`${bracketStyles.subPartBracket} ${statusClass(spStatus)}`}
+                      className={[
+                        bracketStyles.subPartBracket,
+                        statusClass(spStatus),
+                        recede ? bracketStyles.dimmed : '',
+                        subSerifs[subIdx]?.right === false ? bracketStyles.noSerifRight : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' ')}
                       style={{ left: seg.left, top, width, height: SUB_BRACKET_H }}
                       data-fragment-id={spId}
                       data-testid={

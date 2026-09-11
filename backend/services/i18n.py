@@ -12,6 +12,9 @@ returning an error, per ADR-006 §6.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 # BCP 47 primary subtags considered valid in Phase 1. English is canonical;
 # Spanish is declared now so the API contract is stable before es data lands.
 SUPPORTED_LANGUAGES: frozenset[str] = frozenset({"en", "es"})
@@ -81,3 +84,51 @@ def parse_accept_language(header: str | None) -> str:
             best_lang = primary
 
     return best_lang
+
+
+def fold(text: str) -> str:
+    """Case- and accent-insensitive form of a display string.
+
+    One folding rule shared by the two places that need one: ordering a
+    translated list (``services.concepts._sort_key``) and matching a search term
+    against translated text (``TranslationOverlay.search_concept_ids``,
+    ADR-040 § 2). They must agree — a name that sorts under "e" and matches
+    under "é" would put a result somewhere the reader cannot predict.
+
+    Accents are folded rather than compared: Python's default ordering puts
+    every accented character after ``z``, which would file "Época" after
+    "Zarzuela". Not full locale collation — that needs ICU — but right for the
+    Latin-script names this corpus uses.
+
+    Args:
+        text: A display string.
+
+    Returns:
+        The string with combining marks stripped and case folded.
+    """
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
+def tokenize(text: str) -> set[str]:
+    """Split a display string into folded word tokens for whole-token matching.
+
+    Mirrors what the Neo4j full-text index does to English text, which is the
+    behaviour a merged search has to match: whole tokens, case-insensitive,
+    OR across the query's terms — "cadence" finds Perfect Authentic Cadence,
+    "caden" finds nothing (measured against the live index, 2026-09-11). A
+    substring match here instead would make Spanish quietly more permissive
+    than English and give the same typing two different behaviours.
+
+    Accent folding is the one deliberate asymmetry: it makes "autentica" find
+    "Auténtica". English names carry no diacritics, so this changes nothing
+    there, and requiring a Spanish tagger to type accents to find their own
+    vocabulary would be a worse rule than the one it enforces.
+
+    Args:
+        text: A name, alias, or query string.
+
+    Returns:
+        The set of folded alphanumeric tokens it contains.
+    """
+    return {t for t in re.split(r"[^0-9a-z]+", fold(text)) if t}

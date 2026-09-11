@@ -25,7 +25,7 @@
  * xml:id, queries the SVG DOM for its bounding rect and its parent system's
  * rect, and collects per-onset note rects. computeBracketSegments() projects a
  * bar/beat range onto that geometry, emitting one segment per system row (the
- * same approach as the tagging tool's MainBracket). Beat-precise endpoints
+ * same approach as the tagging tool's stored brackets). Beat-precise endpoints
  * mirror the tagging tool's onset filter: onsets >= beat_start in the start
  * bar, onsets < beat_end in the end bar (beat_end is the exclusive bound —
  * see annotator.ts).
@@ -36,9 +36,14 @@
  * approach as ScoreViewer's container-width measurement.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import PlaybackCaret from './PlaybackCaret';
+import SegmentedControl, { ToggleButton } from '../ui/SegmentedControl';
+import IconButton from '../ui/IconButton';
+import { ABOVE_STORED, BELOW_STAGE, STORED_BRACKET_H } from './bracketLanes';
+import { useStaggeredLabels } from './staggerLabels';
+import { serifSides } from './bracketSegments';
 import { buildGhosts } from './ghosts';
 import type { GhostLayer } from './ghosts';
 import { HarmonyOverlay } from './harmonyOverlay';
@@ -72,7 +77,20 @@ import styles from './FragmentNotation.module.css';
 // ---------------------------------------------------------------------------
 
 export type ScalePreset = 35 | 45 | 55;
-const SCALE_LABELS: Record<ScalePreset, string> = { 35: 'S', 45: 'M', 55: 'L' };
+/**
+ * i18n keys for the staff-size control's one-letter labels.
+ *
+ * Abbreviations, not initials of the English words: Spanish reads P/M/G for
+ * pequeño/mediano/grande, so a `label.charAt(0)` of the translated word would
+ * be wrong in one language or the other. The score viewer's own size control
+ * spells the words out; this one is abbreviated because it sits in a much
+ * tighter row (Component 12 Step 19c).
+ */
+const SCALE_LABEL_KEYS: Record<ScalePreset, string> = {
+  35: 'fragments:notation.sizeSmall',
+  45: 'fragments:notation.sizeMedium',
+  55: 'fragments:notation.sizeLarge',
+};
 /** Default staff size: Medium (Component 9 Step 15). */
 const DEFAULT_SCALE: ScalePreset = 45;
 
@@ -81,12 +99,23 @@ const FALLBACK_PAGE_WIDTH = 1080;
 /** Minimum pageWidth — mirrors ScoreViewer's clamp for narrow containers. */
 const MIN_PAGE_WIDTH = 480;
 
-/** Bracket bar height (px) — matches the tagging tool's MainBracket. */
-const BRACKET_H = 5;
+/** Bracket bar height (px) — this viewer only shows stored fragments. */
+const BRACKET_H = STORED_BRACKET_H;
 /** Distance the main bracket sits above its system top: height + small gap. */
-const MAIN_BRACKET_ABOVE_SYSTEM_PX = BRACKET_H + 4;
+const MAIN_BRACKET_ABOVE_SYSTEM_PX = ABOVE_STORED;
 /** Gap below the system bottom before the sub-part bracket top (px). */
-const SUB_BRACKET_BELOW_STAFF_GAP = 20;
+const SUB_BRACKET_BELOW_STAFF_GAP = BELOW_STAGE;
+
+/**
+ * Sub-part label size for a given optical scale.
+ *
+ * Scaling with the notation is what keeps the label in proportion to the
+ * bracket it names (DESIGN.md § 7.7 item 2) — but a straight 10px × 0.6 is 6px,
+ * which is not readable type. The floor trades a little of that proportionality
+ * back for legibility: at the 360px worst case the label lands on 8px rather
+ * than 6, still 20% narrower than the fixed size that caused the collision.
+ */
+const SUB_LABEL_PX = (scale: number): number => Math.max(8, 10 * scale);
 
 // ---------------------------------------------------------------------------
 // SVG geometry for bracket projection
@@ -256,7 +285,7 @@ interface BracketSegment {
  * same scale as the stored `beatStart`/`beatEnd` — so the comparison holds in
  * compound meters too (6/8 stages no longer collapse to whole-beat extents).
  */
-// Exported for unit testing, as MainBracket does with resolveSegments: this is
+// Exported for unit testing, as bracketSegments does with resolveSegments: this is
 // the read-only view's bracket geometry and the two must agree.
 // eslint-disable-next-line react-refresh/only-export-components
 export function computeBracketSegments(
@@ -395,6 +424,24 @@ export default function FragmentNotation({
   const ghostLayerRef = useRef<GhostLayer | null>(null);
   const harmonyOverlayRef = useRef<HarmonyOverlay | null>(null);
   const scoreContainerRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Ratio between the laid-out SVG and Verovio's own canvas width.
+   *
+   * Below `sm` the canvas is clamped to MIN_PAGE_WIDTH and the browser scales
+   * the SVG down (`max-width: 100%`), so bracket geometry — read back after
+   * layout — is already in scaled pixels. Overlay *type* was not: a fixed 10px
+   * label against a bracket at 60% is 1.67x oversized exactly where space is
+   * tightest (DESIGN.md § 7.7 item 2). Labels scale with this instead.
+   */
+  const [opticalScale, setOpticalScale] = useState(1);
+
+  const subPartLayerRef = useRef<HTMLDivElement | null>(null);
+
+  // Sub-part labels collide here exactly as stage labels do in the tagging
+  // tool — "Dominant" over "Final Tonic" is the reported pair, and below `sm`
+  // it is worse because the brackets shrink. Same adaptive stagger (M5 ask 4).
+  useStaggeredLabels(subPartLayerRef, [geometry, opticalScale, fragment]);
   const currentBarRef = useRef<{ barN: number; startMs: number }>({ barN: 1, startMs: 0 });
   const beatDurationMsRef = useRef<number>(500);
   const pageWidthRef = useRef<number>(FALLBACK_PAGE_WIDTH);
@@ -555,6 +602,47 @@ export default function FragmentNotation({
     );
   }, [geometry, midiBase64]);
 
+  /**
+   * Every sub-part bracket segment, flattened, with its serif sides decided.
+   *
+   * Flattened because adjacency is a property *between* sub-parts: they tile
+   * their parent, so one's right edge is the next one's left, and the boundary
+   * should carry a single serif (see `serifSides`).
+   */
+  const subPartBrackets = useMemo(() => {
+    if (fragment.sub_parts.length === 0 || geometry.measures.size === 0) return [];
+    const flat = fragment.sub_parts.flatMap((sp, idx) => {
+      const spPrimary = sp.concept_tags.find((tag) => tag.is_primary);
+      const label =
+        spPrimary?.alias ?? spPrimary?.name ?? t('fragments:detail.partLabel', { number: idx + 1 });
+      return computeBracketSegments(
+        geometry,
+        sp.bar_start,
+        sp.bar_end,
+        sp.beat_start,
+        sp.beat_end
+      ).map((seg, i) => ({ sp, label, seg, i }));
+    });
+    const sides = serifSides(
+      flat.map(({ seg }) => ({ left: seg.left, right: seg.right, lane: seg.systemBottom }))
+    );
+    return flat.map((entry, i) => ({ ...entry, serif: sides[i]! }));
+  }, [fragment.sub_parts, geometry, t]);
+
+  // Keep the optical scale in step with the render. Reads the same two numbers
+  // the narrow-width e2e spec asserts on: the SVG's laid-out width against
+  // Verovio's canvas width.
+  useLayoutEffect(() => {
+    const svg = scoreContainerRef.current?.querySelector('svg');
+    if (!svg) return;
+    // parseFloat, not Number: Verovio writes the width with a unit suffix, and
+    // Number('480px') is NaN — which silently pinned the ratio at 1.
+    const canvas = parseFloat(svg.getAttribute('width') ?? '');
+    if (!canvas) return;
+    const next = svg.getBoundingClientRect().width / canvas;
+    setOpticalScale((prev) => (Math.abs(prev - next) > 0.01 ? next : prev));
+  }, [geometry]);
+
   // ── In-score harmony labels (Step 23) ────────────────────────────────────
   // Mount the harmony overlay on the read-only viewer when enabled. It reuses
   // the harmony_events already sliced into the fragment detail response over the
@@ -687,37 +775,21 @@ export default function FragmentNotation({
       <div className={styles.scoreControls}>
         {fragment.harmony_events.length > 0 && (
           <div className={styles.harmonyToggleGroup}>
-            <button
-              type="button"
-              className={
-                showHarmony ? `${styles.scaleBtn} ${styles.scaleBtnActive}` : styles.scaleBtn
-              }
-              aria-pressed={showHarmony}
-              onClick={() => setShowHarmony((v) => !v)}
-            >
-              <Type variant="label-sm" as="span">
-                {t('fragments:detail.harmonyToggle')}
-              </Type>
-            </button>
+            <ToggleButton pressed={showHarmony} onClick={() => setShowHarmony((v) => !v)}>
+              {t('fragments:detail.harmonyToggle')}
+            </ToggleButton>
           </div>
         )}
-        <div className={styles.scaleGroup} role="group" aria-label={t('common:staffSize')}>
-          {([35, 45, 55] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              className={
-                scale === s ? `${styles.scaleBtn} ${styles.scaleBtnActive}` : styles.scaleBtn
-              }
-              aria-pressed={scale === s}
-              onClick={() => setScale(s)}
-            >
-              <Type variant="label-sm" as="span">
-                {SCALE_LABELS[s]}
-              </Type>
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className={styles.scaleGroup}
+          ariaLabel={t('common:staffSize')}
+          value={scale}
+          onChange={setScale}
+          options={([35, 45, 55] as const).map((s) => ({
+            value: s,
+            label: t(SCALE_LABEL_KEYS[s]),
+          }))}
+        />
       </div>
 
       {/* Score content (position: relative for overlays). Vertical
@@ -771,36 +843,35 @@ export default function FragmentNotation({
 
         {/* Sub-part bracket overlays — ADR-011 two-level display limit.
             One segment per system row, below the staves. */}
-        {fragment.sub_parts.length > 0 && geometry.measures.size > 0 && (
-          <div className={styles.subPartOverlayLayer} aria-hidden="true">
-            {fragment.sub_parts.map((sp, idx) => {
-              const spPrimary = sp.concept_tags.find((tag) => tag.is_primary);
-              const label =
-                spPrimary?.alias ??
-                spPrimary?.name ??
-                t('fragments:detail.partLabel', { number: idx + 1 });
-              const segs = computeBracketSegments(
-                geometry,
-                sp.bar_start,
-                sp.bar_end,
-                sp.beat_start,
-                sp.beat_end
-              );
-              return segs.map((seg, i) => (
-                <div
-                  key={`${sp.id}-${i}`}
-                  className={styles.subPartBracket}
-                  data-status={sp.status}
-                  style={{
-                    left: seg.left,
-                    width: seg.right - seg.left,
-                    top: seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP,
-                  }}
-                >
-                  {i === 0 && <span className={styles.subPartLabel}>{label}</span>}
-                </div>
-              ));
-            })}
+        {subPartBrackets.length > 0 && (
+          <div className={styles.subPartOverlayLayer} aria-hidden="true" ref={subPartLayerRef}>
+            {subPartBrackets.map(({ sp, label, seg, i, serif }) => (
+              <div
+                key={`${sp.id}-${i}`}
+                className={
+                  serif.right
+                    ? styles.subPartBracket
+                    : `${styles.subPartBracket} ${styles.noSerifRight}`
+                }
+                data-status={sp.status}
+                style={{
+                  left: seg.left,
+                  width: seg.right - seg.left,
+                  top: seg.systemBottom + SUB_BRACKET_BELOW_STAFF_GAP,
+                }}
+              >
+                {i === 0 && (
+                  <span
+                    className={styles.subPartLabel}
+                    style={{ fontSize: `${SUB_LABEL_PX(opticalScale)}px` }}
+                    data-stage-label=""
+                    data-lane={Math.round(seg.systemBottom)}
+                  >
+                    {label}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
@@ -812,27 +883,25 @@ export default function FragmentNotation({
 
       {/* Playback bar */}
       <div className={styles.playbackBar}>
-        <button
-          type="button"
-          className={styles.transportButton}
+        <IconButton
+          size="sm"
           disabled={playbackStatus === 'idle' || playbackStatus === 'loading-instrument'}
-          aria-label={playbackStatus === 'playing' ? t('common:pause') : t('common:play')}
+          ariaLabel={playbackStatus === 'playing' ? t('common:pause') : t('common:play')}
           onClick={() => {
             if (playbackStatus === 'playing') pause();
             else void play();
           }}
         >
           {playbackStatus === 'playing' ? '⏸' : '▶'}
-        </button>
-        <button
-          type="button"
-          className={styles.transportButton}
+        </IconButton>
+        <IconButton
+          size="sm"
           disabled={playbackStatus === 'idle'}
-          aria-label={t('common:stop')}
+          ariaLabel={t('common:stop')}
           onClick={handleStop}
         >
           ⏹
-        </button>
+        </IconButton>
         {(playbackStatus === 'playing' || playbackStatus === 'paused') && (
           <Type variant="label-sm" as="span" className={styles.positionDisplay}>
             {displayPosition.bar}:{displayPosition.beat}

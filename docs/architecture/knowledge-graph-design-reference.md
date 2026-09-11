@@ -267,6 +267,16 @@ The critical design move is that a `PropertyValue` can carry a `VALUE_REFERENCES
 
 Values that do not correspond to an existing concept (such as `"complete"`, `"incomplete"`, `"ascending"`) carry no `VALUE_REFERENCES` edge. They are terminal descriptors.
 
+**Value node fields (ADR-039).** A `PropertyValue` carries three label fields, because one string cannot do all three jobs:
+
+| Field | Required | Role |
+|---|---|---|
+| `name` | yes | The **absolute** label — readable without the schema heading above it. Canonical, and what context-free consumers use (exports, exercise distractors). |
+| `short_name` | no | The same label with the schema heading's context elided — `"On Scale Degree 4"` under `"Stage 2 Components"`. Clients render `short_name ?? name`. |
+| `description` | no | Per-value help text, surfaced by the ⓘ beside the value. Lives here rather than on a referenced concept because most values reference nothing. |
+
+Use `short_name` **only** on surfaces that print the schema heading beside the value; anywhere else, use `name`.
+
 **Why this matters for querying:** a query for "all fragments involving an applied dominant" can traverse both direct `APPEARS_IN` links from the `AppliedDominant` concept node and `VALUE_REFERENCES` links from any property value pointing to it — in a single graph query, without collapsing the distinction between a fragment *about* applied dominants and a cadence that merely *contains* one as an elaboration.
 
 **Why this matters for explanations:** the property record, combined with `VALUE_REFERENCES` traversal, makes it possible to reason about a specific instance rather than just a type — "this cadence in particular uses a Neapolitan approach" rather than a generic description of the cadence type. This is useful for human prose annotations and, in Phase 3, would allow a reasoning layer to produce grounded instance-level explanations.

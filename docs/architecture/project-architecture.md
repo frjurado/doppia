@@ -152,9 +152,10 @@ MEI Corpus (OpenScore / DCML / other open sources)
         └──► Expert Annotations ──► Vector Store (RAG prose layer)
                                     ▲         │
                                Blog posts     ▼
-                            (concept-tagged) Knowledge Graph ◄──── APPEARS_IN ──── Fragments
-                                             (concepts + typed
-                                              relationships)
+                            (concept-tagged) Knowledge Graph ◄──── concept_id ──── Fragments
+                                             (concepts + typed    (resolved in PostgreSQL via
+                                              relationships)       fragment_concept_tag —
+                                                                   not a Neo4j edge)
                                                     │
                                     ┌───────────────┼───────────────┐
                                     ▼               ▼               ▼

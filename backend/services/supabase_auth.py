@@ -18,8 +18,13 @@ grant); it is sent as the ``apikey`` header Supabase requires.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
+import secrets
 from dataclasses import dataclass
+from typing import Final
+from urllib.parse import urlencode
 
 import httpx
 
@@ -59,8 +64,9 @@ class SupabaseSession:
             returned to the client so it can schedule a silent refresh.
         user_id: The Supabase user id (``sub``).
         email: The user's email.
-        role: The application role read from ``app_metadata.role`` (``editor``
-            or ``admin``); empty string if unset.
+        email_verified: Whether Supabase has confirmed the address. Roles are
+            deliberately absent: they live in ``user_role`` and are read from
+            PostgreSQL by the route, never from Supabase metadata (ADR-037).
     """
 
     access_token: str
@@ -68,7 +74,7 @@ class SupabaseSession:
     expires_in: int
     user_id: str
     email: str
-    role: str
+    email_verified: bool
 
 
 def _auth_base_url() -> str:
@@ -111,6 +117,36 @@ def _anon_key() -> str:
     return anon_key
 
 
+def _service_role_key() -> str:
+    """Return the Supabase service-role key for admin calls, or raise.
+
+    This key bypasses Row Level Security and can act on any account, so it is
+    read only by the handful of functions that genuinely need admin authority
+    (currently account deletion; Step 10's invites join it). It must never
+    reach the browser.
+
+    Returns:
+        The value of ``SUPABASE_SERVICE_ROLE_KEY``.
+
+    Raises:
+        SupabaseAuthError: 503 if the key is not configured. Deliberately a
+            service error rather than a silent skip — an account deletion that
+            quietly left the auth user alive would be worse than a failure the
+            caller can see.
+    """
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not key:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message=(
+                "Supabase admin operations are not configured "
+                "(SUPABASE_SERVICE_ROLE_KEY unset)."
+            ),
+        )
+    return key
+
+
 def _session_from_payload(payload: dict) -> SupabaseSession:
     """Build a :class:`SupabaseSession` from a Supabase token-response body.
 
@@ -134,14 +170,16 @@ def _session_from_payload(payload: dict) -> SupabaseSession:
             message="Supabase Auth returned no tokens.",
         )
     user = payload.get("user") or {}
-    app_metadata = user.get("app_metadata") or {}
+    user_metadata = user.get("user_metadata") or {}
     return SupabaseSession(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=int(payload.get("expires_in", 3600)),
         user_id=user.get("id", ""),
         email=user.get("email", ""),
-        role=app_metadata.get("role", ""),
+        email_verified=bool(
+            user.get("email_confirmed_at") or user_metadata.get("email_verified")
+        ),
     )
 
 
@@ -178,9 +216,9 @@ async def _token_grant(params: dict[str, str], body: dict[str, str]) -> Supabase
         # refresh token. Both map to 401 at our boundary (the client must
         # re-authenticate); a 5xx from Supabase maps to 503.
         code = (
-            "invalid_grant"
-            if params.get("grant_type") == "refresh_token"
-            else ("invalid_credentials")
+            "invalid_credentials"
+            if params.get("grant_type") == "password"
+            else "invalid_grant"
         )
         if response.status_code >= 500:
             raise SupabaseAuthError(
@@ -257,3 +295,501 @@ async def logout(access_token: str) -> None:
     except (SupabaseAuthError, httpx.HTTPError):
         # Revocation is best-effort; the cookie is cleared by the router.
         return
+
+
+# ── OAuth (PKCE, brokered by Supabase) ────────────────────────────────────────
+
+# Supabase's authorize endpoint spells the SHA-256 challenge method lowercase.
+_PKCE_METHOD = "s256"
+
+#: Providers this proxy will start a flow for. Deliberately a closed set: the
+#: provider name is interpolated into the authorize URL, and the roles doc
+#: settles Google as the only provider at launch.
+SUPPORTED_OAUTH_PROVIDERS: frozenset[str] = frozenset({"google"})
+
+
+def public_app_url() -> str:
+    """Return the origin users are sent back to after an OAuth round trip.
+
+    Read from ``PUBLIC_APP_URL``. This is *not* derived from the request: the
+    callback target is a server-side constant, because Supabase does **not**
+    validate ``redirect_to`` when it hands off to the provider (verified by
+    probe, 2026-08-28 — it forwarded a redirect to an unrelated domain without
+    complaint). Accepting a caller-supplied return URL would therefore turn this
+    endpoint into an open redirect wearing an OAuth flow as a disguise.
+
+    Returns:
+        The origin with no trailing slash.
+
+    Raises:
+        SupabaseAuthError: 503 outside local development when ``PUBLIC_APP_URL``
+            is unset. Failing loudly beats silently sending staging users to
+            localhost.
+    """
+    configured = os.environ.get("PUBLIC_APP_URL", "").rstrip("/")
+    if configured:
+        return configured
+    if os.environ.get("ENVIRONMENT", "production") == "local":
+        return "http://localhost:5173"
+    raise SupabaseAuthError(
+        status_code=503,
+        code="unavailable",
+        message="OAuth is not configured (PUBLIC_APP_URL unset).",
+    )
+
+
+def generate_pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE verifier and its S256 challenge.
+
+    The verifier never leaves the server — it goes into an HttpOnly cookie and
+    comes back on the callback request. That is what makes the brokered flow
+    safe to run through a proxy: an authorization code intercepted in transit is
+    worthless without the verifier, which no script can read.
+
+    Returns:
+        A tuple of ``(verifier, challenge)``, both base64url without padding.
+    """
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+    return verifier, challenge
+
+
+def oauth_authorize_url(provider: str, code_challenge: str) -> str:
+    """Build the Supabase authorize URL for a full-page redirect.
+
+    The browser *navigates* here; it never fetches it. That distinction is what
+    keeps ADR-035's CSP intact — ``connect-src`` has no ``*.supabase.co`` entry
+    and does not need one, and ``form-action 'self'`` governs form submissions,
+    not ``location.assign``.
+
+    Args:
+        provider: An entry of :data:`SUPPORTED_OAUTH_PROVIDERS`.
+        code_challenge: The S256 challenge from :func:`generate_pkce_pair`.
+
+    Returns:
+        The absolute authorize URL, ready to redirect to.
+
+    Raises:
+        SupabaseAuthError: 503 if Supabase or the app URL is unconfigured.
+        ValueError: If ``provider`` is not supported — a programming error; the
+            route validates the caller's input before reaching here.
+    """
+    if provider not in SUPPORTED_OAUTH_PROVIDERS:
+        raise ValueError(f"'{provider}' is not a supported OAuth provider.")
+    query = urlencode(
+        {
+            "provider": provider,
+            "redirect_to": f"{public_app_url()}/auth/callback",
+            "code_challenge": code_challenge,
+            "code_challenge_method": _PKCE_METHOD,
+        }
+    )
+    return f"{_auth_base_url()}/authorize?{query}"
+
+
+async def pkce_grant(auth_code: str, code_verifier: str) -> SupabaseSession:
+    """Exchange an OAuth authorization code for a Supabase session.
+
+    The final leg of the dance: Supabase redirected the browser back to our
+    origin with ``?code=``, the SPA handed that code to us, and we complete the
+    exchange server-side so the refresh token goes straight into the HttpOnly
+    cookie without ever existing in JavaScript.
+
+    Args:
+        auth_code: The ``code`` query parameter from the callback redirect.
+        code_verifier: The verifier minted at the start of the flow.
+
+    Returns:
+        The new :class:`SupabaseSession`.
+
+    Raises:
+        SupabaseAuthError: 401 if the code is invalid, already used, or does not
+            match the verifier; 503 if Auth is unreachable.
+    """
+    return await _token_grant(
+        params={"grant_type": "pkce"},
+        body={"auth_code": auth_code, "code_verifier": code_verifier},
+    )
+
+
+# ── Registration, verification, password reset ────────────────────────────────
+
+#: Registration modes. ``invite`` refuses self-service sign-up entirely (admins
+#: issue Supabase invite emails); ``open`` proxies Supabase's signup endpoint.
+#: Invite-only at launch, flipped when Collections ship
+#: (``roles-and-permissions.md`` § 3) — a config flag, not a code change.
+REGISTRATION_INVITE: Final[str] = "invite"
+REGISTRATION_OPEN: Final[str] = "open"
+
+
+def registration_mode() -> str:
+    """Return the effective registration mode.
+
+    Defaults to ``invite``: an unset or misspelt value must not accidentally
+    open public registration, so anything other than a literal ``open`` closes
+    it.
+
+    Returns:
+        Either :data:`REGISTRATION_INVITE` or :data:`REGISTRATION_OPEN`.
+    """
+    configured = (
+        os.environ.get("REGISTRATION_MODE", REGISTRATION_INVITE).strip().lower()
+    )
+    return REGISTRATION_OPEN if configured == REGISTRATION_OPEN else REGISTRATION_INVITE
+
+
+async def _auth_post(path: str, body: dict, *, params: dict | None = None) -> dict:
+    """POST to a Supabase Auth endpoint and return the parsed body.
+
+    Args:
+        path: Path under ``/auth/v1`` (leading slash included).
+        body: The JSON request body.
+        params: Optional query parameters.
+
+    Returns:
+        The parsed JSON response, or an empty dict for an empty 200/204.
+
+    Raises:
+        SupabaseAuthError: 503 on transport failure or a Supabase 5xx; the
+            upstream status otherwise, with the message Supabase supplied.
+    """
+    base = _auth_base_url()
+    headers = {"apikey": _anon_key(), "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.post(
+                f"{base}{path}", params=params or {}, headers=headers, json=body
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=response.status_code,
+            code="invalid_request",
+            message="The authentication service rejected the request.",
+        )
+    try:
+        return response.json()
+    except ValueError:
+        return {}
+
+
+async def sign_up(
+    email: str, password: str, self_declared_role: str | None = None
+) -> None:
+    """Create an account with email + password, pending email confirmation.
+
+    Supabase sends the confirmation email; the account exists but is unverified
+    until the recipient follows it, and ``require_verified`` refuses content
+    creation in the meantime.
+
+    The caller is responsible for checking :func:`registration_mode` first —
+    this function performs no gating of its own, so the policy lives in exactly
+    one place (the route).
+
+    Args:
+        email: The address to register.
+        password: The chosen password (Supabase enforces its own strength rules).
+        self_declared_role: Optional self-description, parked in Supabase user
+            metadata until the account first authenticates and its ``app_user``
+            row is created. It is only a seed for that row: the profile page is
+            authoritative from then on, and the value grants nothing.
+
+    Raises:
+        SupabaseAuthError: On rejection (weak password, malformed address) or
+            an unreachable service.
+    """
+    options: dict = {"email_redirect_to": f"{public_app_url()}/auth/callback"}
+    if self_declared_role:
+        options["data"] = {"self_declared_role": self_declared_role}
+    await _auth_post(
+        "/signup",
+        {"email": email, "password": password, "options": options},
+    )
+
+
+async def resend_verification(email: str) -> None:
+    """Ask Supabase to re-send the sign-up confirmation email.
+
+    Args:
+        email: The address awaiting confirmation.
+
+    Raises:
+        SupabaseAuthError: Only for transport/service failures. An unknown
+            address is *not* an error here — see the route, which reports
+            success regardless so the endpoint cannot be used to test whether
+            an address is registered.
+    """
+    await _auth_post(
+        "/resend",
+        {
+            "type": "signup",
+            "email": email,
+            "options": {"email_redirect_to": f"{public_app_url()}/auth/callback"},
+        },
+    )
+
+
+async def request_password_reset(email: str) -> None:
+    """Ask Supabase to send a password-recovery email.
+
+    Args:
+        email: The address to recover.
+
+    Raises:
+        SupabaseAuthError: Only for transport/service failures; see
+            :func:`resend_verification` on why an unknown address is not one.
+    """
+    await _auth_post(
+        "/recover",
+        {"email": email},
+        params={"redirect_to": f"{public_app_url()}/auth/reset-password"},
+    )
+
+
+async def update_password(access_token: str, password: str) -> None:
+    """Set a new password for the caller of ``access_token``.
+
+    Serves both paths that need it: a user who followed a recovery link (whose
+    exchanged session authorises exactly this) and a signed-in user changing
+    their password. Supabase authorises the write with the user's own bearer
+    token, so no admin credential is involved.
+
+    Args:
+        access_token: The caller's Supabase access token.
+        password: The new password.
+
+    Raises:
+        SupabaseAuthError: 401 if the token is expired or already used, 503 if
+            Auth is unreachable, or the upstream status on rejection.
+    """
+    base = _auth_base_url()
+    headers = {
+        "apikey": _anon_key(),
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.put(
+                f"{base}/user", headers=headers, json={"password": password}
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=response.status_code,
+            code="invalid_request",
+            message="The password could not be updated.",
+        )
+
+
+# ── Email links (recovery, invite, confirmation) ──────────────────────────────
+
+#: Link types this proxy will verify. A closed set: the value is forwarded to
+#: Supabase as the kind of token being redeemed, and only these four have a
+#: surface in this product.
+VERIFIABLE_LINK_TYPES: Final[frozenset[str]] = frozenset(
+    {"recovery", "invite", "signup", "email_change"}
+)
+
+
+async def verify_email_link(token_hash: str, link_type: str) -> SupabaseSession:
+    """Redeem an emailed one-time token for a session, server-side.
+
+    This is the email-link counterpart to :func:`pkce_grant`, and it exists for
+    the same ADR-035 reason. Supabase's default ``{{ .ConfirmationURL }}`` links
+    point at *its* ``/auth/v1/verify`` endpoint, which redirects back with the
+    session in the URL — putting a refresh token either in the fragment (the
+    implicit flow, i.e. straight into JavaScript) or in a ``?code=`` that our
+    proxy cannot exchange, because an email link never had a PKCE verifier.
+    Neither is acceptable.
+
+    Redeeming the ``{{ .TokenHash }}`` here instead keeps the credential
+    server-side on this path too: the browser carries an opaque, single-use hash
+    and gets back only the cookie. It requires the email templates to link to our
+    own routes rather than to Supabase's verify endpoint — see
+    ``docs/architecture/security-model.md``.
+
+    Args:
+        token_hash: The ``token_hash`` query parameter from the link.
+        link_type: One of :data:`VERIFIABLE_LINK_TYPES`.
+
+    Returns:
+        The established :class:`SupabaseSession`.
+
+    Raises:
+        SupabaseAuthError: 401 if the link is expired or already redeemed (they
+            are single-use), 503 if Auth is unreachable.
+        ValueError: If ``link_type`` is not verifiable — a programming error;
+            the route validates the caller's input before reaching here.
+    """
+    if link_type not in VERIFIABLE_LINK_TYPES:
+        raise ValueError(f"'{link_type}' is not a verifiable link type.")
+
+    base = _auth_base_url()
+    headers = {"apikey": _anon_key(), "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.post(
+                f"{base}/verify",
+                headers=headers,
+                json={"type": link_type, "token_hash": token_hash},
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=401,
+            code="invalid_grant",
+            message="This link has expired or has already been used.",
+        )
+    return _session_from_payload(response.json())
+
+
+async def delete_auth_user(user_id: str) -> None:
+    """Delete a user from Supabase Auth via the admin API.
+
+    Called **after** the PostgreSQL side of an account deletion has committed
+    (``services/account_deletion.py``). The ordering is deliberate: an
+    ``app_user`` row whose auth user is gone is recoverable by an admin, while
+    an auth user whose application data is gone would be an account that logs
+    in to nothing and can no longer be deleted through the normal path.
+
+    Args:
+        user_id: The Supabase user id (the JWT ``sub``).
+
+    Raises:
+        SupabaseAuthError: 503 if Auth is unreachable or the service-role key
+            is unset; the upstream status otherwise. A 404 is **not** an error
+            — an already-absent auth user is the desired end state.
+    """
+    base = _auth_base_url()
+    key = _service_role_key()
+    headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.delete(
+                f"{base}/admin/users/{user_id}", headers=headers
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code == 404:
+        # Already gone. Idempotent by design: a retried deletion must succeed.
+        return
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=response.status_code,
+            code="invalid_request",
+            message="The authentication service refused to delete the account.",
+        )
+
+
+async def invite_user(email: str) -> None:
+    """Send a Supabase invitation email.
+
+    The admin path into an invite-only launch: Supabase creates the account in
+    an unconfirmed state and emails a one-time link. Accepting it *is* choosing
+    a password, which is why the SPA handles invite and password-reset links on
+    the same route.
+
+    ``redirect_to`` is our own reset route, not a caller-supplied value — the
+    same reasoning as :func:`oauth_authorize_url`: Supabase does not validate
+    the target at issue time, and a caller-supplied one would make this an open
+    redirect. It must also be in the project's Redirect URLs allowlist, or
+    Supabase silently substitutes the Site URL.
+
+    **The invite email template must use ``{{ .TokenHash }}``**, not
+    ``{{ .ConfirmationURL }}``: the latter routes through Supabase's own
+    ``/verify`` and hands the browser a refresh token in the URL, which is
+    exactly what ADR-035 removed. See ``security-model.md``.
+
+    Args:
+        email: The address to invite.
+
+    Raises:
+        SupabaseAuthError: 503 if Auth is unreachable or the service-role key
+            is unset; the upstream status otherwise (422 for an address that
+            already has an account).
+    """
+    base = _auth_base_url()
+    key = _service_role_key()
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_AUTH_TIMEOUT_S) as client:
+            response = await client.post(
+                f"{base}/invite",
+                headers=headers,
+                json={
+                    "email": email,
+                    "redirect_to": f"{public_app_url()}/auth/reset-password",
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="Could not reach the authentication service.",
+        ) from exc
+
+    if response.status_code >= 500:
+        raise SupabaseAuthError(
+            status_code=503,
+            code="unavailable",
+            message="The authentication service is unavailable.",
+        )
+    if response.status_code >= 400:
+        raise SupabaseAuthError(
+            status_code=response.status_code,
+            code="invalid_request",
+            message="The invitation could not be sent to this address.",
+        )

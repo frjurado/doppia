@@ -34,7 +34,8 @@
   "overlay": {
     "expandFragment": "Expandir fragmento",
     "collapseFragment": "Contraer fragmento",
-    "openDetails": "Abrir detalles del fragmento"
+    "openDetails": "Abrir detalles del fragmento",
+    "partN": "Parte {{number}}"
   },
   "checklist": {
     "heading": "Lista de comprobación",
@@ -75,6 +76,7 @@
     "conceptSchemaError": "No se pudo cargar el esquema del concepto. Inténtalo de nuevo.",
     "sectionStages": "Etapas",
     "stagesHint": "Arrastra los corchetes para confirmar los límites, o alterna para marcar como ausente.",
+    "stagesBlocked": "La selección es demasiado corta para colocar todas las etapas. Amplíala, o marca etapas como ausentes hasta que quepan las demás.",
     "stagesInfoAria": "Acerca de las etapas",
     "sectionProperties": "Propiedades",
     "sectionHarmony": "Armonía",
@@ -210,6 +212,7 @@
     "pageTitle": "Visor de partitura — Doppia",
     "srTitle": "Visor de partitura",
     "backToBrowse": "← Explorar",
+    "backToQueue": "← Cola de revisión",
     "size": "Tamaño",
     "scale": {
       "small": "Pequeño",
@@ -266,5 +269,25 @@
     "saveDraftError": "No se pudo guardar el borrador.",
     "incompleteSubmit": "Anotación incompleta — no se puede enviar.",
     "submitError": "No se pudo enviar."
+  },
+  "harmonyLabel": {
+    "positionMeasureBeat": "c.{{measure}}{{volta}} t{{beat}}",
+    "beatShort": "t{{beat}}",
+    "root": "fund. {{degree}}",
+    "ext": "ext {{list}}",
+    "quality": {
+      "major": "mayor",
+      "minor": "menor",
+      "diminished": "dism",
+      "augmented": "aum",
+      "half-diminished": "ø",
+      "dominant-seventh": "dom7"
+    },
+    "inversion": {
+      "0": "fundamental",
+      "1": "1ª inv",
+      "2": "2ª inv",
+      "3": "3ª inv"
+    }
   }
 }

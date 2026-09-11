@@ -4,17 +4,25 @@
  * Rule: beats render only within their measure's context, and not at all when
  * the fragment spans complete measures.
  *
- * beat_end display semantics (Component 9 G1, decided with Francisco
- * 2026-07-01): a whole-number beat_end steps back to the last included beat
- * (the exclusive bound minus one); a fractional beat_end displays as-is. A
- * multi-measure end whose beat_end lands on beat 1 of barEnd covers none of
- * barEnd — the true last measure is the previous one, fully covered. Ranges
- * that reduce to whole measures at both ends collapse to the bare "mm. N–M"
- * form.
+ * beat_end display semantics (G1, settled 2026-09-10 in ADR-005 § "range-label
+ * convention", Component 12 Step 20): a range names the first and last
+ * *included onset*, and the unit stepped back by is inferred from the two
+ * endpoints' precision — both whole → a beat, otherwise 1/d for d their common
+ * denominator. A multi-measure end whose beat_end lands on beat 1 of barEnd
+ * covers none of barEnd — the true last measure is the previous one, fully
+ * covered. Ranges that reduce to whole measures at both ends collapse to the
+ * bare "mm. N–M" form.
  */
 
 import { describe, expect, it } from 'vitest';
-import { formatBarRange, formatBeat, formatFragmentRange, qualifyRange } from '../fragmentRange';
+import {
+  formatBarRange,
+  formatBeat,
+  formatFragmentRange,
+  qualifyRange,
+  rangeLabels,
+} from '../fragmentRange';
+import type { RangeLabels } from '../fragmentRange';
 
 describe('formatBeat', () => {
   it('formats a whole beat with no fraction', () => {
@@ -48,8 +56,11 @@ describe('formatFragmentRange — single measure with beats', () => {
     expect(formatFragmentRange(3, 3, 2, 4)).toBe('m. 3, beats 2–3');
   });
 
-  it('formats a fractional end as-is', () => {
-    expect(formatFragmentRange(3, 3, 1, 2.5)).toBe('m. 3, beats 1–2½');
+  it('names the last included onset for a fractional end, not the bound', () => {
+    // [1, 2½) includes onsets 1, 1½ and 2; the last is beat 2. The old rule
+    // showed the bound itself ("beats 1–2½"), naming a point where nothing in
+    // the range starts.
+    expect(formatFragmentRange(3, 3, 1, 2.5)).toBe('m. 3, beats 1–2');
   });
 
   it('collapses equal start/end beats to a single beat', () => {
@@ -81,7 +92,9 @@ describe('formatFragmentRange — multiple measures with beats', () => {
   });
 
   it('formats sub-beat (fractional) positions without float noise', () => {
-    expect(formatFragmentRange(3, 4, 1.5, 2.25)).toBe('m. 3, beat 1½ – m. 4, beat 2¼');
+    // Quarter-beat precision on both ends: the unit is a quarter beat, so the
+    // exclusive 2¼ steps back to 2.
+    expect(formatFragmentRange(3, 4, 1.5, 2.25)).toBe('m. 3, beat 1½ – m. 4, beat 2');
   });
 
   it('reduces a beat_end of 1 to the fully-covered previous measure', () => {
@@ -101,6 +114,86 @@ describe('formatFragmentRange — multiple measures with beats', () => {
     expect(formatFragmentRange(3, 8, 2, 1)).toBe('m. 3, beat 2 – m. 7');
   });
 });
+
+/**
+ * The range-label convention, case for case — ADR-005 § "range-label
+ * convention" (2026-09-10). This is the table in the ADR; if one of these
+ * changes, the ADR is what has to change with it.
+ */
+describe('formatFragmentRange — the ADR-005 range-label table', () => {
+  it('[1, 5) in 4/4 → beats 1–4', () => {
+    expect(formatFragmentRange(3, 3, 1, 5)).toBe('m. 3, beats 1–4');
+  });
+
+  it('[1⅔, 2) → beat 1⅔ (a single third, not "beats 1⅔–1")', () => {
+    // The G1 defect itself. Under the withdrawn rule the whole-number bound
+    // stepped back a full beat while the start stayed fractional, so the label
+    // ran backwards. Stepping back by the range's own unit — a third — lands
+    // exactly on the start, which collapses to one beat.
+    expect(formatFragmentRange(3, 3, 1 + 2 / 3, 2)).toBe('m. 3, beat 1⅔');
+  });
+
+  it('[1⅓, 2) → beats 1⅓–1⅔', () => {
+    expect(formatFragmentRange(3, 3, 1 + 1 / 3, 2)).toBe('m. 3, beats 1⅓–1⅔');
+  });
+
+  it('[1, 2½) → beats 1–2', () => {
+    expect(formatFragmentRange(3, 3, 1, 2.5)).toBe('m. 3, beats 1–2');
+  });
+
+  it('[3, 4½) → beats 3–4', () => {
+    // Deliberately imprecise: only the first half of beat 4 is covered, and
+    // "beats 3 to 4" is what a musician says there. The bracket on the score
+    // carries the exact extent; the label is the caption.
+    expect(formatFragmentRange(3, 3, 3, 4.5)).toBe('m. 3, beats 3–4');
+  });
+
+  it('m. 5 beat 3 – m. 9 beat 1 → m. 5, beat 3 – m. 8', () => {
+    expect(formatFragmentRange(5, 9, 3, 1)).toBe('m. 5, beat 3 – m. 8');
+  });
+
+  it('never renders an end below its start, across the whole beat grid', () => {
+    // The invariant the convention buys, checked exhaustively over the
+    // subdivisions ADR-005 produces rather than asserted once.
+    const grid: number[] = [];
+    for (const d of [1, 2, 3, 4, 6, 8]) {
+      for (let n = 0; n < 4 * d; n++) grid.push(1 + n / d);
+    }
+    for (const start of grid) {
+      for (const end of grid) {
+        if (end <= start) continue;
+        const label = formatFragmentRange(3, 3, start, end);
+        const span = label.match(/beats (\S+)–(\S+)$/);
+        if (!span) continue; // collapsed to a single beat: nothing to order
+        expect(parseBeatGlyph(span[2]!)).toBeGreaterThan(parseBeatGlyph(span[1]!));
+      }
+    }
+  });
+});
+
+/** Read a formatted beat ("1⅔") back to a number, for the ordering check. */
+function parseBeatGlyph(text: string): number {
+  const glyphs: Record<string, number> = {
+    '½': 1 / 2,
+    '⅓': 1 / 3,
+    '⅔': 2 / 3,
+    '¼': 1 / 4,
+    '¾': 3 / 4,
+    '⅕': 1 / 5,
+    '⅖': 2 / 5,
+    '⅗': 3 / 5,
+    '⅘': 4 / 5,
+    '⅙': 1 / 6,
+    '⅚': 5 / 6,
+    '⅛': 1 / 8,
+    '⅜': 3 / 8,
+    '⅝': 5 / 8,
+    '⅞': 7 / 8,
+  };
+  const last = text.slice(-1);
+  const frac = glyphs[last];
+  return frac === undefined ? parseFloat(text) : parseInt(text.slice(0, -1), 10) + frac;
+}
 
 /**
  * formatBarRange / qualifyRange — the ADR-036 bar-label disambiguation.
@@ -166,5 +259,65 @@ describe('qualifyRange', () => {
     expect(qualifyRange(formatFragmentRange(12, 15, 3, 2), { sectionLabel: 'Trio' })).toBe(
       'Trio, m. 12, beat 3 – m. 15, beat 1'
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Localised labels (Component 12 Step 19c)
+// ---------------------------------------------------------------------------
+
+describe('formatFragmentRange — injected labels', () => {
+  const ES: RangeLabels = {
+    measure: 'c.',
+    measures: 'cc.',
+    beat: 'tiempo',
+    beats: 'tiempos',
+  };
+
+  it('defaults to English when no labels are given', () => {
+    // Every pre-existing call site relies on this, which is why the parameter
+    // is optional rather than required.
+    expect(formatFragmentRange(3, 7, null, null)).toBe('mm. 3–7');
+  });
+
+  it('uses the injected labels for a plain measure range', () => {
+    expect(formatFragmentRange(3, 3, null, null, ES)).toBe('c. 3');
+    expect(formatFragmentRange(3, 7, null, null, ES)).toBe('cc. 3–7');
+  });
+
+  it('uses the singular beat word for one beat', () => {
+    expect(formatFragmentRange(3, 3, 2, 3, ES)).toBe('c. 3, tiempo 2');
+  });
+
+  it('uses the plural beat word for a beat span', () => {
+    expect(formatFragmentRange(3, 3, 2, 4, ES)).toBe('c. 3, tiempos 2–3');
+  });
+
+  it('uses the labels on both sides of a cross-measure range', () => {
+    expect(formatFragmentRange(3, 7, 2, 3, ES)).toBe('c. 3, tiempo 2 – c. 7, tiempo 2');
+  });
+
+  it('applies to formatBarRange too', () => {
+    // The listing surfaces use this one; it was hardcoded separately and is
+    // easy to miss when converting the detail formatter.
+    expect(formatBarRange(3, 7, ES)).toBe('cc. 3–7');
+    expect(formatBarRange(3, 3)).toBe('m. 3');
+  });
+});
+
+describe('rangeLabels', () => {
+  it('reads the four keys from the fragments namespace', () => {
+    const seen: string[] = [];
+    const labels = rangeLabels((key: string) => {
+      seen.push(key);
+      return key.split('.').pop() ?? key;
+    });
+    expect(seen).toEqual([
+      'fragments:range.measure',
+      'fragments:range.measures',
+      'fragments:range.beat',
+      'fragments:range.beats',
+    ]);
+    expect(labels.measures).toBe('measures');
   });
 });

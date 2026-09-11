@@ -117,6 +117,8 @@ const isCompound = (beatUnit === 8) && (beatCount % 3 === 0);
 const subdivisionsPerBeat = isCompound ? 3 : 2;
 ```
 
+> **Superseded 2026-09-10** — the predicate above reads 3/8 as compound, i.e. as a single dotted-quarter beat filling the bar. It is now `(beatUnit === 8) && (beatCount >= 6) && (beatCount % 3 === 0)`. See the amendment "compound-meter rule" at the end of this document; the rest of this section is unchanged.
+
 For fine (sixteenth-note) precision in simple meters, `subdivisionsPerBeat = 4`.
 
 **Per-measure meter reading is required.** The time signature must be read from the MEI node of each individual measure before falling back to the global `scoreDef`. This is necessary to handle mid-piece meter changes correctly and is a prerequisite for sub-beat precision being meaningful across a full movement.
@@ -230,3 +232,58 @@ The edge-case entry "**Backward repeat barlines as selection barriers** — By d
 **As implemented (Component 9 Step 3):** the barrier parser is now `buildDirectiveBarriers()` (D.C./D.S. only); `buildRepeatBarriers()` is deleted. The ending gate is no longer a barrier set: `buildEndingBarriers()` is replaced by a volta index (`buildVoltaIndex()` from the MEI, or `voltaIndexFromLayer()` as a fallback) consumed by `computeSelectionKeys()`, which clamps at the §6A.2 gates and *excludes* unreachable sibling endings from the effective range (§6A.3) instead of merely clamping — a clamp cannot express the discontiguous row-2/row-4 selections. The G2 addendum's mechanism descriptions above are historical in those respects; the G2.3 key-deduplication scheme survives, centralised in `walkMeasureKeys()` (`ghosts.ts`), which also guards `barN` parsing: a measure whose `@n` is unparseable (MuseScore `X1`-style excluded-measure numbers, flagged but not auto-corrected by the normalizer) falls back to the nearest preceding finite `@n` rather than producing `NaN` — the I2 totality guarantee of `tagging-tool-design.md` §6A.1.
 
 **As implemented (Component 9 Step 4):** stage geometry adopts the same coordinate discipline. `StageBounds` carries optional `keyStart`/`keyEnd` physical-measure keys alongside the bar/beat floats, sub-part `mc_start`/`mc_end` resolve through those keys (a bar-number lookup is ambiguous inside endings and split measures), and a stage run's `beatEnd` is the last included ghost's exclusive `endFloat` — never estimated from a neighbouring entry. The stage interaction core lives in `stageFrame.ts`: slot lists over the selection's effective key range with interior boundary indices as the single shared boundary value (`tagging-tool-design.md` §6A.4). `toggleStageAbsent` absorbers inherit the vanishing stage's far boundary exactly (bar, float, key) instead of clearing beat coordinates — the clearing shifted the shared boundary against the stage beyond and could overlap it; asymmetric `beatStart`/`beatEnd` pairs remain legal on `StageBounds` and are normalised to the ADR-005 wire invariant by the payload builder.
+
+---
+
+## Amendment — range-label convention: first and last included onset (2026-09-10)
+
+Decided with Francisco, closing Component 12 Step 20 G1 (the "beats 1⅔–1" render).
+
+**The stored bound and the label are different objects.** `[beat_start, beat_end)` stays a half-open interval with onset-based inclusion, exactly as specified above — that is the right data model, and nothing about it changes. The human-readable range label (`formatFragmentRange`, `frontend/src/utils/fragmentRange.ts`) is *prose*, and prose in music is inclusive-by-onset at every granularity: "mm. 5–8" names the onset of the first and the last included measure; "beats 1–4" the first and last included beat; "through the 'and' of 4" the first and last included eighth; even "to the downbeat of m. 9" names the last included event (the arrival), not the offset. Musicians never speak in offsets, so a label must never show one.
+
+**Convention.** The range label names the onset of the first included unit and the onset of the last included unit. The unit is whatever the endpoints' own precision implies: if both `beat_start` and `beat_end` are whole numbers the unit is a beat; otherwise it is `1/d`, where `d` is the least common denominator of the fractional parts (the same subdivision denominators `formatBeat` already recognises — halves, thirds, quarters, sixths, eighths). The displayed end is the stored exclusive bound stepped back by one unit; when that equals the start, the label collapses to a single beat. Whole-measure and multi-measure reductions (an end bound of 1.0 stepping back to the previous, fully covered measure; both ends reducing to whole measures collapsing to `mm. N–M`) are the same rule with the measure as the unit and are unchanged.
+
+| stored (`beat_start`, `beat_end`) | label |
+|---|---|
+| 1, 5 (4/4) | beats 1–4 |
+| 1⅔, 2 | beat 1⅔ |
+| 1⅓, 2 | beats 1⅓–1⅔ |
+| 1, 2½ | beats 1–2 |
+| 3, 4½ | beats 3–4 |
+| m. 5 b. 3 – m. 9 b. 1 | m. 5, beat 3 – m. 8 (unchanged) |
+
+**Why this can never render end < start.** Both endpoints are multiples of `1/d` and the stored bound is strictly greater than the start, so `beat_end − 1/d ≥ beat_start` holds by construction. The invariant is a property of the rule, not a clamp added after the fact; the minimal clamp kept on file since Component 9 (`part-8-campaign-triage.md`) is not needed and should not be added. A fractional part outside the recognised denominators (which compliant ADR-005 coordinates never produce) falls back to the decimal display and to the collapse-to-start behaviour.
+
+**What this supersedes.** The two-rule scheme of 2026-07-01 (Component 9 Step 15, Band 2: whole bound → step back one beat; fractional bound → show as-is) is withdrawn. It mixed an inclusive reading of the end with an exclusive one, which is precisely what produced "1⅔–1" — and its fractional branch also named points where nothing starts ("beats 1–2½" for a range whose last onset is 2). The module docstring in `fragmentRange.ts` records that scheme and must be updated when the implementation lands.
+
+**Deliberate imprecision.** "[3, 4½) → beats 3–4" says "through beat 4" while only its first half is covered. That is the intended behaviour of a label: the bracket on the score is the exact statement of the extent, the text is the caption a musician would speak, and a musician says "beats 3 to 4" there. The label is not asked to carry the offset.
+
+**Rejected: onset + duration** ("m. 5 beat 3, 2 measures long"). Natural above the bar, unnatural below it; makes the reader do arithmetic to find where the range ends; breaks down across meter changes; and abandons the parallel with the measure form that everyone already reads correctly. Its only advantage — unambiguity — is one the label does not need once the bracket is the data.
+
+**Known limit, deferred.** The rule *infers* the last included onset from the endpoints' precision rather than knowing it; the exact version would record the last included ghost's onset at commit time (the annotator has it) as a display-only field, backfilled from the timemap the way `clamp_subpart_bounds.py` was. Not done: it touches the wire invariant and needs a migration for the sake of a caption, and every case where the inference differs from the truth is of the "less precise, still correct" kind above. Listed in `phase-2-entry-backlog.md`; revisit only if a real render ever contradicts its bracket.
+
+**Implementation (Claude Code, not this session):** `displayEndBeat` takes both endpoints and steps back by the inferred unit; the localised labels (`RangeLabels`, Component 12 Step 19c) are unaffected; `fragmentRange.test.ts` gains the table above as cases; the module docstring is rewritten to point here.
+
+---
+
+## Amendment — compound-meter rule: 3/8 is simple (2026-09-10)
+
+Decided with Francisco, closing Track M17 in Component 12 Step 20.
+
+**The rule.** A meter is compound when its beat *groups* its subdivisions — three eighths to a dotted quarter — which takes both an eighth-note denominator and a numerator with something to group:
+
+```javascript
+const isCompound = (beatUnit === 8) && (beatCount >= 6) && (beatCount % 3 === 0);
+```
+
+`beatCount >= 6` is the whole of the change, and **3/8 is the only signature it moves**: every other `unit == 8` numerator divisible by three is already 6 or more. Three eighths in a bar are three beats, as in 3/4 — 3/8 behaves like 3/4, not like 6/8.
+
+**On one-beat bars**, which the plan asked to settle: the rule never *manufactures* one. Grouping is applied only where it leaves at least two beats, so no signature is read as compound into a single beat filling its bar. A notated 1/4 or 1/8 bar genuinely has one beat and is untouched by this — the objection was never to one-beat bars as such, but to inferring one where the notation shows three pulses.
+
+**Why it mattered.** Under the old predicate 3/8 was one dotted-quarter beat covering the bar, so *beat 3 did not exist*. On K280/iii m. 15 the harmony record is right — events on beats 1 and 3 — and both labels drew on beat 1, in dozens of bars of that movement. The resolution controls showed the same single beat. Worse than the display: a beat coordinate written by the tagging tool in a 3/8 movement denoted a different position from the same number in that movement's harmony record, because `ingest_analysis._compute_beat` had required `count >= 6` since it was written. The two stores disagreed about what "beat 2" meant.
+
+**Where the predicate lives.** Three places, which must agree: `ghosts.ts` `isCompoundMeter` (the tagging tool), `ingest_analysis._compute_beat` (harmony ingestion, already correct), and `clamp_subpart_bounds.measure_end_beat` (the M7 repair, which had followed the ghost layer because the ghost layer wrote the values it repairs). The last of these had refused to touch 3/8 movements at all while the rule was disputed; that refusal is now removed.
+
+**Data.** The coordinates written under the old reading were converted by `backend/data_migrations/fix_38_beat_coordinates.py`. Under the old encoding the bar's three eighths were subdivisions of one beat (eighth *k* at `1 + k/3`, bar end at 2.0); under the new one each eighth is a beat (eighth *k* at `1 + k`, bar end at 4.0), so `new = 3 × old − 2`. The map is affine and increasing, so the wire invariant of § "Data model" survives it, and the position each number names in the score is unchanged. Scope: 53 fragments in K280/iii, the corpus's only 3/8 movement carrying any (measured 2026-07-27; K279/iii was a false positive of M18 — its curated meter said 3/8 for a movement notated in 2/4). `clamp_subpart_bounds.py` must be run **after** the conversion, never before.
+
+**Idempotence, and its one limit.** Nothing records which encoding a stored row is in, and the two value spaces overlap at 1 and 2. The conversion script decides per movement from the values themselves: a third can only be the old encoding, and a value above 2.0 — or a `beat_start` of exactly 2.0, which the old reading could not produce — can only be the new one. A movement showing neither is reported and skipped rather than converted twice. That case does not arise in this corpus and would require every coordinate in a 3/8 movement to be a bar edge or beat 1.

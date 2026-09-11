@@ -28,7 +28,7 @@ import { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { StageAssignment, SubPartTag } from './stages';
-import { stageColor } from './stages';
+import { orderStageCards, stageColor } from './stages';
 import SubPartForm from './SubPartForm';
 import Type from '../ui/Type';
 import styles from './StageList.module.css';
@@ -83,21 +83,10 @@ export default function StageList({
 
   // Order by physical position in the score (bar, then beat) so the sidebar
   // reads top-to-bottom the way the stages actually lay out in the music, not
-  // by the abstract CONTAINS-edge schema order (Component 9 G2). Absent
-  // stages have no bounds to position by; group them after the positioned
-  // ones, each ordered among themselves by schema order.
-  const positionSorted = [...assignments].sort((a, b) => {
-    if (a.bounds && b.bounds) {
-      if (a.bounds.barStart !== b.bounds.barStart) return a.bounds.barStart - b.bounds.barStart;
-      const aBeat = a.bounds.beatStart ?? 0;
-      const bBeat = b.bounds.beatStart ?? 0;
-      if (aBeat !== bBeat) return aBeat - bBeat;
-      return a.order - b.order;
-    }
-    if (a.bounds && !b.bounds) return -1;
-    if (!a.bounds && b.bounds) return 1;
-    return a.order - b.order;
-  });
+  // by the abstract CONTAINS-edge schema order (Component 9 G2) — while an
+  // unplaced stage keeps its slot in the sequence rather than dropping to the
+  // bottom of the list (M9). See orderStageCards.
+  const positionSorted = orderStageCards(assignments);
 
   // During a drag, keep the pre-drag order; otherwise track the live sort.
   let sorted = positionSorted;

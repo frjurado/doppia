@@ -41,9 +41,13 @@ import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
 import type { FragmentDetailResponse } from '../services/fragmentApi';
+import { getPublicFragment } from '../services/publicApi';
+import { useAuth } from '../components/auth/AuthContext';
+import { EDITORIAL_ROLES } from '../services/roles';
 import { getFragment } from '../services/fragmentApi';
 import {
   formatFragmentRange,
+  rangeLabels,
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../utils/fragmentRange';
@@ -63,25 +67,34 @@ import styles from './FragmentDetail.module.css';
  * overlays and MIDI transport from there), and the full record panel.
  *
  * Public mode (Component 10 Step 5): the same view serves the anonymous
- * `/public/fragments/:id` route. `loadFragment` is injected with the public
- * API client and `publicMode` hides the (always-`approved`) status badge and
+ * one route since Step 14b. The component picks the public API client and
+ * hides the (always-`approved`) status badge and
  * skips the editor-only concept-schema fetch in the embedded record panel.
  */
 export interface FragmentDetailProps {
   /**
-   * Fragment fetch function. Defaults to the editor `getFragment`; the public
-   * route injects `getPublicFragment` so the anonymous surface hits
-   * `/api/v1/public/fragments/{id}`.
+   * Fragment fetch function. Defaults to the client the caller's session
+   * warrants; tests inject their own.
    */
   loadFragment?: (id: string) => Promise<FragmentDetailResponse>;
-  /** When true, render for the anonymous public path (no editor affordances). */
+  /**
+   * Hide editor affordances. Defaults to "the caller holds no editorial role",
+   * which is also what decides the client above.
+   */
   publicMode?: boolean;
 }
 
-export default function FragmentDetail({
-  loadFragment = getFragment,
-  publicMode = false,
-}: FragmentDetailProps = {}) {
+export default function FragmentDetail({ loadFragment, publicMode }: FragmentDetailProps = {}) {
+  // One route serves everyone since Step 14b, so the component picks its own
+  // client rather than the route injecting one. The two are not independent:
+  // the public endpoint pins `approved` and excludes NonCommercial corpora
+  // (ADR-009 § 2) for anonymous callers, and `publicMode` additionally skips
+  // the concept-schemas fetch, which is editor-only and would 401. Deciding
+  // both from the same fact keeps them from drifting apart.
+  const { user, status } = useAuth();
+  const isEditorial = EDITORIAL_ROLES.some((role) => user?.roles.includes(role) ?? false);
+  const isPublic = publicMode ?? !isEditorial;
+  const fetchFragment = loadFragment ?? (isEditorial ? getFragment : getPublicFragment);
   const { t } = useTranslation(['fragments', 'common']);
   usePageTitle(t('fragments:detail.pageTitle'));
   const { fragmentId } = useParams<{ fragmentId: string }>();
@@ -94,17 +107,24 @@ export default function FragmentDetail({
 
   useEffect(() => {
     if (!fragmentId) return;
+    // Wait for the session before fetching. Roles arrive asynchronously — the
+    // access token is restored from the refresh cookie after a reload — so
+    // firing on the first render would send an editor to the public endpoint
+    // and then never retry: they would silently lose the status badge, the
+    // resolved property names, and any NonCommercial fragment entirely.
+    // A caller who injected `loadFragment` (tests) does not wait.
+    if (loadFragment === undefined && status === 'loading') return;
     setIsLoading(true);
-    loadFragment(fragmentId)
+    fetchFragment(fragmentId)
       .then(setFragment)
       .catch((err) => {
         if (err instanceof ApiError) setError(err);
       })
       .finally(() => setIsLoading(false));
-    // loadFragment is stable (module function or route-level constant); only the
-    // fragmentId drives a refetch.
+    // fetchFragment is derived from `isEditorial`, which is the dependency that
+    // matters beyond the id; the function identity itself is not stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fragmentId]);
+  }, [fragmentId, isEditorial, status]);
 
   // ── Derived ─────────────────────────────────────────────────────────────
   const primaryTag = fragment?.concept_tags.find((tag) => tag.is_primary) ?? null;
@@ -150,7 +170,7 @@ export default function FragmentDetail({
             {t('fragments:detail.backToBrowser')}
           </Type>
         </button>
-        {fragment && !publicMode && (
+        {fragment && !isPublic && (
           <span className={styles.statusBadge} data-status={fragment.status}>
             <Type variant="label-sm" as="span">
               {t(`common:status.${fragment.status}`)}
@@ -207,7 +227,8 @@ export default function FragmentDetail({
                       fragment.bar_start,
                       fragment.bar_end,
                       fragment.beat_start,
-                      fragment.beat_end
+                      fragment.beat_end,
+                      rangeLabels(t)
                     ),
                     {
                       sectionLabel: fragment.section_label,
@@ -286,7 +307,7 @@ export default function FragmentDetail({
               initialFragment={fragment}
               tagMode="view"
               standalone
-              disableSchemaFetch={publicMode}
+              disableSchemaFetch={isPublic}
             />
           </div>
         </div>

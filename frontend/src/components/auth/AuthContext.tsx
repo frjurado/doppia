@@ -34,6 +34,8 @@ import {
   subscribe,
 } from '../../services/auth';
 import {
+  completeOAuth as sessionCompleteOAuth,
+  verifyEmailLink as sessionVerifyEmailLink,
   login as sessionLogin,
   logout as sessionLogout,
   refresh as sessionRefresh,
@@ -47,6 +49,10 @@ interface AuthContextValue {
   status: AuthStatus;
   user: SessionUser | null;
   login: (email: string, password: string) => Promise<void>;
+  /** Finish an OAuth round trip from the code on the callback URL. */
+  completeOAuthLogin: (code: string) => Promise<void>;
+  /** Establish a session from a recovery / invite / confirmation link. */
+  redeemEmailLink: (tokenHash: string, type: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -57,10 +63,21 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const REFRESH_LEAD_MS = 60_000;
 const MIN_REFRESH_DELAY_MS = 5_000;
 
-/** Derive a placeholder user for the dev-token bypass (dev builds only). */
+/**
+ * Derive a placeholder user for the dev-token bypass (dev builds only).
+ *
+ * The roles here mirror what `scripts/seed_dev_users.py` grants the two dev
+ * identities in `user_role`; the backend resolves the real set per request and
+ * would refuse a request this placeholder disagreed with.
+ */
 function devUser(token: string): SessionUser {
   const role = token === 'admin-token' ? 'admin' : 'editor';
-  return { id: `dev-${role}`, email: `${role}@local`, role };
+  return {
+    id: `dev-${role}`,
+    email: `${role}@local`,
+    roles: [role],
+    email_verified: true,
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -128,18 +145,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    let cancelled = false;
+    // No cleanup, and deliberately no `cancelled` flag. `bootstrapped` already
+    // guarantees this body runs exactly once for the provider's lifetime, so a
+    // cancellation flag has nothing legitimate to cancel — but StrictMode's
+    // simulated unmount would *set* it, and the re-run returns at the guard
+    // above without clearing it. The in-flight refresh would then resolve into
+    // a no-op and `status` would stay 'loading' for ever, so in dev builds an
+    // anonymous visitor never reached 'anonymous': no login link, and
+    // RequireAuth rendering null instead of redirecting.
     (async () => {
       try {
-        const session = await sessionRefresh();
-        if (!cancelled) applySession(session);
+        applySession(await sessionRefresh());
       } catch {
-        if (!cancelled) setStatus('anonymous');
+        // A session established *while this bootstrap was in flight* must not be
+        // downgraded by its failure. The OAuth callback route mounts under this
+        // provider and exchanges its code concurrently: on a first sign-in there
+        // is no refresh cookie yet, so this refresh always 401s, and if the
+        // exchange happened to land first its session would be clobbered here.
+        // That guard is the token check — never the cancellation flag.
+        if (getAccessToken() === null) setStatus('anonymous');
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [applySession]);
 
   // Reflect a token cleared outside React (apiFetch clearing on a 401) into
@@ -163,6 +189,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applySession]
   );
 
+  const completeOAuthLogin = useCallback(
+    async (code: string) => {
+      applySession(await sessionCompleteOAuth(code));
+    },
+    [applySession]
+  );
+
+  const redeemEmailLink = useCallback(
+    async (tokenHash: string, type: string) => {
+      applySession(await sessionVerifyEmailLink(tokenHash, type));
+    },
+    [applySession]
+  );
+
   const logout = useCallback(async () => {
     clearTimer();
     await sessionLogout();
@@ -170,7 +210,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearTimer, goAnonymous]);
 
   return (
-    <AuthContext.Provider value={{ status, user, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider
+      value={{ status, user, login, completeOAuthLogin, redeemEmailLink, logout }}
+    >
+      {children}
+    </AuthContext.Provider>
   );
 }
 

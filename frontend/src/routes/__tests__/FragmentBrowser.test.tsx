@@ -19,6 +19,8 @@ import type { ConceptTreeResponse } from '../../services/conceptApi';
 import type { ConceptBrowseItem, ConceptBrowseResponse } from '../../services/fragmentApi';
 import * as conceptApi from '../../services/conceptApi';
 import * as fragmentApi from '../../services/fragmentApi';
+import * as glossaryApi from '../../services/glossaryApi';
+import * as publicApi from '../../services/publicApi';
 import FragmentBrowser from '../FragmentBrowser';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,20 @@ import FragmentBrowser from '../FragmentBrowser';
 // `import('../services/conceptApi')` for searchConcepts.
 vi.mock('../../services/conceptApi');
 vi.mock('../../services/fragmentApi');
+// Since Step 14b the browser is session-aware: the navigator runs on the public
+// concept index for everyone, and the fragment client is chosen by role.
+vi.mock('../../services/glossaryApi');
+vi.mock('../../services/publicApi');
+
+/** Roles the mocked session reports; set per test. */
+let mockRoles: string[] = ['editor'];
+
+vi.mock('../../components/auth/AuthContext', () => ({
+  useAuth: () => ({
+    status: 'authenticated',
+    user: { id: 'u1', email: 'editor@doppia.test', roles: mockRoles, email_verified: true },
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -130,9 +146,9 @@ function makeBrowseResponse(
  */
 function renderBrowser(qs = '') {
   return render(
-    <MemoryRouter initialEntries={[`/concepts${qs}`]}>
+    <MemoryRouter initialEntries={[`/fragments${qs}`]}>
       <Routes>
-        <Route path="/concepts" element={<FragmentBrowser />} />
+        <Route path="/fragments" element={<FragmentBrowser />} />
         <Route path="/fragments/:fragmentId" element={<div data-testid="detail-stub" />} />
       </Routes>
     </MemoryRouter>
@@ -143,13 +159,20 @@ function renderBrowser(qs = '') {
 // Setup
 // ---------------------------------------------------------------------------
 
+/** Wrap a flat node list in the public index's domain envelope. */
+function makeIndex(nodes: ConceptTreeResponse['nodes']) {
+  return { domains: [{ domain: 'cadences', label: 'Cadences', nodes }] };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRoles = ['editor'];
 
-  // Default empty tree, roots, and fragment list — individual tests override as needed.
+  // Default empty tree and fragment list — individual tests override as needed.
   vi.mocked(conceptApi.getConceptTree).mockResolvedValue({ root_id: 'Cadence', nodes: [] });
-  vi.mocked(conceptApi.getConceptRoots).mockResolvedValue([]);
+  vi.mocked(glossaryApi.getPublicConceptIndex).mockResolvedValue(makeIndex([]));
   vi.mocked(fragmentApi.listByConcept).mockResolvedValue(makeBrowseResponse([]));
+  vi.mocked(publicApi.listPublicFragmentsByConcept).mockResolvedValue(makeBrowseResponse([]));
 });
 
 // ---------------------------------------------------------------------------
@@ -164,32 +187,36 @@ describe('FragmentBrowser — initial state', () => {
     expect(await screen.findByText(/search for a concept to browse/i)).toBeInTheDocument();
   });
 
-  it('loads the domain forest (all browsable roots) when no root param is set', async () => {
-    vi.mocked(conceptApi.getConceptRoots).mockResolvedValue([
-      { id: 'Cadence', name: 'Cadence', aliases: [] },
-      { id: 'ClosingSection', name: 'Closing Section', aliases: [] },
-    ]);
-    vi.mocked(conceptApi.getConceptTree).mockImplementation(async (rootId: string) =>
-      rootId === 'Cadence'
-        ? TREE_RESPONSE
-        : {
-            root_id: 'ClosingSection',
-            nodes: [
-              {
-                id: 'ClosingSection',
-                name: 'Closing Section',
-                aliases: [],
-                hierarchy_path: ['Closing Section'],
-                parent_id: null,
-                fragment_count: 0,
-              },
-            ],
-          }
-    );
+  it('loads the domain forest from the public concept index when no root is set', async () => {
+    // The navigator's default view runs on the public index for every caller
+    // since Step 14b — one request returning the whole forest, where it used
+    // to be getConceptRoots() followed by a getConceptTree() per root, all of
+    // them editor-gated. That is what let the public surface have a navigator
+    // at all.
+    vi.mocked(glossaryApi.getPublicConceptIndex).mockResolvedValue({
+      domains: [
+        { domain: 'cadences', label: 'Cadences', nodes: TREE_RESPONSE.nodes },
+        {
+          domain: 'closure',
+          label: 'Closure',
+          nodes: [
+            {
+              id: 'ClosingSection',
+              name: 'Closing Section',
+              aliases: [],
+              hierarchy_path: ['Closing Section'],
+              parent_id: null,
+              fragment_count: 0,
+            },
+          ],
+        },
+      ],
+    });
     renderBrowser();
-    // Both browsable roots render as top-level entries in one forest.
+    // Both domains' roots render as top-level entries in one forest.
     await screen.findByText('Cadence', { exact: true, selector: 'span' });
     expect(screen.getByText('Closing Section')).toBeInTheDocument();
+    expect(conceptApi.getConceptTree).not.toHaveBeenCalled();
   });
 
   it('renders the prompt to select a concept when root is set but no concept selected', async () => {
@@ -473,5 +500,82 @@ describe('FragmentBrowser — navigation', () => {
 
     // The stub route for /fragments/:fragmentId should now render.
     await screen.findByTestId('detail-stub');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session-chosen client (Step 14b)
+// ---------------------------------------------------------------------------
+
+/**
+ * The surface that used to be `/public/concepts` is this component with no
+ * editorial role. These assertions come from the deleted
+ * `PublicFragmentBrowser.test.tsx` — the behaviour still exists, so its
+ * coverage moves here rather than being dropped with the file.
+ */
+describe('FragmentBrowser — session decides the client', () => {
+  it('calls the public client, without a status argument, for a role-less caller', async () => {
+    // Not a cosmetic choice: the public endpoint is what pins `approved` and
+    // excludes NonCommercial corpora (ADR-009 § 2) for anonymous callers.
+    mockRoles = [];
+    vi.mocked(publicApi.listPublicFragmentsByConcept).mockResolvedValue(
+      makeBrowseResponse([makeBrowseItem({ id: 'f1' })])
+    );
+    renderBrowser('?concept=Cadence');
+
+    await waitFor(() => expect(publicApi.listPublicFragmentsByConcept).toHaveBeenCalled());
+    expect(fragmentApi.listByConcept).not.toHaveBeenCalled();
+    expect(publicApi.listPublicFragmentsByConcept).toHaveBeenCalledWith('Cadence', {
+      includeSubtypes: true,
+      cursor: undefined,
+    });
+  });
+
+  it('calls the editorial client for an editor', async () => {
+    // The one real content difference between the old surfaces: an editor sees
+    // NonCommercial corpora here, an anonymous visitor never does.
+    mockRoles = ['editor'];
+    renderBrowser('?concept=Cadence');
+
+    await waitFor(() => expect(fragmentApi.listByConcept).toHaveBeenCalled());
+    expect(publicApi.listPublicFragmentsByConcept).not.toHaveBeenCalled();
+  });
+
+  it('gives a role-less caller the navigator, but not the editor-only root search', async () => {
+    // `/concepts/search` is gated and has no public counterpart; the forest
+    // below it is public, so the navigator itself stays.
+    mockRoles = [];
+    vi.mocked(glossaryApi.getPublicConceptIndex).mockResolvedValue(makeIndex(TREE_RESPONSE.nodes));
+    renderBrowser();
+
+    await screen.findByText('Cadence', { exact: true, selector: 'span' });
+    expect(screen.queryByLabelText(/search/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the root search for an editor', async () => {
+    mockRoles = ['editor'];
+    vi.mocked(glossaryApi.getPublicConceptIndex).mockResolvedValue(makeIndex(TREE_RESPONSE.nodes));
+    renderBrowser();
+
+    await screen.findByText('Cadence', { exact: true, selector: 'span' });
+    expect(screen.getByLabelText(/search/i)).toBeInTheDocument();
+  });
+
+  it('appends the next page when Load more is clicked, on the public client', async () => {
+    mockRoles = [];
+    vi.mocked(publicApi.listPublicFragmentsByConcept)
+      .mockResolvedValueOnce(makeBrowseResponse([makeBrowseItem({ id: 'f1' })], 'cur1'))
+      .mockResolvedValueOnce(makeBrowseResponse([makeBrowseItem({ id: 'f2' })]));
+    renderBrowser('?concept=Cadence');
+
+    const loadMore = await screen.findByRole('button', { name: /load more/i });
+    fireEvent.click(loadMore);
+
+    await waitFor(() =>
+      expect(publicApi.listPublicFragmentsByConcept).toHaveBeenCalledWith('Cadence', {
+        includeSubtypes: true,
+        cursor: 'cur1',
+      })
+    );
   });
 });

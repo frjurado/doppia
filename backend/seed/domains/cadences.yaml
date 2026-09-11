@@ -198,6 +198,7 @@ property_schemas:
         references: Tonic
       - id: Stage1AppliedDominant
         name: "Applied Dominant of Pre-dominant"
+        short_name: "Applied Dominant"
         order: 2
         references: AppliedDominant
 
@@ -210,11 +211,15 @@ property_schemas:
     required: false
     values:
       - id: Stage2SD4
-        name: "Pre-dominant on Scale Degree 4 (IV, ii, ii6, …)"
+        name: "Pre-dominant on Scale Degree 4"
+        short_name: "On Scale Degree 4"
+        description: "IV, ii, ii6, …"
         order: 1
         references: SD4Predominant
       - id: Stage2SDSharp4
-        name: "Pre-dominant on Raised Scale Degree 4 (applied V, +6, …)"
+        name: "Pre-dominant on Raised Scale Degree ♯4"
+        short_name: "On Scale Degree ♯4"
+        description: "Applied V, augmented sixths, …"
         order: 2
         references: SDSharp4Predominant
 
@@ -308,12 +313,19 @@ concepts:
       - schema: ThemeClosure
         order: 3
         group: "closure"
+      # ECP stays inline and ungrouped: it is a genuine analytical property of
+      # the cadence, asked on most fragments, not a rarity to be tucked away.
       - schema: ECP
         order: 11
+      # Covered and Unison are rare enough that they read as noise beside the
+      # rest (Component 11 triage item 9). Clustered under one heading, last —
+      # the order values put them after ECP, and the group makes them a block.
       - schema: Covered
         order: 12
+        group: "other"
       - schema: Unison
         order: 13
+        group: "other"
     capture_extensions:
       # A review gate, not stored data: nothing lands in
       # summary.concept_extensions, because the harmony already lives in
@@ -423,7 +435,7 @@ concepts:
   - id: DeceptiveCadence
     name: "Deceptive Cadence"
     aliases:
-      - DC
+      - Dec.Cad.
     domain: cadences
     type: CadenceType
     complexity: intermediate
@@ -443,6 +455,8 @@ concepts:
 
   - id: EvadedCadence
     name: "Evaded Cadence"
+    aliases:
+      - Ev.Cad.
     domain: cadences
     type: CadenceType
     complexity: intermediate
@@ -465,6 +479,8 @@ concepts:
 
   - id: AbandonedCadence
     name: "Abandoned Cadence"
+    aliases:
+      - Abnd.
     domain: cadences
     type: CadenceType
     complexity: advanced
@@ -523,6 +539,8 @@ concepts:
 
   - id: ReopeningHalfCadence
     name: "Reopening Half Cadence"
+    aliases:
+      - "HC (reopening)"
     domain: cadences
     type: CadenceType
     complexity: advanced
@@ -546,6 +564,8 @@ concepts:
 
   - id: DominantArrival
     name: "Dominant Arrival"
+    aliases:
+      - Dom.Arr.
     domain: cadences
     type: CadenceType
     complexity: advanced

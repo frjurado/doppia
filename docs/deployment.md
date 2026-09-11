@@ -51,7 +51,7 @@ NEO4J_PASSWORD=<auradb-password>
 DATABASE_URL=postgresql+asyncpg://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-key>
-SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>   # required from Component 12: account deletion, invitations
 
 # Cloudflare R2
 R2_ACCOUNT_ID=<account-id>
@@ -99,11 +99,18 @@ Secrets are stored in Fly.io's secret store (`fly secrets set KEY=value`) and ar
 
 ```bash
 fly ssh console --app doppia-staging
-python scripts/seed.py --domain cadences
+python scripts/seed.py --all
 python scripts/validate_graph.py
 ```
 
 The seed script uses `MERGE` and is idempotent; it is safe to re-run after any YAML change.
+
+**Always `--all`, never `--domain <name>`, on a remote console.** Single-domain
+seeding compares the *whole* graph against the one file it loaded, so every id
+belonging to the other domains looks orphaned and the script stops on an
+id-immutability prompt — `input()` at `scripts/seed.py:413`, which over
+`fly ssh console -C` has no terminal to answer it. `--all` is what CI runs and
+raises no prompt.
 
 ### 2. Supabase
 
@@ -335,7 +342,11 @@ fly secrets set \
 fly deploy --app doppia-staging
 ```
 
-Non-secret environment variables (`ENVIRONMENT`, `AUTH_MODE`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `PORT`) are set in `fly.toml` under `[env]` and committed to the repository — no secrets needed for these.
+Non-secret environment variables (`ENVIRONMENT`, `AUTH_MODE`, `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `PORT`, `PUBLIC_APP_URL`, `REGISTRATION_MODE`) are set in `fly.toml` under `[env]` and committed to the repository — no secrets needed for these.
+
+`PUBLIC_APP_URL` is where OAuth and Supabase email links return users, and it must also be listed in Supabase's **Authentication → URL Configuration → Redirect URLs**. That allowlist is the enforcement point: Supabase does *not* validate `redirect_to` when it hands off to the provider (verified 2026-08-28), which is also why the backend derives the value from config and never accepts it from a caller. Outside `ENVIRONMENT=local` an unset `PUBLIC_APP_URL` fails the OAuth endpoints with 503 rather than defaulting to localhost.
+
+`REGISTRATION_MODE` gates self-service sign-up (`invite` | `open`). Anything other than a literal `open` keeps registration closed, so a typo cannot open public sign-up by accident. It flips to `open` when Collections ship (Component 13).
 
 **Build architecture.** The `fly.toml` uses a multi-stage `backend/Dockerfile` with build context set to the repository root (`context = "."`). Stage 1 (Node) builds the React SPA; stage 2 (Python) installs backend dependencies and copies the built frontend into `/app/static/`. FastAPI serves the static files at runtime via `StaticFiles`. There is a single Fly app — no separate frontend deployment.
 
@@ -367,9 +378,11 @@ Run migrations before deploying the new application version if the migration add
 If the update includes knowledge graph YAML changes:
 
 ```bash
-fly ssh console --app doppia-staging -C "python scripts/seed.py --domain cadences"
+fly ssh console --app doppia-staging -C "python scripts/seed.py --all"
 fly ssh console --app doppia-staging -C "python scripts/validate_graph.py"
 ```
+
+`--all`, not `--domain <name>` — see the note under § Neo4j AuraDB above.
 
 ## DCML corpus re-ingestion
 

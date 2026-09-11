@@ -4,6 +4,7 @@ import { ApiError } from '../../services/api';
 import Type from '../ui/Type';
 import BrowseItem from './BrowseItem';
 import styles from './BrowseColumn.module.css';
+import Button from '../ui/Button';
 
 interface BrowseColumnProps<T> {
   items: T[];
@@ -46,9 +47,9 @@ export default function BrowseColumn<T>({
             {error.message}
           </Type>
           {onRetry && (
-            <button type="button" onClick={onRetry} className={styles.retryButton}>
+            <Button variant="tertiary" size="sm" className={styles.retryButton} onClick={onRetry}>
               {t('retry')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -59,18 +60,9 @@ export default function BrowseColumn<T>({
     return (
       <div className={styles.column}>
         {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
-          <BrowseItem
-            key={i}
-            id={`skeleton-${i}`}
-            isSelected={false}
-            onClick={() => {}}
-            disabled
-          >
+          <BrowseItem key={i} id={`skeleton-${i}`} isSelected={false} onClick={() => {}} disabled>
             <div className={styles.skeletonLine} style={{ opacity: 0.4 - i * 0.1 }} />
-            <div
-              className={styles.skeletonLineSm}
-              style={{ opacity: 0.3 - i * 0.07 }}
-            />
+            <div className={styles.skeletonLineSm} style={{ opacity: 0.3 - i * 0.07 }} />
           </BrowseItem>
         ))}
       </div>
@@ -81,10 +73,7 @@ export default function BrowseColumn<T>({
     return (
       <div className={styles.column}>
         <div className={styles.emptyState}>
-          <Type
-            variant="label-md"
-            style={{ color: 'var(--color-on-surface-variant)' }}
-          >
+          <Type variant="label-md" style={{ color: 'var(--color-on-surface-variant)' }}>
             {emptyLabel ?? t('nothingHere')}
           </Type>
         </div>

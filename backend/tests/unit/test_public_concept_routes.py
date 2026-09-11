@@ -195,7 +195,11 @@ class TestPublicConceptDetail:
         assert body["hierarchy_path"][0] == "Cadence"
         assert body["parent"]["id"] == "AuthenticCadence"
         assert body["relationships"][0]["type"] == "CONTRASTS_WITH"
-        service.get_public_detail.assert_awaited_once_with("PerfectAuthenticCadence")
+        # Language is threaded from negotiation to the service (Step 19c);
+        # the public glossary was English-only regardless of it until then.
+        service.get_public_detail.assert_awaited_once_with(
+            "PerfectAuthenticCadence", "en"
+        )
 
     @pytest.mark.asyncio
     async def test_unreviewed_definition_flag_is_surfaced(
@@ -316,7 +320,7 @@ class TestPublicConceptIndex:
         pac = next(n for n in domain["nodes"] if n["id"] == "PerfectAuthenticCadence")
         assert pac["parent_id"] == "AuthenticCadenceRealised"
         assert pac["fragment_count"] == 12
-        service.get_public_index.assert_awaited_once_with()
+        service.get_public_index.assert_awaited_once_with("en")
 
     @pytest.mark.asyncio
     async def test_index_carries_wildcard_cors(
@@ -406,6 +410,7 @@ class TestPublicConceptExamples:
             include_subtypes=True,
             limit=3,
             seed=None,
+            language="en",
         )
 
     @pytest.mark.asyncio
@@ -428,6 +433,7 @@ class TestPublicConceptExamples:
             include_subtypes=False,
             limit=5,
             seed=42,
+            language="en",
         )
 
     @pytest.mark.asyncio

@@ -23,6 +23,7 @@ import { searchConcepts } from '../../services/conceptApi';
 import type { ConceptSearchHit } from '../../services/conceptApi';
 import Type from '../ui/Type';
 import styles from './ConceptPicker.module.css';
+import IconButton from '../ui/IconButton';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -217,14 +218,14 @@ export default function ConceptPicker({
           data-testid="concept-search-input"
         />
         {(hasQuery || selectedConceptId) && (
-          <button
-            type="button"
+          <IconButton
+            size="sm"
             className={styles.clearButton}
             onClick={handleClear}
-            aria-label={t('conceptPicker.clearSelection')}
+            ariaLabel={t('conceptPicker.clearSelection')}
           >
             ✕
-          </button>
+          </IconButton>
         )}
       </div>
 

@@ -1,0 +1,107 @@
+/* Account profile. Editorial pacing rather than a form grid: a single column
+   with generous vertical space, tonal layering for the panel, 0px radius and
+   no dividing lines (DESIGN.md sections 2-5). */
+
+.page {
+  padding: var(--spacing-10) var(--spacing-8);
+  max-width: var(--width-list);
+}
+
+.title {
+  color: var(--color-primary);
+  margin: 0 0 var(--spacing-8);
+}
+
+.panel {
+  padding: var(--spacing-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-8);
+}
+
+/* Read-only rows: email and granted roles. Stacked, not tabulated — a table
+   would need rules to be legible, and rules are forbidden. */
+.readonly {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-6);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+}
+
+.label {
+  color: var(--color-primary);
+}
+
+/* Underline, not a box (DESIGN.md section 5 "Input Fields"). The select gets
+   the same treatment so the two controls read as one family. */
+.input {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: 0 1px 0 0 var(--color-outline);
+  padding: var(--spacing-2) 0;
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  color: var(--color-on-background);
+  outline: none;
+  width: 100%;
+}
+
+.input:focus {
+  box-shadow: 0 1px 0 0 var(--color-primary);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The consent toggle: checkbox and label on one line, its explanation beneath. */
+.toggleField {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--spacing-2) var(--spacing-3);
+  align-items: center;
+}
+
+.hint {
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+/* The toggle's explanation sits under the label, not beside the checkbox. */
+.toggleField .hint {
+  grid-column: 2;
+}
+
+.error {
+  color: var(--color-error);
+  margin: 0;
+}
+
+.saved {
+  color: var(--color-primary);
+  margin: 0;
+}
+
+/* Layout-only. Shape, colour and state live in the shared Button (F12); the
+   panel's forms are a column, so both controls hug the leading edge. */
+.secondaryButton {
+  align-self: flex-start;
+}
+
+.submitButton {
+  align-self: flex-start;
+  margin-top: var(--spacing-2);
+}

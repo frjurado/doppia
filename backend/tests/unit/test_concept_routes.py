@@ -94,7 +94,7 @@ async def concept_client() -> AsyncGenerator[tuple[AsyncClient, Any], None]:
     mock_service.search.return_value = ConceptSearchResponse(items=[], next_cursor=None)
 
     dev_user_obj = __import__("api.dependencies", fromlist=["AppUser"]).AppUser(
-        id="test-user", role="editor", email="test@example.com"
+        id="test-user", roles=frozenset({"editor"}), email="test@example.com"
     )
 
     app.dependency_overrides[get_concept_service] = lambda: mock_service
@@ -928,3 +928,174 @@ class TestConceptServiceSchemaTree:
         }
         item = _build_schema_item(row, "en", {}, {}, {})
         assert item.values[0].referenced_concept is None
+
+    def test_build_schema_item_projects_short_name_and_description(self) -> None:
+        """A value row carries its short form and per-value gloss through."""
+        from services.concepts import _build_schema_item
+
+        row = {
+            "schema_id": "Stage2Components",
+            "schema_name": "Stage 2 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage2SD4",
+                    "name": "Pre-dominant on Scale Degree 4",
+                    "short_name": "On Scale Degree 4",
+                    "description": "IV, ii, ii6, …",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        item = _build_schema_item(row, "en", {}, {}, {})
+        value = item.values[0]
+        # The absolute name survives for context-free consumers; the short form
+        # is what a surface printing "Stage 2 Components" above it renders.
+        assert value.name == "Pre-dominant on Scale Degree 4"
+        assert value.short_name == "On Scale Degree 4"
+        assert value.description == "IV, ii, ii6, …"
+
+    def test_build_schema_item_short_name_absent_is_none(self) -> None:
+        """A value with no short form or gloss leaves both fields None."""
+        from services.concepts import _build_schema_item
+
+        row = {
+            "schema_id": "CadenceFunction",
+            "schema_name": "Cadence Function",
+            "schema_description": None,
+            "cardinality": "ONE_OF",
+            "required": True,
+            "values": [
+                {
+                    "id": "Independent",
+                    "name": "Independent",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        item = _build_schema_item(row, "en", {}, {}, {})
+        assert item.values[0].short_name is None
+        assert item.values[0].description is None
+
+    def test_build_schema_item_overlays_value_labels_per_field(self) -> None:
+        """A Spanish row localising only the name leaves the others English.
+
+        The fallback is per field, not per row (Component 12 Step 19b). Most
+        values have no short form at all, so a row-level fallback would blank a
+        short name the graph does have the moment any Spanish row existed.
+        """
+        from services.concepts import _build_schema_item
+        from services.translation import ValueTranslation
+
+        row = {
+            "schema_id": "Stage2Components",
+            "schema_name": "Stage 2 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage2SD4",
+                    "name": "Pre-dominant on Scale Degree 4",
+                    "short_name": "On Scale Degree 4",
+                    "description": "IV, ii, ii6, …",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        value_t = {
+            "Stage2SD4": ValueTranslation(
+                name="Predominante sobre el Grado 4",
+                short_name=None,
+                description=None,
+            )
+        }
+        item = _build_schema_item(row, "es", {}, value_t, {})
+        value = item.values[0]
+
+        assert value.name == "Predominante sobre el Grado 4"
+        assert value.short_name == "On Scale Degree 4"
+        assert value.description == "IV, ii, ii6, …"
+
+    def test_build_schema_item_uses_translated_value_labels(self) -> None:
+        """A fully translated row wins over the English graph values."""
+        from services.concepts import _build_schema_item
+        from services.translation import ValueTranslation
+
+        row = {
+            "schema_id": "Stage2Components",
+            "schema_name": "Stage 2 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage2SD4",
+                    "name": "Pre-dominant on Scale Degree 4",
+                    "short_name": "On Scale Degree 4",
+                    "description": "IV, ii, ii6, …",
+                    "referenced_concept_id": None,
+                    "referenced_concept_name": None,
+                    "referenced_concept_definition": None,
+                }
+            ],
+        }
+        value_t = {
+            "Stage2SD4": ValueTranslation(
+                name="Predominante sobre el Grado 4",
+                short_name="Sobre el Grado 4",
+                description="IV, ii, ii6, …",
+            )
+        }
+        item = _build_schema_item(row, "es", {}, value_t, {})
+        assert item.values[0].short_name == "Sobre el Grado 4"
+
+    def test_build_schema_item_marks_stub_reference(self) -> None:
+        """A referenced stub is flagged so clients can suppress its boilerplate.
+
+        Stub concepts carry a definition like "Stub: defined in the
+        harmonic-functions domain", which is not help text.
+        """
+        from services.concepts import _build_schema_item
+
+        row = {
+            "schema_id": "Stage1Components",
+            "schema_name": "Stage 1 Components",
+            "schema_description": None,
+            "cardinality": "MANY_OF",
+            "required": False,
+            "values": [
+                {
+                    "id": "Stage1AppliedDominant",
+                    "name": "Applied Dominant of Pre-dominant",
+                    "short_name": "Applied Dominant",
+                    "referenced_concept_id": "AppliedDominant",
+                    "referenced_concept_name": "Applied Dominant",
+                    "referenced_concept_definition": (
+                        "Stub: defined in the harmonic-functions domain."
+                    ),
+                    "referenced_concept_stub": True,
+                },
+                {
+                    "id": "ClosesSentence",
+                    "name": "Closes a Sentence",
+                    "referenced_concept_id": "Sentence",
+                    "referenced_concept_name": "Sentence",
+                    "referenced_concept_definition": "A phrase type.",
+                    "referenced_concept_stub": False,
+                },
+            ],
+        }
+        item = _build_schema_item(row, "en", {}, {}, {})
+        assert item.values[0].referenced_concept is not None
+        assert item.values[0].referenced_concept.stub is True
+        assert item.values[1].referenced_concept is not None
+        assert item.values[1].referenced_concept.stub is False

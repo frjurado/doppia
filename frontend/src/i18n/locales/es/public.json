@@ -1,6 +1,5 @@
 {
   "wordmark": "Doppia",
-  "tagline": "Análisis musical abierto",
   "browse": {
     "pageTitle": "Explorar fragmentos — Doppia",
     "heading": "Fragmentos etiquetados con {{concept}}",
@@ -56,7 +55,7 @@
       "prolongation": "Prolongación"
     },
     "complexities": {
-      "foundational": "Fundamental",
+      "foundational": "Básico",
       "intermediate": "Intermedio",
       "advanced": "Avanzado"
     },

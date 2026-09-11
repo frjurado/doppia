@@ -1,34 +1,20 @@
-import { Link, Outlet } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import LanguageSwitcher from './LanguageSwitcher';
+import { Outlet } from 'react-router-dom';
+import TopBar from './TopBar';
 import styles from './PublicLayout.module.css';
 
 /**
- * Minimal shell for the anonymous public read path (Component 10 Step 5).
+ * Shell for the public read path (glossary, public browse, fragment detail).
  *
- * Deliberately *not* the editor NavBar: the public surface has no Browse /
- * Fragments / Review links, no login gate, and no account badge. The full
- * audience-split public topbar (with a role-gated Editorial menu) is
- * Component 12 — this is the minimal shell the plan calls for, carrying only
- * the wordmark, a tagline, and the language switcher.
- *
- * Design system (DESIGN.md): container-low tonal header, 0px radius, Newsreader
- * wordmark, Public Sans labels, no 1px borders.
+ * Component 10 shipped this with a deliberately minimal header of its own,
+ * because the editorial NavBar was the only alternative and accounts did not
+ * exist yet. Component 12 Step 13 retires that split: the shared {@link TopBar}
+ * is the product frame on every surface, and it decides for itself which
+ * groups a given visitor sees. What remains here is the page scaffold.
  */
 export default function PublicLayout() {
-  const { t } = useTranslation('public');
-
   return (
     <div className={styles.layout}>
-      <header className={styles.bar}>
-        <Link to="/public/concepts" className={styles.wordmark}>
-          {t('wordmark')}
-        </Link>
-        <span className={styles.tagline}>{t('tagline')}</span>
-        <div className={styles.actions}>
-          <LanguageSwitcher />
-        </div>
-      </header>
+      <TopBar />
       <main className={styles.content}>
         <Outlet />
       </main>

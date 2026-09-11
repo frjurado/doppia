@@ -44,21 +44,6 @@
   display: none;
 }
 
-.clearButton {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  padding: var(--spacing-1) var(--spacing-2);
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.clearButton:hover {
-  color: var(--color-primary);
-}
-
 /* ── Domain facet pills ─────────────────────────────────────────────────── */
 
 .facets {
@@ -172,4 +157,11 @@
   color: var(--color-on-surface-variant);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Layout-only. Shape and state come from the shared IconButton (F12). It is a
+   flex sibling of the input inside `.searchRow`, not an overlay on it — it
+   must only refuse to shrink. */
+.clearButton {
+  flex-shrink: 0;
 }

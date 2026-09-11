@@ -1,0 +1,20 @@
+{
+  "pageTitle": "Doppia",
+  "title": "Doppia",
+  "tagline": "Análisis musical abierto",
+  "lede": "Un corpus de partituras anotado fragmento a fragmento y enlazado a un grafo de conocimiento con los conceptos que hay detrás.",
+  "doorsAria": "Por dónde empezar",
+  "glossary": {
+    "title": "El glosario",
+    "body": "Cada concepto tiene su página: qué es, dónde se sitúa entre sus vecinos y ejemplos anotados que puedes escuchar."
+  },
+  "fragments": {
+    "title": "Explorar fragmentos",
+    "body": "Elige un concepto y lee los pasajes etiquetados con él, en partitura y junto a su análisis."
+  },
+  "corpus": {
+    "title": "El corpus",
+    "body": "Partituras por compositor y obra, para leer movimientos completos y para etiquetar."
+  },
+  "note": "Doppia se construye en abierto y el corpus sigue creciendo."
+}

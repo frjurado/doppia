@@ -272,3 +272,63 @@ class TestPublicIndex:
         for d in index.domains:
             assert d.domain, "domain key must be present"
             assert d.nodes, f"domain {d.domain} has no nodes"
+
+
+def _property_schemas(concept_id: str) -> list[dict[str, Any]]:
+    """Run ``get_concept_property_schemas`` against a fresh async driver / loop."""
+    from graph.queries.concepts import get_concept_property_schemas
+
+    uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+    user = os.environ.get("NEO4J_USER", "neo4j")
+    password = os.environ.get("NEO4J_PASSWORD", "localpassword")
+
+    async def _run() -> list[dict[str, Any]]:
+        driver = AsyncGraphDatabase.driver(uri, auth=(user, password))
+        await driver.verify_connectivity()
+        try:
+            async with driver.session() as session:
+                return await get_concept_property_schemas(session, concept_id)
+        finally:
+            await driver.close()
+
+    return asyncio.run(_run())
+
+
+class TestPropertySchemaOrdering:
+    """Schema sort order — ADR-023 § 4 as amended (Component 12 Step 16)."""
+
+    def test_ungrouped_schema_sits_between_two_groups(self) -> None:
+        """`ECP` stays inline between "closure" and "other".
+
+        The original sort put every grouped schema ahead of every ungrouped
+        one, which made this arrangement unreachable: grouping the rare pair
+        promoted it above `ECP`. The amended sort is `order` then `name`, so a
+        schema's declared order alone fixes its position.
+        """
+        rows = _property_schemas("PerfectAuthenticCadence")
+        by_id = {r["schema_id"]: r for r in rows}
+        order = [r["schema_id"] for r in rows]
+
+        assert by_id["ECP"]["group"] is None
+        assert by_id["Covered"]["group"] == "other"
+        assert by_id["Unison"]["group"] == "other"
+
+        assert order.index("CadenceFunction") < order.index("ECP")
+        assert order.index("ECP") < order.index("Covered")
+        assert order.index("Covered") < order.index("Unison")
+
+    def test_other_group_is_last_and_contiguous(self) -> None:
+        """The "other" cluster ends the form, with nothing wedged inside it.
+
+        Contiguity is a seed contract under the amended sort: the renderer
+        clusters contiguous runs and never re-sorts, so a group whose `order`
+        values straddle another schema would draw two headings.
+        """
+        rows = _property_schemas("PerfectAuthenticCadence")
+        groups = [r["group"] for r in rows]
+
+        assert groups[-1] == "other"
+        assert groups[-2] == "other"
+        # Exactly one contiguous run of "other".
+        runs = [g for i, g in enumerate(groups) if i == 0 or g != groups[i - 1]]
+        assert runs.count("other") == 1

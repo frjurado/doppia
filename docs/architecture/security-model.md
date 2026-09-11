@@ -98,6 +98,14 @@ the browser never calls Supabase Auth directly. The cookie attributes:
 | `Path` | `/api/v1/auth` | Sent only to login/refresh/logout; no other endpoint sees it. |
 | `Max-Age` | 30 days | Session length; the refresh grant 401s earlier if Supabase invalidates it. |
 
+A second, short-lived cookie exists only during an OAuth round trip:
+
+| Attribute | Value | Reason |
+|---|---|---|
+| name | `doppia_pkce` | Holds the PKCE **verifier** while the user is away at the provider. |
+| `HttpOnly` / `Secure` / `SameSite` / `Path` | as above | Same treatment as the refresh cookie, for the same reason. |
+| `Max-Age` | 10 minutes | One consent screen, generously timed. Cleared on success *and* on every failure — the verifier is single-use. |
+
 **CSRF.** The `SameSite=Lax` + path-scoped cookie is never sent on a cross-site
 POST, and every non-auth endpoint authenticates with the bearer access token (a
 cross-origin page cannot read it), not the cookie — so there is no cookie-driven
@@ -105,6 +113,139 @@ state change to forge. No separate CSRF token is used; one must be added if a
 future endpoint ever authenticates a state change via the cookie. This relies on
 the same-origin deployment (the SPA and API are one Fly app — see
 `deployment.md`), which makes the cookie same-site on every API call.
+
+### Registration and OAuth (Component 12 Step 4)
+
+Registration flows are proxied like login: sign-up, resend-verification and
+password-reset all go through `/api/v1/auth`, never from the browser to
+Supabase.
+
+- **Self-service sign-up is gated** by `REGISTRATION_MODE` (`invite` | `open`).
+  Anything other than a literal `open` keeps it closed, so a typo cannot open
+  public registration; the refusal is a 403 `REGISTRATION_CLOSED` and Supabase
+  is never called.
+- **Resend-verification and password-reset always answer 202**, whether or not
+  the address is registered. Reporting the difference would make either endpoint
+  an oracle for which addresses hold accounts, and someone who owns the address
+  learns the answer from their inbox anyway. A 503 still surfaces — hiding the
+  address is not a reason to hide that Auth is down.
+- **OAuth uses PKCE with the verifier held server-side** (ADR-035's OAuth
+  amendment). The implicit flow is unusable here: it returns tokens in the URL
+  fragment, i.e. directly into JavaScript.
+- **The OAuth return address is server config, never a request parameter.**
+  Supabase does *not* validate `redirect_to` when handing off to the provider
+  (verified by probe, 2026-08-28 — it forwarded an unrelated domain without
+  complaint); its Redirect URLs allowlist is enforced later, at its own
+  callback. A caller-supplied return URL would therefore have made the start
+  endpoint an open redirect, so it comes from `PUBLIC_APP_URL` and the endpoint
+  accepts no redirect parameter.
+- **Email links are redeemed server-side.** Supabase's default
+  `{{ .ConfirmationURL }}` points at *its* `/auth/v1/verify` endpoint, which
+  redirects back with the session in the URL — a refresh token in the fragment
+  (i.e. in JavaScript) or a `?code=` our proxy cannot exchange, because an email
+  link never had a PKCE verifier. Neither is acceptable under ADR-035, so the
+  templates link to our own routes carrying `{{ .TokenHash }}`, and
+  `POST /api/v1/auth/verify-link` redeems it. The browser carries an opaque,
+  single-use hash and receives only the cookie. **This makes the email templates
+  part of the security posture, not cosmetic**: reverting one to
+  `{{ .ConfirmationURL }}` silently reintroduces the token-in-URL problem.
+- **The Supabase Redirect URLs allowlist is the enforcement point** for where a
+  link may return to. When a `redirect_to` is not on it, Supabase does not
+  error — it silently substitutes the project's Site URL, so a missing entry
+  presents as "the link went to the wrong page" rather than as a refusal. Every
+  route that terminates an email or OAuth flow needs an entry, per environment.
+- **Password changes carry no role check**: Supabase authorises the write with
+  the caller's own bearer token, so holding the token *is* the authorisation.
+  The same endpoint serves a recovery-link session and a deliberate change.
+
+**Not yet addressed:** these unauthenticated endpoints have no application-level
+rate limit — neither does login, which predates them. Supabase applies its own
+limits to auth endpoints (including a cap on outbound emails), which is the
+current control. Worth a decision when the rate-limiting section is next
+revisited.
+
+### Reading history on the public read path (Component 12 Step 7)
+
+`GET /api/v1/public/fragments/{id}` reads the caller for exactly one purpose:
+recording a `reading_history` row when a signed-in user has opted in. Three
+properties keep this from weakening the public path's guarantees:
+
+- **The response does not depend on the caller.** The fragment is still fetched
+  with `caller_id=None` and `caller_roles=frozenset()`, so a signed-in reader
+  and an anonymous one are served the same bytes, and the `approved`-only and
+  ADR-009 licence guarantees are untouched.
+- **The route takes `get_optional_user`, not `get_current_user`.** It loads no
+  role set, because it makes no authorisation decision. Nothing may branch on
+  the roles it carries (they are always empty).
+- **Recording happens after the 404 branch**, so probing for an unapproved
+  fragment records nothing.
+
+The consent check lives inside the SQL statement rather than in a preceding
+read, so there is no check-then-act window; see
+`tech-stack-and-database-reference.md` § User-state tables.
+
+**CORS note.** The public prefix's policy allows only `Accept-Language`, not
+`Authorization` — so a genuine cross-origin consumer of the public API cannot
+send a token, which is correct: that surface is anonymous by definition. Our
+own SPA is unaffected in every environment, because it is always same-origin
+with the API (the Vite dev server proxies `/api`; staging and production serve
+the SPA from the same app). Do not add `Authorization` to the public policy to
+"fix" a cross-origin case — there isn't one to fix.
+
+### Admin surfaces and the service-role key (Component 12 Steps 10–11)
+
+`/api/v1/admin/*` is uniformly `require_role(ADMIN)`. Three notes:
+
+- **The service-role key is now load-bearing.** `SUPABASE_SERVICE_ROLE_KEY`
+  bypasses Row Level Security and can act on any account. Only two functions
+  read it — `invite_user` and `delete_auth_user` — and it must never reach the
+  browser. A missing key is a visible 503 rather than a silent skip.
+- **The invite email template is part of the security posture**, exactly as the
+  recovery template is: it must use `{{ .TokenHash }}` pointing at our own
+  `/auth/reset-password` route. `{{ .ConfirmationURL }}` routes through
+  Supabase's `/verify` and hands the browser a refresh token in the URL, which
+  is what ADR-035 removed. No test can catch this — it lives in the Supabase
+  dashboard.
+- **`redirect_to` on an invite is a server-side constant**, derived from
+  `PUBLIC_APP_URL` and never caller-supplied — the same reasoning as the OAuth
+  authorize URL, and for the same reason: Supabase does not validate the target
+  at issue time. It must also be in the project's Redirect URLs allowlist, or
+  Supabase silently substitutes the Site URL.
+
+**The Site-URL fallback, and why the SPA now survives it** (staging,
+2026-08-30). `redirect_to=<PUBLIC_APP_URL>/auth/reset-password` was not on the
+staging project's Redirect URLs allowlist, so Supabase replaced the path with
+the Site URL and sent the invitation as `https://doppia-staging.fly.dev/?token_hash=…&type=invite`.
+The **query string survives; the path does not.**
+
+Nothing at `/` reads a token, so the invitee's browser ran the ordinary
+anonymous bootstrap (`POST /auth/refresh` → 401, correct), `RequireAuth` sent
+them to `/login`, and the token was discarded. The account could not be
+created, and there was nothing on screen to say why — the failure is entirely
+silent, and the only symptom is a support request.
+
+The allowlist entry is the fix and every environment needs its own. But because
+the failure mode is silent and repeats per environment,
+`components/auth/EmailLinkRedirect.tsx` sits above the route tree and forwards
+any request carrying `token_hash` plus a known `type` to that type's redemption
+route, query string intact:
+
+| `type` | redeemed at |
+|---|---|
+| `invite`, `recovery` | `/auth/reset-password` (both end in choosing a password) |
+| `signup`, `email_change` | `/auth/callback` (session only) |
+
+It changes nothing about redemption — still one server-side call, credential
+never in JavaScript (ADR-035). It only ensures the code that redeems is the
+code that runs. An unknown `type` is left alone rather than guessed at.
+
+**Checklist when adding an environment:** every route that ends an auth flow
+needs an allowlist entry — `/auth/callback` (OAuth, email confirmation) and
+`/auth/reset-password` (recovery, invitation) — plus the Site URL itself.
+
+The frontend's `RequireRole` route guard and the role-gated nav links are
+**presentation, not permission**. Removing them would leak nothing; they exist
+so nobody is shown a door that does not open.
 
 ### R2 and CORS
 
@@ -447,11 +588,13 @@ async def validate_auth(request: Request) -> AppUser:
                 "This configuration is invalid and the application will not start. "
                 f"ENVIRONMENT={environment!r}"
             )
-        # Extract the token and assign a synthetic dev user.
+        # Extract the token and assign a synthetic dev identity. Roles are not
+        # assigned here: since ADR-037 they are resolved from user_role in
+        # get_current_user, on the bypass path exactly as in staging.
         token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if token != _DEV_TOKEN:
             raise HTTPException(status_code=401, detail="Invalid dev token.")
-        return AppUser(id="dev-user", role="admin", email="dev@local")
+        return AppUser(id="dev-user", roles=frozenset(), email="dev@local")
 
     # Normal path: validate the JWT against Supabase.
     return await validate_supabase_jwt(request)
@@ -473,18 +616,20 @@ The `deployment.md` note that "`ENVIRONMENT=production` disables the local auth 
 
 The specific string `"dev-token"` has no special significance in production. Even if the bypass check were somehow defeated, a production user would need to know the exact value. It is not a secret — it is in the README — but it is also not meaningful without the environment preconditions. Changing it periodically provides no additional security; the environment checks are the actual controls.
 
-### Dev-user rows in `app_user`
+### Dev-user rows in `app_user` and their grants in `user_role`
 
-The bypass assigns synthetic UUIDs to each token:
+The bypass assigns synthetic UUIDs to each token, and the role each one is *expected* to hold:
 
-| Token | UUID | Role |
+| Token | UUID | Role granted in `user_role` |
 |---|---|---|
 | `dev-token` | `00000000-0000-0000-0000-000000000001` | `editor` |
 | `admin-token` | `00000000-0000-0000-0000-000000000002` | `admin` |
 
-These UUIDs are written into `fragment.created_by` and `fragment_review.reviewer_id`, both of which carry `ForeignKey("app_user.id")`. On a fresh local database the `app_user` table is empty, so any fragment write fails with `ForeignKeyViolationError` before the application can return a response.
+The right-hand column is not a property of the token. Since ADR-037 the bypass supplies an identity only; `get_current_user` resolves roles from `user_role` on the local path exactly as it does in staging, so **the dev tokens are useless without their grants** — the dev editor authenticates and is then refused by every `require_role` check. This is a deliberate consequence: there is one authorisation path, not a production one and a development one that could drift apart.
 
-**Fix:** `backend/scripts/seed_dev_users.py` inserts both rows idempotently (`ON CONFLICT (id) DO NOTHING`). Run it once after `alembic upgrade head` when setting up a local development database:
+The UUIDs are also written into `fragment.created_by` and `fragment_review.reviewer_id`, both of which carry `ForeignKey("app_user.id")`. On a fresh local database the `app_user` table is empty, so any fragment write fails with `ForeignKeyViolationError` before the application can return a response.
+
+**Fix:** `backend/scripts/seed_dev_users.py` inserts both the `app_user` rows and their `user_role` grants idempotently (`ON CONFLICT ... DO NOTHING`). Run it once after `alembic upgrade head` when setting up a local development database:
 
 ```bash
 cd backend
@@ -494,6 +639,24 @@ python scripts/seed_dev_users.py
 The script reads `DATABASE_URL` from `.env` and is safe to re-run. **Do not run it against staging or production.** Those environments use real Supabase Auth — `app_user` rows are created by the normal authentication flow when a user first signs in.
 
 Integration tests seed these rows automatically via the `_seed_dev_users` fixture in conftest; the script is only needed for manual local development.
+
+### Testing real Supabase tokens locally
+
+`AUTH_MODE=local` accepts the two dev tokens and **rejects everything else**,
+including a genuine Supabase access token. So any flow that issues a real token
+— password login against the live project, and the whole OAuth dance — cannot be
+exercised end to end while the bypass is on: the sign-in itself succeeds, and
+then the first API call with the resulting token 401s, `apiFetch` clears it, and
+the SPA lands back on `/login`. The symptom looks like a broken OAuth flow and
+is not one.
+
+To exercise those flows locally, run the backend with `AUTH_MODE=supabase` and
+`ENVIRONMENT=local`. That combination is permitted — the startup guard only
+refuses `AUTH_MODE=local` *outside* a local environment, never the reverse — and
+it leaves the refresh cookie unsecured for plain-HTTP localhost, which is what
+`_cookie_secure()` already handles. Clear `localStorage['doppia_access_token']`
+first, or the dev-build bypass in `AuthProvider` re-seeds the dev token on the
+next reload and masks the real session.
 
 ---
 
@@ -536,6 +699,14 @@ concept_translation
 property_schema_translation
 property_value_translation
 ```
+
+**Every table created since must do the same, in its own migration** — the
+list above is a snapshot, not a mechanism. Component 12 added `user_role`
+(migration 0010) and the four user-state tables `exercise_type`,
+`exercise_session`, `exercise_result`, `reading_history` (migration 0012). The
+user-state tables are the sharpest case yet: they hold per-user history, so a
+missing default-deny there would be a data leak rather than merely an
+inconsistency.
 
 No RLS policies need to be written. The default-deny is the correct policy: PostgREST should never serve these tables directly, and the absence of an explicit policy makes that intent clear.
 

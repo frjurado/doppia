@@ -43,6 +43,18 @@ vi.mock('../../services/fragmentApi');
 vi.mock('../../services/conceptApi');
 vi.mock('../../services/publicApi');
 
+// Since Step 14b one route serves everyone and the component picks its client
+// from the caller's roles, so these tests need a session. Editorial by default:
+// the existing assertions are about the editor's view of the page.
+const mockRoles: string[] = ['editor'];
+
+vi.mock('../../components/auth/AuthContext', () => ({
+  useAuth: () => ({
+    status: 'authenticated',
+    user: { id: 'u1', email: 'editor@doppia.test', roles: mockRoles, email_verified: true },
+  }),
+}));
+
 vi.mock('../../services/verovio', () => ({
   getVerovioToolkit: vi.fn(),
   renderFragment: vi.fn(),
@@ -62,9 +74,15 @@ const mockTransport = {
   state: 'stopped' as string,
   seconds: 0,
   position: '0:0:0',
-  start: vi.fn(function (this: typeof mockTransport) { this.state = 'started'; }),
-  stop: vi.fn(function (this: typeof mockTransport) { this.state = 'stopped'; }),
-  pause: vi.fn(function (this: typeof mockTransport) { this.state = 'paused'; }),
+  start: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'started';
+  }),
+  stop: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'stopped';
+  }),
+  pause: vi.fn(function (this: typeof mockTransport) {
+    this.state = 'paused';
+  }),
   cancel: vi.fn(),
   schedule: vi.fn(),
 };
@@ -92,9 +110,7 @@ vi.mock('@tonejs/midi', () => ({
     return {
       tracks: [
         {
-          notes: [
-            { name: 'C4', duration: 0.5, time: 0, velocity: 0.8 },
-          ],
+          notes: [{ name: 'C4', duration: 0.5, time: 0, velocity: 0.8 }],
         },
       ],
     };
@@ -110,7 +126,7 @@ const MOCK_SVG =
 const MOCK_MIDI_BASE64 = btoa('MIDI');
 
 function makeFragmentDetail(
-  overrides: Partial<FragmentDetailResponse> = {},
+  overrides: Partial<FragmentDetailResponse> = {}
 ): FragmentDetailResponse {
   return {
     id: 'frag-001',
@@ -170,7 +186,7 @@ function renderDetail(fragmentId = 'frag-001') {
       <Routes>
         <Route path="/fragments/:fragmentId" element={<FragmentDetail />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -184,12 +200,10 @@ function renderPublicDetail(fragmentId = 'frag-001') {
       <Routes>
         <Route
           path="/public/fragments/:fragmentId"
-          element={
-            <FragmentDetail loadFragment={publicApi.getPublicFragment} publicMode />
-          }
+          element={<FragmentDetail loadFragment={publicApi.getPublicFragment} publicMode />}
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -204,7 +218,7 @@ function setupFullLoad(fragment = makeFragmentDetail()) {
     text: () => Promise.resolve('<mei>test</mei>'),
   } as Response);
   vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
-    {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+    {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>
   );
   vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
   vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
@@ -255,7 +269,7 @@ describe('FragmentDetail — loading and error states', () => {
 
   it('shows an error message when the fragment fetch fails', async () => {
     vi.mocked(fragmentApi.getFragment).mockRejectedValue(
-      new ApiError('NOT_FOUND', 'Fragment not found', 404),
+      new ApiError('NOT_FOUND', 'Fragment not found', 404)
     );
     renderDetail();
     await screen.findByText(/fragment not found/i);
@@ -285,7 +299,7 @@ describe('FragmentDetail — concept identity section', () => {
             hierarchy_path: ['Cadence'],
           },
         ],
-      }),
+      })
     );
     renderDetail();
     await screen.findByText('Half Cadence');
@@ -309,7 +323,7 @@ describe('FragmentDetail — concept identity section', () => {
       makeFragmentDetail({
         data_licence: 'CC BY-SA 4.0',
         data_licence_url: 'https://creativecommons.org/licenses/by-sa/4.0/',
-      }),
+      })
     );
     renderDetail();
 
@@ -349,7 +363,7 @@ describe('FragmentDetail — concept identity section', () => {
             hierarchy_path: ['Chord'],
           },
         ],
-      }),
+      })
     );
     renderDetail();
     await screen.findByText(/also tagged/i);
@@ -385,7 +399,14 @@ describe('FragmentDetail — measure/beat display rule', () => {
 
   it('attaches each beat to its own measure for beat-precise fragments', async () => {
     setupFullLoad(
-      makeFragmentDetail({ bar_start: 3, bar_end: 4, mc_start: 3, mc_end: 4, beat_start: 2, beat_end: 2 }),
+      makeFragmentDetail({
+        bar_start: 3,
+        bar_end: 4,
+        mc_start: 3,
+        mc_end: 4,
+        beat_start: 2,
+        beat_end: 2,
+      })
     );
     renderDetail();
     // beat_end is an exclusive bound; displayed as the last covered beat
@@ -399,7 +420,7 @@ describe('FragmentDetail — measure/beat display rule', () => {
         data_licence: 'CC BY-SA 4.0',
         data_licence_url: 'https://creativecommons.org/licenses/by-sa/4.0/',
         harmony_sources: ['dcml'],
-      }),
+      })
     );
     renderDetail();
     await screen.findByText('PAC');
@@ -449,12 +470,12 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
 
     await waitFor(() => {
       expect(vi.mocked(verovioService.renderFragment)).toHaveBeenCalledWith(
-        expect.anything(),  // toolkit instance
+        expect.anything(), // toolkit instance
         expect.any(String), // MEI text
-        3,                  // mc_start — position index
-        5,                  // mc_end
+        3, // mc_start — position index
+        5, // mc_end
         // Default scale Medium (45); system breaks allowed (Component 9 Step 15).
-        expect.objectContaining({ scale: 45, breaks: 'smart' }),
+        expect.objectContaining({ scale: 45, breaks: 'smart' })
       );
     });
   });
@@ -471,7 +492,7 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String),
         1,
         2,
-        expect.objectContaining({ scale: 45 }),
+        expect.objectContaining({ scale: 45 })
       );
     });
   });
@@ -493,7 +514,7 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String),
         2,
         2,
-        expect.objectContaining({ scale: 45 }),
+        expect.objectContaining({ scale: 45 })
       );
     });
   });
@@ -515,7 +536,7 @@ describe('FragmentDetail — Verovio select spike fixtures', () => {
         expect.any(String),
         3,
         3,
-        expect.objectContaining({ scale: 45 }),
+        expect.objectContaining({ scale: 45 })
       );
     });
   });
@@ -558,7 +579,7 @@ describe('FragmentDetail — scale controls', () => {
         expect.any(String),
         1,
         4,
-        expect.objectContaining({ scale: 35 }),
+        expect.objectContaining({ scale: 35 })
       );
     });
   });
@@ -569,13 +590,19 @@ describe('FragmentDetail — scale controls', () => {
 // ---------------------------------------------------------------------------
 
 /** One movement_analysis event in the loose detail-response shape. */
-function makeHarmonyEvent(
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function makeHarmonyEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    mc: 1, mn: 1, volta: null, beat: 1,
-    local_key: 'C', numeral: 'I', applied_to: null,
-    extensions: [], source: 'dcml', auto: true, reviewed: false,
+    mc: 1,
+    mn: 1,
+    volta: null,
+    beat: 1,
+    local_key: 'C',
+    numeral: 'I',
+    applied_to: null,
+    extensions: [],
+    source: 'dcml',
+    auto: true,
+    reviewed: false,
     ...overrides,
   };
 }
@@ -629,10 +656,13 @@ describe('FragmentDetail — playback controls', () => {
     renderDetail();
 
     // Wait for the play button to become enabled (MIDI ready → useMidiPlayback → 'ready').
-    await waitFor(() => {
-      const btn = screen.getByRole('button', { name: /play/i });
-      expect(btn).not.toBeDisabled();
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        const btn = screen.getByRole('button', { name: /play/i });
+        expect(btn).not.toBeDisabled();
+      },
+      { timeout: 3000 }
+    );
   });
 
   it('stop button is disabled before playback starts', async () => {
@@ -697,7 +727,7 @@ describe('FragmentDetail — sub-part bracket overlay', () => {
     // Since jsdom returns zero rects, the overlay is not present. (Exclude the
     // always-present playback caret, which is also aria-hidden — Step 19.)
     expect(
-      document.querySelector('[aria-hidden="true"]:not([data-testid="playback-caret"])'),
+      document.querySelector('[aria-hidden="true"]:not([data-testid="playback-caret"])')
     ).not.toBeInTheDocument();
   });
 });
@@ -715,7 +745,7 @@ describe('FragmentDetail — public mode', () => {
       text: () => Promise.resolve('<mei>test</mei>'),
     } as Response);
     vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
-      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>
     );
     vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
     vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
@@ -736,7 +766,7 @@ describe('FragmentDetail — public mode', () => {
       text: () => Promise.resolve('<mei>test</mei>'),
     } as Response);
     vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
-      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>
     );
     vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
     vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);
@@ -746,9 +776,7 @@ describe('FragmentDetail — public mode', () => {
     // Concept identity still renders…
     await screen.findByText('PAC');
     // …but the (always-approved) status badge is not shown on the public path.
-    expect(
-      document.querySelector('[data-status="approved"]'),
-    ).not.toBeInTheDocument();
+    expect(document.querySelector('[data-status="approved"]')).not.toBeInTheDocument();
   });
 
   it('does not fetch concept schemas on the public path (editor-only endpoint)', async () => {
@@ -759,7 +787,7 @@ describe('FragmentDetail — public mode', () => {
       text: () => Promise.resolve('<mei>test</mei>'),
     } as Response);
     vi.mocked(verovioService.getVerovioToolkit).mockResolvedValue(
-      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>,
+      {} as Awaited<ReturnType<typeof verovioService.getVerovioToolkit>>
     );
     vi.mocked(verovioService.renderFragment).mockResolvedValue(MOCK_SVG);
     vi.mocked(verovioService.renderMidi).mockResolvedValue(MOCK_MIDI_BASE64);

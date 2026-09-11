@@ -200,6 +200,20 @@ is built.
 supporting product chrome (topbar, moderation, data rights). All decisions
 recorded in `../architecture/roles-and-permissions.md`; summary here.
 
+**Status: ✅ complete 2026-09-11** — 21 steps, plan and record in
+[`component-12-user-infrastructure.md`](component-12-user-infrastructure.md).
+The four scoping calls left open below (item 13's home, M17's slot, the M10
+split, the collection DDL) were decided in the 2026-08-26 planning session and
+are annotated in place.
+
+Five Track M items closed with it (M4, M9, M13, M17, and M10's G1 half), and
+the component grew two pieces its plan did not contain: **Spanish content**,
+not just a Spanish interface (Steps 19b/19c — the inventory's claim that the
+gap was data rather than code turned out to be wrong, and four of 55 endpoints
+were accepting a language), and **cross-language concept search** (Step 21,
+ADR-040), without which a Spanish tagger could read the tool but not search
+it.
+
 ### Scope
 
 - **Role model migration:** single `role` column → role *set* (join table
@@ -214,7 +228,10 @@ recorded in `../architecture/roles-and-permissions.md`; summary here.
   `collection`, `collection_fragment`, `exercise_result`, `reading_history`,
   profile fields. `exercise_result` and `reading_history` are created **now**,
   before their features exist — the "record from day one" principle.
-  Reading history is opt-in, default off.
+  Reading history is opt-in, default off. *(Decided 2026-08-26: the
+  `collection` / `collection_fragment` DDL itself waits for Component 13,
+  designed against the real feature; Component 12's data-rights ADR records
+  the FK-shaping deletion/tombstone rules now.)*
 - **Data rights, designed in from the start:** JSON export of profile,
   collections, exercise history, reading history; account deletion deletes
   user-owned content but **reassigns editorial content (fragments, reviews)
@@ -231,6 +248,25 @@ recorded in `../architecture/roles-and-permissions.md`; summary here.
   design-system work below, not a standalone tweak. Fold in the design-debt
   register F8–F13 (shared button library, layout width tokens, etc. —
   `step-17-design-coherence-review.md`) where it overlaps.
+  **Landed 2026-08-31 (Component 12 Step 13):** one shared `TopBar` replaces
+  both the editorial `NavBar` and the minimal public header, so every surface
+  carries the same frame. Public nav is Fragments + Glossary (the rest join as
+  they ship); the Editorial menu holds Corpus, Concept tree, Review, and for
+  admins Moderation and People; the account menu holds Profile, Progress and
+  sign out. Below `sm` the three groups collapse into one disclosure panel per
+  `DESIGN.md` § 7.4. The F8–F13 fold-in remains Step 14's.
+  **F10 and F12 landed 2026-09-01 (Step 14a).** Six layout-width tokens replace
+  eighteen scattered magic numbers, and one `Button` component replaces the
+  primary/secondary/destructive/quiet shapes that had been re-declared across
+  eighteen module stylesheets. The score viewer's 1200px unified up to 1280
+  after an A/B on a 48-bar render (see the component plan). Score-surface
+  chrome was deferred and then **completed 2026-09-03**, adding the two shapes
+  the library still lacked: `SegmentedControl` (with its single-option
+  `ToggleButton`) and `IconButton`. That closes **F12** — the three segmented
+  controls that disagreed about what "selected" looks like are one component,
+  both transport rows are one, and `HarmonyPanel`'s buttons, in F12's original
+  scope but missed by the first pass, use the shared `Button`.
+  **F8, F9, F11 and F13 stay in the backlog**, untouched.
 
 ### Mobile — supported-surface matrix
 
@@ -245,9 +281,19 @@ the topbar work.
 | Collection editing | Degrade gracefully |
 | Tagging tool, blog authoring, admin, presentation mode | Desktop-only |
 
-Open technical check: Verovio at narrow widths (vertical scroll + small scale
-— expected fine, needs an afternoon of testing) and the scrollytelling
-fallback layout on phones (a Component 16 design decision).
+**Landed 2026-08-31 (Component 12 Step 12):** the addendum is in `DESIGN.md`
+§ 7 — breakpoints, the mobile nav pattern, layout-width set, touch-target
+minimum, and this matrix, which § 7.2 now carries authoritatively. The Verovio
+narrow-width check is done: below a ~552px viewport notation is *optically
+scaled* (Verovio's pageWidth is clamped at 480px and the SVG is CSS-scaled to
+fit) rather than reflowed, which is accepted and recorded as intended; bracket
+overlays stay aligned through the downscale and no public surface scrolls
+horizontally at any width. Guarded by `frontend/e2e/narrow-width.spec.ts`. Two
+scoped follow-ups (glossary example-card layout below `sm`; sub-part label
+scaling, folded into M5) went to Component 12 Step 14.
+
+Still open: the scrollytelling fallback layout on phones (a Component 16
+design decision).
 
 ### Carried in from the Component 11 triage (2026-08-25)
 
@@ -262,10 +308,10 @@ component's close. Each is triaged, grounded in code, and costed in
 |---|---|---|---|
 | 8 | **Stage component value names are far too long** — "Pre-dominant on Scale Degree 4 (IV, ii, ii6, …)" is what an editor reads on every cadence they tag. Wants a short/long pair. | Editorial copy plus a small schema change | Recommended shape is a `short_name` on `PropertyValueYAML`, with forms using `short_name ?? name` and the glossary keeping `name`. Note `PropertyValueYAML.aliases` is **already seeded to Neo4j and read by nothing** — a cheaper but semantically muddier route |
 | 9 | **Rare properties (`Covered`, `Unison`) shown inline** — should sit under an "Other" grouping | Design pass | **The mechanism already exists**: ADR-023 `group` on the `HAS_PROPERTY_SCHEMA` edge, already rendered as a labelled cluster, already used by `Cadence`'s `closure` group. Clustering is three YAML lines and no code. Only *collapsing* them needs UI work |
-| 10 | **Cancel/Delete at the panel top, Save/Submit at its foot** — unify | Design-system work; folds into the topbar/`DESIGN.md` pass alongside F8–F13 and M5 | Pure layout, no state coupling. Wrinkle: the row must read well with two buttons (create) and four (edit), and `DESIGN.md` has no precedent for a destructive action in this panel |
-| 11 | **Radio and checkbox pairs look alike** — an exclusive choice and a multi-select are visually indistinguishable, so the control does not say whether a second click replaces or adds | Same design pass | Presentation switches on **value count, not cardinality** (≤2 inline, >2 popover), which is by design. With 0px radii and tonal-only depth the usual circle-vs-square cue is weak. A design check, not a code fix |
+| 10 | **Cancel/Delete at the panel top, Save/Submit at its foot** — unify | Design-system work; folds into the topbar/`DESIGN.md` pass alongside F8–F13 and M5 | Pure layout, no state coupling. Wrinkle: the row must read well with two buttons (create) and four (edit), and `DESIGN.md` has no precedent for a destructive action in this panel. **Done 2026-09-01 (Step 14a):** the header was removed rather than emptied. A read-through then found the tool had three action grammars and the fix had added a fourth, so the second pass replaced all of them with one — `DESIGN.md` § 5 "Action blocks" |
+| 11 | **Radio and checkbox pairs look alike** — an exclusive choice and a multi-select are visually indistinguishable, so the control does not say whether a second click replaces or adds | Same design pass | Presentation switches on **value count, not cardinality** (≤2 inline, >2 popover), which is by design. With 0px radii and tonal-only depth the usual circle-vs-square cue is weak. A design check, not a code fix. **Done 2026-09-01 (Step 14a):** the check found them not weak but *identical*. Fixed by taking the BOOL toggle as the model — only the indicator well changes colour, a MANY_OF option is a BOOL, a ONE_OF option gets a centred mark. No explanatory text; the dropdown presentation got the same mark. A further pass unified the whole sidebar control set on the same model: one 16px mark (property / BOOL / stage swatch, previously 16 / 24 / 14), flat rows, whole row clickable, and one ⓘ implementation replacing three |
 | 12 | **A fragment too short for its stages shows no stages at all**, silently | The one bug-like item; small, but wants the design pass's copy | **The detection is already written and correct**: `computeAutoPrePopulate` sets `blocked`, empties the assignments, and its own docstring says the caller "should surface a UI note" — the caller stores it, uses it to block submission, and never renders it. Only the notice is missing |
-| 13 | **Capture extensions are declared, seeded, and never captured** | Genuinely unowned; scheduled here rather than thematically at home | Four are declared (`post_evasion_harmony`, `prior_ac_pointer`, `prior_cadence_pointer` ×2) and persisted on the concept node; `summary.concept_extensions` is an always-empty slot. `harmony_gate` is the only implemented type — and the only one needing no capture UI. For `ReopeningHalfCadence` the pointer is not optional detail: per `cadences-design.md` the concept exists *because* the relationship is captured that way, so tagging one today records the concept but not what makes it that concept |
+| 13 | **Capture extensions are declared, seeded, and never captured** | ~~Genuinely unowned; scheduled here rather than thematically at home~~ **Re-homed to Component 15 (2026-08-26)** — capture work with no relationship to user infrastructure; 15 is where its absence bites (exercisability) | Four are declared (`post_evasion_harmony`, `prior_ac_pointer`, `prior_cadence_pointer` ×2) and persisted on the concept node; `summary.concept_extensions` is an always-empty slot. `harmony_gate` is the only implemented type — and the only one needing no capture UI. For `ReopeningHalfCadence` the pointer is not optional detail: per `cadences-design.md` the concept exists *because* the relationship is captured that way, so tagging one today records the concept but not what makes it that concept |
 | 14 | **Six of the ten taggable cadence concepts render an unlabelled bracket** — `EvadedCadence`, `AbandonedCadence`, `ReopeningHalfCadence`, `DominantArrival`, `ClosingSection`, `StandingOnTheDominant` | Small correctness fix plus an editorial call; pairs with item 8 | The parent bracket labels from the concept *alias* with **no fallback**, and those six declare none. The sub-part path in the same file already falls back `alias ?? name ?? "Part N"` on purpose — the parent path never got it. Same underlying gap as item 8: the display needs a short label and the model only reliably carries a long one; worth solving once, together |
 
 Two of these are a natural fit for this component and two are a scheduling
@@ -274,10 +320,13 @@ planned: **10 and 11 belong to the design pass this component already owns**
 (the topbar redesign folds in F8–F13 and M5, § Scope above). **8, 9, 12 and 14** are
 small and independent — they could ride any component, and 14 is a one-line
 correctness fix that pairs naturally with 8. **13 is a tagging-tool
-capture feature** with no relationship to user infrastructure; it sits here
-because nothing else owns it, and it may be worth re-homing when the Phase-2
-sequence is firmed up. `component-15-exercises.md` already flags it as a
-constraint on which concepts are cleanly exercisable.
+capture feature** with no relationship to user infrastructure; it sat here
+because nothing else owned it. **Decided 2026-08-26: re-homed to Component
+15**, where its absence actually bites — `component-15-exercises.md` already
+flags it as a constraint on which concepts are cleanly exercisable, and that
+component now owns *building* it, not just triaging it. Accepted cost:
+`ReopeningHalfCadence` fragments tagged before 15 keep missing their
+constitutive pointer.
 
 One further item from the same triage is **not** listed above because it is
 glossary work rather than tagging or chrome: the concept page's "more specific
@@ -373,8 +422,11 @@ exercises with item-level progress tracking. Agreed to precede the blog.
 - **v1 scope:** one answer family (`identify_concept`), two presentations
   (notation, listening). Localization tasks ("click the cadence arrival"),
   error detection, and the other `extended-features.md` families are
-  recorded as future work. Capture-extensions triage happens during this
-  component.
+  recorded as future work. **Capture extensions land here** (re-homed from
+  Component 12's carried list, 2026-08-26): the two capturing types
+  (`harmony_object`, `fragment_pointer`) get declarations on the concept
+  payload, capture UI, write validation, and read-model surfacing — not just
+  the triage the earlier wording promised.
 
 The `exercise_session` / `exercise_result` tables ship in Component 12
 regardless, so history is recorded from the first exercise ever answered.
@@ -428,21 +480,21 @@ everything else rides alongside the component it pairs with naturally.
 | ~~M1~~ | ~~Editorial data fixes (harmony confirmations sweep, the per-fragment errata list)~~ | ✅ Done — Component 11 Step 13C/13D (2026-07-30). The per-fragment errata were corrected through the repaired editor and verified on real renders; the confirmation sweep closed at **465/465 in-fragment harmony events** across all six K279 and K280 movements. Two bugs surfaced and were fixed mid-sweep (288edd7): "Confirm all" fired N parallel read-modify-writes of one `events` array and lost all but the last, and manually inserted harmonies recorded no `mc`, so they vanished from the editor after Step 10's mc-scoped query. | issues doc § Editorial work; `component-11-concept-glossary.md` § 13C/13D |
 | ~~M2~~ | ~~`harmony_gate` seeding + one-time confirmation sweep~~ | ✅ Done — Component 11 Step 13F (e1221aa, 2026-07-30). One `capture_extensions` entry on `Cadence`; every subtype inherits it through `IS_SUBTYPE_OF`, verified against the live graph. Seeded *after* the sweep, since the gate fires at approval time and would otherwise have made each M1 erratum un-re-approvable mid-flight. Pre-seed exposure measured at 14 of 383 fragments, **none approved**, so nothing already public was invalidated. | backlog §3; `component-11-concept-glossary.md` § 13F |
 | M3 | Fragment edit/lifecycle UI (post-approval flow) | During 13 | backlog §3 |
-| M4 | Review-queue UX: scroll-to-fragment on select; back button returns to queue; evaded/abandoned cadence naming | During 12–13 (the naming bug earlier if it also affects public labels) | issues doc § Revision workflow |
-| M5 | Bracket redesign (square handles, edited-vs-rest differentiation, collision/label overlap) — needs design thinking first | With Component 12's design-system work (topbar / DESIGN.md addendum) — one design pass | issues doc § Score |
+| ~~M4~~ | ~~Review-queue UX: scroll-to-fragment on select; back button returns to queue; evaded/abandoned cadence naming~~ | ✅ **Landed — Component 12 Steps 15 + 18 (2026-09-05/06), `173ffd2`, `5b310e1`.** The naming half was not a naming bug: six concepts carried no alias and every label site read `aliases[0]`, so the fix was coined aliases plus a fallback to the concept name | issues doc § Revision workflow |
+| M5 | Bracket redesign (square handles, edited-vs-rest differentiation, collision/label overlap) — needs design thinking first | With Component 12's design-system work (topbar / DESIGN.md addendum) — one design pass | issues doc § Score. **Done 2026-09-01 (Step 14).** All four asks traced to one cause — four surfaces each carrying a private copy of the vertical geometry — so the **vertical half of the bracket-geometry unification was pulled forward** from the backlog; the horizontal half stays there. End treatment now encodes editability (serif = committed, gradient = editable); labels always sit on the far side of their bracket from the staff and stagger only where they collide. Exploration: [`../reports/component-12-reports/m5-bracket-redesign-exploration.md`](../reports/component-12-reports/m5-bracket-redesign-exploration.md) |
 | ~~M6~~ | ~~Info sidebar fixes: property order, harmony sliced to fragment range, local-key convention, stage properties missing, wrong key/meter in summary~~ | ✅ Fixed — Component 11 Step 10. The "possibly a real bug" was real: `summary.key`/`summary.meter` were parsed from the MEI, which encodes `<keySig sig="4f"/>` with no mode, so every fragment in the corpus was stamped "C major". Both now derive from the movement record, and `summary.meter` resolves at the fragment's own mc — which in turn exposed M18. | issues doc § Info sidebar |
 | ~~M7~~ | ~~Stage-bracket overflow bug at sub-beat fragment bounds (279/ii m. 8–10)~~ | ✅ Fixed — Component 11 Step 11 (2026-07-27): the stage layout frame applied the selection's beat-precision endpoint filters at beat/sub-beat resolution only, so a beat-precise fragment whose stages fit *measure*-granularly — the normal case, since the grid follows the stage count — got whole-measure outer stages that overflowed their parent. Invariant I7 was quietly false exactly there. `buildStageSlots` now clips both endpoint slots (geometry and beat coordinates) and `prePopulateStages` pins its outer edges; stored rows repaired by `clamp_subpart_bounds.py` | issues doc § Real bugs |
 | M8 | Harmony panel refinements (Grado vs Fundamental semantics, local-key prepopulation/display; "edit events outside a fragment?" question) | During 13–14 — harmony data quality feeds exercises | issues doc § Harmony panel |
-| M9 | Tagging sidebar cleanup (drop "stage properties" label; fix stage ordering) | During 12 (small; batch with any tagging-tool touch) | issues doc § Tagging sidebar |
-| M10 | G1 beat-range display convention; pickup/partial-bar beat numbering; caret at repeat barlines | During 12–13 — display conventions worth settling before wide public exposure | backlog §3 |
+| ~~M9~~ | ~~Tagging sidebar cleanup (drop "stage properties" label; fix stage ordering)~~ | ✅ **Landed — Component 12 Step 18 (2026-09-06), `5b310e1`.** Larger than "small": the ordering defect was not absent stages sorting last but cards keeping whatever order the clicks produced. `orderStageCards` imposes score position, absent stages held in place | issues doc § Tagging sidebar |
+| M10 | ~~G1 beat-range display convention~~; pickup/partial-bar beat numbering; caret at repeat barlines | **Split (2026-08-26):** G1 in Component 12 (plan Step 20); pickup numbering (ADR-005-adjacent design work) and the caret in Component 13. ✅ **G1 landed 2026-09-11, `754c34b`** — ADR-005 § "range-label convention": the label names the first and last *included onset*, unit inferred from the endpoints' precision, so end ≥ start holds by construction. The other two remain Component 13's | backlog §3; ADR-005 |
 | ~~M11~~ | ~~Concept-tree count cache staleness~~ | ✅ Fixed — Component 11 Step 8 (2026-07-25): the Redis `tree:*` cache held the whole tree response *including* `fragment_count`, invalidated only on re-seed, so counts sat up to an hour stale. The cache now holds the count-free structure (key bumped to `tree:v2:…`); approved counts are read live from PostgreSQL on every request, by the editor tree and the public glossary index alike. | issues doc § Fragment browser |
 | ~~M12~~ | ~~Duplicate-`@n` display disambiguation (K331/ii "Menuetto da capo")~~ | ✅ Fixed — Component 11 Step 9 (ADR-036, 2026-07-25). The survey found Family A is **K331/ii alone** and that the volta family *does not exist* — second endings carry X-prefixed `@n`, so ADR-015 and the normalization doc both documented a convention the corpus never followed. Solved with an mc-keyed `movement_section` table naming sections from the MEI's own `<dir>`, plus `qualifyRange` as the single display convention. | backlog §3; ADR-015 amendment; ADR-036 |
-| M13 | i18n surface inventory (list per type/complexity/urgency, then decide) | During 12 — UI text grows fastest with registration and the new topbar | issues doc § I18N; full second-language machinery stays deferred per ADR-006 |
+| ~~M13~~ | ~~i18n surface inventory (list per type/complexity/urgency, then decide)~~ | ✅ **Landed — Component 12 Steps 19 / 19b / 19c (2026-09-06/07), `71ff536`, `f906cdb`, `54cca03`.** Went past the inventory the item asked for: Spanish content seeded and the overlay wired to the surfaces that never had it. The deferral of "full second-language machinery" is therefore itself superseded — `fragment_annotation_translation` (user prose) is the only piece still deferred | `component-12-reports/i18n-surface-inventory.md`, `…/i18n-untranslated-surfaces.md` |
 | M14 | Verovio 6.2.0 upgrade — deliberate event per ADR-013, only after snapshot tests (Component 10) exist | During 14 — after snapshot tests, settled before 15/16 build on rendering | backlog §3 |
 | M15 | **Normalizer advisories are not persisted** — `movement.normalization_warnings` is `null` for 52 of 54 movements after the 2026-07-05 re-ingest, so the normalizer computes advisories (51 of them for K331/ii alone) and stores none. Nothing downstream can ask "what did ingest find about this movement?" | Documented and deferred 2026-07-25 (Component 11 § 9A); slot with the next ingest/corpus work | Component 11 § Step 9A survey report |
 | M16 | **`bar_start`/`bar_end` cannot represent an X-prefixed `@n`** — they are `INTEGER`, but split-measure complements (`X1`, `X2`, …) appear in 16 movements and are what *every* second volta ending in the corpus carries. A selection beginning on one has no faithful human coordinate to store. No such fragment exists today, so nothing is wrong yet | Documented and deferred 2026-07-25 (Component 11 § 9A); slot with the next selection-bounds work | Component 11 § Step 9A survey report; ADR-015 |
 | ~~M18~~ | **21 of 54 movements carry a curated `meter` that contradicts their own notation.** `meter` is hand-entered per movement in `scripts/dcml_corpora/*.toml`; the MEI is the actual score. Spot-checked against the repertoire, the **MEI is right every time** and the TOML is wrong — K279/iii is 2/4 not 3/8, K281/i 2/4 not 4/4, K281/ii 3/8 not 6/8, K281/iii 2/2 not 2/4, K330/i 2/4 not 4/4, K576/i 6/8 not 4/4, and so on. Two movements with fragments are affected, so **76 fragments show a wrong meter in the sidebar and the glossary today** (69 on K279/iii, 7 on K281/i) — `fix_summary_key_meter.py` faithfully copied the wrong value in. Beat coordinates are *not* affected: the ghost layer parses the MEI, so tagging always used the true meter. Unlike `key_signature`, which the MEI genuinely cannot supply (no mode — see Component 11 Step 10), meter is fully derivable from the notation | ✅ Fixed 2026-07-27, before Component 11 Step 13. Prep now derives it (`services.mei_meter.starting_meter`) and the manifests no longer carry the field at all — a cross-check would only have converted 21 silent errors into 21 loud ones for someone to retype. `fix_movement_meter.py` repairs the movement records, `fix_summary_key_meter.py` the fragment summaries. Two further things came out of it: `summary.meter` is now resolved at the **fragment's own measure** rather than the movement's first (Francisco's point — a fragment sits in one place, and two movements change meter mid-piece), and `getMeterForMeasure` was falling back to the *global* meter rather than the running one, so every bar after a change read the opening signature. No fragment sat after a change, so that one was latent | `scripts/prepare_dcml_corpus.py`, `backend/services/mei_meter.py` |
-| M17 | **3/8 is read as compound by the ghost layer and as simple by DCML — harmony labels land on the wrong beat.** Confirmed visible on **280/iii m. 15**: the harmony record is right (events on beats 1 and 3) but both labels draw on beat 1, and there are **dozens of such bars in that movement**. The ghost layer's `isCompoundMeter` is `unit == 8 && count % 3 == 0`, so 3/8 becomes one dotted-quarter beat — beat 3 does not exist for it to place a label on, and the resolution controls show the same single beat. DCML (and `ingest_analysis`, which requires `count >= 6`) reads 3/8 as three eighth-note beats. Francisco's reading: **3/8 should behave like 3/4, not like 6/8**; the deeper question is what the rule for "compound" should be, and whether one-beat time signatures should be allowed at all. Note the blast radius is wider than display: a beat coordinate written by the tagging tool in a 3/8 movement means something different from the same number in a harmony record, so any fix needs a data pass over 3/8 fragments as well as the rule change. **Scale, measured on staging 2026-07-27: one movement, K280/iii, 53 of 376 fragments.** (A first count said 122 across two movements; K279/iii only *looked* 3/8 because its curated meter is wrong — see M18. Its MEI, and so its ghost layer and its tagging, are 2/4 throughout, and its 69 fragments are unaffected.) | Francisco noted it on 280/iii; independently hit 2026-07-27 (Component 11 Step 11, writing `measure_end_beat`), which now refuses to repair sub-part bounds in a 3/8 movement rather than adjudicate the rule. **Triage with the post-Component-11 issues batch** | Component 11 § Step 11; `ghosts.ts` `isCompoundMeter`/`beatSlotCount`, `ingest_analysis.py`, `clamp_subpart_bounds.py` `measure_end_beat` |
+| M17 | **3/8 is read as compound by the ghost layer and as simple by DCML — harmony labels land on the wrong beat.** Confirmed visible on **280/iii m. 15**: the harmony record is right (events on beats 1 and 3) but both labels draw on beat 1, and there are **dozens of such bars in that movement**. The ghost layer's `isCompoundMeter` is `unit == 8 && count % 3 == 0`, so 3/8 becomes one dotted-quarter beat — beat 3 does not exist for it to place a label on, and the resolution controls show the same single beat. DCML (and `ingest_analysis`, which requires `count >= 6`) reads 3/8 as three eighth-note beats. Francisco's reading: **3/8 should behave like 3/4, not like 6/8**; the deeper question is what the rule for "compound" should be, and whether one-beat time signatures should be allowed at all. Note the blast radius is wider than display: a beat coordinate written by the tagging tool in a 3/8 movement means something different from the same number in a harmony record, so any fix needs a data pass over 3/8 fragments as well as the rule change. **Scale, measured on staging 2026-07-27: one movement, K280/iii, 53 of 376 fragments.** (A first count said 122 across two movements; K279/iii only *looked* 3/8 because its curated meter is wrong — see M18. Its MEI, and so its ghost layer and its tagging, are 2/4 throughout, and its 69 fragments are unaffected.) | Francisco noted it on 280/iii; independently hit 2026-07-27 (Component 11 Step 11, writing `measure_end_beat`), which now refuses to repair sub-part bounds in a 3/8 movement rather than adjudicate the rule. **Resolved 2026-09-10 (Component 12 Step 20).** Rule: compound requires `count >= 6`, so 3/8 is three eighth-note beats — recorded as an ADR-005 amendment ("compound-meter rule"). Ghost layer, `clamp_subpart_bounds.measure_end_beat` and `ingest_analysis` now share one predicate. Verified on a render: 192 beat ghosts for 192 measures before, 522 after, and m. 15's two harmony labels separated instead of stacked on beat 1. Data pass `fix_38_beat_coordinates.py` converted the 48 K280/iii coordinate pairs (`new = 3 × old − 2`), and the clamp's 3/8 refusal came out with the dispute | Component 11 § Step 11; `ghosts.ts` `isCompoundMeter`/`beatSlotCount`, `ingest_analysis.py`, `clamp_subpart_bounds.py` `measure_end_beat` |
 
 Still deferred beyond Phase 2 unless triggered: Component 6 music21
 auto-analysis (trigger: first non-DCML corpus), multi-domain fragment filter
@@ -460,6 +512,7 @@ second-language content machinery (ADR-006).
 | Scrollytelling risk | Early horizontal rendering spike in Component 10 | this doc |
 | Role model | Multi-role set; Author distinct from Editor; `require_owner_or_role()` ownership pattern | `roles-and-permissions.md` |
 | Registration | Email+password (verified) + Google OAuth; invite-only launch, open with Collections; default role `registered` | `roles-and-permissions.md` |
+| Route topology | `/` becomes a public landing page and the corpus browser moves to `/corpus`; the two fragment-browse surfaces collapse into one. Scheduled after Step 14, before Part 6. **Done 2026-09-04.** One `/fragments` route with the client chosen by session — the backend already keys ADR-009 § 2 on `caller_id is None`, so an editor still sees NonCommercial corpora and an anonymous reader still never does. The concept navigator runs on the public index and now serves anonymous readers too, which was the last structural reason for two surfaces. Old public URLs redirect with the query intact | `component-12-user-infrastructure.md` § Step 14b |
 | Glossary fragment selection | Random 3 + shuffle; `featured_rank` documented as future override | this doc, Component 11 |
 | Glossary stubs | Shown as such ("not yet covered") | this doc, Component 11 |
 | Glossary definitions | Editorial revision is a per-concept gate (`definition_reviewed`) | this doc, Component 11 |
@@ -474,6 +527,13 @@ second-language content machinery (ADR-006).
 | Track M timing | Whole track clear before Component 15; public-surface items by end of Component 11 | this doc, Track M |
 | Data rights | Export + deletion designed at schema time; editorial content reassigned to system user | `roles-and-permissions.md` |
 | Exercise design | Agreed 2026-07-15 — YAML-seeded types, per-pair activation gates, fixed interleaved sessions, preview-flagged testing data | `component-15-exercises.md` |
+| Capture extensions (triage item 13) | Re-homed to Component 15, which owns building the two capturing types (2026-08-26) | this doc, Components 12/15; `component-12-user-infrastructure.md` |
+| M17 (3/8 meter rule) | Component 12 owns rule + fix + K280/iii data pass; 3/8 behaves like 3/4 (2026-08-26) | this doc, Track M; `component-12-user-infrastructure.md` § Step 20 |
+| M10 split | G1 convention in Component 12; pickup numbering + repeat-barline caret in Component 13 (2026-08-26) | this doc, Track M |
+| Collection DDL timing | `collection`/`collection_fragment` created in Component 13 with their feature; FK-shaping rules recorded in 12's data-rights ADR (2026-08-26) | this doc, Components 12/13 |
+| Range-label convention (G1) | A range names the first and last *included onset*; the unit is inferred from the endpoints' own precision, so end ≥ start by construction and no clamp is needed (2026-09-10) | `ADR-005` § "range-label convention"; `component-12-user-infrastructure.md` § Step 20 |
+| Cross-language concept search | Search Neo4j **and** `concept_translation` and union the result for a non-English locale, rather than searching the overlay alone: concepts are seeded English-first, so a locale-only search would make every newly seeded concept unfindable rather than merely untranslated (2026-09-11) | `ADR-040`; `component-12-user-infrastructure.md` § Step 21 |
+| Shell scrolling | The page shell scrolls by default; a page that wants to trap its own scrolling opts out. Forgetting now costs a scrollbar instead of silently clipping content (2026-09-11) | `component-12-user-infrastructure.md` § Step 12 |
 
 Per the Definition of Done, non-obvious decisions made during implementation
 get ADRs; the registration/role-model migration in particular should be

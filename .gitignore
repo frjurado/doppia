@@ -53,9 +53,6 @@ backend/migrations/versions/*.pyc
 # Claude
 .claude/
 
-# Internal Guide
-docs/.guide/
-
 # Spike output (generated SVGs from scripts/spike_verovio_incipit.py)
 scripts/spike_output/
 

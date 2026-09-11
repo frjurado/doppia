@@ -51,6 +51,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         ComposerNotFoundError,
         ConceptNotFoundError,
         CorpusNotFoundError,
+        EmailNotVerifiedError,
         FragmentAlreadyApprovedError,
         FragmentNotFoundError,
         FragmentValidationError,
@@ -58,10 +59,14 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         HarmonyEventNotFoundError,
         HarmonyNotReviewedError,
         IngestionError,
+        ModerationReportNotFoundError,
         MovementNotFoundError,
         Neo4jUnavailableError,
         PostgresUnavailableError,
         RedisUnavailableError,
+        ReportAlreadyOpenError,
+        ReportAlreadyResolvedError,
+        SelfAdminRevocationError,
         SelfReviewForbiddenError,
         UserNotFoundError,
         WorkNotFoundError,
@@ -82,8 +87,12 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         CollectionNotFoundError: 404,
         UserNotFoundError: 404,
         HarmonyEventNotFoundError: 404,
+        ModerationReportNotFoundError: 404,
         # Conflict — 409
         FragmentAlreadyApprovedError: 409,
+        ReportAlreadyOpenError: 409,
+        ReportAlreadyResolvedError: 409,
+        SelfAdminRevocationError: 409,
         # Unprocessable — 422
         HarmonyNotReviewedError: 422,
         IngestionError: 422,
@@ -91,6 +100,7 @@ def _build_doppia_status_map() -> dict[type[DoppiaError], int]:
         SelfReviewForbiddenError: 422,
         # Auth — 403
         AuthorizationError: 403,
+        EmailNotVerifiedError: 403,
         # Integrity — 500
         GraphIntegrityError: 500,
     }

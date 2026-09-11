@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { PropertySchema } from '../../services/conceptApi';
 import { getConceptSchemas } from '../../services/conceptApi';
@@ -34,13 +35,17 @@ import {
 } from '../../services/fragmentApi';
 import type { ApprovalGateDetail, FragmentDetailResponse } from '../../services/fragmentApi';
 import { ApiError } from '../../services/api';
+import { apiErrorMessage } from '../../services/errorMessage';
 import {
   formatBeat,
   formatFragmentRange,
+  rangeLabels,
   makeRepeatContextFormatter,
   qualifyRange,
 } from '../../utils/fragmentRange';
 import { formatKeyName } from '../../utils/keyName';
+import Button from '../ui/Button';
+import IconButton from '../ui/IconButton';
 import Type from '../ui/Type';
 import styles from './FragmentDetailPanel.module.css';
 
@@ -178,9 +183,13 @@ function harmonyChordLabel(e: HarmonyRow, includeKey = true): string {
   return parts.join(' ') || '—';
 }
 
-function harmonyPositionLabel(e: HarmonyRow): string {
+function harmonyPositionLabel(e: HarmonyRow, t: TFunction): string {
   const v = e.volta != null ? `v${e.volta}` : '';
-  return `m.${e.mn}${v} b${formatBeat(e.beat)}`;
+  return t('score:harmonyLabel.positionMeasureBeat', {
+    measure: e.mn,
+    volta: v,
+    beat: formatBeat(e.beat),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -395,7 +404,7 @@ export default function FragmentDetailPanel({
         }
       } catch (err) {
         if (!cancelled) {
-          setLoadError(err instanceof ApiError ? err.message : t('score:detailPanel.loadError'));
+          setLoadError(apiErrorMessage(err, t, t('score:detailPanel.loadError')));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -466,7 +475,7 @@ export default function FragmentDetailPanel({
       await deleteFragment(fragment.id, fragment.sub_parts.length > 0);
       onDeleteDone?.(fragment.id);
     } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : t('score:detailPanel.deleteError'));
+      setDeleteError(apiErrorMessage(err, t, t('score:detailPanel.deleteError')));
       setDeleteState('idle');
     }
   }, [fragment, onDeleteDone, t]);
@@ -500,7 +509,7 @@ export default function FragmentDetailPanel({
         harmonySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } else {
         setReviewError(
-          err instanceof ApiError ? err.message : t('score:detailPanel.approvalError')
+          apiErrorMessage(err, t, t('score:detailPanel.approvalError'))
         );
         setReviewPhase('idle');
       }
@@ -524,7 +533,7 @@ export default function FragmentDetailPanel({
       setReviewPhase('idle');
       onReviewDone?.(fragment.id);
     } catch (err) {
-      setReviewError(err instanceof ApiError ? err.message : t('score:detailPanel.rejectionError'));
+      setReviewError(apiErrorMessage(err, t, t('score:detailPanel.rejectionError')));
       setReviewPhase('rejecting');
     }
   }, [fragment, rejectComment, onReviewDone, t]);
@@ -547,6 +556,23 @@ export default function FragmentDetailPanel({
 
   // Map schema id → human name; falls back to the raw id when schemas unavailable.
   const schemaMap = new Map(schemas?.map((s) => [s.id, s.name]) ?? []);
+
+  /**
+   * Map property-value id → label, from the same schema list already fetched.
+   *
+   * Stored values are ids, and this panel printed them raw — a reader saw
+   * "Stage 2 Components: Stage2SD4". The schema list carries every permitted
+   * value, so resolving them costs one pass and no extra request.
+   *
+   * `short_name ?? name` for the same reason the form uses it: the schema name
+   * is the row's own label, immediately to the left, so the context the short
+   * form leans on is right there. Unresolvable ids keep printing raw rather
+   * than vanishing — on the public path the schema fetch is skipped entirely
+   * (it is editor-only), and a visible id beats a blank cell.
+   */
+  const valueMap = new Map(
+    (schemas ?? []).flatMap((sc) => sc.values.map((v) => [v.id, v.short_name ?? v.name]))
+  );
 
   /**
    * Order stored property entries the way the create/edit form shows them (M6).
@@ -577,10 +603,10 @@ export default function FragmentDetailPanel({
 
   /** Render a stored property value: lists join, booleans read as yes/no. */
   function propertyValueLabel(val: string | string[]): string {
-    if (Array.isArray(val)) return val.join(', ');
+    if (Array.isArray(val)) return val.map((v) => valueMap.get(v) ?? v).join(', ');
     if (val === 'true') return t('common:yes');
     if (val === 'false') return t('common:no');
-    return val;
+    return valueMap.get(val) ?? val;
   }
 
   const harmonyRows = (fragment?.harmony_events ?? []).map((e) =>
@@ -637,11 +663,11 @@ export default function FragmentDetailPanel({
             {loadError}
           </Type>
           {onClose && (
-            <button type="button" className={styles.closeInlineButton} onClick={onClose}>
+            <Button variant="tertiary" size="sm" onClick={onClose}>
               <Type variant="label-sm" as="span">
                 {t('common:close')}
               </Type>
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -669,14 +695,13 @@ export default function FragmentDetailPanel({
                   </Type>
                 )}
               </div>
-              <button
-                type="button"
+              <IconButton
                 className={styles.closeButton}
                 onClick={onClose}
-                aria-label={t('score:detailPanel.closePanelAria')}
+                ariaLabel={t('score:detailPanel.closePanelAria')}
               >
                 ×
-              </button>
+              </IconButton>
             </header>
           )}
 
@@ -697,7 +722,8 @@ export default function FragmentDetailPanel({
                     fragment.bar_start,
                     fragment.bar_end,
                     fragment.beat_start,
-                    fragment.beat_end
+                    fragment.beat_end,
+                    rangeLabels(t)
                   ),
                   {
                     sectionLabel: fragment.section_label,
@@ -813,7 +839,7 @@ export default function FragmentDetailPanel({
                   <li key={i} className={styles.harmonyEvent}>
                     <span className={styles.harmonyPosition}>
                       <Type variant="label-sm" as="span">
-                        {harmonyPositionLabel(row)}
+                        {harmonyPositionLabel(row, t)}
                       </Type>
                     </span>
                     <span className={styles.harmonyChord}>
@@ -888,7 +914,13 @@ export default function FragmentDetailPanel({
                             inside its parent fragment, whose range above already
                             carries the section, so repeating "Trio," on every
                             stage would be noise, not clarity. */}
-                        {formatFragmentRange(sp.bar_start, sp.bar_end, sp.beat_start, sp.beat_end)}
+                        {formatFragmentRange(
+                          sp.bar_start,
+                          sp.bar_end,
+                          sp.beat_start,
+                          sp.beat_end,
+                          rangeLabels(t)
+                        )}
                       </Type>
                       {/* Stage properties (M6): the read sidebar showed a
                           stage's name and range but never what was recorded
@@ -953,222 +985,248 @@ export default function FragmentDetailPanel({
             </section>
           )}
 
-          {/* ── Review actions (Step 14) — shown for submitted fragments (panel only) */}
-          {!standalone && fragment.status === 'submitted' && reviewPhase !== 'gate-failed' && (
-            <div className={styles.reviewSection}>
-              <Type variant="label-sm" as="h3" className={styles.reviewHeading}>
-                {t('score:detailPanel.sectionReview')}
-              </Type>
+          {/* ── The panel's one action block (triage item 10) ─────────────
+              Review decisions and lifecycle chrome used to be two rows on two
+              different tonal layers, both left-aligned, four buttons in two
+              styles. They are one block now, pinned to the panel foot on a
+              single layer. Grammar (DESIGN.md § 5):
 
-              {/* Approve / Reject buttons */}
-              {(reviewPhase === 'idle' || reviewPhase === 'approving') && (
-                <>
-                  <div className={styles.reviewActions}>
-                    <button
-                      type="button"
-                      className={styles.approveButton}
-                      onClick={runApprove}
-                      disabled={reviewPhase === 'approving'}
-                    >
-                      <Type variant="label-sm" as="span">
-                        {reviewPhase === 'approving'
-                          ? t('score:detailPanel.approving')
-                          : t('score:detailPanel.approve')}
-                      </Type>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.rejectOpenButton}
-                      onClick={handleRejectClick}
-                      disabled={reviewPhase === 'approving'}
-                    >
-                      <Type variant="label-sm" as="span">
-                        {t('score:detailPanel.reject')}
-                      </Type>
-                    </button>
-                  </div>
-                  {reviewError && (
-                    <Type variant="label-sm" as="p" className={styles.reviewErrorText}>
-                      {reviewError}
-                    </Type>
-                  )}
-                </>
-              )}
+                • decisions stack full-width — the panel is a ~320px column,
+                  where an inline row of four cannot read;
+                • at most one filled button, and it is the action that moves
+                  the fragment's lifecycle on the server. Edit only switches
+                  mode locally, so it is always secondary — its treatment never
+                  depends on what else is on screen;
+                • lifecycle chrome sits in one small row beneath, never filled,
+                  with the destructive action at the trailing edge.
 
-              {/* Reject comment form */}
-              {(reviewPhase === 'rejecting' || reviewPhase === 'rejecting-sending') && (
-                <>
-                  <textarea
-                    className={styles.rejectTextarea}
-                    value={rejectComment}
-                    onChange={(e) => setRejectComment(e.target.value)}
-                    placeholder={t('score:detailPanel.rejectPlaceholder')}
-                    rows={3}
-                    disabled={reviewPhase === 'rejecting-sending'}
-                    aria-label={t('score:detailPanel.rejectionReasonAria')}
-                  />
-                  {reviewError && (
-                    <Type variant="label-sm" as="p" className={styles.reviewErrorText}>
-                      {reviewError}
-                    </Type>
-                  )}
-                  <div className={styles.reviewActions}>
-                    <button
-                      type="button"
-                      className={styles.rejectSendButton}
-                      onClick={handleRejectSubmit}
-                      disabled={reviewPhase === 'rejecting-sending'}
-                    >
-                      <Type variant="label-sm" as="span">
-                        {reviewPhase === 'rejecting-sending'
-                          ? t('score:detailPanel.sending')
-                          : t('score:detailPanel.sendRejection')}
-                      </Type>
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.cancelButton}
-                      onClick={handleRejectCancel}
-                      disabled={reviewPhase === 'rejecting-sending'}
-                    >
-                      <Type variant="label-sm" as="span">
-                        {t('common:cancel')}
-                      </Type>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+              The error-container wells (gate failure, delete confirmation)
+              nest inside the block and keep their own colour. */}
+          {!standalone && (
+            <footer className={styles.actionBlock}>
+              {/* Review decisions — submitted fragments only. */}
+              {fragment.status === 'submitted' && reviewPhase !== 'gate-failed' && (
+                <div className={styles.decisions}>
+                  <Type variant="label-sm" as="h3" className={styles.reviewHeading}>
+                    {t('score:detailPanel.sectionReview')}
+                  </Type>
 
-          {/* ── Approval gate failure (Step 14, panel only) ───────────────── */}
-          {!standalone &&
-            fragment.status === 'submitted' &&
-            reviewPhase === 'gate-failed' &&
-            gateDetail && (
-              <div className={styles.gateFailed}>
-                <Type variant="label-sm" as="p" className={styles.gateFailedIntro}>
-                  {t('score:detailPanel.gateIntro')}
-                </Type>
-
-                {gateDetail.unreviewed_actual_key && (
-                  <div className={styles.gateItem}>
-                    <Type variant="label-sm" as="span" className={styles.gateItemLabel}>
-                      {t('score:detailPanel.gateActualKey')}
-                    </Type>
-                    <Type variant="body-sm" as="span">
-                      {t('score:detailPanel.gateActualKeyDetail', {
-                        value: gateDetail.unreviewed_actual_key.value,
-                      })}
-                    </Type>
-                  </div>
-                )}
-
-                {gateDetail.unreviewed_harmony_events &&
-                  gateDetail.unreviewed_harmony_events.length > 0 && (
+                  {(reviewPhase === 'idle' || reviewPhase === 'approving') && (
                     <>
-                      <Type variant="label-sm" as="p" className={styles.gateItemLabel}>
-                        {t('score:detailPanel.gateUnconfirmedEvents')}
-                      </Type>
-                      <ol className={styles.gateEventList}>
-                        {gateDetail.unreviewed_harmony_events.map((ev, i) => {
-                          const row = toHarmonyRow(ev as Record<string, unknown>);
-                          return (
-                            <li key={i} className={styles.gateEventItem}>
-                              <Type variant="label-sm" as="span" className={styles.harmonyPosition}>
-                                {harmonyPositionLabel(row)}
-                              </Type>
-                              {/* Keys print on every row here, unlike the
-                                  harmony list above: this is a list of events
-                                  needing attention, each read on its own, not a
-                                  running harmonic reading down the fragment. */}
-                              <Type variant="body-sm" as="span">
-                                {harmonyChordLabel(row)}
-                              </Type>
-                            </li>
-                          );
-                        })}
-                      </ol>
-                      <Type variant="label-sm" as="p" className={styles.gateNote}>
-                        {t('score:detailPanel.gateNote')}
-                      </Type>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        fullWidth
+                        onClick={runApprove}
+                        disabled={reviewPhase === 'approving'}
+                      >
+                        <Type variant="label-sm" as="span">
+                          {reviewPhase === 'approving'
+                            ? t('score:detailPanel.approving')
+                            : t('score:detailPanel.approve')}
+                        </Type>
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        fullWidth
+                        onClick={handleRejectClick}
+                        disabled={reviewPhase === 'approving'}
+                      >
+                        <Type variant="label-sm" as="span">
+                          {t('score:detailPanel.reject')}
+                        </Type>
+                      </Button>
+                      {reviewError && (
+                        <Type variant="label-sm" as="p" className={styles.reviewErrorText}>
+                          {reviewError}
+                        </Type>
+                      )}
                     </>
                   )}
 
-                <div className={styles.reviewActions}>
-                  <button type="button" className={styles.approveButton} onClick={runApprove}>
+                  {(reviewPhase === 'rejecting' || reviewPhase === 'rejecting-sending') && (
+                    <>
+                      <textarea
+                        className={styles.rejectTextarea}
+                        value={rejectComment}
+                        onChange={(e) => setRejectComment(e.target.value)}
+                        placeholder={t('score:detailPanel.rejectPlaceholder')}
+                        rows={3}
+                        disabled={reviewPhase === 'rejecting-sending'}
+                        aria-label={t('score:detailPanel.rejectionReasonAria')}
+                      />
+                      {reviewError && (
+                        <Type variant="label-sm" as="p" className={styles.reviewErrorText}>
+                          {reviewError}
+                        </Type>
+                      )}
+                      <Button
+                        variant="destructiveConfirm"
+                        size="sm"
+                        fullWidth
+                        onClick={handleRejectSubmit}
+                        disabled={reviewPhase === 'rejecting-sending'}
+                      >
+                        <Type variant="label-sm" as="span">
+                          {reviewPhase === 'rejecting-sending'
+                            ? t('score:detailPanel.sending')
+                            : t('score:detailPanel.sendRejection')}
+                        </Type>
+                      </Button>
+                      <div className={styles.chromeRow}>
+                        <Button
+                          variant="quiet"
+                          size="sm"
+                          onClick={handleRejectCancel}
+                          disabled={reviewPhase === 'rejecting-sending'}
+                        >
+                          <Type variant="label-sm" as="span">
+                            {t('common:cancel')}
+                          </Type>
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Approval gate failure — a nested error well. */}
+              {fragment.status === 'submitted' && reviewPhase === 'gate-failed' && gateDetail && (
+                <div className={styles.gateFailed}>
+                  <Type variant="label-sm" as="p" className={styles.gateFailedIntro}>
+                    {t('score:detailPanel.gateIntro')}
+                  </Type>
+
+                  {gateDetail.unreviewed_actual_key && (
+                    <div className={styles.gateItem}>
+                      <Type variant="label-sm" as="span" className={styles.gateItemLabel}>
+                        {t('score:detailPanel.gateActualKey')}
+                      </Type>
+                      <Type variant="body-sm" as="span">
+                        {t('score:detailPanel.gateActualKeyDetail', {
+                          value: gateDetail.unreviewed_actual_key.value,
+                        })}
+                      </Type>
+                    </div>
+                  )}
+
+                  {gateDetail.unreviewed_harmony_events &&
+                    gateDetail.unreviewed_harmony_events.length > 0 && (
+                      <>
+                        <Type variant="label-sm" as="p" className={styles.gateItemLabel}>
+                          {t('score:detailPanel.gateUnconfirmedEvents')}
+                        </Type>
+                        <ol className={styles.gateEventList}>
+                          {gateDetail.unreviewed_harmony_events.map((ev, i) => {
+                            const row = toHarmonyRow(ev as Record<string, unknown>);
+                            return (
+                              <li key={i} className={styles.gateEventItem}>
+                                <Type
+                                  variant="label-sm"
+                                  as="span"
+                                  className={styles.harmonyPosition}
+                                >
+                                  {harmonyPositionLabel(row, t)}
+                                </Type>
+                                {/* Keys print on every row here, unlike the
+                                  harmony list above: this is a list of events
+                                  needing attention, each read on its own, not a
+                                  running harmonic reading down the fragment. */}
+                                <Type variant="body-sm" as="span">
+                                  {harmonyChordLabel(row)}
+                                </Type>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                        <Type variant="label-sm" as="p" className={styles.gateNote}>
+                          {t('score:detailPanel.gateNote')}
+                        </Type>
+                      </>
+                    )}
+
+                  <Button variant="primary" size="sm" fullWidth onClick={runApprove}>
                     <Type variant="label-sm" as="span">
                       {t('score:detailPanel.tryAgain')}
                     </Type>
-                  </button>
-                  <button type="button" className={styles.cancelButton} onClick={handleGateBack}>
-                    <Type variant="label-sm" as="span">
-                      {t('common:back')}
-                    </Type>
-                  </button>
+                  </Button>
+                  <div className={styles.chromeRow}>
+                    <Button variant="quiet" size="sm" onClick={handleGateBack}>
+                      <Type variant="label-sm" as="span">
+                        {t('common:back')}
+                      </Type>
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            )}
-
-          {/* ── Delete confirmation (panel only) ──────────────────────────── */}
-          {!standalone && deleteState === 'confirming' && (
-            <div className={styles.deleteConfirm}>
-              <Type variant="body-sm" as="p" className={styles.deleteConfirmText}>
-                {fragment.sub_parts.length > 0
-                  ? t('score:detailPanel.deleteConfirmWithSubparts', {
-                      count: fragment.sub_parts.length,
-                    })
-                  : t('score:detailPanel.deleteConfirm')}
-              </Type>
-              {deleteError && (
-                <Type variant="label-sm" as="p" className={styles.deleteErrorText}>
-                  {deleteError}
-                </Type>
               )}
-              <div className={styles.confirmActions}>
-                <button
-                  type="button"
-                  className={styles.confirmDeleteButton}
-                  onClick={handleDeleteConfirm}
-                >
-                  <Type variant="label-sm" as="span">
-                    {t('score:detailPanel.confirmDelete')}
-                  </Type>
-                </button>
-                <button type="button" className={styles.cancelButton} onClick={handleDeleteCancel}>
-                  <Type variant="label-sm" as="span">
-                    {t('common:cancel')}
-                  </Type>
-                </button>
-              </div>
-            </div>
-          )}
 
-          {!standalone && deleteState === 'deleting' && (
-            <div className={styles.deleteConfirm}>
-              <Type variant="label-sm" as="p" className={styles.stateText}>
-                {t('score:detailPanel.deleting')}
-              </Type>
-            </div>
-          )}
+              {/* Delete confirmation — the only place a solid error fill appears. */}
+              {deleteState === 'confirming' && (
+                <div className={styles.deleteConfirm}>
+                  <Type variant="body-sm" as="p" className={styles.deleteConfirmText}>
+                    {fragment.sub_parts.length > 0
+                      ? t('score:detailPanel.deleteConfirmWithSubparts', {
+                          count: fragment.sub_parts.length,
+                        })
+                      : t('score:detailPanel.deleteConfirm')}
+                  </Type>
+                  {deleteError && (
+                    <Type variant="label-sm" as="p" className={styles.deleteErrorText}>
+                      {deleteError}
+                    </Type>
+                  )}
+                  <div className={styles.confirmActions}>
+                    <Button variant="destructiveConfirm" size="sm" onClick={handleDeleteConfirm}>
+                      <Type variant="label-sm" as="span">
+                        {t('score:detailPanel.confirmDelete')}
+                      </Type>
+                    </Button>
+                    <Button variant="quiet" size="sm" onClick={handleDeleteCancel}>
+                      <Type variant="label-sm" as="span">
+                        {t('common:cancel')}
+                      </Type>
+                    </Button>
+                  </div>
+                </div>
+              )}
 
-          {/* ── Footer: Edit + Delete (tag mode only; panel only) ─────────── */}
-          {!standalone && tagMode === 'tag' && deleteState === 'idle' && (
-            <footer className={styles.footer}>
-              <button
-                type="button"
-                className={styles.editButton}
-                onClick={() => onEdit?.(fragment)}
-              >
-                <Type variant="label-sm" as="span">
-                  {t('common:edit')}
-                </Type>
-              </button>
-              <button type="button" className={styles.deleteButton} onClick={handleDeleteClick}>
-                <Type variant="label-sm" as="span">
-                  {t('common:delete')}
-                </Type>
-              </button>
+              {deleteState === 'deleting' && (
+                <div className={styles.deleteConfirm}>
+                  <Type variant="label-sm" as="p" className={styles.stateText}>
+                    {t('score:detailPanel.deleting')}
+                  </Type>
+                </div>
+              )}
+
+              {/* Edit is a decision, but never the filled one — it changes no
+                  server state. Delete takes the trailing edge of the chrome row. */}
+              {tagMode === 'tag' && deleteState === 'idle' && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    fullWidth
+                    onClick={() => onEdit?.(fragment)}
+                  >
+                    <Type variant="label-sm" as="span">
+                      {t('common:edit')}
+                    </Type>
+                  </Button>
+                  <div className={styles.chromeRow}>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className={styles.destructiveAction}
+                      onClick={handleDeleteClick}
+                    >
+                      <Type variant="label-sm" as="span">
+                        {t('common:delete')}
+                      </Type>
+                    </Button>
+                  </div>
+                </>
+              )}
             </footer>
           )}
         </>

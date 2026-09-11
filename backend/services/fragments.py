@@ -23,7 +23,7 @@ import hashlib
 import logging
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -60,16 +60,20 @@ from models.fragment import (
     SubPartFragmentCreate,
 )
 from models.music import Composer, Corpus, Movement, MovementSection, Work
+from models.roles import ADMIN
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from services.cache import get_subtree_cache, set_subtree_cache
+from services.concepts import localise_hierarchy_path
 from services.fragment_validation import (
     validate_concept_existence,
     validate_containment,
 )
+from services.i18n import DEFAULT_LANGUAGE
 from services.object_storage import StorageClient
 from services.task_dispatch import dispatch_task
 from services.tasks.render_fragment_preview import render_fragment_preview
+from services.translation import TranslationOverlay
 from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -434,6 +438,22 @@ async def enqueue_preview_regeneration_for_movement(
     return len(fragment_ids)
 
 
+@dataclass(frozen=True)
+class LocalisedConcept:
+    """A concept's display text in the requested language.
+
+    Fragment payloads name concepts in three ways — the full name, the alias on
+    a bracket, and the ancestor path — and all three were read straight off the
+    Neo4j node, which holds English only. That is why a stored fragment's
+    bracket said "PAC" while the concept picker two panels away said "CAP"
+    (Component 12 Step 19c, C4).
+    """
+
+    name: str
+    alias: str | None
+    hierarchy_path: list[str]
+
+
 class FragmentService:
     """Business logic for the fragment write surface and review state machine.
 
@@ -453,6 +473,61 @@ class FragmentService:
         self._driver = driver
         self._redis = redis
         self._storage = storage
+
+    async def _localised_concepts(
+        self,
+        concept_ids: Iterable[str],
+        language: str,
+    ) -> dict[str, LocalisedConcept]:
+        """Fetch concepts from Neo4j and overlay their text for ``language``.
+
+        One place rather than four: every fragment-listing path hydrates the
+        same three fields the same way, and before this each did it inline
+        against the raw graph values.
+
+        Ancestors are added to the overlay read because a concept's hierarchy
+        path names concepts that are not themselves tagged — without them the
+        leaf translates and every ancestor stays English.
+
+        Args:
+            concept_ids: Concept ids appearing anywhere in the payload.
+            language: Requested response language.
+
+        Returns:
+            Mapping of concept id → :class:`LocalisedConcept`. Ids Neo4j does
+            not know are absent; callers fall back to the id, as they did
+            before.
+        """
+        ids = list(dict.fromkeys(concept_ids))
+        if not ids:
+            return {}
+
+        async with self._driver.session() as neo_session:
+            rows = await get_concepts_by_ids(neo_session, ids)
+
+        overlay_ids: set[str] = {r["id"] for r in rows}
+        for row in rows:
+            overlay_ids.update(row.get("hierarchy_path_ids") or [])
+        translations = await TranslationOverlay(self._db).concept_translations(
+            sorted(overlay_ids), language
+        )
+
+        out: dict[str, LocalisedConcept] = {}
+        for row in rows:
+            t = translations.get(row["id"])
+            aliases = (
+                t.aliases if t and t.aliases is not None else row.get("aliases")
+            ) or []
+            out[row["id"]] = LocalisedConcept(
+                name=t.name if t else row.get("name", row["id"]),
+                alias=aliases[0] if aliases else None,
+                hierarchy_path=localise_hierarchy_path(
+                    row.get("hierarchy_path"),
+                    row.get("hierarchy_path_ids"),
+                    translations,
+                ),
+            )
+        return out
 
     # ------------------------------------------------------------------
     # Public interface — write path
@@ -527,7 +602,7 @@ class FragmentService:
         fragment_id: uuid.UUID,
         payload: FragmentUpdate,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
     ) -> Fragment:
         """Replace all mutable fields of a draft or rejected fragment atomically.
 
@@ -543,8 +618,7 @@ class FragmentService:
             fragment_id: UUID of the fragment to update.
             payload: Validated ``FragmentUpdate`` payload.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller (``"editor"`` or
-                ``"admin"``).
+            caller_roles: Roles held by the authenticated caller.
 
         Returns:
             The updated :class:`~models.fragment.Fragment` ORM row.
@@ -560,7 +634,7 @@ class FragmentService:
         try:
             async with self._db.begin():
                 fragment = await self._get_editable(fragment_id)
-                self._check_edit_permission(fragment, caller_id, caller_role)
+                self._check_edit_permission(fragment, caller_id, caller_roles)
 
                 data_licence = await self._derive_data_licence(
                     fragment.movement_id, payload.bar_start, payload.bar_end
@@ -620,7 +694,7 @@ class FragmentService:
         fragment_id: uuid.UUID,
         payload: FragmentUpdate,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
     ) -> FragmentUpdateResult:
         """Update a fragment at any status with revision semantics.
 
@@ -646,8 +720,7 @@ class FragmentService:
             fragment_id: UUID of the fragment to update.
             payload: Validated :class:`~models.fragment.FragmentUpdate` payload.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller (``"editor"`` or
-                ``"admin"``).
+            caller_roles: Roles held by the authenticated caller.
 
         Returns:
             :class:`FragmentUpdateResult` with the updated fragment and the
@@ -675,7 +748,7 @@ class FragmentService:
                         detail={"fragment_id": str(fragment_id)},
                     )
 
-                self._check_edit_permission(fragment, caller_id, caller_role)
+                self._check_edit_permission(fragment, caller_id, caller_roles)
                 previous_status = fragment.status
 
                 # Load existing concept tags for analytic comparison.
@@ -874,7 +947,8 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         caller_id: str | None,
-        caller_role: str,
+        caller_roles: frozenset[str],
+        language: str = DEFAULT_LANGUAGE,
     ) -> FragmentDetailResponse:
         """Return the full fragment record with hydrated concept tags, harmony
         events, and nested sub-parts.
@@ -891,8 +965,8 @@ class FragmentService:
             fragment_id: UUID of the fragment to read.
             caller_id: String UUID of the authenticated caller, or ``None``
                 for the anonymous public read path.
-            caller_role: Role of the authenticated caller (``"anonymous"``
-                when unauthenticated).
+            caller_roles: Roles held by the caller; empty for an anonymous
+                reader (``registered`` is implicit and grants no extra visibility).
 
         Returns:
             :class:`~models.fragment.FragmentDetailResponse` with concept tags
@@ -918,7 +992,7 @@ class FragmentService:
 
         # Draft visibility: only the creator or an admin may read a draft.
         # Anonymous callers (caller_id=None) are never the creator.
-        if fragment.status == "draft" and caller_role != "admin":
+        if fragment.status == "draft" and ADMIN not in caller_roles:
             is_creator = (
                 caller_id is not None
                 and fragment.created_by is not None
@@ -985,21 +1059,16 @@ class FragmentService:
             {t.concept_id for t in parent_tags}
             | {t.concept_id for tags in sub_tags_by_fragment.values() for t in tags}
         )
-        concept_map: dict[str, dict] = {}
-        if all_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
-                    concept_map[c["id"]] = c
+        concept_map = await self._localised_concepts(all_concept_ids, language)
 
         def _hydrate_tag(tag: FragmentConceptTag) -> ConceptTagDetail:
-            data = concept_map.get(tag.concept_id, {})
-            aliases: list[str] = data.get("aliases", [])
+            data = concept_map.get(tag.concept_id)
             return ConceptTagDetail(
                 concept_id=tag.concept_id,
                 is_primary=tag.is_primary,
-                name=data.get("name", tag.concept_id),
-                alias=aliases[0] if aliases else None,
-                hierarchy_path=data.get("hierarchy_path", []),
+                name=data.name if data else tag.concept_id,
+                alias=data.alias if data else None,
+                hierarchy_path=data.hierarchy_path if data else [],
             )
 
         # Slice harmony events from movement_analysis.
@@ -1129,9 +1198,10 @@ class FragmentService:
         self,
         movement_id: uuid.UUID,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 100,
+        language: str = DEFAULT_LANGUAGE,
     ) -> FragmentListResponse:
         """Return a cursor-paginated list of top-level fragments for a movement.
 
@@ -1149,7 +1219,7 @@ class FragmentService:
         Args:
             movement_id: UUID of the movement to query.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_roles: Roles held by the authenticated caller.
             cursor: Opaque pagination cursor from a prior response.
             page_size: Maximum top-level fragments per page (1–500).
 
@@ -1170,7 +1240,7 @@ class FragmentService:
         )
 
         # Status visibility — enforced at the service layer, not in the route.
-        if caller_role != "admin":
+        if ADMIN not in caller_roles:
             caller_uuid = uuid.UUID(caller_id)
             stmt = stmt.where(
                 or_(
@@ -1244,14 +1314,11 @@ class FragmentService:
             {t.concept_id for tags in tags_by_frag.values() for t in tags}
             | {t.concept_id for tags in sub_tags_by_frag.values() for t in tags}
         )
-        alias_map: dict[str, str | None] = {}
-        name_map: dict[str, str | None] = {}
-        if all_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
-                    aliases: list[str] = c.get("aliases", [])
-                    alias_map[c["id"]] = aliases[0] if aliases else None
-                    name_map[c["id"]] = c.get("name", c["id"])
+        localised = await self._localised_concepts(all_concept_ids, language)
+        alias_map: dict[str, str | None] = {
+            cid: c.alias for cid, c in localised.items()
+        }
+        name_map: dict[str, str | None] = {cid: c.name for cid, c in localised.items()}
 
         def _primary(
             frag_id: uuid.UUID, tmap: dict
@@ -1320,9 +1387,10 @@ class FragmentService:
     async def list_for_review(
         self,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 50,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ReviewQueueResponse:
         """Return a cursor-paginated list of submitted fragments awaiting review.
 
@@ -1347,7 +1415,7 @@ class FragmentService:
 
         Args:
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_roles: Roles held by the authenticated caller.
             cursor: Opaque pagination cursor from a prior response.
             page_size: Maximum fragments per page (1–200).
 
@@ -1368,7 +1436,7 @@ class FragmentService:
         )
 
         # Creator exclusion: editors do not see their own submitted fragments.
-        if caller_role != "admin":
+        if ADMIN not in caller_roles:
             caller_uuid = uuid.UUID(caller_id)
             stmt = stmt.where(Fragment.created_by != caller_uuid)
 
@@ -1411,12 +1479,11 @@ class FragmentService:
         all_concept_ids = list(
             {t.concept_id for tags in tags_by_frag.values() for t in tags}
         )
-        alias_map: dict[str, str | None] = {}
-        if all_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, all_concept_ids):
-                    aliases: list[str] = c.get("aliases", [])
-                    alias_map[c["id"]] = aliases[0] if aliases else None
+        localised = await self._localised_concepts(all_concept_ids, language)
+        alias_map: dict[str, str | None] = {
+            cid: c.alias for cid, c in localised.items()
+        }
+        name_map: dict[str, str | None] = {cid: c.name for cid, c in localised.items()}
 
         # Batch movement context: one JOIN query for all unique movement_ids.
         ctx_result = await self._db.execute(
@@ -1441,15 +1508,21 @@ class FragmentService:
         # restart reads "Trio, mm. 12-15" like every other surface (ADR-036).
         sections_by_movement = await self._fetch_movement_sections(movement_ids)
 
-        def _primary_for(frag_id: uuid.UUID) -> tuple[str | None, str | None]:
+        def _primary_for(
+            frag_id: uuid.UUID,
+        ) -> tuple[str | None, str | None, str | None]:
             for tag in tags_by_frag.get(frag_id, []):
                 if tag.is_primary:
-                    return tag.concept_id, alias_map.get(tag.concept_id)
-            return None, None
+                    return (
+                        tag.concept_id,
+                        alias_map.get(tag.concept_id),
+                        name_map.get(tag.concept_id),
+                    )
+            return None, None, None
 
         items: list[ReviewQueueItem] = []
         for f in page:
-            p_id, p_alias = _primary_for(f.id)
+            p_id, p_alias, p_name = _primary_for(f.id)
             ctx = movement_ctx.get(f.movement_id, {})
             items.append(
                 ReviewQueueItem(
@@ -1468,6 +1541,7 @@ class FragmentService:
                     status=f.status,
                     primary_concept_id=p_id,
                     primary_concept_alias=p_alias,
+                    primary_concept_name=p_name,
                     created_by=f.created_by,
                     submitted_at=f.updated_at,
                     composer_name=ctx.get("composer_name", ""),
@@ -1489,9 +1563,10 @@ class FragmentService:
         include_subtypes: bool,
         status_filter: str,
         caller_id: str | None,
-        caller_role: str,
+        caller_roles: frozenset[str],
         cursor: str | None = None,
         page_size: int = 50,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ConceptBrowseResponse:
         """Return a cursor-paginated browse list of fragments for a concept.
 
@@ -1533,8 +1608,8 @@ class FragmentService:
                 to ``approved`` when an invalid value is supplied.
             caller_id: String UUID of the authenticated caller, or ``None``
                 for the anonymous public read path (``approved``-only).
-            caller_role: Role of the authenticated caller (``"anonymous"``
-                when unauthenticated).
+            caller_roles: Roles held by the caller; empty for an anonymous
+                reader (``registered`` is implicit and grants no extra visibility).
             cursor: Opaque time-ordered pagination cursor from a prior response.
             page_size: Maximum items per page (1–200).
 
@@ -1592,7 +1667,7 @@ class FragmentService:
                 .where(Corpus.licence.op("~*")(_NC_LICENCE_REGEX))
             )
             stmt = stmt.where(Fragment.movement_id.not_in(nc_movements))
-        elif caller_role != "admin":
+        elif ADMIN not in caller_roles:
             caller_uuid = uuid.UUID(caller_id)
             # Base visibility: own drafts + all non-draft.
             stmt = stmt.where(
@@ -1635,7 +1710,7 @@ class FragmentService:
                 include_subtypes=include_subtypes,
             )
 
-        items = await self._hydrate_browse_items(page)
+        items = await self._hydrate_browse_items(page, language)
 
         next_cursor = (
             _encode_time_cursor(page[-1].updated_at, page[-1].id) if has_next else None
@@ -1648,7 +1723,7 @@ class FragmentService:
         )
 
     async def _hydrate_browse_items(
-        self, page: list[Fragment]
+        self, page: list[Fragment], language: str = DEFAULT_LANGUAGE
     ) -> list[ConceptBrowseItem]:
         """Turn a list of Fragment rows into browse-card items.
 
@@ -1685,14 +1760,11 @@ class FragmentService:
 
         # Batch Neo4j concept hydration for primary concept IDs.
         primary_concept_ids = list({t.concept_id for t in primary_tag_by_frag.values()})
-        concept_name_map: dict[str, str] = {}
-        concept_alias_map: dict[str, str | None] = {}
-        if primary_concept_ids:
-            async with self._driver.session() as neo_session:
-                for c in await get_concepts_by_ids(neo_session, primary_concept_ids):
-                    aliases: list[str] = c.get("aliases", [])
-                    concept_name_map[c["id"]] = c.get("name", c["id"])
-                    concept_alias_map[c["id"]] = aliases[0] if aliases else None
+        localised = await self._localised_concepts(primary_concept_ids, language)
+        concept_name_map: dict[str, str] = {cid: c.name for cid, c in localised.items()}
+        concept_alias_map: dict[str, str | None] = {
+            cid: c.alias for cid, c in localised.items()
+        }
 
         # Batch movement context.
         ctx_result = await self._db.execute(
@@ -1801,6 +1873,7 @@ class FragmentService:
         include_subtypes: bool = True,
         limit: int = 3,
         seed: int | None = None,
+        language: str = DEFAULT_LANGUAGE,
     ) -> ConceptExamplesResponse:
         """Draw up to ``limit`` random approved example fragments for a concept.
 
@@ -1878,7 +1951,7 @@ class FragmentService:
         result = await self._db.execute(stmt)
         page = list(result.scalars().all())
 
-        examples = await self._hydrate_browse_items(page)
+        examples = await self._hydrate_browse_items(page, language)
         return ConceptExamplesResponse(
             examples=examples,
             concept_id=concept_id,
@@ -1893,7 +1966,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         caller_id: str,
-        caller_role: str,
+        caller_roles: frozenset[str],
         confirm_cascade: bool = False,
         dry_run: bool = False,
     ) -> FragmentDeleteResult:
@@ -1920,7 +1993,7 @@ class FragmentService:
         Args:
             fragment_id: UUID of the fragment to delete.
             caller_id: String UUID of the authenticated caller.
-            caller_role: Role of the authenticated caller.
+            caller_roles: Roles held by the authenticated caller.
             confirm_cascade: Set ``True`` to authorise deleting parent + all
                 sub-parts when sub-parts exist.
             dry_run: If ``True``, return the cascade child count without
@@ -1946,7 +2019,7 @@ class FragmentService:
                 detail={"fragment_id": str(fragment_id)},
             )
 
-        self._check_delete_permission(fragment, caller_id, caller_role)
+        self._check_delete_permission(fragment, caller_id, caller_roles)
 
         count_result = await self._db.execute(
             select(func.count()).where(Fragment.parent_fragment_id == fragment_id)
@@ -1987,7 +2060,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         reviewer_id: str,
-        reviewer_role: str,
+        reviewer_roles: frozenset[str],
         comment: str | None = None,
     ) -> Fragment:
         """Record an approval and transition to ``approved`` if all gates pass.
@@ -2009,7 +2082,7 @@ class FragmentService:
         Args:
             fragment_id: UUID of the submitted fragment.
             reviewer_id: String UUID of the authenticated reviewer.
-            reviewer_role: Role of the reviewer (``"editor"`` or ``"admin"``).
+            reviewer_roles: Roles held by the reviewer.
             comment: Optional comment to record alongside the review decision.
 
         Returns:
@@ -2031,12 +2104,12 @@ class FragmentService:
         # Phase 1: validate and record the review.
         async with self._db.begin():
             fragment = await self._get_submitted(fragment_id)
-            if reviewer_role != "admin":
+            if ADMIN not in reviewer_roles:
                 _check_not_creator(fragment, reviewer_id)
             await self._upsert_review(fragment_id, reviewer_uuid, "approved", comment)
 
         # Phase 2: threshold + gate check (reads only; no active transaction).
-        if reviewer_role == "admin":
+        if ADMIN in reviewer_roles:
             meets_threshold = True
         else:
             approval_count = await self._count_approvals(
@@ -2081,7 +2154,7 @@ class FragmentService:
         self,
         fragment_id: uuid.UUID,
         reviewer_id: str,
-        reviewer_role: str,
+        reviewer_roles: frozenset[str],
         comment: str | None = None,
     ) -> Fragment:
         """Record a rejection and transition the fragment to ``rejected``.
@@ -2096,7 +2169,7 @@ class FragmentService:
         Args:
             fragment_id: UUID of the submitted fragment.
             reviewer_id: String UUID of the authenticated reviewer.
-            reviewer_role: Role of the reviewer (``"editor"`` or ``"admin"``).
+            reviewer_roles: Roles held by the reviewer.
             comment: Optional comment to record alongside the review decision.
 
         Returns:
@@ -2111,7 +2184,7 @@ class FragmentService:
 
         async with self._db.begin():
             fragment = await self._get_submitted(fragment_id)
-            if reviewer_role != "admin":
+            if ADMIN not in reviewer_roles:
                 _check_not_creator(fragment, reviewer_id)
             await self._upsert_review(fragment_id, reviewer_uuid, "rejected", comment)
             fragment.status = "rejected"
@@ -2432,7 +2505,7 @@ class FragmentService:
 
     @staticmethod
     def _check_delete_permission(
-        fragment: Fragment, caller_id: str, caller_role: str
+        fragment: Fragment, caller_id: str, caller_roles: frozenset[str]
     ) -> None:
         """Assert that the caller may delete this fragment.
 
@@ -2440,7 +2513,7 @@ class FragmentService:
             FragmentValidationError: Caller is not the creator and not an admin,
                 or caller is the creator but the fragment is ``approved``.
         """
-        if caller_role == "admin":
+        if ADMIN in caller_roles:
             return
         is_creator = (
             fragment.created_by is not None and str(fragment.created_by) == caller_id
@@ -2468,7 +2541,7 @@ class FragmentService:
 
     @staticmethod
     def _check_edit_permission(
-        fragment: Fragment, caller_id: str, caller_role: str
+        fragment: Fragment, caller_id: str, caller_roles: frozenset[str]
     ) -> None:
         """Assert that the caller may edit this draft.
 
@@ -2478,7 +2551,7 @@ class FragmentService:
         is_creator = (
             fragment.created_by is not None and str(fragment.created_by) == caller_id
         )
-        if not is_creator and caller_role != "admin":
+        if not is_creator and ADMIN not in caller_roles:
             raise FragmentValidationError(
                 "Only the creating annotator or an admin may update a draft.",
                 detail={

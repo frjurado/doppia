@@ -187,16 +187,18 @@ test('anonymous read journey: browse → detail → score + MIDI, no editor affo
   page,
 }) => {
   // Browse by concept (the deep-link shape the glossary will use).
-  await page.goto(`/public/concepts?concept=${CONCEPT_ID}`);
+  await page.goto(`/fragments?concept=${CONCEPT_ID}`);
 
   // The approved fragment appears as a card (a button whose accessible name
   // includes the primary concept alias).
-  const card = page.getByRole('button', { name: /PAC/i });
+  // The navigator's tree row also carries the alias, so match the card's own
+  // label — anonymous callers get the tree since Step 14b.
+  const card = page.getByRole('button', { name: /Open fragment/i });
   await expect(card).toBeVisible();
 
   // Open the fragment detail.
   await card.click();
-  await expect(page).toHaveURL(new RegExp(`/public/fragments/${FRAGMENT_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/fragments/${FRAGMENT_ID}`));
 
   // The production Verovio WASM renders the fragment into the score page
   // container: wait for real musical content (a note glyph) to appear. We assert
@@ -213,6 +215,26 @@ test('anonymous read journey: browse → detail → score + MIDI, no editor affo
   // No editor affordances are reachable on the public surface.
   await expect(page.getByRole('button', { name: /^edit/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /submit|approve|reject/i })).toHaveCount(0);
+});
+
+test('the shell scrolls its content rather than clipping it', async ({ page }) => {
+  // The page shell was `overflow: hidden`, so any surface that did not declare
+  // its own scrolling had its bottom silently cut off — Profile and the two
+  // admin pages were unreachable below the fold, and every future page with
+  // more than a screen of content would have joined them. The rule is now that
+  // the shell scrolls by default and a page opts out (`height: 100%;
+  // overflow: hidden`) when it wants to trap its own scrolling.
+  //
+  // This lives in e2e because CSS modules are stubbed under vitest: the unit
+  // tests cannot see a stylesheet, so nothing else can catch the regression.
+  await page.goto('/glossary');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+  const overflowY = await page.locator('main').evaluate((el) => getComputedStyle(el).overflowY);
+
+  expect(overflowY, 'the shell must not clip a page that does not scroll itself').not.toBe(
+    'hidden'
+  );
 });
 
 test('glossary journey: index → concept page → example expand → browse → detail', async ({
@@ -241,13 +263,38 @@ test('glossary journey: index → concept page → example expand → browse →
 
   // 4. Follow the browse link into the concept's approved fragments.
   await page.getByRole('link', { name: /browse fragments tagged/i }).click();
-  await expect(page).toHaveURL(new RegExp(`/public/concepts\\?concept=${CONCEPT_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/fragments\\?concept=${CONCEPT_ID}`));
 
   // 5. Open the fragment detail from its card, and confirm it renders.
-  const card = page.getByRole('button', { name: /PAC/i });
+  // The navigator's tree row also carries the alias, so match the card's own
+  // label — anonymous callers get the tree since Step 14b.
+  const card = page.getByRole('button', { name: /Open fragment/i });
   await expect(card).toBeVisible();
   await card.click();
-  await expect(page).toHaveURL(new RegExp(`/public/fragments/${FRAGMENT_ID}`));
+  await expect(page).toHaveURL(new RegExp(`/fragments/${FRAGMENT_ID}`));
+  await expect(page.locator('[class*="svgPage"] svg .note').first()).toBeAttached({
+    timeout: 30_000,
+  });
+});
+
+/**
+ * The old public URLs are permalinks in the wild: Component 11's glossary
+ * linked into `/public/concepts?concept=…` from the day it shipped, and
+ * fragment detail pages have been shareable since Component 10. Step 14b
+ * collapsed both onto one route, so the redirects are the only thing keeping
+ * those links working — and a redirect that dropped the query would land the
+ * reader on an empty prompt rather than the fragments they asked for.
+ */
+test('legacy public URLs still resolve after the Step 14b collapse', async ({ page }) => {
+  await page.goto(`/public/concepts?concept=${CONCEPT_ID}`);
+  await expect(page).toHaveURL(new RegExp(`/fragments\\?concept=${CONCEPT_ID}`));
+  await expect(page.getByRole('button', { name: /Open fragment/i })).toBeVisible();
+
+  await page.goto(`/public/fragments/${FRAGMENT_ID}`);
+  await expect(page).toHaveURL(new RegExp(`/fragments/${FRAGMENT_ID}`));
+  // Same proof of arrival the journey above uses: Verovio ran and produced
+  // notes. Asserted *attached* rather than visible because the headless layout
+  // measures the container at 0 width.
   await expect(page.locator('[class*="svgPage"] svg .note').first()).toBeAttached({
     timeout: 30_000,
   });

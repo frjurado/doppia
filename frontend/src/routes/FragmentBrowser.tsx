@@ -5,11 +5,21 @@ import Surface from '../components/ui/Surface';
 import Type from '../components/ui/Type';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { ApiError } from '../services/api';
-import { ConceptTreeNode, getConceptRoots, getConceptTree } from '../services/conceptApi';
+import { ConceptTreeNode, getConceptTree } from '../services/conceptApi';
 import { ConceptBrowseItem, listByConcept } from '../services/fragmentApi';
-import { formatBarRange, makeRepeatContextFormatter, qualifyRange } from '../utils/fragmentRange';
+import { getPublicConceptIndex } from '../services/glossaryApi';
+import { listPublicFragmentsByConcept } from '../services/publicApi';
+import { useAuth } from '../components/auth/AuthContext';
+import { EDITORIAL_ROLES } from '../services/roles';
+import {
+  formatBarRange,
+  makeRepeatContextFormatter,
+  qualifyRange,
+  rangeLabels,
+} from '../utils/fragmentRange';
 import { stripEmbeddedCatalogue } from '../utils/workTitle';
 import styles from './FragmentBrowser.module.css';
+import Button from '../components/ui/Button';
 
 // ---------------------------------------------------------------------------
 // Tree building helpers
@@ -136,7 +146,7 @@ export function FragmentCard({ item, onOpen }: FragmentCardProps) {
   const conceptLabel = item.primary_concept_alias ?? item.primary_concept_name ?? '—';
   // ADR-036: qualified with its movement section where bar numbers restart
   // ("Trio, mm. 12–15"), so two cards from different sections never read alike.
-  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end), {
+  const barRange = qualifyRange(formatBarRange(item.bar_start, item.bar_end, rangeLabels(t)), {
     sectionLabel: item.section_label,
     repeatContext: item.repeat_context,
     formatRepeatContext: makeRepeatContextFormatter(t),
@@ -241,14 +251,47 @@ export function FragmentCard({ item, onOpen }: FragmentCardProps) {
  *
  * Component 8 Step 7.
  */
+/**
+ * Browse fragments by concept — the one browse surface (Step 14b).
+ *
+ * There were two, `/concepts` and `/public/concepts`, and they were near
+ * duplicates: the same `FragmentCard`, the same `ConceptBrowseResponse` from
+ * the same service method, differing only in which client fetched it. The
+ * editorial one could not even show anything the public one could not — its
+ * status filter was a `useState` with no setter, pinned to `approved`.
+ *
+ * They are one route now, and the session decides what the caller gets:
+ *
+ *  - **Which client.** Editors call the editorial endpoint, everyone else the
+ *    public one. This is not a UI preference — the backend keys its policy on
+ *    `caller_id is None`, pinning `approved` and excluding NonCommercial
+ *    corpora (ADR-009 § 2) for anonymous callers. Choosing the client per
+ *    session is how the frontend meets a rule the server already enforces, and
+ *    it is the one real difference between the old surfaces: an editor sees NC
+ *    corpora here, an anonymous visitor never does.
+ *  - **Which concept tree.** The navigator runs on the *public* concept index
+ *    for every caller. Its nodes are field-for-field identical to the editorial
+ *    tree's, so this costs an adapter of one `flatMap` — and it retires the
+ *    reason the public surface had no navigator at all, namely that
+ *    `/concepts/tree` and `/concepts/roots` are editor-only.
+ *
+ * Root search stays editorial: `/concepts/search` is gated and has no public
+ * counterpart. Anonymous visitors browse the forest instead, which is what the
+ * glossary links them into.
+ */
 export default function FragmentBrowser() {
-  const { t } = useTranslation(['fragments', 'common']);
+  const { t, i18n } = useTranslation(['fragments', 'common']);
   usePageTitle(t('fragments:browser.pageTitle'));
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const rootId = searchParams.get('root');
   const conceptId = searchParams.get('concept');
+
+  // Editorial callers get the editorial client and the root search; everyone
+  // else gets the public client, which is what enforces ADR-009 § 2.
+  const { user } = useAuth();
+  const isEditorial = EDITORIAL_ROLES.some((role) => user?.roles.includes(role) ?? false);
 
   // ---- tree state ----
   const [treeNodes, setTreeNodes] = useState<ConceptTreeNode[]>([]);
@@ -279,20 +322,24 @@ export default function FragmentBrowser() {
   useEffect(() => {
     setTreeLoading(true);
     setTreeError(null);
-    const load: Promise<ConceptTreeNode[]> = rootId
-      ? getConceptTree(rootId).then((res) => res.nodes)
-      : getConceptRoots().then((roots) =>
-          Promise.all(roots.map((r) => getConceptTree(r.id).then((res) => res.nodes))).then(
-            (lists) => lists.flat()
-          )
-        );
+    // The public index already returns the whole forest — a flat node list
+    // keyed by parent_id with fragment counts, the same six fields the
+    // editorial tree carries — so it needs flattening, not adapting. Only a
+    // `?root` narrowing (reachable from the editor-only root search) still
+    // needs the gated subtree endpoint.
+    const load: Promise<ConceptTreeNode[]> =
+      rootId && isEditorial
+        ? getConceptTree(rootId).then((res) => res.nodes)
+        : getPublicConceptIndex().then((res) => res.domains.flatMap((d) => d.nodes));
     load
       .then(setTreeNodes)
       .catch((err) => {
         if (err instanceof ApiError) setTreeError(err);
       })
       .finally(() => setTreeLoading(false));
-  }, [rootId]);
+  // The concept tree's names come from the server's overlay, so a language
+  // switch must refetch rather than only re-render.
+  }, [rootId, isEditorial, i18n.language]);
 
   // ---- debounced root search ----
   const handleSearchChange = useCallback((value: string) => {
@@ -338,11 +385,9 @@ export default function FragmentBrowser() {
       if (isFirstPage) setFragmentsLoading(true);
       setFragmentsError(null);
       try {
-        const res = await listByConcept(conceptId, {
-          includeSubtypes,
-          status: statusFilter,
-          cursor,
-        });
+        const res = isEditorial
+          ? await listByConcept(conceptId, { includeSubtypes, status: statusFilter, cursor })
+          : await listPublicFragmentsByConcept(conceptId, { includeSubtypes, cursor });
         setFragments((prev) => (isFirstPage ? res.items : [...prev, ...res.items]));
         setFragmentsNextCursor(res.next_cursor);
       } catch (err) {
@@ -351,14 +396,14 @@ export default function FragmentBrowser() {
         if (isFirstPage) setFragmentsLoading(false);
       }
     },
-    [conceptId, includeSubtypes, statusFilter]
+    [conceptId, includeSubtypes, statusFilter, isEditorial]
   );
 
   useEffect(() => {
     setFragments([]);
     setFragmentsNextCursor(null);
     if (conceptId) loadFragments();
-  }, [conceptId, includeSubtypes, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [conceptId, includeSubtypes, statusFilter, isEditorial, i18n.language]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const childrenMap = useMemo(() => buildChildrenMap(treeNodes), [treeNodes]);
   const roots = childrenMap.get(null) ?? [];
@@ -422,51 +467,55 @@ export default function FragmentBrowser() {
             )}
           </div>
 
-          {/* Root search */}
-          <div className={styles.searchBox}>
-            <input
-              type="search"
-              className={styles.searchInput}
-              placeholder={t('fragments:browser.searchPlaceholder')}
-              value={searchQuery}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              aria-label={t('fragments:browser.searchAria')}
-            />
-            {(searchResults.length > 0 || searchLoading) && (
-              <Surface layer="container-highest" floating className={styles.searchDropdown}>
-                {searchLoading && (
-                  <div className={styles.searchItem}>
-                    <Type
-                      variant="label-sm"
-                      as="span"
-                      style={{ color: 'var(--color-on-surface-variant)' }}
+          {/* Root search — editorial only: `/concepts/search` is gated and has
+              no public counterpart. Anonymous visitors browse the forest
+              below, which is what the glossary links them into. */}
+          {isEditorial && (
+            <div className={styles.searchBox}>
+              <input
+                type="search"
+                className={styles.searchInput}
+                placeholder={t('fragments:browser.searchPlaceholder')}
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                aria-label={t('fragments:browser.searchAria')}
+              />
+              {(searchResults.length > 0 || searchLoading) && (
+                <Surface layer="container-highest" floating className={styles.searchDropdown}>
+                  {searchLoading && (
+                    <div className={styles.searchItem}>
+                      <Type
+                        variant="label-sm"
+                        as="span"
+                        style={{ color: 'var(--color-on-surface-variant)' }}
+                      >
+                        {t('common:searching')}
+                      </Type>
+                    </div>
+                  )}
+                  {searchResults.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      className={styles.searchItem}
+                      onClick={() => pickRoot(r.id)}
                     >
-                      {t('common:searching')}
-                    </Type>
-                  </div>
-                )}
-                {searchResults.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    className={styles.searchItem}
-                    onClick={() => pickRoot(r.id)}
-                  >
-                    <Type variant="body-sm" as="span">
-                      {r.name}
-                    </Type>
-                    <Type
-                      variant="label-sm"
-                      as="span"
-                      style={{ color: 'var(--color-on-surface-variant)' }}
-                    >
-                      {r.id}
-                    </Type>
-                  </button>
-                ))}
-              </Surface>
-            )}
-          </div>
+                      <Type variant="body-sm" as="span">
+                        {r.name}
+                      </Type>
+                      <Type
+                        variant="label-sm"
+                        as="span"
+                        style={{ color: 'var(--color-on-surface-variant)' }}
+                      >
+                        {r.id}
+                      </Type>
+                    </button>
+                  ))}
+                </Surface>
+              )}
+            </div>
+          )}
 
           {/* Tree */}
           <div className={styles.treeScroll}>
@@ -495,7 +544,9 @@ export default function FragmentBrowser() {
                   as="span"
                   style={{ color: 'var(--color-on-surface-variant)' }}
                 >
-                  {t('fragments:browser.searchToBrowse')}
+                  {isEditorial
+                    ? t('fragments:browser.searchToBrowse')
+                    : t('fragments:browser.noConcepts')}
                 </Type>
               </div>
             )}
@@ -581,15 +632,16 @@ export default function FragmentBrowser() {
                 ))}
                 {fragmentsNextCursor && !fragmentsLoading && (
                   <div className={styles.loadMore}>
-                    <button
-                      type="button"
-                      className={styles.loadMoreButton}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      fullWidth
                       onClick={() => loadFragments(fragmentsNextCursor)}
                     >
                       <Type variant="label-sm" as="span">
                         {t('common:loadMore')}
                       </Type>
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -601,7 +653,12 @@ export default function FragmentBrowser() {
                 as="span"
                 style={{ color: 'var(--color-on-surface-variant)' }}
               >
-                {rootId
+                {/* Keyed on whether a forest actually rendered, not on
+                    `?root`: the navigator is populated for every caller since
+                    Step 14b, so "search for a concept" would be telling a
+                    reader with a tree beside them — and no search box, which is
+                    editor-only — to do something they cannot. */}
+                {roots.length > 0
                   ? t('fragments:browser.selectFromTree')
                   : t('fragments:browser.searchToStart')}
               </Type>

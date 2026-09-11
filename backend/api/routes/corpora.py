@@ -18,6 +18,7 @@ from api.rate_limiting import UPLOAD, limiter
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from models.base import get_db
 from models.ingestion import IngestionReport
+from models.roles import ADMIN
 from services.ingestion import ingest_corpus
 from services.object_storage import StorageClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/composers", tags=["Corpora"])
     "/{composer_slug}/corpora/{corpus_slug}/upload",
     status_code=201,
     response_model=IngestionReport,
-    dependencies=[require_role("admin")],
+    dependencies=[require_role(ADMIN)],
     summary="Upload a corpus ZIP",
     response_description="Ingestion report listing accepted and rejected movements.",
 )
