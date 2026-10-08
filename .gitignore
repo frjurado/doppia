@@ -63,3 +63,6 @@ scripts/spike_output/
 /lib/
 backend/lib/
 /*.html
+
+# Private docs
+/private/
