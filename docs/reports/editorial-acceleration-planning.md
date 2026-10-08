@@ -9,6 +9,14 @@ Francisco answers § 7, this report becomes the input to a roadmap doc under
 `docs/roadmap/` and to one ADR (§ 4.9). This file then stays as the record of
 how the decisions were reached.
 
+> **Update 2026-10-08 (same day).** Decisions 1, 2 and 7 taken (Track E
+> placement; provenance rule → ADR-041; prose policy in `docs/howto/`), and the
+> production launch postponed. The rest are deferred to the stage named in
+> `docs/roadmap/track-e-editorial-acceleration.md` § Decisions. One correction
+> found while drafting E0: hard-locked decision 8's annotator `confidence`
+> field (cited in § 3 as ambiguity's "home") was specified but **never
+> implemented**. It is now an E1/E3 item.
+
 ---
 
 ## 1. The problem

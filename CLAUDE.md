@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Doppia is an open music analysis repository: a curated corpus of musical scores (MEI format) annotated with fragments, linked to a semantically rich knowledge graph in Neo4j. The system is currently in **Phase 1** — building the notation infrastructure, knowledge graph, and editorial tagging tools. No public-facing product exists yet.
+Doppia is an open music analysis repository: a curated corpus of musical scores (MEI format) annotated with fragments, linked to a semantically rich knowledge graph in Neo4j. Phase 1 (notation infrastructure, knowledge graph, editorial tagging tools) is complete. **Phase 2** (public read path, glossary, user infrastructure, then collections, exercises and blog) is in progress, with **Track E (editorial acceleration)** inserted before Component 13. See `docs/roadmap/phase-2.md` and `docs/roadmap/track-e-editorial-acceleration.md`.
 
 ## Commands
 
@@ -126,6 +126,7 @@ React 18 + TypeScript + Vite + React Router v6. All `.js` files are forbidden in
 - **`require_role()` and `require_owner_or_role()` are the only permitted permission mechanisms** — no inline role or ownership checks anywhere else. `require_role(*roles)` is any-of over the caller's role set (a route dependency); `require_owner_or_role()` lives in `backend/services/permissions.py` because it needs the loaded resource. Roles come from the `user_role` table, never from a JWT claim (ADR-037).
 - **Pydantic validates before every database write** — no payload reaches any database without passing through a Pydantic model.
 - **Seed scripts use `MERGE`, never `CREATE`** — bare `CREATE` in a seed script is a bug.
+- **Machines propose; only human actions produce approved data** (ADR-041). Machine output enters the editorial workflow only as a candidate (kept outside the `fragment` table; machines never create `fragment` rows), a visibly preselected form value, or a review-queue flag that writes nothing. Any tool that preselects a value must record it in `fragment.value_provenance`.
 - **MEI files are stored by S3 object key** (e.g. `mozart-piano-sonatas/k331/movement-1.mei`), never absolute path or URL. Signed URLs are resolved at request time.
 
 ### Python
@@ -172,6 +173,9 @@ Before finishing any implementation task:
 | `docs/architecture/security-model.md` | CORS policy, rate limiting, signed URL lifecycle, dev auth bypass |
 | `docs/mockups/opus_urtext/DESIGN.md` | Authoritative design system for all frontend work |
 | `docs/adr/` | Architecture Decision Records for all non-obvious decisions |
+| `docs/roadmap/phase-2.md` | Phase 2 component order, Track M, and the decisions log |
+| `docs/roadmap/track-e-editorial-acceleration.md` | Track E stages (E0–E6), decisions taken and deferred; governed by ADR-041 |
+| `docs/howto/prose-annotation-guidelines.md` | What fragment prose contains and the review checklist (P1–P8) applied to it |
 | `docs/roadmap/phase-2-entry-backlog.md` | Everything Phase 1 deliberately left open — first input to Phase-2 planning |
 | `docs/deployment.md` | Staging/production setup, deploy flow, re-ingestion protocol, free-tier operations |
 | `CONTRIBUTING.md` | Full coding conventions, testing strategy, and branching policy |
