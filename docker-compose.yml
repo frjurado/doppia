@@ -44,8 +44,14 @@ services:
       timeout: 3s
       retries: 10
 
+  # minio/minio and minio/mc were withdrawn from Docker Hub (2026-10); Chainguard's
+  # build is the drop-in. It publishes only `latest`, so pin by digest and bump
+  # deliberately. The image ships sh and mc, so minio-init reuses it.
   minio:
-    image: minio/minio
+    image: cgr.dev/chainguard/minio@sha256:e70b2b1e74d79457f808710483bd726ff364529ca30736eaa15a6ab547d3a5a7
+    # Chainguard runs as uid 65532; the minio_data volume created by the old
+    # image is root-owned, so run as root to keep existing local data readable.
+    user: "0"
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -62,7 +68,7 @@ services:
       retries: 10
 
   minio-init:
-    image: minio/mc
+    image: cgr.dev/chainguard/minio@sha256:e70b2b1e74d79457f808710483bd726ff364529ca30736eaa15a6ab547d3a5a7
     depends_on:
       minio:
         condition: service_healthy

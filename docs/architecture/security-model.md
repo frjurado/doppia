@@ -710,6 +710,17 @@ inconsistency.
 
 No RLS policies need to be written. The default-deny is the correct policy: PostgREST should never serve these tables directly, and the absence of an explicit policy makes that intent clear.
 
+**Supabase stopped auto-granting Data API access on 2026-10-30.** From that
+date, a new table in `public` no longer receives automatic grants to `anon`,
+`authenticated` and `service_role`. Tables that existed before keep the
+grants they had. For Doppia this adds a second barrier on every new table: it
+has no grants and also denies by default under RLS. It does not replace RLS.
+The per-table `ENABLE ROW LEVEL SECURITY` rule above still applies, because the
+older tables keep their grants and the Supabase linter checks RLS, not grants.
+**Do not add the `GRANT` statements** that Supabase's notice recommends. They
+exist to open tables to the Data API, which Doppia does not use. FastAPI connects
+as the table owner and needs no grants.
+
 **Note on `alembic_version`.** This Alembic-internal table is covered by migration 0006 rather than 0005. Alembic connects via `DATABASE_URL` as the `postgres` superuser; PostgreSQL superusers bypass RLS entirely regardless of whether any policies exist. Enabling RLS with no policies on `alembic_version` therefore has no effect on migrations — it only silences the Supabase linter warning that flagged the table as unprotected.
 
 ### Why no other approach is needed

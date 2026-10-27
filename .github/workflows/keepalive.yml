@@ -25,13 +25,19 @@ jobs:
         run: |
           # Retry a few times: the first request after an idle spell may hit a
           # cold-starting Fly machine and time out before uvicorn is up.
+          # No --fail: a 503 body names the failing store ("postgres"/"neo4j"
+          # marked "error"), so print it rather than discard it.
           for attempt in 1 2 3; do
-            if curl --fail --silent --show-error --max-time 90 \
-                "https://doppia-staging.fly.dev/api/v1/health/deep"; then
+            rm -f body.json
+            code=$(curl --silent --show-error --max-time 90 \
+                --output body.json --write-out '%{http_code}' \
+                "https://doppia-staging.fly.dev/api/v1/health/deep") || code="curl-error"
+            cat body.json 2>/dev/null || true
+            if [ "$code" = "200" ]; then
               echo " — ok (attempt ${attempt})"
               exit 0
             fi
-            echo "attempt ${attempt} failed; retrying in 30s..."
+            echo " — HTTP ${code}; attempt ${attempt} failed; retrying in 30s..."
             sleep 30
           done
           echo "deep health ping failed after 3 attempts" >&2
