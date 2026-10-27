@@ -174,20 +174,26 @@ These show up everywhere; internalizing them explains most code you'll read:
 
 ---
 
-## 8. Decisions: how to navigate the 36 ADRs
+## 8. Decisions: how to navigate the 41 ADRs
 
 Don't memorize them; know the clusters, and read the actual ADR when the topic comes up:
 
 - **Platform choices:** 001 auth (Supabase), 002 file storage, 003 score display mode,
-  010 React, 012 Tone.js, 013 Verovio pinning, 006 i18n.
+  010 React, 012 Tone.js, 013 Verovio pinning, 006 i18n (040 cross-language concept
+  search extends it).
 - **Auth/session:** 016 JWT storage → superseded in part by 035 (HttpOnly refresh cookie).
+- **Users & rights:** 037 role-set model (`user_role`; any-of `require_role`), 038 data
+  rights (export, deletion, reassignment to the system user).
 - **Task execution:** 017 Celery/Redis config, 034 in-process default.
 - **MEI normalization family** (the deep end): 021/022 accidentals, 026 ties, 027
   corrections overlay, 028 gestural resolution, 029 staff presentation, 030 deterministic
   xml:ids, 031 clefs, 032/033 import repairs, 025 repeats/voltas, 036 movement sections.
 - **Graph & tagging model:** 011 multi-level tagging, 019 bool cardinality, 020 cadence
-  prerequisite edges, 023 ordering, 005/015 measure coordinates, 024 fragment rendering
-  context.
+  prerequisite edges, 023 ordering, 039 property-value labelling, 005/015 measure
+  coordinates, 024 fragment rendering context.
+- **Editorial workflow:** 041 machine assistance and provenance. Machines propose
+  (candidates, preselected values, flags); only human actions produce approved data;
+  `origin` per fragment, `value_provenance` per value.
 - **Content/licensing:** 009 DCML licensing constraint, 014 original-MEI retention,
   007 prose vectorisation, 008 fragment previews, 004 pipeline trigger, 018 ingestion
   failure recovery.
@@ -199,14 +205,22 @@ Don't memorize them; know the clusters, and read the actual ADR when the topic c
 - **Phase 1 (components 1–9): done.** Ingested the DCML Mozart piano-sonatas corpus,
   built the tagging tool, seeded the Cadence domain, hardened in Component 9.
 - **Phase 2 (agreed 2026-07-15): in progress.** Order: 10 foundations/public read path
-  (done — security debt retired July 2026) → **11 Concept Glossary (current)** →
-  12 user infrastructure → 13 collections → 14 presentation mode → 15 exercises →
-  16 blog/scrollytelling. Track M (editorial repairs) runs in parallel.
+  (done — security debt retired July 2026) → 11 Concept Glossary (done, Aug 2026) →
+  12 user infrastructure (done, Sep 2026) → **Track E — editorial acceleration
+  (current, inserted 2026-10-08)** → 13 collections → 14 presentation mode →
+  15 exercises → 16 blog/scrollytelling. Track M (editorial repairs) runs in parallel.
+  Track E exists because editorial throughput, not infrastructure, became the
+  constraint. It runs E0 groundwork (done) → E1 graph review against Caplin
+  (critical path) → E2 DCML cadence reconciliation → E3 harmony-derived defaults →
+  E4 consistency checks → E5 passage correspondence → E6 model critique.
+  The production launch (staging/production split, domain) is postponed.
 - **Phase 3 (AI tutoring): designed-for but not started** — pgvector and user-history
-  schemas exist so no migration is needed if/when it happens.
+  schemas exist so no migration is needed if/when it happens. Note the boundary drawn
+  by ADR-041: *user-facing* AI is Phase 3; *editorial-side* machine assistance is
+  allowed from Phase 2.
 
-Live sources: `docs/roadmap/phase-2.md`, `phase-2-entry-backlog.md`, per-issue reports
-under `docs/reports/`.
+Live sources: `docs/roadmap/phase-2.md`, `track-e-editorial-acceleration.md`,
+`phase-2-entry-backlog.md`, per-issue reports under `docs/reports/`.
 
 ---
 
@@ -220,6 +234,8 @@ under `docs/reports/`.
 | What does the graph contain? | `architecture/knowledge-graph-design-reference.md`, `edge-vocabulary-reference.md`, `knowledge-graph-domain-map.md` |
 | How does MEI get cleaned up? | `architecture/mei-ingest-normalization.md` + ADR 021–033 |
 | How is it deployed? | `deployment.md` |
-| Want the plain-language version of a tool or concept? | `handbook/guides/` (18 short explainers; backlog in the ledger) |
+| Want the plain-language version of a tool or concept? | `handbook/guides/` (19 short explainers; backlog in the ledger) |
+| What goes in a fragment's prose commentary? | `howto/prose-annotation-guidelines.md` |
+| What may a machine do in editorial work? | `adr/ADR-041-editorial-machine-assistance-and-provenance.md`; `roadmap/track-e-editorial-acceleration.md` |
 | Why was X decided? | `adr/ADR-*.md` (see §8 clusters) |
 | What's planned / what broke? | `roadmap/`, `reports/` |

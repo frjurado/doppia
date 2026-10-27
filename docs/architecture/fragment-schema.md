@@ -71,6 +71,8 @@ CREATE INDEX fragment_status_idx ON fragment (status);
 CREATE INDEX fragment_movement_idx ON fragment (movement_id);
 ```
 
+> **Planned (ADR-041, 2026-10-08).** Three provenance columns, `origin`, `origin_ref` and `value_provenance`, are added by the first Track E stage that writes them (E3 at the latest; see `docs/roadmap/track-e-editorial-acceleration.md`). They record how a fragment started and which values were machine-preselected and accepted unchanged. They are columns, not `summary` fields, because provenance is editorial metadata and not analysis. This table definition is updated when the migration lands.
+
 **`movement_id`** is the foreign key to the `movement` row that owns the MEI source. The S3 object key is resolved by reading `movement.mei_object_key`; there is no `mei_file` column on the fragment itself, because the key belongs to the movement and the fragment inherits it. Keys follow the pattern `{composer.slug}/{corpus.slug}/{work.slug}/{movement.slug}.mei` (e.g. `mozart/piano-sonatas/k331/movement-1.mei`).
 
 **`bar_start` / `bar_end`** are the `<measure @n>` values from the MEI source — the **human coordinate**. They are the numbers a musician sees on the score and are used for display labels ("m. 72–75"), API responses, and editorial communication. They are fragile as machine identifiers: they can be non-integer (`X1`, `X2` in MuseScore exports), repeat across volta endings (both endings share the same `@n`), and pickup bars use `@n="0"`. These columns are retained as-is for display; all rendering uses `mc_start`/`mc_end` instead. See `docs/adr/ADR-015-dual-measure-coordinate-system.md` for the full rationale and `docs/adr/ADR-005-sub-measure-precision.md` for the beat-precision implementation.
@@ -215,8 +217,9 @@ Every record carries a top-level `version` integer. Code that reads `summary` mu
   "concepts": ["PerfectAuthenticCadence"],
 
   "properties": {
-    "SopranoPosition": "ScaleDegree1",
-    "CadentialElaboration": ["Cadential64", "AppliedDominant"]
+    "CadenceFunction": "Independent",
+    "PhraseClosure": ["ClosesConsequent"],
+    "ECP": false
   },
 
   "concept_extensions": {}
@@ -259,14 +262,17 @@ The version of music21 used to generate the auto-extracted fields (e.g. `"9.1.0"
 Ordered list of concept `id` values applied to this fragment, matching the entries in `fragment_concept_tag`. The first entry is always the primary concept. This array is denormalised from the join table for convenience in AI reasoning contexts where both the tag and the summary are consumed together; `fragment_concept_tag` is authoritative for querying.
 
 **`properties`** *(object, optional)*
-Instance-level property values, keyed by `PropertySchema.id`. Values are either a single string (`ONE_OF` cardinality) or an array of strings (`MANY_OF` cardinality). Every value is a `PropertyValue.id` from the knowledge graph schema. Validated against the applicable schemas at write time by the Pydantic layer.
+Instance-level property values, keyed by `PropertySchema.id`. Values are a single string (`ONE_OF` cardinality), an array of strings (`MANY_OF` cardinality), or a JSON boolean (`BOOL` cardinality, ADR-019). Every string value is a `PropertyValue.id` from the knowledge graph schema. Validated against the applicable schemas at write time by the Pydantic layer.
 
 ```json
 {
-  "SopranoPosition": "ScaleDegree1",
-  "CadentialElaboration": ["Cadential64", "AppliedDominant"]
+  "CadenceFunction": "Independent",
+  "PhraseClosure": ["ClosesConsequent"],
+  "ECP": false
 }
 ```
+
+(Schemas and values as seeded in `backend/seed/domains/cadences.yaml`. An earlier version of this example used `SopranoPosition` and `CadentialElaboration`, which the seeded domain does not define — corrected 2026-10-08, Track E stage E0.)
 
 A missing key means no value was supplied for that schema. A `required: true` schema with no value will fail Pydantic validation before the record is written.
 

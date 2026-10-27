@@ -276,6 +276,14 @@ component keep missing their constitutive pointer. Triage which concepts are
 cleanly exercisable as part of building the two capturing types, rather than as
 a separate pass.
 
+> **Under review (2026-10-08).** Track E stage E1 re-examines every capture
+> extension before any is built. `post_evasion_harmony` is likely a computed
+> lookup (the evasion sits immediately after the cadence fragment's end), not
+> annotator input. The `fragment_pointer` fields need confirmation UI for their
+> already-designed pre-population, not inference. If E1 so rules, the build
+> moves to Track E stage E3, ahead of this component. See
+> `track-e-editorial-acceleration.md` § Decisions.
+
 ---
 
 ## Decisions Log

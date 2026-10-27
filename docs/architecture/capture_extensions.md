@@ -2,6 +2,14 @@
 
 ## Purpose
 
+> **Under review (2026-10-08, Track E stage E1).** Each declared extension is
+> being re-examined against this document's own rule ("if it's computable, it
+> belongs in the pipeline"). In particular, `post_evasion_harmony` appears to
+> be a lookup of the first `movement_analysis` event at or after the evaded
+> cadence's end, which would be better stored as an event reference or derived
+> on read than captured as a copied `harmony_object`. See
+> `docs/roadmap/track-e-editorial-acceleration.md`.
+
 `capture_extensions` is a structured specification on a concept node that tells the tagging tool what additional data to collect when a fragment of that concept type is annotated. It is the concept node's authority over what the annotator is asked to provide, beyond the base schema.
 
 ---

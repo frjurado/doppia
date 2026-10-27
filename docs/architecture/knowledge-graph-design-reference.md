@@ -10,6 +10,8 @@ These layers are not nested inside one another. They are all first-class graph c
 
 ## Part I — Architecture
 
+> **Note on examples (2026-10-08).** The schemas and values used throughout this document (`SopranoPosition`, `CadentialElaboration`, `Predominant`, …) are illustrations of the three-layer design, written before the cadence domain was seeded. They are not the seeded vocabulary. For the actual concepts and property schemas read `backend/seed/domains/cadences.yaml` and `docs/seed-drafts/cadences-design.md`.
+
 ### 1. The Three Layers
 
 | Layer | What it stores | Connects via |

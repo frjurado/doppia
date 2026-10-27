@@ -101,6 +101,8 @@ ideas for any new tech to the backlog below.
 | Measure coordinates: dual system, sub-measure precision | ADR-015, ADR-005 | 0 | — | |
 | Security model: roles, CORS, rate limits, signed URLs | security-model.md | 0 | — | |
 | Licensing constraints shaping the corpus (DCML) | ADR-009; corpus-and-analysis-sources.md | 0 | — | |
+| Editorial machine assistance: the provenance rule, and where each Track E tool sits on it | ADR-041; roadmap/track-e-editorial-acceleration.md | 0 | — | Added 2026-10-08 with ADR-041. |
+| Provenance in layers: event (`source`/`auto`/`reviewed`), fragment (`origin`), value (`value_provenance`) | fragment-schema.md; corpus-and-analysis-sources.md; ADR-041 §§ 3–5 | 0 | — | Added 2026-10-08. Fragment/value columns are planned, landing in Track E E3. |
 
 ---
 

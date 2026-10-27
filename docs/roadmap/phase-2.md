@@ -7,13 +7,20 @@ per-component implementation plans (starting with
 [`component-10-foundations-public-read-path.md`](component-10-foundations-public-read-path.md))
 are drafted as each component begins.
 
+**Amended 2026-10-08:** Track E (Editorial Acceleration) is inserted between
+Components 12 and 13, and the "no AI layer" scope is narrowed to *user-facing*
+AI (ADR-041). See [`track-e-editorial-acceleration.md`](track-e-editorial-acceleration.md).
+
 ## Purpose
 
 Phase 2 turns the Phase 1 knowledge asset — a populated fragment database, a
 seeded cadence domain, and the Verovio rendering infrastructure — into a
 publicly usable product: a concept glossary, user accounts, collections with a
-presentation mode, exercises, and a blog with scrollytelling. No AI layer;
-that remains Phase 3.
+presentation mode, exercises, and a blog with scrollytelling. No user-facing
+AI layer; that remains Phase 3. Editorial-side machine assistance (candidates,
+defaults, consistency checks, model critique), used only by editors and never
+writing approved data without a human action, is permitted from Phase 2 per
+`../adr/ADR-041-editorial-machine-assistance-and-provenance.md` (Track E).
 
 The feature scope is defined in `../architecture/project-architecture.md`
 § Phase 2. This document turns that scope into components, an order, and a
@@ -68,6 +75,9 @@ Components continue Phase 1's numbering (Phase 1 ended at Component 9).
 12. User infrastructure                ── roles, registration, user state,
     │                                     moderation, data rights, topbar
     ▼
+Track E — Editorial acceleration       ── inserted 2026-10-08; E0–E4 here,
+    │                                     E5–E6 may interleave with 13–14
+    ▼
 13. Collections                        ── first user-owned content
     │
     ▼
@@ -82,6 +92,9 @@ Components continue Phase 1's numbering (Phase 1 ended at Component 9).
 
 Track M (parallel): editorial-tool repairs and UX debt — runs alongside,
 prioritised opportunistically. M0 (fragment editor repair) was urgent; done.
+
+Production launch (staging/production split, domain): postponed 2026-10-08;
+docs/reports/production-launch-planning.md stays open.
 ```
 
 Rationale for the order: cheapest-public-value first (glossary needs no
@@ -89,6 +102,13 @@ accounts), user infrastructure before anything user-owned, presentation mode
 immediately after collections while the code is warm, exercises before blog
 (agreed 2026-07-14), and scrollytelling last but de-risked early by a
 rendering spike in Component 10.
+
+Track E was inserted before Component 13 on 2026-10-08 because Components
+13–16 all consume approved fragments, and editorial throughput, not
+infrastructure, had become the constraint. See
+[`track-e-editorial-acceleration.md`](track-e-editorial-acceleration.md) and
+the report it came from,
+[`../reports/editorial-acceleration-planning.md`](../reports/editorial-acceleration-planning.md).
 
 ---
 
@@ -426,7 +446,11 @@ exercises with item-level progress tracking. Agreed to precede the blog.
   Component 12's carried list, 2026-08-26): the two capturing types
   (`harmony_object`, `fragment_pointer`) get declarations on the concept
   payload, capture UI, write validation, and read-model surfacing — not just
-  the triage the earlier wording promised.
+  the triage the earlier wording promised. **Under review (2026-10-08):**
+  Track E stage E1 re-examines every capture extension
+  (`post_evasion_harmony` is likely a computed lookup, and the pointer fields
+  need confirmation UI rather than capture). If E1 so rules, this scope moves
+  to Track E (E3); see `track-e-editorial-acceleration.md`.
 
 The `exercise_session` / `exercise_result` tables ship in Component 12
 regardless, so history is recorded from the first exercise ever answered.
@@ -462,6 +486,26 @@ the Component 10 spike.
 
 ---
 
+## Track E — Editorial Acceleration (inserted before Component 13)
+
+**Purpose:** raise tagging and review throughput by removing repetition, so the
+editor's time goes to the cases that need judgement. Most of it is
+deterministic tooling; model use is confined to critique until ADR-041 § 6's
+conditions are met.
+
+**Full roadmap:** [`track-e-editorial-acceleration.md`](track-e-editorial-acceleration.md).
+Stages:
+
+- E0 groundwork (done 2026-10-08);
+- E1 graph review against Caplin (critical path);
+- E2 DCML cadence-label reconciliation;
+- E3 harmony-derived and expected-shape defaults (absorbs M8);
+- E4 consistency checks and review triage;
+- E5 passage correspondence;
+- E6 model critique.
+
+---
+
 ## Track M — Editorial-Tool Repairs & UX Debt (parallel)
 
 Runs alongside Components 10–16; no public-launch gate, but M0 blocked
@@ -484,7 +528,7 @@ everything else rides alongside the component it pairs with naturally.
 | M5 | Bracket redesign (square handles, edited-vs-rest differentiation, collision/label overlap) — needs design thinking first | With Component 12's design-system work (topbar / DESIGN.md addendum) — one design pass | issues doc § Score. **Done 2026-09-01 (Step 14).** All four asks traced to one cause — four surfaces each carrying a private copy of the vertical geometry — so the **vertical half of the bracket-geometry unification was pulled forward** from the backlog; the horizontal half stays there. End treatment now encodes editability (serif = committed, gradient = editable); labels always sit on the far side of their bracket from the staff and stagger only where they collide. Exploration: [`../reports/component-12-reports/m5-bracket-redesign-exploration.md`](../reports/component-12-reports/m5-bracket-redesign-exploration.md) |
 | ~~M6~~ | ~~Info sidebar fixes: property order, harmony sliced to fragment range, local-key convention, stage properties missing, wrong key/meter in summary~~ | ✅ Fixed — Component 11 Step 10. The "possibly a real bug" was real: `summary.key`/`summary.meter` were parsed from the MEI, which encodes `<keySig sig="4f"/>` with no mode, so every fragment in the corpus was stamped "C major". Both now derive from the movement record, and `summary.meter` resolves at the fragment's own mc — which in turn exposed M18. | issues doc § Info sidebar |
 | ~~M7~~ | ~~Stage-bracket overflow bug at sub-beat fragment bounds (279/ii m. 8–10)~~ | ✅ Fixed — Component 11 Step 11 (2026-07-27): the stage layout frame applied the selection's beat-precision endpoint filters at beat/sub-beat resolution only, so a beat-precise fragment whose stages fit *measure*-granularly — the normal case, since the grid follows the stage count — got whole-measure outer stages that overflowed their parent. Invariant I7 was quietly false exactly there. `buildStageSlots` now clips both endpoint slots (geometry and beat coordinates) and `prePopulateStages` pins its outer edges; stored rows repaired by `clamp_subpart_bounds.py` | issues doc § Real bugs |
-| M8 | Harmony panel refinements (Grado vs Fundamental semantics, local-key prepopulation/display; "edit events outside a fragment?" question) | During 13–14 — harmony data quality feeds exercises | issues doc § Harmony panel |
+| M8 | Harmony panel refinements (Grado vs Fundamental semantics, local-key prepopulation/display; "edit events outside a fragment?" question) | **Pulled into Track E, stage E3 (2026-10-08)**: the same data feeds the harmony-derived defaults. Was "during 13–14" | issues doc § Harmony panel |
 | ~~M9~~ | ~~Tagging sidebar cleanup (drop "stage properties" label; fix stage ordering)~~ | ✅ **Landed — Component 12 Step 18 (2026-09-06), `5b310e1`.** Larger than "small": the ordering defect was not absent stages sorting last but cards keeping whatever order the clicks produced. `orderStageCards` imposes score position, absent stages held in place | issues doc § Tagging sidebar |
 | M10 | ~~G1 beat-range display convention~~; pickup/partial-bar beat numbering; caret at repeat barlines | **Split (2026-08-26):** G1 in Component 12 (plan Step 20); pickup numbering (ADR-005-adjacent design work) and the caret in Component 13. ✅ **G1 landed 2026-09-11, `754c34b`** — ADR-005 § "range-label convention": the label names the first and last *included onset*, unit inferred from the endpoints' precision, so end ≥ start holds by construction. The other two remain Component 13's | backlog §3; ADR-005 |
 | ~~M11~~ | ~~Concept-tree count cache staleness~~ | ✅ Fixed — Component 11 Step 8 (2026-07-25): the Redis `tree:*` cache held the whole tree response *including* `fragment_count`, invalidated only on re-seed, so counts sat up to an hour stale. The cache now holds the count-free structure (key bumped to `tree:v2:…`); approved counts are read live from PostgreSQL on every request, by the editor tree and the public glossary index alike. | issues doc § Fragment browser |
@@ -534,6 +578,11 @@ second-language content machinery (ADR-006).
 | Range-label convention (G1) | A range names the first and last *included onset*; the unit is inferred from the endpoints' own precision, so end ≥ start by construction and no clamp is needed (2026-09-10) | `ADR-005` § "range-label convention"; `component-12-user-infrastructure.md` § Step 20 |
 | Cross-language concept search | Search Neo4j **and** `concept_translation` and union the result for a non-English locale, rather than searching the overlay alone: concepts are seeded English-first, so a locale-only search would make every newly seeded concept unfindable rather than merely untranslated (2026-09-11) | `ADR-040`; `component-12-user-infrastructure.md` § Step 21 |
 | Shell scrolling | The page shell scrolls by default; a page that wants to trap its own scrolling opts out. Forgetting now costs a scrollbar instead of silently clipping content (2026-09-11) | `component-12-user-infrastructure.md` § Step 12 |
+| Track E placement | Editorial Acceleration inserted between Components 12 and 13 (E0–E4); E5–E6 may interleave with 13–14; component order 13–16 unchanged (2026-10-08) | `track-e-editorial-acceleration.md` |
+| Editorial machine assistance | Permitted from Phase 2 on the editorial side only; machines propose (candidates, preselected values, flags), only human actions produce approved data; provenance at fragment and value level (2026-10-08) | `ADR-041` |
+| Prose annotation policy | Prose says what the structured fields cannot; references to other passages live outside the prose (2026-10-08) | `../howto/prose-annotation-guidelines.md` |
+| M8 slot | Pulled into Track E stage E3 (2026-10-08) | this doc, Track M; `track-e-editorial-acceleration.md` |
+| Production launch | Postponed (2026-10-08); the planning report stays open | `../reports/production-launch-planning.md` |
 
 Per the Definition of Done, non-obvious decisions made during implementation
 get ADRs; the registration/role-model migration in particular should be
