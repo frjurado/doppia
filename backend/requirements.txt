@@ -46,7 +46,7 @@ verovio==6.1.0
 # carried an unfixable advisory set (PYSEC-2025-185 + transitive ecdsa/pyasn1)
 # and is effectively unmaintained. The [crypto] extra pulls cryptography for
 # ES256 JWKS verification.
-PyJWT[crypto]==2.13.0
+PyJWT[crypto]==2.15.1
 httpx==0.28.1
 
 # Environment variable loading (.env files in dev; no-op in production)

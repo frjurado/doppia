@@ -564,7 +564,7 @@ Staging runs entirely on free tiers, and two of them **auto-pause on idleness** 
 | Fly.io | `auto_stop_machines` + `min_machines_running = 0` | First request after idle hits a cold start (a few seconds) | Nothing needed; the keep-alive ping also wakes the machine daily |
 | Cloudflare R2 | 10 GB storage / generous ops allowance | Not a realistic constraint at Phase-1 scale | None |
 
-**Keep-alive ping.** `.github/workflows/keepalive.yml` hits `GET /api/v1/health/deep` daily (06:23 UTC, with retries for the Fly cold start). The endpoint runs a trivial query against **both** PostgreSQL and Neo4j so each provider registers activity; it is unauthenticated (like `/health`) and returns per-store status only, no data. A 503 from it names the paused store. Daily is comfortably inside the shortest (3-day) pause window, so a failed run or two is harmless.
+**Keep-alive ping.** `.github/workflows/keepalive.yml` hits `GET /api/v1/health/deep` daily (06:23 UTC, with retries for the Fly cold start). The endpoint runs a trivial query against **both** PostgreSQL and Neo4j so each provider registers activity; it is unauthenticated (like `/health`) and returns per-store status only, no data. A 503 from it names the paused store, and the workflow prints that response body in its log (since 2026-10-28; earlier runs used `curl --fail` and discarded it). Daily is comfortably inside the shortest (3-day) pause window, so a failed run or two is harmless.
 
 **If a store paused anyway** (e.g. the workflow was disabled): resume Neo4j from the Aura console (takes ~1 min) and/or restore the Supabase project from its dashboard, then re-run the workflow manually (`workflow_dispatch`) and confirm it returns 200.
 

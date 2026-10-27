@@ -423,7 +423,7 @@ CREATE TABLE prose_chunk (
 
 ### 4. Object Storage — MEI Files and SoundFont Assets
 
-**Local dev:** MinIO (`minio/minio` image) running on port 9000. Accessed by the API to resolve `mei_object_key` values into signed URLs (15-minute TTL). Bucket name: `doppia`.
+**Local dev:** MinIO (Chainguard build, `cgr.dev/chainguard/minio`, pinned by digest in `docker-compose.yml` and `ci.yml`; `minio/minio` was withdrawn from Docker Hub in 2026-10) running on port 9000. Accessed by the API to resolve `mei_object_key` values into signed URLs (15-minute TTL). Bucket name: `doppia`.
 
 **Production:** Cloudflare R2. The API generates pre-signed R2 URLs; the frontend fetches MEI content directly from R2 without proxying through the API server.
 
