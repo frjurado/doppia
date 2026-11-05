@@ -22,8 +22,8 @@ This plan details stage E1 of the track document; it does not replace it.
 - **The glossary is bilingual.** `backend/seed/translations/es.yaml` overlays
   definitions and names, so every rewritten public text changes in both
   languages (Step 8).
-- **The local database is not the campaign.** It holds 21 top-level fragments.
-  The counts that gate this work must come from staging (Step 1).
+- **The local database is not the campaign.** It holds 21 top-level fragments;
+  staging holds 155 (Step 1).
 - **The tool refuses a child-less fragment.** Q5 needs one case of it, a Dominant
   Arrival on a terminal dominant. The guard is small and frontend-only (Step 14).
 
@@ -31,14 +31,11 @@ This plan details stage E1 of the track document; it does not replace it.
 
 ## Part 1 — Facts
 
-### Step 1 — Staging counts
+### Step 1 — Staging counts — done 2026-11-05
 
-Run `scripts/e1_staging_facts.py` (read-only) for the checks in `proposals.md` § E,
-with the staging connection string in the git-ignored `private/staging.env`.
-
-**Gates:** `Unison` retires only if its count is zero, or the values are migrated
-first. `Covered` moves only if no non-realised cadence carries it. The other
-counts size Step 15.
+`scripts/e1_staging_facts.py` (read-only) ran against staging; the results are in
+`proposals.md` § E. `Unison` and `Covered` are unused, so Step 5 needs no data
+migration, and the audit has nine fragments.
 
 ---
 
@@ -74,8 +71,8 @@ Group the rare BOOLs with the existing "other" group (Component 12 Step 16).
 
 ### Step 5 — Removals and moves
 
-- Retire `Unison`, subject to Step 1.
-- Move `Covered` from `Cadence` to `AuthenticCadenceRealised`, subject to Step 1.
+- Retire `Unison`.
+- Move `Covered` from `Cadence` to `AuthenticCadenceRealised`.
 - Remove the `post_evasion_harmony` capture extension from `EvadedCadence`, and
   `harmony_object` from `backend/seed/schemas.py` with its tests.
 - Write one idempotent script that deletes the stale edges and the `Unison`
@@ -183,13 +180,10 @@ The backend needs no change (`sub_parts` defaults to empty).
 
 ### Step 15 — Audit list
 
-List the fragments on staging that the decisions touch, from the Step 1 queries:
-deviations with a stage that breaks P10, half cadences that break the Q3 ruling,
-evaded fragments that do not end at their dominant stage, `Covered` values to
-re-check against the new meaning. Corrections are editorial: Francisco makes them
-in the tool, one by one (ADR-041). No bulk rewrite of fragments, and no prose
-backfill (P5). If the list is long, it goes through the E4 flags instead of being
-cleared here.
+The nine fragments are listed in `proposals.md` § E. Corrections are editorial:
+Francisco makes them in the tool, one by one (ADR-041). No bulk rewrite of
+fragments, and no prose backfill (P5). The two K281/i dominant arrivals wait for
+Step 14.
 
 ---
 
@@ -217,12 +211,9 @@ cleared here.
 ## Sequencing
 
 ```
-Step 1 (staging counts) → Steps 2–8 → Step 9 → Steps 10–13 → Step 15
+Steps 2–8 → Step 9 → Steps 10–13 → Step 15
                           Step 14 (independent; before any terminal-dominant DA is tagged)
 ```
-
-Steps 2–4 and 6 can start before Step 1, because they add or reword and remove
-nothing. Step 5 cannot.
 
 **Staging:** the seed and the Step 5 script run after the PR merges, then the
 glossary is checked on staging in both languages.

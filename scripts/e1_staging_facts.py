@@ -36,7 +36,7 @@ _TOP_LEVEL = """
 _PLACE = "w.slug || '/' || m.slug AS place, f.bar_start, f.bar_end, f.status"
 
 _CHILDREN = """
-    (SELECT coalesce(string_agg(ct.concept_id, ' > ' ORDER BY c.mc_start), '(none)')
+    (SELECT coalesce(string_agg(ct.concept_id, ' > ' ORDER BY c.mc_end, c.beat_end), '(none)')
        FROM fragment c
        JOIN fragment_concept_tag ct ON ct.fragment_id = c.id AND ct.is_primary
       WHERE c.parent_fragment_id = f.id) AS stages

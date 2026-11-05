@@ -1,6 +1,6 @@
 # E1 proposals and open questions
 
-**Date:** 2026-10-08; revised 2026-11-05 with Francisco's answers (§ F). Part
+**Date:** 2026-10-08; revised 2026-11-05 with Francisco's answers (§ F) and the staging counts (§ E). Part
 of the [E1 review](README.md). Every row of [`concordance.md`](concordance.md)
 that is not "Consistent" leads here. Nothing below has been applied yet: the
 implementation plan is
@@ -19,7 +19,7 @@ Where a row carries a condition, it is stated there.
 | # | Proposal | Settles (roadmap E1 list) | Changes | Stage | Status |
 |---|---|---|---|---|---|
 | P1 | Reaffirm decision 4; add per-concept **expected stages** read by defaults and checks | Decision 4 | YAML field + seed; `cadences-design.md` | E1 → E3, E4 | Agreed |
-| P2 | One rule for the contextual family: judge → BOOL; later unit → `FOLLOWS`; data → compute. Add `Elided`; narrow and redescribe `Covered`; retire `Unison`; `post_evasion_harmony` becomes a computed "initiating harmony" | Unison, Covered, elision; capture extensions | YAML; `capture_extensions.md`; Component 15 scope | E1 → E3 | Agreed; retiring `Unison` needs the staging count (§ E) |
+| P2 | One rule for the contextual family: judge → BOOL; later unit → `FOLLOWS`; data → compute. Add `Elided`; narrow and redescribe `Covered`; retire `Unison`; `post_evasion_harmony` becomes a computed "initiating harmony" | Unison, Covered, elision; capture extensions | YAML; `capture_extensions.md`; Component 15 scope | E1 → E3 | Agreed; the staging count clears `Unison` and `Covered` (§ E) |
 | P3 | `ReopeningHalfCadence` also `FOLLOWS DeceptiveCadence` | (concordance) | YAML edge; pointer validator | E1 → E3 | Agreed |
 | P4 | DCML → graph mapping policy; Caplin's readings stored as a reference set | DCML mapping | E2 rules; reference fixture | E1 (set), E2 (rules) | Agreed (Q9) |
 | P5 | `CadenceFunction`: record the departure, rewrite the value descriptions, four rulings; implement `confidence` | Confidence field | YAML descriptions; tagging guidelines; fragment schema; ADR | E1 → E3 | Agreed; competing reading dropped (Q2); internal HC `Independent` (Q3) |
@@ -108,7 +108,7 @@ Applied:
 | **Covered** | 1 | **Keep; move to `AuthenticCadenceRealised`; rewrite the description** (§ C). | pp. 140–142; glossary p. 585. A covered cadence is an *elided PAC* that looks like an IAC; the inverse (an IAC covered by 1) also exists. Choosing which voice is the melody is a judgement, so the criterion holds. E4 flag: `Covered` without `Elided` (allowed, Caplin has an accompaniment variant, but worth a look). |
 | `ReinterpretedAsHC` | 1 | Keep (description refinement only). | pp. 121–124. |
 | `ReopeningHalfCadence`, `ClosingSection`, `StandingOnTheDominant` | 2 | Keep; see P3 for one edge. | Already in the right shape. |
-| **Unison** | 3 | **Retire the schema** and compute a texture flag at the arrival (monophony or doubled monophony) with the E4 soprano extractor. | Caplin's term is the *unison half cadence* (p. 114; glossary p. 592); a unison PAC needs a bass-line melody (p. 114). Texture is rhetorical (p. 139) and visible in the notes. No uses in the local database, but that is a small sample (§ E), so removal waits for the staging count. |
+| **Unison** | 3 | **Retire the schema** and compute a texture flag at the arrival (monophony or doubled monophony) with the E4 soprano extractor. | Caplin's term is the *unison half cadence* (p. 114; glossary p. 592); a unison PAC needs a bass-line melody (p. 114). Texture is rhetorical (p. 139) and visible in the notes. No uses on staging (§ E), so removal needs no data migration. |
 | **`post_evasion_harmony`** | 3 | **Remove the capture extension; compute it.** Display it as Caplin's **initiating harmony**: the first `movement_analysis` event at the onset where the final tonic was expected (the end of the dominant stage). Store nothing, or an event reference `(mn, volta, beat)`. If no harmony label falls at that onset, raise a review flag. | pp. 169–174; glossary p. 587. Francisco's point stands (report § 4.2). One caution from Caplin: the harmony does not decide the type. The same V⁴₂–I⁶ makes a deceptive or an evaded cadence depending on grouping (p. 171), so the field is information, never a classifier. |
 | Metric position of the arrival | 3 | Compute when needed (beat of the stage-4 onset, or of the HC dominant). The ratio model (arrival duration : unit length) waits for formal units. | § 3.4.1, pp. 129–138: meter is rhetorical. |
 
@@ -527,28 +527,52 @@ subordinate theme (p. 119).
 
 ---
 
-## E. Facts to verify before the YAML pass
+## E. Staging counts (2026-11-05)
 
-**These need staging.** The local database was checked on 2026-11-04 and holds
-only 21 top-level fragments plus 69 stage children. The "91 fragments" quoted
-from the Component 11 triage counted those children, so it is about 21 cadences,
-not 91, and the campaign is larger on staging. The local sample shows no
-`Covered`, `Unison` or SD5 values, and no abandoned or dominant-arrival
-fragments at all, so it proves nothing about the cases below.
+From `scripts/e1_staging_facts.py`, run read-only against staging. The campaign
+stands at 155 top-level fragments (50 approved, 105 submitted) and 417 stage
+children. The local database holds 21 and is not a usable sample. The "91
+fragments" in the Component 11 triage counted stage children.
 
-Counts on staging, needed before any schema is removed or narrowed:
+**Gates, all clear.**
 
-- fragments with `Unison` or `Covered` set;
-- fragments with `IACSopranoDegree` = SD5;
-- `Covered` set on a cadence that is not a realised AC (blocks moving it);
-- evaded-cadence fragments: does each end at the end of its dominant stage,
-  so that the initiating-harmony lookup is well defined? (Example: the K279/ii
-  fragment ending in m. 3, against Caplin's evasion at the downbeat of m. 4,
-  p. 171.)
-- abandoned and dominant-arrival fragments with a `CadentialDominant` child
-  (candidates that break P10);
-- half cadences with `CadenceFunction` = `WayStation` that are not reopened HCs
-  (they break the Q3 ruling; local sample: none).
+| Check | Result | Consequence |
+|---|---|---|
+| `Unison` set | 0 | Retire it; no data migration |
+| `Covered` set | 0 | Move it; no data migration |
+| `IACSopranoDegree` = SD5 | 0 of 4 (all SD3) | P6 needs no audit |
+| Evaded cadences | 24, each ending on its Dominant stage, none with a Final Tonic | The initiating-harmony lookup is well defined |
+| Final Tonic on an HC, DA, evaded or abandoned cadence | 0 | `absent` in P1 matches practice |
+| Abandoned cadences | 3 | All follow Q4 and P10 already (below) |
+| Prose | 143 of 155 top-level fragments | The rulings' prose may still be missing, but prose in general is not |
+| Soprano test set for E4 | 64 PAC + 4 IAC | |
+
+**Abandoned cadences comply.** K279/i mm. 81–82 and K281/iii mm. 32–33 stop at the
+pre-dominant with no Dominant stage. K280/ii mm. 53–54 has a Dominant stage with
+`Cadential64` on a 6-4 that never reaches V, and ends there. These are the P10
+cases as written, tagged before P10 existed.
+
+**Audit list for Step 15.** Harmony labels are DCML's, read from staging. Each item
+is Francisco's call.
+
+| Fragment | Status | Now | Question |
+|---|---|---|---|
+| K281/i m. 27 | submitted | DA, `Premature`, `WayStation`, Dominant stage | Caplin reads this as a slightly premature dominant arrival from an ongoing Prinner, with no cadential progression (p. 176 n. 68), so the concept is right. That makes it a terminal dominant: under P10, remove the stage. Under Q3, `WayStation` becomes `Independent`. Needs Step 14 |
+| K281/i m. 96 | submitted | Same | The recapitulation counterpart; same answer |
+| K279/ii mm. 37–41 | approved | DA, `ECP`, three stages | The prose rests on the seventh, but the labels show V on beat 1 and V⁷ on beat 2. A seventh added after the arrival does not weaken an HC (p. 23 n. 70; p. 191). HC or DA? |
+| K279/i mm. 23–24 | approved | HC, `WayStation`, `ClosesContinuation` | An internal HC, so `Independent` under Q3. See the note below |
+| K279/i mm. 77–78 | approved | Same | Same |
+| K279/i mm. 85–86 | approved | HC, `WayStation` | `Independent` under Q3 |
+| K279/i mm. 34–35 | approved | PAC, `WayStation` | P5 says a PAC is never a way station: which function? |
+| K280/i mm. 46–48 | submitted | PAC, `WayStation` | Same |
+| K280/i mm. 134–136 | submitted | PAC, `WayStation` | Same |
+
+**A note on K279/i mm. 23–24 and 77–78.** Q3 stands, but these two are the cases
+that test it. Caplin's third reason for denying way-station status is that new
+material follows an internal HC, while a way station repeats. Here the prose says
+the continuation repeats. Two of his three reasons still hold, and
+`ClosesContinuation` already points to `Independent`, since that schema is only
+meaningful there.
 
 ---
 
