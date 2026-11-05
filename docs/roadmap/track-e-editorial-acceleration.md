@@ -64,15 +64,25 @@ default or computed field shapes E3 and E4 and the DCML→graph mapping in E2.
 | Model pre-analysis of fine typology | Deferred; needs the blind-sample protocol first | ADR-041 § 6 |
 | Production launch | Postponed; `production-launch-planning.md` stays open as written | `phase-2.md` |
 
+### Taken in E1 (2026-11-05)
+
+Taken, not yet applied: `track-e-e1-graph-revision.md` carries them out. Details
+are in `../investigations/caplin-graph-review/proposals.md`.
+
+| Decision | Resolution | Proposal |
+|---|---|---|
+| Hard-locked decision 4 (all `CONTAINS` optional) | Reaffirmed, with per-concept expected stages as data | P1 |
+| Stages where the definition fails | Tag no stage; a child-less fragment becomes possible | P10 |
+| `Unison`, `Covered`, elision, the contextual family | One three-way rule: add `Elided`, narrow `Covered`, retire `Unison` subject to the staging count | P2 |
+| Capture extensions | `post_evasion_harmony` computed, not stored in the field; pointer UI moves from Component 15 to E3 | P2 |
+| DCML→graph mapping policy | Set; applied in E2. Caplin's readings stored as a reference set | P4 |
+| Annotator `confidence` field | Kept: three values, default *secure*, prose required below it; no competing-reading field. Built in E3 | P5 |
+| Tagging guidelines | New `docs/howto/tagging-guidelines.md` in E1; a public version later | P11 |
+
 ### Deferred to a named stage
 
 | Question | Settled in | Notes |
 |---|---|---|
-| Hard-locked decision 4 (all `CONTAINS` optional): reaffirm, routing expected shape into defaults, or revisit | E1 | report § 4.3, § 4.5 kind 1 |
-| Property status of `Unison`, `Covered`; elision; the "contextual" feature family as one design question | E1 | criterion in report § 4.3 |
-| Capture extensions: re-home from Component 15; `post_evasion_harmony` as a computed lookup | E1 (decision), E3 (build) | report § 4.2 |
-| DCML→graph mapping policy (plagal cadences; evaded vs. abandoned; HC variants) | E1, applied in E2 | report § 4.4 |
-| Annotator `confidence` field (hard-locked decision 8, **specified but never implemented**) | E1 (still wanted? shape?), E3 (build) | `cadences-design.md` Open items |
 | Statistical defaults: threshold, minimum n, cold-start hint file | after E3, when enough approved data exists | report § 4.5 kind 2; placeholders ≥ 80 %, n ≥ 15 |
 | Passage-correspondence scope line vs. the excluded thematic relations | E5 design spike | report § 4.6; `knowledge-graph-domain-map.md` |
 
@@ -90,7 +100,10 @@ Sizes are relative (S/M/L), not dates.
 - ✅ `fragment-schema.md` example drift fixed (`SopranoPosition` → real
   schemas).
 
-### E1 — Graph review against Caplin *(M–L, reading-bound)*
+### E1 — Graph review against Caplin *(M–L, reading-bound)* — in progress
+
+**First pass reviewed 2026-11-04.** Implementation plan:
+[`track-e-e1-graph-revision.md`](track-e-e1-graph-revision.md).
 
 **Input:** Caplin, *Cadence* (the classical-style part), kept under the
 git-ignored `/private/sources/`; `backend/seed/domains/cadences.yaml`;
@@ -150,7 +163,7 @@ disagreements listed for review.
   fields;
 - the ADR-041 migration (`origin`, `origin_ref`, `value_provenance`) and
   preselected-value styling;
-- the annotator `confidence` field, if E1 keeps it.
+- the annotator `confidence` field (three values, default *secure*).
 
 **Pairs with Track M8** (harmony panel: degree vs. root semantics, local-key
 pre-population), which touches the same data. Pull it in here.
@@ -226,6 +239,8 @@ runs by default.
   data is sufficient.
 - **Component 6 per-event `bass_pitch`/`soprano_pitch`** beyond the E4
   arrival extractor. Its trigger remains the first non-DCML corpus.
+- **Public "how we analyse" page**, built from the tagging guidelines in both
+  languages, alongside the production launch.
 
 ---
 

@@ -1,10 +1,10 @@
 # Caplin graph review (Track E, stage E1)
 
 **Date:** 2026-10-08
-**Status:** Draft for Francisco's review. Proposals only: no YAML, ADR or
-`cadences-design.md` change has been made. The decisions are Francisco's; once
-taken, the seed changes go through Claude Code (`seed(cadences):`) and the
-amendments to `cadences-design.md` and the ADRs follow in the same pass.
+**Status:** Reviewed by Francisco 2026-11-04 and 2026-11-05; every question is
+answered (`proposals.md` § F). No YAML, ADR or `cadences-design.md` change has been made
+yet. The work is planned in
+[`../../roadmap/track-e-e1-graph-revision.md`](../../roadmap/track-e-e1-graph-revision.md).
 **Roadmap:** [`../../roadmap/track-e-editorial-acceleration.md`](../../roadmap/track-e-editorial-acceleration.md) § E1.
 **Report:** [`../../reports/editorial-acceleration-planning.md`](../../reports/editorial-acceleration-planning.md) § 4.3 (method, property criterion).
 
@@ -87,8 +87,9 @@ agrees with the book, so the concordance uses:
   deviations break exactly the stages that the theory requires, so structural
   requiredness would reject correct tags.
 - **Caplin's text is full of ambiguities he declines to settle.** That is the
-  strongest argument found for implementing decision 8 (`confidence`), and for
-  letting it name the competing reading (proposal P5).
+  strongest argument found for implementing decision 8 (`confidence`)
+  (proposal P5). Francisco chose to keep ambiguity to `confidence` plus prose,
+  without a field naming the competing reading.
 - **Caplin discusses 73 passages from the Doppia corpus**, from all eighteen
   sonatas; fifteen of them are explicit ambiguity cases. See
   `corpus-test-cases.md`.

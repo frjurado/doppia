@@ -1,9 +1,10 @@
 # E1 proposals and open questions
 
-**Date:** 2026-10-08. Part of the [E1 review](README.md). Every row of
-[`concordance.md`](concordance.md) that is not "Consistent" leads here.
-Nothing below has been applied. Each proposal says what would change, where,
-and in which Track E stage; the decisions are Francisco's.
+**Date:** 2026-10-08; revised 2026-11-05 with Francisco's answers (§ F). Part
+of the [E1 review](README.md). Every row of [`concordance.md`](concordance.md)
+that is not "Consistent" leads here. Nothing below has been applied yet: the
+implementation plan is
+[`../../roadmap/track-e-e1-graph-revision.md`](../../roadmap/track-e-e1-graph-revision.md).
 
 Page numbers are Caplin, *Cadence* (2024). Draft wording for definitions and
 descriptions is in § C, so the Claude Code pass has text to start from.
@@ -12,17 +13,23 @@ descriptions is in § C, so the Claude Code pass has text to start from.
 
 ## Summary
 
-| # | Proposal | Settles (roadmap E1 list) | Changes | Stage |
-|---|---|---|---|---|
-| P1 | Reaffirm decision 4; add per-concept **expected stages** read by defaults and checks | Decision 4 | YAML field + seed; `cadences-design.md` | E1 → E3, E4 |
-| P2 | One rule for the contextual family: judge → BOOL; later unit → `FOLLOWS`; data → compute. Add `Elided`; narrow and redescribe `Covered`; retire `Unison`; `post_evasion_harmony` becomes a computed "initiating harmony" | Unison, Covered, elision; capture extensions | YAML; `capture_extensions.md`; Component 15 scope | E1 → E3 |
-| P3 | `ReopeningHalfCadence` also `FOLLOWS DeceptiveCadence` | (concordance) | YAML edge; pointer validator | E1 → E3 |
-| P4 | DCML → graph mapping policy | DCML mapping | E2 rules | E2 |
-| P5 | `CadenceFunction`: record the departure, rewrite the value descriptions, four rulings; implement `confidence` with an optional competing reading | Confidence field | YAML descriptions; tagging guide; fragment schema; ADR | E1 → E3 |
-| P6 | IAC: fix the public definition; correct `IACSopranoDegree`'s description (or remove it, see Q1); consider `PrinnerCadence` | (concordance) | YAML; E4 test-set text | E1 |
-| P7 | Add "deceptive cadence (3̂)" as a BOOL on `DeceptiveCadence` | (concordance) | YAML | E1 |
-| P8 | Rewrite `EvadedCadence`, `DominantArrival`, `Premature` | (concordance) | YAML | E1 |
-| P9 | Smaller corrections: `HalfCadenceShape` naming, `ECP` criterion, stage 1b VI, `ContrapuntalCadence` name, minor wording | (concordance) | YAML; harmonic-functions stub | E1 |
+**Status:** all proposals are agreed, as written or with the answer in § F.
+Where a row carries a condition, it is stated there.
+
+| # | Proposal | Settles (roadmap E1 list) | Changes | Stage | Status |
+|---|---|---|---|---|---|
+| P1 | Reaffirm decision 4; add per-concept **expected stages** read by defaults and checks | Decision 4 | YAML field + seed; `cadences-design.md` | E1 → E3, E4 | Agreed |
+| P2 | One rule for the contextual family: judge → BOOL; later unit → `FOLLOWS`; data → compute. Add `Elided`; narrow and redescribe `Covered`; retire `Unison`; `post_evasion_harmony` becomes a computed "initiating harmony" | Unison, Covered, elision; capture extensions | YAML; `capture_extensions.md`; Component 15 scope | E1 → E3 | Agreed; retiring `Unison` needs the staging count (§ E) |
+| P3 | `ReopeningHalfCadence` also `FOLLOWS DeceptiveCadence` | (concordance) | YAML edge; pointer validator | E1 → E3 | Agreed |
+| P4 | DCML → graph mapping policy; Caplin's readings stored as a reference set | DCML mapping | E2 rules; reference fixture | E1 (set), E2 (rules) | Agreed (Q9) |
+| P5 | `CadenceFunction`: record the departure, rewrite the value descriptions, four rulings; implement `confidence` | Confidence field | YAML descriptions; tagging guidelines; fragment schema; ADR | E1 → E3 | Agreed; competing reading dropped (Q2); internal HC `Independent` (Q3) |
+| P6 | IAC: fix the public definition; keep `IACSopranoDegree` with a corrected description; add `PrinnerCadence` | (concordance) | YAML; E4 test-set text | E1 | Agreed (Q1) |
+| P7 | Add "Deceptive Cadence (3̂)" as a BOOL on `DeceptiveCadence` | (concordance) | YAML | E1 | Agreed |
+| P8 | Rewrite `EvadedCadence`, `DominantArrival`, `Premature`; also `AbandonedCadence` (Q4) | (concordance) | YAML | E1 | Agreed |
+| P9 | Smaller corrections: `HalfCadenceShape` naming, `ECP` criterion, stage 1b VI, `ContrapuntalCadence` name, minor wording | (concordance) | YAML; harmonic-functions stub | E1 | Agreed |
+| P10 | **New.** A stage fragment asserts that the stage exists: tag it only where its definition holds, and never widen a stage definition to fit a deviation | Q5 | Tagging guidelines; `CadentialDominant` wording; `expected_stages` values; one tool change | E1 → E3, E4 | Agreed (Q5) |
+| P11 | **New.** Write the tagging guidelines, which do not exist yet | (concordance) | New `docs/howto/tagging-guidelines.md` | E1 | Agreed; public version deferred (Q11) |
+| P12 | **New.** Stop showing "(Realised)" on the Half Cadence | Francisco's note | YAML and `es.yaml` names | E1 | Agreed (Q10) |
 
 Re-deferred, with reasons, in § D.
 
@@ -58,9 +65,9 @@ expectations as data, per concept, in a form the tools can read:
 | PAC, IAC | optional | optional | expected | expected |
 | Deceptive | optional | optional | expected | expected (substitute) |
 | Evaded | optional | optional | expected | **absent** |
-| Abandoned | optional | optional | optional (see Q5) | **absent** |
+| Abandoned | optional | optional | optional (P10) | **absent** |
 | HC (realised, reopening) | optional | optional | expected | — |
-| Dominant Arrival | optional | optional | see Q5 | — |
+| Dominant Arrival | optional | optional | optional (P10) | — |
 
 - **Where:** a small `expected_stages` map on the concept in `cadences.yaml`
   (stage concept id → `expected` / `absent`; unlisted = optional), inherited
@@ -101,7 +108,7 @@ Applied:
 | **Covered** | 1 | **Keep; move to `AuthenticCadenceRealised`; rewrite the description** (§ C). | pp. 140–142; glossary p. 585. A covered cadence is an *elided PAC* that looks like an IAC; the inverse (an IAC covered by 1) also exists. Choosing which voice is the melody is a judgement, so the criterion holds. E4 flag: `Covered` without `Elided` (allowed, Caplin has an accompaniment variant, but worth a look). |
 | `ReinterpretedAsHC` | 1 | Keep (description refinement only). | pp. 121–124. |
 | `ReopeningHalfCadence`, `ClosingSection`, `StandingOnTheDominant` | 2 | Keep; see P3 for one edge. | Already in the right shape. |
-| **Unison** | 3 | **Retire the schema** and compute a texture flag at the arrival (monophony or doubled monophony) with the E4 soprano extractor. | Caplin's term is the *unison half cadence* (p. 114; glossary p. 592); a unison PAC needs a bass-line melody (p. 114). Texture is rhetorical (p. 139) and visible in the notes. Zero uses in 91 fragments (Component 11 triage, item 9), so removal needs no migration if that still holds (§ E). |
+| **Unison** | 3 | **Retire the schema** and compute a texture flag at the arrival (monophony or doubled monophony) with the E4 soprano extractor. | Caplin's term is the *unison half cadence* (p. 114; glossary p. 592); a unison PAC needs a bass-line melody (p. 114). Texture is rhetorical (p. 139) and visible in the notes. No uses in the local database, but that is a small sample (§ E), so removal waits for the staging count. |
 | **`post_evasion_harmony`** | 3 | **Remove the capture extension; compute it.** Display it as Caplin's **initiating harmony**: the first `movement_analysis` event at the onset where the final tonic was expected (the end of the dominant stage). Store nothing, or an event reference `(mn, volta, beat)`. If no harmony label falls at that onset, raise a review flag. | pp. 169–174; glossary p. 587. Francisco's point stands (report § 4.2). One caution from Caplin: the harmony does not decide the type. The same V⁴₂–I⁶ makes a deceptive or an evaded cadence depending on grouping (p. 171), so the field is information, never a classifier. |
 | Metric position of the arrival | 3 | Compute when needed (beat of the stage-4 onset, or of the HC dominant). The ratio model (arrival duration : unit length) waits for formal units. | § 3.4.1, pp. 129–138: meter is rhetorical. |
 
@@ -170,9 +177,14 @@ means in Doppia's sense (§ C).
 | Case | Caplin | Proposed tag |
 |---|---|---|
 | An IAC that ends a complete main theme (galant habit; Haydn and the young Mozart, p. 98) | Neither independent (p. 94 n. 115) nor way station (p. 98) | `Independent` + `ClosesMainTheme`; the prose names the galant habit. A fourth value is not worth it for a habit Caplin dates to before ca. 1780. |
-| An internal HC in a subordinate theme | Explicitly not a way station, for three stated reasons (p. 119) | `Independent`, with no `ThemeClosure` (subordinate-theme part 1 is a deferred value). |
+| An internal HC (or dominant arrival) in a subordinate theme | Explicitly not a way station, for three stated reasons (p. 119) | `Independent`, with no `ThemeClosure` (subordinate-theme part 1 is a deferred value). |
 | A way station that is denied (no PAC follows, or an HC follows instead) | Still a way station by its context; the denial is a further event (pp. 162–164, 175–176) | `WayStation`; the prose says it is denied. This matches the design doc's "a WayStation may be unfulfilled". |
 | Independent vs way station left open | Caplin leaves it open (K332/iii mm. 21–32, p. 165) | One value + `confidence` (below). |
+
+**Prose for these rulings.** The galant-habit and denied-way-station rulings
+rely on the prose. Francisco expects it is often missing on existing fragments,
+so this is a rule going forward, not a backfill sweep: E4 raises a flag where
+the prose is absent, and the fix happens in review.
 
 E4 checks follow from the departure: `WayStation` on a PAC (or on an HC that
 is not a reopened HC), and a PAC with
@@ -189,13 +201,11 @@ needs somewhere to say "this is a contested call". Proposal:
 - **Keep decision 8 and build it in E3**, on the fragment base schema (not per
   concept): an ordinal with three values, e.g. *secure / probable /
   contested*. Default: secure.
-- **Add an optional "competing reading"**: one concept id (and, if needed, one
-  property value) naming the alternative. This is not double tagging: there is
-  still one fragment and one primary concept. It makes Caplin's ambiguity pairs
-  queryable (evaded / elided deceptive; evaded / PAC; evaded / HC; abandoned /
-  deceptive; HC / premature DA), which is exactly what Component 15 exercises
-  and a research query want. Whether this stretches decision 8 too far is
-  **Q2**.
+- **No "competing reading" field** (Q2). Ambiguity stays as `confidence` plus
+  prose. The price is known and accepted: Caplin's ambiguity pairs (evaded /
+  elided deceptive; evaded / PAC; evaded / HC; abandoned / deceptive; HC /
+  premature DA) are not queryable as pairs. A low `confidence` still finds
+  them, and the prose names the alternative.
 - **Prose rule:** any value other than *secure* needs the argument in the
   commentary (prose guidelines § 2, "argument"); an E4 mechanical check.
 - **Record:** `fragment-schema.md` and an ADR when E3 builds it.
@@ -212,22 +222,19 @@ needs somewhere to say "this is a contested call". Proposal:
   one as genuine, explains another motivically, rereads one as ending on 3 and
   offers covered-PAC readings for two (pp. 90–93); he calls the case highly
   exceptional and normally explained some other way (p. 219). Rewrite (§ C).
-- **`IACSopranoDegree`.** With SD5 that rare, the schema records SD3 almost
-  every time. Two options:
-  - **(a) Keep it, with a corrected description** (recommended): SD5 is
-    highly exceptional in the classical style and should come with an argument
-    in the prose. Genuine cases exist (one in Caplin's classical set, three
-    nineteenth-century ones, p. 93 n. 113), the graph's aim is portability, and
-    keeping it needs no migration. An E4 flag on SD5 sends each one to review
-    as a possible covered PAC.
-  - **(b) Remove it.** The E4 soprano test set is unaffected (PAC implies
-    SD1, IAC implies SD3), but a genuine IAC on 5 then has only prose.
-- **`PrinnerCadence` (candidate, BOOL on IAC).** Caplin treats the Prinner
-  cadence as a genuine IAC variant (pp. 85–86; glossary p. 587), relevant to
-  the galant sonatas: K282/i closes its main theme with one (p. 98). The
-  criterion: (1) yes; (2) yes, for schema pedagogy; (3) partly derivable once
-  the soprano line is extracted, not now. Worth adding if Francisco expects to
-  use it in exercises; otherwise prose (**Q1**).
+- **`IACSopranoDegree`: keep, with a corrected description** (Q1; § C). SD5 is
+  highly exceptional in the classical style and comes with an argument in the
+  prose. Genuine cases exist (one in Caplin's classical set, three
+  nineteenth-century ones, p. 93 n. 113), the graph's aim is portability, and
+  keeping it needs no migration. An E4 flag on SD5 sends each one to review as
+  a possible covered PAC.
+- **`PrinnerCadence`: add, as a BOOL on the IAC** (Q1; § C). Caplin treats the
+  Prinner cadence as a genuine IAC variant (pp. 85–86; glossary p. 587), and it
+  matters for the galant sonatas: K282/i closes its main theme with one
+  (p. 98). This does not conflict with Q7. The property records one cadence
+  type; it does not open the melodic-pattern schemata, which stay out of scope.
+  It may be cross-checked once the E4 soprano extractor exists. MacKay rejects
+  the type as cadential (p. 86 n. 94); Doppia follows Caplin.
 
 ### P7 — "Deceptive cadence (3̂)"
 
@@ -258,9 +265,19 @@ station open (p. 165). Proposal: a BOOL on `DeceptiveCadence`, named "Deceptive 
   corpus case, K332/i mm. 31–40 (p. 194), is one he leaves between HC and
   PDA, so it needs `confidence`.
 
-The four rewritten definitions (with the IAC) carry `definition_reviewed:
-true`. Francisco either approves the new text in this pass or the flag goes
-back to `false` until he does.
+- **`AbandonedCadence`** (added by Q4): keep the content, and state that there
+  may be no single moment of arrival. Both Caplin's abandoned cadence and his
+  abandoned cadential progression (pp. 178, 182–187) are tagged with this
+  concept. The fragment ends where the progression is given up, which is the
+  end of the last genuine cadential harmony. The event that gives it up (the
+  shift to an inversion, say) lies just after the fragment, so it can be
+  computed, as with the evaded cadence's initiating harmony.
+
+The rewritten public definitions (IAC, Evaded, Dominant Arrival, Abandoned and
+`CadentialDominant`) carry `definition_reviewed: true`.
+The new text is either approved by Francisco in this pass, or the flag goes back to
+`false` until it is. Their `es.yaml` translations change with them, because
+the glossary shows both languages.
 
 ### P9 — Smaller corrections
 
@@ -273,7 +290,131 @@ back to `false` until he does.
 | `ReinterpretedAsHC` | Description: an authentic cadence that closes in the dominant key area and, because the home key comes straight back, is heard in retrospect as a half cadence in the home key. | p. 121; glossary p. 589 |
 | `HalfCadenceRealised` | Optional addition: the dominant ends its group and is heard as the goal, not as a penultimate harmony; a seventh or inversion *after* the arrival does not cancel the HC. | pp. 101–103; p. 23 n. 70 |
 | `Cadence` | Optional: "phrase, theme, or section" → "theme or theme-level phrase" (Caplin denies cadences above the theme, pp. 17–20). | § 2.2.2 |
-| Tagging guide | Add: fragment bounds = cadential function (§ 2.5); HC arrival = first arrival of the dominant through the progression (§ 2.9); consecutive PACs (§ 2.8.5); overhang decides by its first pitch (§ 7.1.4). | as cited |
+
+### P10 — Stages assert existence
+
+**The rule.** A stage fragment says "this stage is here". So tag a stage only
+where its definition holds, and never widen a stage definition to fit a
+deviation. Where the stage is missing, leave it absent: for a deviation, the
+missing stage *is* the analysis.
+
+**Applied.**
+
+| Case | Caplin | Stages |
+|---|---|---|
+| Abandoned, type 1: root-position V shifts to V⁶ or V⁶₅ | The dominant is cadential, then undermined (p. 178) | `CadentialDominant` on the root-position span. The fragment ends there; the inversion lies just after it |
+| Abandoned, with a cadential 6-4 that never reaches V (Ex. 4.43) | The 6-4 signals the onset of stage 3 (p. 179) | `CadentialDominant` with `Cadential64` on the 6-4; the fragment ends there |
+| Abandoned, type 2: the dominant arrives inverted | It never attains cadential status (p. 178) | No stage 3. The fragment ends with the pre-dominant |
+| Abandoned, type 3: the pre-dominant leads to no dominant | No cadential dominant (p. 178) | No stage 3 |
+| Abandoned progression with no arrival (Q4) | Same three mechanisms | Same; stages 1–2 as far as they are genuine |
+| Dominant Arrival on a **final** dominant (V⁷ ending a cadential progression) | A cadential progression exists (pp. 187–192) | Stages as in an HC, with `CadentialDominant` on the V⁷ |
+| Premature DA on a root-position triad that ends a cadential progression | As above (pp. 193–202) | Stages as in an HC |
+| Dominant Arrival on a **terminal** dominant, root position or inverted | No half cadential progression leads to it (p. 192) | **No stages.** The arrival is the last harmony event in the fragment |
+
+**Why this and not "tag it and let the definition admit the deviation".**
+
+1. **Caplin's axiom.** Stage 3 is root position throughout, in every genuine
+   cadence and in the deceptive and evaded deviations (p. 179). Admitting an
+   inverted dominant turns the stage into "whatever dominant is around".
+2. **The graph already works this way.** `CadentialFinalTonic` is declared
+   absent for evaded and abandoned cadences, and the evaded cadence's
+   initiating harmony sits in the stage-4 slot without being stage 4. Treating
+   stage 3 the same way is consistency, not a new idea.
+3. **It keeps the data useful.** "Every `CadentialDominant`" stays a clean set
+   for exercises and browsing. E3 gets a simple rule (root-position dominant →
+   stage 3), and E4 can check it. Under the alternative, both lose their rule.
+4. **It agrees with P1.** Expected stages are data; absence is a legitimate,
+   queryable state rather than a gap.
+
+**Costs.**
+
+- A terminal-dominant DA has no child fragment, so its arrival is not marked
+  separately. It is the last harmony event in the range, which is enough for
+  E4 and the display.
+- Its bounds need a rule, because there is no cadential function to measure:
+  the fragment spans the last prolongational or sequential link into the
+  dominant. Proposed for the tagging guidelines.
+- In contiguous mode the last stage always reaches the fragment's end
+  (`tagging-tool-design.md` § 4), so these fragments must end at the end of the
+  last genuine stage. That is the Q4 rule, so the two fit together.
+- Existing fragments may break the rule, for example an inverted dominant
+  tagged as stage 3. The staging count decides how many (§ E). None locally.
+- **The tool blocks the terminal-dominant case today.** See below.
+
+**The child-less fragment and the tool.** Checked in the code on 2026-11-05. A
+terminal-dominant DA needs every stage absent, and the tool does not allow that:
+`toggleStageAbsent` refuses to remove the last active stage
+(`frontend/src/components/score/stages.ts`), and `StageList.tsx` disables the
+toggle with "cannot remove last active stage". This is not a consequence of
+contiguous mode. Contiguity governs the stages that are present: adjacent ones
+share a boundary, and the outer ones meet the main bracket. With no stages, there
+is nothing to constrain. Stageless concepts such as `ClosingSection` already exist.
+The guard exists only because no neighbour remains to absorb the space, and in
+this case nothing needs to absorb it. The rest of the path is ready:
+
+- the backend accepts an empty `sub_parts` list, and containment passes trivially;
+- `computeStagesComplete` already treats all-absent as complete;
+- re-enabling from zero already works: `handleToggleAbsent` re-places the wanted
+  stages over the selection;
+- re-opening a saved fragment with no children marks every optional stage absent.
+
+So the change is to drop the guard and the disabled state. The risk is an editor
+removing all stages from a PAC by accident. That is not blocked: E4's
+expected-stage flag catches it, which is what P1 is for.
+
+**Wording that follows.** `CadentialDominant` today says "the dominant of a Half
+Cadence… must be a triad", which a DA on V⁷ contradicts, since DA is a subtype
+of `HalfCadence`. Draft in § C.
+
+### P11 — Tagging guidelines (new document)
+
+**The gap.** Earlier drafts of this review pointed to a "tagging guide". No such
+document exists. Rules for *how to tag* are scattered across
+`tagging-tool-design.md` (how the tool behaves), `cadences-design.md` (the
+theory), `prose-annotation-guidelines.md` (what the commentary says) and
+Francisco's practice.
+
+**Proposal.** Write `docs/howto/tagging-guidelines.md`, the sibling of the prose
+guidelines, for the editor and for any reviewer, human or machine. It holds:
+
+- fragment bounds = cadential function, not "the cadence chord" (§ 2.5);
+- the HC arrival is the first arrival of the dominant through the progression
+  (§ 2.9);
+- consecutive PACs: the first closes, the second is a codetta with limited
+  scope, unless the prose argues otherwise (§ 2.8.5);
+- an overhang decides by its first pitch (§ 7.1.4);
+- a seventh or inversion *after* the HC arrival does not cancel the HC
+  (p. 23 n. 70);
+- noncadential deceptive resolutions are not deceptive cadences (pp. 167–169);
+- the `CadenceFunction` rulings (P5);
+- abandoned cadences and where they end (Q4);
+- the stage rule (P10), with the bounds rule for a terminal-dominant DA;
+- the reopened HC's prior AC (Q8);
+- when to lower `confidence`.
+
+### P12 — "Half Cadence (Realised)"
+
+**Why it looks odd.** "(Realised)" exists to separate the taggable concept from
+its abstract parent, `HalfCadence`, which holds the plain name. The authentic
+branch has the same pair, but its realised node is not taggable, so editors
+only ever see PAC and IAC. The label also reaches public fragment pages, not
+just the tagging tool.
+
+**Proposal.** Swap the names, and leave the ids alone (they are immutable):
+
+| id | `name` now | `name` proposed | `es.yaml` proposed |
+|---|---|---|---|
+| `HalfCadenceRealised` | Half Cadence (Realised) | Half Cadence | Semicadencia |
+| `HalfCadence` (abstract) | Half Cadence | Half Cadence (General) | Semicadencia (general) |
+
+The parenthesis moves to the one concept nobody tags, which appears only in the
+glossary and the hierarchy. No code changes. Two test fixtures use the old
+Spanish name as sample strings and can stay or follow.
+
+**Alternative.** A concept-level `short_name`, like ADR-039's for property
+values. It keeps both full names but needs code on every surface that prints a
+concept, and those surfaces include the public ones. The swap is simpler and
+fixes them all.
 
 ---
 
@@ -287,6 +428,29 @@ arrives on scale degree 3 rather than 1. Weaker than a PAC; characteristic of
 the antecedent of a period, or of a Way Station towards a later PAC. An
 arrival on scale degree 5 is highly exceptional in the Classical style, and
 such a passage can often be heard another way, for instance as a covered PAC.
+
+**`IACSopranoDegree`** (description). The scale degree of the melody at the
+arrival of an IAC. Scale degree 3 is the norm. Scale degree 5 is highly
+exceptional in the Classical style: consider a covered PAC first, and give the
+argument in the commentary.
+
+**`PrinnerCadence`** (new, description). True when an IAC carries a Prinner
+melody (scale degrees 6–5–4–3) over a standard cadential bass (4–5–1). Common in
+the galant style.
+
+**`AbandonedCadence`.** An Authentic Cadence whose progression is given up
+before it reaches its goal: the root-position dominant shifts to an inversion,
+the dominant arrives already inverted, or the pre-dominant leads to no cadential
+dominant at all. There may be no single moment of arrival, only a point where
+the cadential motion stops. Where the Evaded Cadence fails at the arrival, the
+Abandoned Cadence fails at the dominant.
+
+**`CadentialDominant`.** Stage 3 of a cadence: the cadential
+dominant, a root-position V or V7, optionally preceded by a cadential 6-4. In a
+realised Half Cadence it is the arrival point and must be a triad; in an
+Authentic Cadence it prepares the final tonic (Stage 4). An inverted dominant is
+not cadential, so it is not this stage: an Abandoned Cadence or a Dominant
+Arrival built on one has no Stage 3.
 
 **`EvadedCadence`.** An Authentic Cadence whose final tonic never arrives: at
 the moment it is expected, a new idea or phrase begins, so the event in that
@@ -338,12 +502,16 @@ Simple (I–V): no pre-dominant. Converging: the bass rises to scale degree 5
 turn one into the other within the pre-dominant.
 
 **`CadenceFunction`** (value descriptions).
-*Independent:* the cadence closes its unit, and no PAC is pending in its
-place. *Way Station:* the cadence appears where a PAC is expected and puts
+*Independent:* the cadence closes its unit on its own terms and does not stand
+in for a PAC. *Way Station:* the cadence appears where a PAC is expected and puts
 that closure off, whether or not the PAC eventually arrives. *Limited Scope:*
 the cadence closes only a small unit (a basic idea, a codetta, an idea within
 a compound presentation) and has no closing force at the level of the phrase
 or theme.
+
+The first draft of *Independent* read "no PAC is pending in its place". That
+contradicts the internal-HC ruling, because a PAC is always pending in a
+subordinate theme (p. 119).
 
 ---
 
@@ -352,7 +520,7 @@ or theme.
 | Item | Why not now | Where it goes |
 |---|---|---|
 | Medial standing on the dominant; fusion processes; missing closure targets | Formal-function matters | `formal-function-design-notes.md` (add a pointer to this review) |
-| Melodic patterns and streams | See Q7 | After the E4 soprano extractor |
+| Melodic patterns and streams | Out of scope (Q7) | Nowhere for now. The E4 soprano extractor does not reopen this |
 | One-more-time flag | Follows almost every evaded expanded cadence (p. 275); low value as a tag | Prose; revisit with E5 (repetition is a correspondence) |
 | Metric ratio | Needs tagged formal units | Formal-function domain |
 | Statistical defaults | Unchanged from the roadmap | After E3 |
@@ -361,48 +529,48 @@ or theme.
 
 ## E. Facts to verify before the YAML pass
 
+**These need staging.** The local database was checked on 2026-11-04 and holds
+only 21 top-level fragments plus 69 stage children. The "91 fragments" quoted
+from the Component 11 triage counted those children, so it is about 21 cadences,
+not 91, and the campaign is larger on staging. The local sample shows no
+`Covered`, `Unison` or SD5 values, and no abandoned or dominant-arrival
+fragments at all, so it proves nothing about the cases below.
+
 Counts on staging, needed before any schema is removed or narrowed:
 
-- fragments with `Unison` or `Covered` set (91-fragment local count: zero);
+- fragments with `Unison` or `Covered` set;
 - fragments with `IACSopranoDegree` = SD5;
 - `Covered` set on a cadence that is not a realised AC (blocks moving it);
 - evaded-cadence fragments: does each end at the end of its dominant stage,
   so that the initiating-harmony lookup is well defined? (Example: the K279/ii
   fragment ending in m. 3, against Caplin's evasion at the downbeat of m. 4,
   p. 171.)
+- abandoned and dominant-arrival fragments with a `CadentialDominant` child
+  (candidates that break P10);
+- half cadences with `CadenceFunction` = `WayStation` that are not reopened HCs
+  (they break the Q3 ruling; local sample: none).
 
 ---
 
-## F. Open questions for Francisco
+## F. Decisions
 
-- **Q1.** P6: keep `IACSopranoDegree` with a corrected description (a), or
-  remove it (b)?
-  And `PrinnerCadence`: a property, or prose?
-- **Q2.** P5: is the optional "competing reading" acceptable under decision 8,
-  or should ambiguity stay as `confidence` + prose only?
-- **Q3.** P5: do the four rulings match how you have been tagging? In
-  particular the internal HC as `Independent`.
-- **Q4.** Abandoned cadential *progressions* with no moment of arrival (Caplin's
-  open bracket, pp. 182–187): tag them as `AbandonedCadence` fragments ending
-  where the progression is given up, or tag only abandoned *cadences* with a
-  discernible arrival and leave progressions to the prose of the surrounding
-  fragment?
-- **Q5.** Stage children where the stage concept's own definition does not
-  hold: the inverted or missing dominant of an abandoned cadence, and a
-  Dominant Arrival on a terminal (possibly inverted) dominant with no cadential
-  progression. Tag no stages, or tag the stage and let the definition admit the
-  deviation?
-- **Q6.** Should final vs terminal dominant be a property of
-  `DominantArrival` (ONE_OF), or is the definition enough? It is largely
-  derivable from the harmony, which argues for the definition only.
-- **Q7.** Melodic patterns (Caplin's streams, the Prinner, the Cudworth): a
-  future schema for exercises, or out of scope? Caplin himself calls the
-  structural-pitch choice ad hoc (p. 65), so agreement between annotators
-  would be low.
-- **Q8.** The reopened HC overrides its AC (pp. 124–125): how should the AC
-  fragment itself be tagged? Proposed default: tag it as what it is
-  morphologically, `CadenceFunction` = `LimitedScope`, with the prose naming
-  the reopening.
-- **Q9.** P4: may Caplin's readings of the corpus passages be stored as a
-  reference annotation set (labels and bar numbers only, with page
-  references)? It would be internal test data, not published content.
+All answered by Francisco, 2026-11-04 and 2026-11-05. No question remains open.
+
+| Q | Question | Answer | Effect |
+|---|---|---|---|
+| Q1 | `IACSopranoDegree`; `PrinnerCadence` | Keep with a corrected description; `PrinnerCadence` is a property | P6 |
+| Q2 | Optional "competing reading" | No. Ambiguity stays as `confidence` + prose only | P5 |
+| Q3 | The four `CadenceFunction` rulings | All four stand, including the internal HC as `Independent`. Prose clarifications may be missing on existing fragments | P5 |
+| Q4 | Abandoned cadential progressions with no arrival | Tag as `AbandonedCadence` fragments ending where the progression is given up | P8, P10 |
+| Q5 | Stages where the stage definition does not hold | Tag no stage. Accepted on the condition that the tool allows a child-less fragment; it does not yet, so E1 adds that change | P10 |
+| Q6 | Final vs terminal dominant as a property | No: definition only | P8 |
+| Q7 | Melodic patterns (streams, Prinner, Cudworth) | Out of scope | § D; see P6 for why `PrinnerCadence` still stands |
+| Q8 | How to tag the AC that a reopened HC overrides | As proposed: what it is morphologically, `CadenceFunction` = `LimitedScope`, with the prose naming the reopening | P11 |
+| Q9 | Store Caplin's readings as a reference set | Yes: labels and bar numbers only, with page references | P4 |
+| Q10 | Swap the two Half Cadence names | Yes | P12 |
+| Q11 | A public version of the tagging guidelines | Yes, later: a short reader-facing page in both languages, built from `tagging-guidelines.md`, alongside the production launch | P11 |
+
+**A note on Q9.** The repository is public, so a fixture committed here is
+readable by anyone even though nothing in the product shows it. Labels, bar
+numbers and page references are fine on that basis. The set must not grow into
+paraphrased analysis.
