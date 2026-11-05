@@ -33,9 +33,8 @@ This plan details stage E1 of the track document; it does not replace it.
 
 ### Step 1 — Staging counts
 
-Write a read-only SQL script for the checks in `proposals.md` § E and run it
-against staging. Francisco either supplies the staging connection string or runs
-the script.
+Run `scripts/e1_staging_facts.py` (read-only) for the checks in `proposals.md` § E,
+with the staging connection string in the git-ignored `private/staging.env`.
 
 **Gates:** `Unison` retires only if its count is zero, or the values are migrated
 first. `Covered` moves only if no non-realised cadence carries it. The other
@@ -125,9 +124,8 @@ new properties. Definitions are editorial text, so Francisco reviews these too.
 - `cadences-design.md`: amend decision 4 ("optional in structure, expected in
   data"), update the BOOL list in decision 7, record the `CadenceFunction`
   departure, record decision 8's shape, drop the planned Contrapuntal split.
-- **ADR-042** (proposed): expected stages and the stage rule. They are new design
-  decisions, and CLAUDE.md asks for them to be recorded. Francisco confirms this
-  before it is written.
+- ADR-042 (expected stages and the stage rule): written 2026-11-05. Step 7 records
+  the final field shape as an amendment.
 - `capture_extensions.md`: `harmony_object` removed; `post_evasion_harmony` as a
   computed lookup.
 - `component-15-exercises.md`, `phase-2.md` decisions log: capture work moves to

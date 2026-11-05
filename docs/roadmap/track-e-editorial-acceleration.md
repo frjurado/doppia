@@ -13,6 +13,9 @@ component-plan model (`component-12-user-infrastructure.md`).
 - [`../adr/ADR-041-editorial-machine-assistance-and-provenance.md`](../adr/ADR-041-editorial-machine-assistance-and-provenance.md):
   machines propose; only human actions produce approved data; provenance is
   recorded at fragment and value level.
+- [`../adr/ADR-042-stage-presence.md`](../adr/ADR-042-stage-presence.md):
+  optional in structure, expected in data; a stage is tagged only where its
+  definition holds.
 - [`../howto/prose-annotation-guidelines.md`](../howto/prose-annotation-guidelines.md):
   what fragment commentary contains, and the review checklist applied to it.
 
