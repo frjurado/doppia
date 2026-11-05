@@ -45,7 +45,7 @@ Branch: this one (`feature/track-e-e1-caplin-review`), or a new
 `feature/track-e-e1-seed` if the review docs merge first. Pre-commit needs the
 backend venv on `PATH` for seed YAML commits.
 
-### Step 2 — Public definitions
+### Step 2 — Public definitions — done 2026-11-05
 
 Rewrite from § C: `ImperfectAuthenticCadence`, `EvadedCadence`,
 `DominantArrival`, `AbandonedCadence`, `CadentialDominant`. Francisco approves the
@@ -53,13 +53,13 @@ text in this step; anything not approved goes back to `definition_reviewed: fals
 
 Optional wording from P9: `Cadence`, `HalfCadenceRealised`.
 
-### Step 3 — Schema and value descriptions
+### Step 3 — Schema and value descriptions — done 2026-11-05
 
 Rewrite: `CadenceFunction` with its three value descriptions, `Covered`, `ECP`,
 `Premature`, `HalfCadenceShape`, `ReinterpretedAsHC`, `IACSopranoDegree`. Rename
 `Basic` to "Simple (I–V)" (id unchanged).
 
-### Step 4 — New properties
+### Step 4 — New properties — done 2026-11-05
 
 - `Elided` (BOOL) on `AuthenticCadence`.
 - `PrinnerCadence` (BOOL) on `ImperfectAuthenticCadence`.
@@ -69,7 +69,7 @@ Rewrite: `CadenceFunction` with its three value descriptions, `Covered`, `ECP`,
 
 Group the rare BOOLs with the existing "other" group (Component 12 Step 16).
 
-### Step 5 — Removals and moves
+### Step 5 — Removals and moves — done 2026-11-05
 
 - Retire `Unison`.
 - Move `Covered` from `Cadence` to `AuthenticCadenceRealised`.
@@ -79,27 +79,27 @@ Group the rare BOOLs with the existing "other" group (Component 12 Step 16).
   nodes, and run it on local and staging after seeding. It belongs in
   `scripts/`, with a note in `docs/deployment.md`.
 
-### Step 6 — Edges and names
+### Step 6 — Edges and names — done 2026-11-05
 
 - `ReopeningHalfCadence` `FOLLOWS DeceptiveCadence`; widen the `prior_ac_pointer`
-  description; add the alias "Reopened HC".
+  description; rename to "Reopened Half Cadence", alias "HC (reopened)".
 - `ContrapuntalCadence`: name "Prolongational Closure", alias "Contrapuntal
   Cadence" (`prolongation.yaml`).
 - Swap the Half Cadence names (P12).
 
-### Step 7 — `expected_stages`
+### Step 7 — `expected_stages` — done 2026-11-05
 
 - Add the field to the concept model in `backend/seed/schemas.py` and to the
   seed, then fill in the P1 table.
 - Store it so E3 and E4 can read it, inherited down `IS_SUBTYPE_OF` and
   overridable by a subtype. Nothing reads it in E1.
 
-### Step 8 — Spanish
+### Step 8 — Spanish — done 2026-11-05
 
 Update `es.yaml` for every changed definition, description and name, and add the
 new properties. Definitions are editorial text, so Francisco reviews these too.
 
-### Step 9 — Verification
+### Step 9 — Verification — done 2026-11-05
 
 - `python scripts/seed.py --domain cadences` (and `prolongation`,
   `harmonic-functions`).
@@ -215,8 +215,8 @@ Steps 2–8 → Step 9 → Steps 10–13 → Step 15
                           Step 14 (independent; before any terminal-dominant DA is tagged)
 ```
 
-**Staging:** the seed and the Step 5 script run after the PR merges, then the
-glossary is checked on staging in both languages.
+**Staging:** the seed and `scripts/e1_graph_cleanup.py` run after the PR merges
+(`docs/deployment.md`), then the glossary is checked on staging in both languages.
 
 ---
 

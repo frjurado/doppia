@@ -379,7 +379,7 @@ def test_capture_extensions_persisted_as_json(neo4j_driver: Driver) -> None:
 
     ext = CaptureExtensionYAML(
         field="cadential_harmony",
-        type="harmony_object",
+        type="fragment_pointer",
         required=False,
         description="The harmonic object at the cadence point.",
     )
@@ -419,7 +419,7 @@ def test_capture_extensions_persisted_as_json(neo4j_driver: Driver) -> None:
         assert isinstance(stored, list)
         assert len(stored) == 1
         assert stored[0]["field"] == "cadential_harmony"
-        assert stored[0]["type"] == "harmony_object"
+        assert stored[0]["type"] == "fragment_pointer"
         assert stored[0]["required"] is False
     finally:
         with neo4j_driver.session() as session:

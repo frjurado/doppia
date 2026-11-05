@@ -96,7 +96,7 @@ The `fragment_pointer` type captures a relationship between two fragments where 
       description: "The cadence fragment this post-cadential section prolongs."
 
 - id: ReopeningHalfCadence
-  name: "Reopening Half Cadence"
+  name: "Reopened Half Cadence"
   capture_extensions:
     - field: prior_ac_pointer
       type: fragment_pointer

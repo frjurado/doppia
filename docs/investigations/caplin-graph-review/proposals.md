@@ -129,7 +129,8 @@ the `prior_ac_pointer` description to "authentic or deceptive cadence". Two
 edges are better than retargeting to `AuthenticCadence`, which would admit
 evaded and abandoned cadences; they have no final event to reopen. The
 validator ("the target carries the edge's target concept") must accept either
-target. Also add the alias "Reopened HC" (Caplin's term).
+target. Also rename it "Reopened Half Cadence", alias "HC (reopened)", which is
+Caplin's term and matches the Spanish (the id stays `ReopeningHalfCadence`).
 
 Rare in the corpus; no passage from the eighteen sonatas is discussed under
 this heading. Low priority, cheap.
@@ -150,7 +151,7 @@ the rules assume the standard set PAC, IAC, HC, DC, EC, PC.
 | PC | **never a cadence concept** | Caplin: no plagal cadence in the classical style (p. 24; pp. 146–149). Count these in their own bucket, "non-cadential (DCML PC)", outside the three agreement buckets. If one follows a PAC, note it as a closing-section (codetta) candidate; otherwise as prolongational closure. |
 
 **A fourth bucket.** Doppia tags of types DCML cannot express (Dominant
-Arrival, Abandoned, Reopening HC, `LimitedScope` gestures) are not
+Arrival, Abandoned, Reopened HC, `LimitedScope` gestures) are not
 disagreements. Count them as "Doppia-only, outside the DCML vocabulary" so the
 disagreement list stays meaningful.
 

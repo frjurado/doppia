@@ -454,6 +454,39 @@ def _check_capture_extension_consistency(domains: list[DomainYAML]) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _check_expected_stages(domains: list[DomainYAML]) -> bool:
+    """Reject ``expected_stages`` keys that are not stages of the cadence tree.
+
+    A key is valid when some concept in the loaded domains declares it as a
+    ``CONTAINS`` target. The map is inherited, so the check does not require the
+    declaring concept itself to contain the stage.
+
+    Args:
+        domains: All loaded and validated domain files.
+
+    Returns:
+        ``True`` when every key is a known stage.
+    """
+    stages = {
+        entry.target
+        for domain in domains
+        for concept in domain.concepts
+        for entry in concept.contains
+    }
+    valid = True
+    for domain in domains:
+        for concept in domain.concepts:
+            for stage in concept.expected_stages:
+                if stage not in stages:
+                    print(
+                        f"[seed] ERROR: {concept.id}.expected_stages names "
+                        f"{stage!r}, which is not a CONTAINS target.",
+                        file=sys.stderr,
+                    )
+                    valid = False
+    return valid
+
+
 def _check_id_immutability(
     existing_concept_ids: frozenset[str],
     yaml_concept_ids: frozenset[str],
@@ -721,6 +754,9 @@ def main() -> None:
         sys.exit(2)
 
     if not _check_capture_extension_consistency(domains):
+        sys.exit(2)
+
+    if not _check_expected_stages(domains):
         sys.exit(2)
 
     if args.dry_run:

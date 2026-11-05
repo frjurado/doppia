@@ -21,6 +21,13 @@ concepts:
     top_level_taggable: false
     definition: "Stub: defined in the harmonic-functions domain."
 
+  - id: TonicSubstitute
+    name: "Tonic Substitute"
+    domain: harmonic-functions
+    stub: true
+    top_level_taggable: false
+    definition: "Stub: defined in the harmonic-functions domain."
+
   - id: AppliedDominant
     name: "Applied Dominant"
     domain: harmonic-functions

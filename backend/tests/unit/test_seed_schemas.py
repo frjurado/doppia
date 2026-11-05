@@ -330,8 +330,8 @@ def test_full_domain_with_all_fields() -> None:
 
 
 def test_capture_extension_all_types_accepted() -> None:
-    """All three capture-extension types parse correctly."""
-    for ext_type in ("harmony_object", "harmony_gate", "fragment_pointer"):
+    """Both capture-extension types parse correctly."""
+    for ext_type in ("harmony_gate", "fragment_pointer"):
         ext = CaptureExtensionYAML.model_validate(
             {
                 "field": "cadential_harmony",
@@ -362,7 +362,7 @@ def test_capture_extension_extra_field_forbidden() -> None:
         CaptureExtensionYAML.model_validate(
             {
                 "field": "f",
-                "type": "harmony_object",
+                "type": "fragment_pointer",
                 "required": False,
                 "description": "d",
                 "bogus": "value",
@@ -377,7 +377,7 @@ def test_concept_capture_extensions_round_trip() -> None:
         "capture_extensions": [
             {
                 "field": "cadential_harmony",
-                "type": "harmony_object",
+                "type": "fragment_pointer",
                 "required": False,
                 "description": "Harmonic object at the cadence point.",
             }
@@ -387,7 +387,7 @@ def test_concept_capture_extensions_round_trip() -> None:
     assert len(concept.capture_extensions) == 1
     ext = concept.capture_extensions[0]
     assert ext.field == "cadential_harmony"
-    assert ext.type == "harmony_object"
+    assert ext.type == "fragment_pointer"
     assert ext.required is False
     # Round-trip
     concept2 = ConceptYAML.model_validate(concept.model_dump())
@@ -427,7 +427,7 @@ def test_capture_extension_consistency_no_conflicts() -> None:
 
     ext = {
         "field": "cadential_harmony",
-        "type": "harmony_object",
+        "type": "fragment_pointer",
         "required": False,
         "description": "d",
     }
@@ -441,7 +441,7 @@ def test_capture_extension_consistency_type_conflict() -> None:
 
     ext_a = {
         "field": "cadential_harmony",
-        "type": "harmony_object",
+        "type": "fragment_pointer",
         "required": False,
         "description": "d",
     }
@@ -461,15 +461,76 @@ def test_capture_extension_consistency_required_conflict() -> None:
 
     ext_a = {
         "field": "cadential_harmony",
-        "type": "harmony_object",
+        "type": "fragment_pointer",
         "required": True,
         "description": "d",
     }
     ext_b = {
         "field": "cadential_harmony",
-        "type": "harmony_object",
+        "type": "fragment_pointer",
         "required": False,
         "description": "d",
     }
     domain = _make_domain_with_extensions([[ext_a], [ext_b]])
     assert _check_capture_extension_consistency([domain]) is False
+
+
+# ---------------------------------------------------------------------------
+# expected_stages (ADR-042)
+# ---------------------------------------------------------------------------
+
+
+def test_expected_stages_default_empty() -> None:
+    """A concept with no expected_stages leaves every stage optional."""
+    assert ConceptYAML.model_validate(MINIMAL_CONCEPT).expected_stages == {}
+
+
+def test_expected_stages_accepts_both_values() -> None:
+    """``expected`` and ``absent`` are the two permitted values."""
+    concept = ConceptYAML.model_validate(
+        {
+            **MINIMAL_CONCEPT,
+            "expected_stages": {"StageA": "expected", "StageB": "absent"},
+        }
+    )
+    assert concept.expected_stages == {"StageA": "expected", "StageB": "absent"}
+
+
+def test_expected_stages_rejects_required() -> None:
+    """``required`` is not a value: the map never expresses a structural rule."""
+    with pytest.raises(ValidationError):
+        ConceptYAML.model_validate(
+            {**MINIMAL_CONCEPT, "expected_stages": {"StageA": "required"}}
+        )
+
+
+def test_expected_stages_check_rejects_unknown_stage() -> None:
+    """A key that is no concept's CONTAINS target fails the seed check."""
+    from scripts.seed import _check_expected_stages
+
+    domain = DomainYAML.model_validate(
+        {
+            "domain": "test",
+            "concepts": [
+                {
+                    **MINIMAL_CONCEPT,
+                    "expected_stages": {"NotAStage": "expected"},
+                }
+            ],
+        }
+    )
+    assert _check_expected_stages([domain]) is False
+
+
+def test_expected_stages_check_passes_on_the_real_domain() -> None:
+    """Every expected_stages key in cadences.yaml is a real stage."""
+    import pathlib
+
+    import yaml
+
+    from scripts.seed import _check_expected_stages
+
+    raw = yaml.safe_load(
+        pathlib.Path("backend/seed/domains/cadences.yaml").read_text(encoding="utf-8")
+    )
+    assert _check_expected_stages([DomainYAML.model_validate(raw)]) is True

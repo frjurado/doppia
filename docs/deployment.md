@@ -384,6 +384,16 @@ fly ssh console --app doppia-staging -C "python scripts/validate_graph.py"
 
 `--all`, not `--domain <name>` — see the note under § Neo4j AuraDB above.
 
+Seeding only uses `MERGE`, so anything dropped from the YAML stays in the graph.
+**One-off for the E1 graph revision:** after that seed, remove the retired `Unison`
+schema and the moved `Covered` edge. The first command is a dry run, and the script
+is safe to re-run:
+
+```bash
+fly ssh console --app doppia-staging -C "python scripts/e1_graph_cleanup.py"
+fly ssh console --app doppia-staging -C "python scripts/e1_graph_cleanup.py --apply"
+```
+
 ## DCML corpus re-ingestion
 
 Required when a bug fix changes how `movement_analysis.events` JSONB is computed (e.g. a `_compute_beat` correction). The admin `/dispatch-pending-analysis` endpoint **cannot** be used for DCML movements because the harmonies TSV is not stored in R2 — it is only available during the original upload. The only correct re-ingestion path is to re-upload the corpus ZIP, which passes the TSV through the pipeline again.

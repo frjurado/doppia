@@ -20,7 +20,9 @@ domain: prolongation
 concepts:
 
   - id: ContrapuntalCadence
-    name: "Contrapuntal Cadence"
+    name: "Prolongational Closure"
+    aliases:
+      - "Contrapuntal Cadence"
     domain: prolongation
     stub: true
     top_level_taggable: false

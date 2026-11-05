@@ -310,12 +310,12 @@ class TestPropertySchemaOrdering:
         order = [r["schema_id"] for r in rows]
 
         assert by_id["ECP"]["group"] is None
+        assert by_id["Elided"]["group"] == "other"
         assert by_id["Covered"]["group"] == "other"
-        assert by_id["Unison"]["group"] == "other"
 
         assert order.index("CadenceFunction") < order.index("ECP")
-        assert order.index("ECP") < order.index("Covered")
-        assert order.index("Covered") < order.index("Unison")
+        assert order.index("ECP") < order.index("Elided")
+        assert order.index("Elided") < order.index("Covered")
 
     def test_other_group_is_last_and_contiguous(self) -> None:
         """The "other" cluster ends the form, with nothing wedged inside it.

@@ -165,7 +165,7 @@ class CaptureExtensionYAML(BaseModel):
 
     field: str
     """Flat-namespace field name shared across all concepts (must not conflict)."""
-    type: Literal["harmony_object", "harmony_gate", "fragment_pointer"]
+    type: Literal["harmony_gate", "fragment_pointer"]
     required: bool
     description: str
 
@@ -222,6 +222,11 @@ class ConceptYAML(BaseModel):
     capture_extensions: list[CaptureExtensionYAML] = []
     """Structured extra fields the tagging tool should collect for this concept.
     Stored as a JSON-encoded string on the Neo4j node (``c.capture_extensions``)."""
+    expected_stages: dict[str, Literal["expected", "absent"]] = {}
+    """What the theory expects of this concept's stages (ADR-042): stage concept id
+    to ``expected`` or ``absent``; an unlisted stage is optional. Inherited down
+    ``IS_SUBTYPE_OF``, read by defaults and checks, never enforced at submission.
+    Stored as a JSON-encoded string on the Neo4j node (``c.expected_stages``)."""
 
 
 class DomainYAML(BaseModel):
